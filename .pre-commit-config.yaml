@@ -1,0 +1,43 @@
+exclude: "^docs/|env/"
+default_stages: [commit]
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: no-commit-to-branch
+        args: ["--branch", "main"]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-json
+      - id: debug-statements
+      - id: trailing-whitespace
+
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v2.34.0
+    hooks:
+      - id: pyupgrade
+        args: ["--py311-plus"]
+
+  - repo: https://github.com/akaihola/darker
+    rev: v2.1.0
+    hooks:
+      - id: darker
+        args: ["--isort", "--line-length", "120"]
+        additional_dependencies:
+          - black==24.8.0
+          - isort==5.13.2
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: []

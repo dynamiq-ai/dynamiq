@@ -1,0 +1,14 @@
+# mkdocs.yml
+site_name: Dynamiq Documentation
+
+theme:
+  name: "material"
+
+plugins:
+  - mkdocstrings
+  - search
+
+docs_dir: mkdocs
+
+markdown_extensions:
+  - pymdownx.superfences

@@ -1,0 +1,124 @@
+connections:
+  openai-conn:  # id
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+  anthropic-conn:  # id
+    type: dynamiq.connections.Anthropic
+    api_key: ${oc.env:ANTHROPIC_API_KEY}
+
+prompts:
+  openai-ai-prompt:
+    messages:
+      - role: user
+        content: "What is AI?"
+  openai-ds-prompt:  # id
+    messages:
+      - role: user
+        content: "What is Data Science?"
+  openai-rag-prompt:  # id
+    messages:
+      - role: user
+        content: "What is RAG??"
+  openai-facts-date-prompt:
+    messages:
+      - role: user
+        content: "What interesting was in the same date in 2020?"
+  anthropic-llm-prompt:  # id
+    messages:
+      - role: user
+        content: "What is LLM?"
+
+nodes:
+  openai-1:  # id
+    type: dynamiq.nodes.llms.OpenAI
+    name: OpenAI-1
+    model: gpt-3.5-turbo
+    connection: openai-conn
+    prompt: openai-ai-prompt
+    error_handling:
+      timeout_seconds: 60
+      retry_interval_seconds: 1
+      max_retries: 0
+      backoff_rate: 1
+    output_transformer:
+      path: null
+      selector:
+        "ai_1": "$.content"
+    caching:
+      enabled: false
+    streaming:
+      enabled: false
+
+  openai-2:  # id
+    type: dynamiq.nodes.llms.OpenAI
+    name: OpenAI-2
+    model: gpt-3.5-turbo
+    connection: openai-conn
+    prompt: openai-ds-prompt
+    depends:
+      - node: openai-1
+      - node: choice-1
+        option: choice-is-correct-date
+
+  anthropic-1:  # id
+    type: dynamiq.nodes.llms.Anthropic
+    name: Anthropic-1
+    model: claude-3-opus-20240229
+    connection: anthropic-conn
+    prompt: anthropic-llm-prompt
+
+  openai-3:  # id
+    type: dynamiq.nodes.llms.OpenAI
+    name: OpenAI-3
+    model: gpt-3.5-turbo
+    connection: openai-conn
+    prompt: openai-rag-prompt
+    depends:
+      - node: choice-1
+        option: choice-is-correct-next-date
+
+  openai-4:  # id
+    type: dynamiq.nodes.llms.OpenAI
+    name: OpenAI-4
+    model: gpt-3.5-turbo
+    connection: openai-conn
+    prompt: openai-facts-date-prompt
+
+  choice-1:  # id
+    type: dynamiq.nodes.operators.Choice
+    name: Choice-1
+    options:
+      - id: choice-is-correct-date
+        name: Date
+        condition:
+          operator: string-equals
+          variable: $.date
+          value: 4 May 2024
+          is_not: false
+      - id: choice-is-correct-next-date
+        name: Next date
+        condition:
+          operator: string-equals
+          variable: $.next_date
+          value: 5 May 2024
+
+flows:
+  map-flow:
+    name: Map Flow
+    nodes:
+      - openai-4
+
+  dag-flow:  # id
+    name: DAG Test Flow
+    nodes:
+      - openai-1
+      - openai-2
+      - openai-3
+      - anthropic-1
+      - choice-1
+
+# Could specify multiple workflows in single yaml
+workflows:
+  dag-workflow:  # id
+    flow: dag-flow
+    version: 1

@@ -1,0 +1,60 @@
+connections:
+  openai-conn:  # id
+    type: OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+prompt_template: |
+  Please answer the following question
+  **User Question:** {{query}}
+  Answer:
+
+prompts:
+  openai-ai-prompt:
+    messages:
+      - role: user
+        content:
+          - type: text
+            text: "What’s in this image?"
+          - type: image_url
+            image_url:
+              url: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+
+
+nodes:
+  openai-1:  # id
+    type: dynamiq.nodes.llms.OpenAI
+    name: OpenAI-1
+    model: gpt-4o
+    connection: openai-conn
+    prompt: openai-ai-prompt
+    error_handling:
+      timeout_seconds: 60
+      retry_interval_seconds: 1
+      max_retries: 0
+      backoff_rate: 1
+    input_transformer:
+      path: null
+      selector:
+        "query": "$.query"
+    output_transformer:
+      path: null
+      selector:
+        "answer": "$.content"
+    caching:
+      enabled: false
+    streaming:
+      enabled: false
+
+
+flows:
+  retrieval-flow:  # id
+    name: LLM answering flow
+    nodes:
+      - openai-1
+
+
+# Could specify multiple workflows in single yaml
+workflows:
+
+  retrieval-workflow:  # id
+    flow: retrieval-flow
