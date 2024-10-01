@@ -1,1 +1,3 @@
-@delamainer
+# Dynamiq Team will be the default owners for everything in the repo.
+# @dynamiq-ai/dynamiq-core will be requested for review when someone opens a pull request.
+* @dynamiq-ai/dynamiq-core
