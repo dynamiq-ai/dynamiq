@@ -43,3 +43,5 @@ jobs:
           export POETRY_HTTP_BASIC_CODEARTIFACT_PASSWORD=`aws codeartifact get-authorization-token --domain dynamiq --domain-owner ${{ secrets.AWS_ACCOUNT_ID }} --region ${{ secrets.AWS_REGION }} --query authorizationToken --output text`
           export POETRY_REPOSITORIES_CODEARTIFACT_URL=`aws codeartifact get-repository-endpoint --domain dynamiq --domain-owner ${{ secrets.AWS_ACCOUNT_ID }} --repository dynamiq --region ${{ secrets.AWS_REGION }} --format pypi --query repositoryEndpoint --output text`
           poetry publish --repository codeartifact
+      - name: Publish to PyPI
+        run: poetry publish -u __token__ -p ${{ secrets.PYPI_PASSWORD }}

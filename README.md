@@ -36,9 +36,13 @@ Ready to dive in? Here's how you can get started with Dynamiq:
 
 ### Installation
 
-First, let's get Dynamiq installed. You'll need Python, so make sure that's set up on your machine.
+First, let's get Dynamiq installed. You'll need Python, so make sure that's set up on your machine. Then run:
 
-Build the Python package from the source code:
+```sh
+pip install dynamiq
+```
+
+Or build the Python package from the source code:
 ```sh
 git clone https://github.com/dynamiq-ai/dynamiq.git
 cd dynamiq
