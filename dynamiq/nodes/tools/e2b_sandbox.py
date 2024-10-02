@@ -1,7 +1,7 @@
 import io
 import os
 import uuid
-from hashlib import md5
+from hashlib import sha256
 from typing import Any, Literal
 
 from e2b import Sandbox
@@ -147,7 +147,7 @@ class E2BInterpreterTool(ConnectionNode):
         """Executes Python code in the specified sandbox."""
         if not sandbox:
             raise ValueError("Sandbox instance is required for code execution.")
-        code_hash = md5(code.encode()).hexdigest()
+        code_hash = sha256(code.encode()).hexdigest()
         filename = f"/home/user/{code_hash}.py"
         sandbox.filesystem.write(filename, code)
         process = sandbox.process.start_and_wait(f"python3 {filename}")

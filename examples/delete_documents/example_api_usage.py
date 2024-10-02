@@ -55,9 +55,7 @@ def delete_document(url, file_id, data):
     headers = {
         "Content-Type": "application/json",
     }
-    response = requests.delete(
-        url.replace("<file_id>", str(file_id)), json=data, headers=headers
-    )
+    response = requests.delete(url.replace("<file_id>", str(file_id)), json=data, headers=headers)  # nosec
     print(f"Deleting file_id {file_id}: {response.status_code}")
     print(response.json())
 

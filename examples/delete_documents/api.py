@@ -105,7 +105,7 @@ async def delete_chroma_documents(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def main(host: str = "0.0.0.0", port: int = 8000):
+def main(host: str = "0.0.0.0", port: int = 8000):  # nosec
     """
     Main function to run the FastAPI server with specified host and port.
 

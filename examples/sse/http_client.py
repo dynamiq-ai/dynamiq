@@ -19,7 +19,7 @@ INPUT = {"a": 1, "b": 2}
 async def http_client():
     output_stream = defaultdict(str)
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as client:  # nosec
         async with aconnect_sse(
             client=client,
             method="POST",
