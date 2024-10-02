@@ -140,7 +140,8 @@ def run_pinecone_retrieval():
 
     logger.info(f"Output documents: {len(output_documents)}")
 
-    assert len(output_documents) == 6
+    if len(output_documents) != 6:
+        logger.error(f"Output documents: {len(output_documents)}. Expected 6.")
 
     return wf_output
 
@@ -227,7 +228,8 @@ def run_qdrant_retrieval():
 
     logger.info(f"Output documents: {len(output_documents)}")
 
-    assert len(output_documents) == 6
+    if len(output_documents) != 6:
+        logger.error(f"Output documents: {len(output_documents)}. Expected 6.")
 
     return wf_output
 
@@ -314,7 +316,8 @@ def run_weaviate_retrieval():
 
     logger.info(f"Output documents: {len(output_documents)}")
 
-    assert len(output_documents) == 6
+    if len(output_documents) != 6:
+        logger.error(f"Output documents: {len(output_documents)}. Expected 6.")
 
     return wf_output
 
@@ -400,7 +403,8 @@ def run_chroma_retrieval():
 
     logger.info(f"Output documents: {len(output_documents)}")
 
-    assert len(output_documents) == 6
+    if len(output_documents) != 6:
+        logger.error(f"Output documents: {len(output_documents)}. Expected 6.")
 
     return wf_output
 

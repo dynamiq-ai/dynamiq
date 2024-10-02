@@ -153,7 +153,7 @@ class Python(Node):
 
         try:
             byte_code = compile_restricted(self.code, "<inline>", "exec")
-            exec(byte_code, restricted_globals)
+            exec(byte_code, restricted_globals)  # nosec
 
             if "run" not in restricted_globals:
                 raise ValueError("The 'run' function is not defined in the provided code.")

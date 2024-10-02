@@ -63,7 +63,7 @@ def create_agent(file_paths: list[str], files_description: list[str]):
     return agent_software
 
 
-def run_workflow(prompt: str, files_to_upload: list[str], files_description=[""]) -> tuple[str, dict]:
+def run_workflow(prompt: str, files_to_upload: list[str], files_description: list[str]) -> tuple[str, dict]:
     """
     Main function to set up and run the workflow, handling any exceptions that may occur.
 
@@ -75,9 +75,8 @@ def run_workflow(prompt: str, files_to_upload: list[str], files_description=[""]
         files_to_upload (List[str]): A list of file paths that have to be uploaded.
         files_description (str): Description of files uploaded
     """
-    assert files_to_upload, "Provide file paths"
-    assert files_description, "Provide description to files"
-    assert len(files_description) == len(files_to_upload), "Number of file paths and file descriptions doesn't match"
+    if len(files_description) == len(files_to_upload):
+        raise ValueError("Number of file paths and file descriptions doesn't match")
 
     try:
         agent = create_agent(files_to_upload, files_description)

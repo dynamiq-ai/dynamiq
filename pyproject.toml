@@ -90,3 +90,9 @@ pygraphviz = "~1.13"
 agentops = "~0.3.12"
 langfuse = "^2.51.2"
 peft = "^0.13.0"
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+
+[tool.isort]
+line_length = 120

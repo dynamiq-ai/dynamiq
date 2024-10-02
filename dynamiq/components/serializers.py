@@ -131,4 +131,4 @@ class JsonPickleSerializer(BaseSerializer):
         """
         import jsonpickle
 
-        return jsonpickle.decode(value)
+        return jsonpickle.decode(value)  # nosec

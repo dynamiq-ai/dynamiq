@@ -41,3 +41,9 @@ repos:
       - id: conventional-pre-commit
         stages: [commit-msg]
         args: []
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.10
+    hooks:
+      - id: bandit
+        args: ["-c", "pyproject.toml"]
