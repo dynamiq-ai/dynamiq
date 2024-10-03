@@ -8,6 +8,7 @@ from typing import Any, Callable, ClassVar
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections.managers import ConnectionManager
+from dynamiq.memory import Memory
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -16,7 +17,7 @@ from dynamiq.nodes.agents.exceptions import (
     ToolExecutionException,
 )
 from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.prompts import Message, Prompt
+from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils.logger import logger
@@ -60,6 +61,11 @@ class Agent(Node):
     role: str | None = None
     goal: str | None = None
     max_loops: int = 1
+    memory: Memory | None = Field(
+        None,
+        description="Memory node for the agent. If not provided, a default in-memory"
+        "memory will be used. Configure using MemoryConfig.",
+    )
 
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -71,10 +77,12 @@ class Agent(Node):
         self._intermediate_steps: dict[int, dict] = {}
         self._run_depends: list[dict] = []
         self._init_prompt_blocks()
+        if self.memory is None:
+            self.memory = Memory()
 
     @property
     def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"llm": True, "tools": True}
+        return super().to_dict_exclude_params | {"llm": True, "tools": True, "memory": True}
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
@@ -105,11 +113,12 @@ class Agent(Node):
             "instructions": "",
             "output_format": "Provide your answer in a clear and concise manner.",
             "request": "User request: {input}",
-            "context": "",
+            "conversation_history": "\n{context}",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
             "user_input": "",
+            "context": "",
         }
 
     def add_block(self, block_name: str, content: str):
@@ -130,12 +139,16 @@ class Agent(Node):
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
+        self.memory.add_message(role=MessageRole.USER, content=input_data.get("input"))
 
+        context = self.memory.get_messages_as_string()
+        self._prompt_variables["context"] = context
         self._prompt_variables.update(input_data)
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
         result = self._run_agent(config=config, **kwargs)
+        self.memory.add_message(role=MessageRole.ASSISTANT, content=result)
 
         execution_result = {
             "content": result,

@@ -176,3 +176,16 @@ class BaseEmbedder(BaseModel):
             doc.embedding = emb
 
         return {"documents": documents, "meta": meta}
+
+    @property
+    def embedding_size(self) -> int:
+        """
+        Evaluates and returns the size of the embedding vector for the current model.
+
+        Returns:
+            int: The size of the embedding vector.
+        """
+        from litellm import embedding
+
+        response = embedding(model=self.model, input=["test"], **self.embed_params)
+        return len(response.data[0]["embedding"])

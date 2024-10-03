@@ -1,82 +1,49 @@
-# Trip Planner
+# Trip Planner Examples
 
-This project demonstrates the use of AI agents to create a comprehensive trip planning system. It utilizes the Dynamiq framework to orchestrate multiple AI agents for tasks such as city selection, city guide creation, and travel itinerary generation.
+This directory contains examples demonstrating how to use Dynamiq agents and orchestrators to build a trip planning application. The examples showcase different approaches to orchestrating agents and utilizing tools for research and content generation.
 
-## Directory Structure
+## Components
 
-```
-trip_planner/
-    prompts.py
-    use_planner.py
-    use_orchestrator.py
-```
+### `prompts.py`
 
-## Files Overview
+- Defines functions for generating customer prompts for trip planning.
+- Includes functions for validating input data and formatting prompts.
 
-### prompts.py
+## Examples
 
-This file contains functions to create prompts for the AI agents:
+### Using Planner (Linear Orchestrator)
 
-- `create_customer_prompt()`: Generates a detailed prompt for comprehensive trip planning, including city selection, guide creation, and itinerary development.
-- `create_simple_customer_prompt()`: Creates a simpler prompt focused on city guide creation.
+- **`use_planner.py`**: Demonstrates a linear workflow using a `LinearOrchestrator` to manage a sequence of agents:
+    - **City Selection Expert:** Analyzes travel data to select the best city based on criteria like weather, events, and costs.
+    - **City Guide Expert:** Gathers information about the chosen city, including attractions, customs, and recommendations.
+    - **City Guide Writer:** Creates a detailed travel guide based on the gathered information.
+    - The workflow takes user input for trip details and saves the final output to a markdown file.
 
-### use_planner.py
+### Using Adaptive Orchestrator
 
-This script demonstrates the use of a Linear Orchestrator to manage AI agents for trip planning:
-
-- Utilizes OpenAI or Anthropic language models.
-- Implements various tools like web search, web scraping, and calculations.
-- Creates specialized agents for city selection, city guide creation, and travel writing.
-- Processes user input to generate a detailed travel guide.
-
-### use_orchestrator.py
-
-Similar to `use_planner.py`, but uses an Adaptive Orchestrator instead of a Linear Orchestrator:
-
-- Offers more flexibility in agent interactions and task management.
-- Otherwise similar in functionality to `use_planner.py`.
-
-## Key Features
-
-- Multi-agent system for comprehensive trip planning
-- Flexible choice between OpenAI (GPT) and Anthropic (Claude) language models
-- Integration with external tools for web search and scraping
-- Customizable prompts for different levels of detail in trip planning
-- Output of detailed travel guides in Markdown format
+- **`use_orchestrator.py`**: Showcases an adaptive workflow using an `AdaptiveOrchestrator` to dynamically manage agent execution:
+    - **City Selection Expert:** Similar to the previous example, analyzes travel data to select the best city.
+    - **City Guide Expert:** Gathers information about the chosen city, including attractions, customs, and recommendations.
+    - **City Guide Writer:** Creates a detailed travel guide based on the gathered information.
+    - The `AdaptiveOrchestrator` decides which agent to execute next based on the current state of the workflow.
+    - The workflow takes user input for trip details and saves the final output to a markdown file.
 
 ## Usage
 
-1. Set up the required environment variables:
-   - `SERP_API_KEY`: API key for the ScaleSERP tool
-   - `ZENROWS_API_KEY`: API key for the ZenRows scraping tool
-   - OpenAI or Anthropic API credentials (as per your chosen provider)
+1. **Set up environment variables:**
+   - `OPENAI_API_KEY`: Your OpenAI API key.
+   - `ANTHROPIC_API_KEY`: Your Anthropic API key.
+   - `SCALESERP_API_KEY`: Your ScaleSerp API key.
+   - `ZENROWS_API_KEY`: Your ZenRows API key.
+2. **Run the desired example:**
+   - For the linear workflow: `python use_planner.py`
+   - For the adaptive workflow: `python use_orchestrator.py`
 
-2. Run either `use_planner.py` or `use_orchestrator.py`:
-   ```
-   python use_planner.py
-   ```
-   or
-   ```
-   python use_orchestrator.py
-   ```
+## Key Concepts
 
-3. Follow the prompts to input your travel details:
-   - Your current location
-   - Cities you want to visit
-   - Travel dates
-   - Your interests
-
-4. The system will generate a detailed travel guide, which will be printed to the console and saved as a Markdown file.
-
-## Dependencies
-
-This project relies on the Dynamiq framework and its components. Ensure you have the following installed:
-
-- dynamiq
-- openai (if using GPT models)
-- anthropic (if using Claude models)
-- Other dependencies as required by the Dynamiq framework
-
-## Note
-
-This project is an example of using AI agents for trip planning. The actual performance and accuracy of the generated travel guides depend on the underlying AI models and the quality of data sources accessed by the tools.
+- **Agent Orchestration:** Managing the execution and interaction of multiple agents to achieve a complex goal.
+- **Linear Orchestration:** Agents are executed in a predefined sequence.
+- **Adaptive Orchestration:** The order of agent execution is dynamically determined based on the workflow's state.
+- **Research Tools:** Utilizing tools like `ScaleSerpTool` and `ZenRowsTool` to gather information from the web.
+- **Content Generation:** Leveraging LLMs to generate well-structured and informative travel guides.
+- **Prompt Engineering:** Crafting effective prompts to guide the agents' actions and ensure relevant output.

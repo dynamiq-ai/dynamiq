@@ -1,92 +1,39 @@
-# Literature Overview Generator
+# Literature Overview Examples
 
-This project demonstrates the use of AI agents to create a comprehensive literature overview on a given topic. It utilizes the Dynamiq framework to orchestrate multiple AI agents for tasks such as research and writing, with a focus on generating content for research papers.
+This directory contains examples demonstrating how to use Dynamiq agents and orchestrators to generate a literature overview on a given topic. The examples showcase different approaches to orchestrating agents and utilizing tools for research and content generation.
 
-## Directory Structure
+## Examples
 
-```
-literature_overview/
-    use_planner.py
-    use_orchestrator.py
-```
+### Using Planner (Linear Orchestrator)
 
-## Files Overview
+- **`use_planner.py`**: Demonstrates a linear workflow using a `LinearOrchestrator` to manage a sequence of agents:
+    - **Research Analyst:** Uses `ScaleSerpTool` and `ScraperSummarizerTool` to research the topic and gather relevant information.
+    - **Writer and Editor:** Creates a literature overview based on the research findings.
+    - The workflow saves the final output to a markdown file.
 
-### use_planner.py
+### Using Adaptive Orchestrator
 
-This script demonstrates the use of a Linear Orchestrator to manage AI agents for literature overview generation:
-
-- Utilizes OpenAI or Anthropic language models.
-- Implements various tools including web search, web scraping, arXiv search, and calculations.
-- Creates specialized agents for research and writing.
-- Processes user input to generate a detailed literature overview on a given topic.
-
-### use_orchestrator.py
-
-Similar to `use_planner.py`, but uses an Adaptive Orchestrator instead of a Linear Orchestrator:
-
-- Offers more flexibility in agent interactions and task management.
-- Otherwise similar in functionality to `use_planner.py`.
-
-## Key Features
-
-- Multi-agent system for comprehensive literature overview generation
-- Flexible choice between OpenAI (GPT) and Anthropic (Claude) language models
-- Integration with external tools for web search, web scraping, and arXiv search
-- Customizable content structure
-- Output of detailed literature overviews in Markdown format
+- **`use_orchestrator.py`**: Showcases an adaptive workflow using an `AdaptiveOrchestrator` to dynamically manage agent execution:
+    - **Research Analyst:** Similar to the previous example, uses `ScaleSerpTool` for research.
+    - **Writer and Editor:** Creates the literature overview.
+    - The `AdaptiveOrchestrator` decides which agent to execute next based on the current state of the workflow.
+    - The workflow saves the final output to a markdown file.
 
 ## Usage
 
-1. Set up the required environment variables:
-   - `SERP_API_KEY`: API key for the ScaleSERP tool
-   - `ZENROWS_API_KEY`: API key for the ZenRows scraping tool
-   - OpenAI or Anthropic API credentials (as per your chosen provider)
+1. **Set up environment variables:**
+   - `OPENAI_API_KEY`: Your OpenAI API key.
+   - `ANTHROPIC_API_KEY`: Your Anthropic API key.
+   - `SCALESERP_API_KEY`: Your ScaleSerp API key.
+   - `ZENROWS_API_KEY`: Your ZenRows API key.
+2. **Run the desired example:**
+   - For the linear workflow: `python use_planner.py`
+   - For the adaptive workflow: `python use_orchestrator.py`
 
-2. Run either `use_planner.py` or `use_orchestrator.py`:
-   ```
-   python use_planner.py
-   ```
-   or
-   ```
-   python use_orchestrator.py
-   ```
+## Key Concepts
 
-3. The system will generate a detailed literature overview on the topic "LLM based Multi-Agent Systems and Frameworks".
-
-4. The generated overview will be printed to the console and saved as a Markdown file named `article_gpt.md`.
-
-## Overview Structure
-
-The generated literature overviews follow a specific structure:
-
-1. Introduction
-2. Main concepts
-3. Applications
-4. Conclusion
-5. Sources
-
-The overview is formatted in Markdown, including proper syntax for headings, lists, and other formatting elements.
-
-## Agents
-
-1. **Research Analyst**: Finds the most relevant and up-to-date information on the requested topic using web search, web scraping, and arXiv search tools.
-2. **Writer and Editor**: Creates high-quality content based on the information provided by the Research Analyst.
-
-## Tools
-
-- ScaleSERPTool: For web searches
-- ZenRowsTool: For web scraping
-
-## Dependencies
-
-This project relies on the Dynamiq framework and its components. Ensure you have the following installed:
-
-- dynamiq
-- openai (if using GPT models)
-- anthropic (if using Claude models)
-- Other dependencies as required by the Dynamiq framework
-
-## Note
-
-This project is an example of using AI agents for literature overview generation. The actual performance and accuracy of the generated overviews depend on the underlying AI models and the quality of data sources accessed by the tools. The content is focused on "LLM based Multi-Agent Systems and Frameworks" but can be modified to cover other topics by changing the `user_prompt` in the scripts.
+- **Agent Orchestration:** Managing the execution and interaction of multiple agents to achieve a complex goal.
+- **Linear Orchestration:** Agents are executed in a predefined sequence.
+- **Adaptive Orchestration:** The order of agent execution is dynamically determined based on the workflow's state.
+- **Research Tools:** Utilizing tools like `ScaleSerpTool` and `ScraperSummarizerTool` to gather information from the web.
+- **Content Generation:** Leveraging LLMs to generate well-structured and informative content based on research findings.
