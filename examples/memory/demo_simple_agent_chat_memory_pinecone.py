@@ -8,13 +8,7 @@ from examples.llm_setup import setup_llm
 
 def setup_agent():
     llm = setup_llm()
-
-    # Set up Pinecone connection
-    pinecone_api_key = ""
-    if not pinecone_api_key:
-        raise ValueError("PINECONE_API_KEY environment variable is not set")
-
-    pinecone_connection = PineconeConnection(api_key=pinecone_api_key)
+    pinecone_connection = PineconeConnection()
     embedder = OpenAIEmbedder()
 
     # Create a memory instance with Pinecone storage

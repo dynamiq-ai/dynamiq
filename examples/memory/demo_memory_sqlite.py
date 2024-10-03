@@ -11,7 +11,7 @@ memory_sqlite.add_message(MessageRole.ASSISTANT, "SQLite is a great embedded dat
 
 # Get all messages
 print("\nSQLite messages:")
-messages = memory_sqlite.get_messages()
+messages = memory_sqlite.get_all_messages()
 for msg in messages:
     print(f"{msg.role}: {msg.content}")
 

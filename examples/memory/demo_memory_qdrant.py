@@ -5,9 +5,7 @@ from dynamiq.memory.memory import Memory
 from dynamiq.prompts import MessageRole
 
 # Initialize Qdrant connection
-qdrant_connection = QdrantConnection(
-    url="",  # e.g. "http://localhost:6333"
-)
+qdrant_connection = QdrantConnection()
 
 # Initialize embedder
 embedder = OpenAIEmbedder()

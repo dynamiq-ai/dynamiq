@@ -10,7 +10,7 @@ memory.add_message(MessageRole.ASSISTANT, "I'm doing well, thank you for asking.
 memory.add_message(MessageRole.USER, "Can you help me with a math problem?")
 
 # Get all messages
-messages = memory.get_messages()
+messages = memory.get_all_messages()
 for msg in messages:
     print(f"{msg.role}: {msg.content}")
 

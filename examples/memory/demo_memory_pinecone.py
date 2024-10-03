@@ -25,7 +25,7 @@ memory.add_message(
 
 # Get all messages
 print("All messages:")
-messages = memory.get_messages()
+messages = memory.get_all_messages()
 for msg in messages:
     print(f"{msg.role}: {msg.content}")
 
