@@ -1,9 +1,8 @@
 import uuid
-from typing import Any
 
 from pinecone import Pinecone as PineconeClient
 from pinecone import ServerlessSpec
-from pinecone.core.client.exceptions import PineconeException
+from pinecone.core.openapi.shared.exceptions import PineconeException
 
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Pinecone as PineconeConnection
@@ -22,13 +21,17 @@ class Pinecone(Backend):
 
     name = "Pinecone"
 
-    def __init__(self, connection: PineconeConnection, embedder: BaseEmbedder, index_name: str = "conversations"):
+    def __init__(
+        self,
+        connection: PineconeConnection,
+        embedder: BaseEmbedder,
+        index_name: str = "conversations",
+    ):
         """Initializes the Pinecone memory storage."""
         self.connection = connection
         self.index_name = index_name
         self.embedder = embedder
 
-        # Check for API key and raise an error if missing
         self.api_key = self.connection.api_key
         if not self.api_key:
             raise PineconeError(
@@ -49,8 +52,7 @@ class Pinecone(Backend):
                     metric="cosine",
                     spec=ServerlessSpec(cloud=self.connection.cloud, region=self.connection.region),
                 )
-            else:
-                self.index = self.pc.Index(self.index_name)
+            self.index = self.pc.Index(self.index_name)
         except PineconeException as e:
             raise PineconeError(f"Error initializing Pinecone index: {e}") from e
 
@@ -59,9 +61,14 @@ class Pinecone(Backend):
         try:
             embedding_result = self.embedder.embed_text(message.content)
             embedding = embedding_result["embedding"]
-            cleaned_metadata = self._clean_metadata(message.model_dump())
+            metadata = {
+                "content": message.content,
+                "role": message.role.value,
+            }
+            if message.metadata:
+                metadata.update(message.metadata)
             message_id = str(uuid.uuid4())
-            self.index.upsert(vectors=[(message_id, embedding, cleaned_metadata)])
+            self.index.upsert(vectors=[(message_id, embedding, metadata)])
         except PineconeException as e:
             raise PineconeError(f"Error adding message to Pinecone: {e}") from e
 
@@ -73,7 +80,14 @@ class Pinecone(Backend):
                 top_k=limit,
                 include_metadata=True,
             )
-            messages = [Message(**match["metadata"]) for match in query_response["matches"]]
+            messages = [
+                Message(
+                    content=match.metadata["content"],
+                    role=match.metadata["role"],
+                    metadata=match.metadata.get("metadata", {}),
+                )
+                for match in query_response["matches"]
+            ]
             return messages
         except PineconeException as e:
             raise PineconeError(f"Error retrieving messages from Pinecone: {e}") from e
@@ -84,7 +98,14 @@ class Pinecone(Backend):
             embedding_result = self.embedder.embed_text(query)
             embeddings = embedding_result["embedding"]
             results = self.index.query(vector=embeddings, top_k=search_limit, include_metadata=True)
-            messages = [Message(**match["metadata"]) for match in results["matches"]]
+            messages = [
+                Message(
+                    content=match["metadata"]["content"],
+                    role=match["metadata"]["role"],
+                    metadata=match["metadata"].get("metadata"),  # Extract additional metadata
+                )
+                for match in results["matches"]
+            ]
             return messages
         except PineconeException as e:
             raise PineconeError(f"Error searching in Pinecone: {e}") from e
@@ -93,7 +114,8 @@ class Pinecone(Backend):
         """Checks if the Pinecone index is empty."""
         try:
             stats = self.index.describe_index_stats()
-            return stats["total_vector_count"] == 0
+            is_empty = stats.get("total_vector_count", 0) == 0
+            return is_empty
         except PineconeException as e:
             raise PineconeError(f"Error checking if Pinecone index is empty: {e}") from e
 
@@ -103,17 +125,3 @@ class Pinecone(Backend):
             self.index.delete(delete_all=True)
         except PineconeException as e:
             raise PineconeError(f"Error clearing Pinecone index: {e}") from e
-
-    def _clean_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
-        """Clean metadata to ensure it only contains valid types for Pinecone."""
-        cleaned_metadata = {}
-        for k, v in metadata.items():
-            if isinstance(v, (str, int, float, bool)):
-                cleaned_metadata[k] = v
-            elif isinstance(v, list):
-                cleaned_metadata[k] = [self._clean_metadata(item) if isinstance(item, dict) else item for item in v]
-            elif isinstance(v, dict):
-                cleaned_metadata[k] = self._clean_metadata(v)
-            else:
-                cleaned_metadata[k] = str(v)
-        return cleaned_metadata

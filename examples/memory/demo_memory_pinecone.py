@@ -4,10 +4,10 @@ from dynamiq.memory import Config, Memory
 from dynamiq.memory.backend import Pinecone
 from dynamiq.prompts import MessageRole
 
-pinecone_connection = PineconeConnection(api_key="")
+pinecone_connection = PineconeConnection()
 embedder = OpenAIEmbedder()
 config = Config()
-backend = Pinecone(connection=pinecone_connection, index_name="my-memory-index-v2", embedder=embedder)
+backend = Pinecone(connection=pinecone_connection, embedder=embedder)
 
 memory = Memory(
     config=config,

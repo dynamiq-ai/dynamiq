@@ -7,7 +7,7 @@ from examples.llm_setup import setup_llm
 def setup_agent():
     llm = setup_llm()
     config = Config()
-    memory = Memory(config=config, backend=InMemory())  # Explicitly use InMemory backend
+    memory = Memory(config=config, backend=InMemory())
     AGENT_ROLE = "helpful assistant"
     AGENT_GOAL = "is to provide useful information and answer questions"
     agent = SimpleAgent(
@@ -33,7 +33,7 @@ def chat_loop(agent):
         print(f"AI: {response_content}")
 
     print("\nChat History:")
-    print(agent.memory.get_messages_as_string())
+    print(agent.memory.get_all_messages_as_string())
 
 
 if __name__ == "__main__":

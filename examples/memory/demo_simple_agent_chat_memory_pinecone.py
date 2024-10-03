@@ -12,7 +12,7 @@ def setup_agent():
     embedder = OpenAIEmbedder()
 
     # Create a memory instance with Pinecone storage
-    backend = Pinecone(connection=pinecone_connection, index_name="my-memory-index-v2", embedder=embedder)
+    backend = Pinecone(connection=pinecone_connection, embedder=embedder)
     config = Config()
 
     memory_pinecone = Memory(config=config, backend=backend)
@@ -43,7 +43,7 @@ def chat_loop(agent):
         print(f"AI: {response_content}")
 
     print("\nChat History:")
-    print(agent.memory.get_messages_as_string())
+    print(agent.memory.get_all_messages_as_string())
 
 
 if __name__ == "__main__":

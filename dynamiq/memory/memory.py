@@ -74,6 +74,7 @@ class Memory:
         """Clears the memory."""
         try:
             self.backend.clear()
+            logger.debug(f"Memory {self.backend.name}: Cleared memory")
         except Exception as e:
             logger.error(f"Error clearing memory: {e}")
             raise e

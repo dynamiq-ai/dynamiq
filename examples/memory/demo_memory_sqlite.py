@@ -23,7 +23,7 @@ for msg in search_results:
 
 # Print all messages
 print("\nSQLite messages:")
-print(memory_sqlite.get_messages_as_string())
+print(memory_sqlite.get_all_messages_as_string())
 
 # Clear memory
 memory_sqlite.clear()

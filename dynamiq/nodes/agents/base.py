@@ -141,7 +141,7 @@ class Agent(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         self.memory.add_message(role=MessageRole.USER, content=input_data.get("input"))
 
-        context = self.memory.get_messages_as_string()
+        context = self.memory.get_all_messages_as_string()
         self._prompt_variables["context"] = context
         self._prompt_variables.update(input_data)
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
