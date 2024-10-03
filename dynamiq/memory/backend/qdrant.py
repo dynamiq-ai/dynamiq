@@ -1,3 +1,5 @@
+import uuid
+
 from qdrant_client.http import models as qdrant_models
 from qdrant_client.http.exceptions import ApiException
 
@@ -54,11 +56,12 @@ class Qdrant(Backend):
         try:
             embedding_result = self.embedder.embed_text(message.content)
             embedding = embedding_result["embedding"]
+            message_id = str(uuid.uuid4())
             self.client.upsert(
                 collection_name=self.collection_name,
                 points=[
                     qdrant_models.PointStruct(
-                        id=message.id,
+                        id=message_id,
                         vector=embedding,
                         payload=message.model_dump(),
                     )

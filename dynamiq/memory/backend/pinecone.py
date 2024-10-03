@@ -1,3 +1,4 @@
+import uuid
 from typing import Any
 
 from pinecone import Pinecone as PineconeClient
@@ -59,7 +60,8 @@ class Pinecone(Backend):
             embedding_result = self.embedder.embed_text(message.content)
             embedding = embedding_result["embedding"]
             cleaned_metadata = self._clean_metadata(message.model_dump())
-            self.index.upsert(vectors=[(message.id, embedding, cleaned_metadata)])
+            message_id = str(uuid.uuid4())
+            self.index.upsert(vectors=[(message_id, embedding, cleaned_metadata)])
         except PineconeException as e:
             raise PineconeError(f"Error adding message to Pinecone: {e}") from e
 

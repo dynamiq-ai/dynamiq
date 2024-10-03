@@ -1,6 +1,7 @@
 import json
 import re
 import sqlite3
+import uuid
 
 from dynamiq.memory.backend.base import Backend
 from dynamiq.prompts import Message
@@ -80,8 +81,9 @@ class SQLite(Backend):
             """  # nosec B608
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                message_id = str(uuid.uuid4())
                 cursor.execute(
-                    query, (message.id, message.role.value, message.content, json.dumps(message.metadata))
+                    query, (message_id, message.role.value, message.content, json.dumps(message.metadata))
                 )  # nosec B608
                 conn.commit()
 
@@ -97,7 +99,7 @@ class SQLite(Backend):
                 cursor = conn.cursor()
                 cursor.execute(query)  # nosec B608
                 rows = cursor.fetchall()
-            return [Message(id=row[0], role=row[1], content=row[2], metadata=json.loads(row[3])) for row in rows]
+            return [Message(role=row[1], content=row[2], metadata=json.loads(row[3])) for row in rows]
 
         except sqlite3.Error as e:
             raise SQLiteError(f"Error retrieving messages from database: {e}") from e
@@ -142,6 +144,6 @@ class SQLite(Backend):
                 cursor = conn.cursor()
                 cursor.execute(query_str, (f"%{query}%", search_limit))  # nosec B608
                 rows = cursor.fetchall()
-            return [Message(id=row[0], role=row[1], content=row[2], metadata=json.loads(row[3])) for row in rows]
+            return [Message(role=row[1], content=row[2], metadata=json.loads(row[3])) for row in rows]
         except sqlite3.Error as e:
             raise SQLiteError(f"Error searching in database: {e}") from e
