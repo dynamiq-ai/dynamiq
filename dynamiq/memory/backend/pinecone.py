@@ -2,7 +2,6 @@ import uuid
 
 from pinecone import Pinecone as PineconeClient
 from pinecone import ServerlessSpec
-from pinecone.core.openapi.shared.exceptions import PineconeException
 
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Pinecone as PineconeConnection
@@ -41,7 +40,7 @@ class Pinecone(Backend):
 
         try:
             self.pc = PineconeClient(api_key=self.api_key)
-        except PineconeException as e:
+        except Exception as e:
             raise PineconeError(f"Failed to connect to Pinecone: {e}") from e
 
         try:
@@ -53,7 +52,7 @@ class Pinecone(Backend):
                     spec=ServerlessSpec(cloud=self.connection.cloud, region=self.connection.region),
                 )
             self.index = self.pc.Index(self.index_name)
-        except PineconeException as e:
+        except Exception as e:
             raise PineconeError(f"Error initializing Pinecone index: {e}") from e
 
     def add(self, message: Message):
@@ -69,7 +68,7 @@ class Pinecone(Backend):
                 metadata.update(message.metadata)
             message_id = str(uuid.uuid4())
             self.index.upsert(vectors=[(message_id, embedding, metadata)])
-        except PineconeException as e:
+        except Exception as e:
             raise PineconeError(f"Error adding message to Pinecone: {e}") from e
 
     def get_all(self, limit: int = 10000) -> list[Message]:
@@ -89,7 +88,7 @@ class Pinecone(Backend):
                 for match in query_response["matches"]
             ]
             return messages
-        except PineconeException as e:
+        except Exception as e:
             raise PineconeError(f"Error retrieving messages from Pinecone: {e}") from e
 
     def search(self, query: str, search_limit: int) -> list[Message]:
@@ -107,7 +106,7 @@ class Pinecone(Backend):
                 for match in results["matches"]
             ]
             return messages
-        except PineconeException as e:
+        except Exception as e:
             raise PineconeError(f"Error searching in Pinecone: {e}") from e
 
     def is_empty(self) -> bool:
@@ -116,12 +115,12 @@ class Pinecone(Backend):
             stats = self.index.describe_index_stats()
             is_empty = stats.get("total_vector_count", 0) == 0
             return is_empty
-        except PineconeException as e:
+        except Exception as e:
             raise PineconeError(f"Error checking if Pinecone index is empty: {e}") from e
 
     def clear(self):
         """Clears the Pinecone index."""
         try:
             self.index.delete(delete_all=True)
-        except PineconeException as e:
+        except Exception as e:
             raise PineconeError(f"Error clearing Pinecone index: {e}") from e
