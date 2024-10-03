@@ -1,7 +1,7 @@
 from dynamiq.components.embedders.openai import OpenAIEmbedder
-from dynamiq.connections import Pinecone
+from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory import Config, Memory
-from dynamiq.memory.backend import PineconeBackend
+from dynamiq.memory.backend import Pinecone
 from dynamiq.nodes.agents.simple import SimpleAgent
 from examples.llm_setup import setup_llm
 
@@ -10,15 +10,15 @@ def setup_agent():
     llm = setup_llm()
 
     # Set up Pinecone connection
-    pinecone_api_key = "10e1dc8b-7ec1-4d23-8174-fa1f9a23d7aa"
+    pinecone_api_key = ""
     if not pinecone_api_key:
         raise ValueError("PINECONE_API_KEY environment variable is not set")
 
-    pinecone_connection = Pinecone(api_key=pinecone_api_key)
+    pinecone_connection = PineconeConnection(api_key=pinecone_api_key)
     embedder = OpenAIEmbedder()
 
     # Create a memory instance with Pinecone storage
-    backend = PineconeBackend(connection=pinecone_connection, index_name="my-memory-index-v2", embedder=embedder)
+    backend = Pinecone(connection=pinecone_connection, index_name="my-memory-index-v2", embedder=embedder)
     config = Config()
 
     memory_pinecone = Memory(config=config, backend=backend)
