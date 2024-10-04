@@ -1,6 +1,8 @@
 import json
 from typing import Any
 
+from dynamiq.utils import JsonWorkflowEncoder
+
 
 class BaseSerializer:
     """
@@ -83,7 +85,7 @@ class JsonSerializer(BaseSerializer):
         Returns:
             str: The JSON string representation of the value.
         """
-        return json.dumps(value)
+        return json.dumps(value, cls=JsonWorkflowEncoder)
 
     def loads(self, value: str | None) -> Any:
         """

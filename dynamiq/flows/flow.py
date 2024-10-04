@@ -186,7 +186,7 @@ class Flow(BaseFlow):
         run_id = uuid4()
         merged_kwargs = kwargs | {
             "run_id": run_id,
-            "parent_run_id": kwargs.get("parent_run_id"),
+            "parent_run_id": kwargs.get("parent_run_id", run_id),
         }
 
         logger.info(f"Flow {self.id}: execution started.")
