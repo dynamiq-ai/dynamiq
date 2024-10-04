@@ -44,11 +44,8 @@ class SQLite(Backend):
                 if result is None:
                     if create_if_not_exists:
                         self._create_table()
-                        print(f"Table '{self.table_name}' created successfully.")
                     else:
                         raise SQLiteError(f"Table '{self.table_name}' does not exist in the database.")
-                else:
-                    print(f"Using existing SQLite table '{self.table_name}'.")
 
         except sqlite3.Error as e:
             raise SQLiteError(f"Error validating or creating table: {e}") from e
@@ -130,20 +127,38 @@ class SQLite(Backend):
         except sqlite3.Error as e:
             raise SQLiteError(f"Error clearing database: {e}") from e
 
-    def search(self, query: str, search_limit: int) -> list[Message]:
-        """Searches for messages in SQLite based on the query."""
+    def search(self, query: str = None, search_limit: int = None, filters: dict = None) -> list[Message]:
+        """Searches for messages in SQLite based on the query and/or filters."""
+        search_limit = search_limit or self.config.search_limit  # Use default if not provided
         try:
             self._validate_table_name()
-            query_str = f"""
-            SELECT id, role, content, metadata
-            FROM {self.table_name}
-            WHERE content LIKE ?
-            ORDER BY id DESC LIMIT ?
-            """  # nosec B608
+            where_clauses = []
+            params = []
+
+            if query:
+                where_clauses.append("content LIKE ?")
+                params.append(f"%{query}%")
+
+            if filters:
+                for key, value in filters.items():
+                    if isinstance(value, list):
+                        where_clauses.append(f"json_extract(metadata, '$.{key}') LIKE ?")
+                        params.append(f"%{json.dumps(value)}%")
+                    else:
+                        where_clauses.append(f"json_extract(metadata, '$.{key}') = ?")
+                        params.append(value)
+
+            query_str = f"SELECT id, role, content, metadata FROM {self.table_name}"  # nosec B608
+            if where_clauses:
+                query_str += f" WHERE {' AND '.join(where_clauses)}"
+            query_str += " ORDER BY id DESC LIMIT ?"
+            params.append(search_limit)
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(query_str, (f"%{query}%", search_limit))  # nosec B608
+                cursor.execute(query_str, params)
                 rows = cursor.fetchall()
-            return [Message(role=row[1], content=row[2], metadata=json.loads(row[3])) for row in rows]
+            return [Message(role=row[1], content=row[2], metadata=json.loads(row[3] or "{}")) for row in rows]
+
         except sqlite3.Error as e:
             raise SQLiteError(f"Error searching in database: {e}") from e

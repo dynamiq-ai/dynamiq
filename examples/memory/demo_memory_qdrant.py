@@ -4,29 +4,26 @@ from dynamiq.memory.backend.qdrant import Qdrant
 from dynamiq.memory.memory import Memory
 from dynamiq.prompts import MessageRole
 
-# Initialize Qdrant connection
 qdrant_connection = QdrantConnection()
-
-# Initialize embedder
 embedder = OpenAIEmbedder()
-
-# Initialize Qdrant backend
-qdrant_backend = Qdrant(connection=qdrant_connection, embedder=embedder)
-
-# Initialize Memory with Qdrant backend
+qdrant_backend = Qdrant(connection=qdrant_connection, embedder=embedder, collection_name="your-collection")
 memory = Memory(backend=qdrant_backend)
 
-# Add messages
-memory.add_message(role=MessageRole.USER, content="Hello, how are you?")
-memory.add_message(role=MessageRole.ASSISTANT, content="I'm doing well, thank you!")
 
-# Search for messages
-search_results = memory.search_messages(query="how are you")
-print(search_results)
+memory.add_message(MessageRole.USER, "Hello, how are you?", metadata={"mood": "happy"})
+memory.add_message(MessageRole.ASSISTANT, "I'm doing well, thank you!", metadata={"mood": "helpful"})
 
-# Get all messages
-all_messages = memory.get_all_messages()
-print(all_messages)
 
-# Clear the memory
+# Search with filters only
+results = memory.search_messages(filters={"mood": "happy"})
+print("Qdrant results with filters only:", [r.content for r in results])
+
+# Search with query and filters
+results = memory.search_messages(query="how are you", filters={"mood": "happy"})
+print("Qdrant results with query and filters:", [r.content for r in results])
+
+# Search with query only
+results = memory.search_messages("thank you")
+print("Qdrant results with query only:", [r.content for r in results])
+
 memory.clear()

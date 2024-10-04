@@ -17,14 +17,15 @@ class Memory:
         self.config = config
         self.backend = backend
 
-    def add_message(self, role: MessageRole, content: str, timestamp: float = None):
+    def add_message(self, role: MessageRole, content: str, metadata: dict = None):
         """Adds a message to the memory."""
         try:
-            message = Message(role=role, content=content, timestamp=timestamp)
+            message = Message(role=role, content=content, metadata=metadata)
             self.backend.add(message)
             logger.debug(f"Memory {self.backend.name}: Added message: {message.role}: {message.content[:20]}...")
         except Exception as e:
-            print(f"Error adding message: {e}")
+            logger.error(f"Error adding message: {e}")
+            raise
 
     def get_all_messages(self) -> list[Message]:
         """Retrieves all messages from the memory."""
@@ -37,10 +38,14 @@ class Memory:
         messages = self.get_all_messages()
         return self._format_messages_as_string(messages, format)
 
-    def search_messages(self, query: str) -> list[Message]:
-        """Searches for messages relevant to the query."""
-        search_results = self.backend.search(query, search_limit=self.config.search_limit)
-        logger.debug(f"Memory {self.backend.name}: Found {len(search_results)} search results for query: {query}...")
+    def search_messages(self, query: str = None, filters: dict = None) -> list[Message]:
+        """Searches for messages relevant to the query or filters."""
+        search_results = self.backend.search(
+            query=query, search_limit=self.config.search_limit, filters=filters or self.config.search_filters
+        )
+        logger.debug(
+            f"Memory {self.backend.name}: Found {len(search_results)} search results for query: {query}, filters: {filters}"  # noqa: E501
+        )
         return search_results
 
     def get_search_results_as_string(self, query: str, format: str = "plain") -> str:

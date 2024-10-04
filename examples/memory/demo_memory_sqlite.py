@@ -3,28 +3,22 @@ from dynamiq.memory.memory import Memory
 from dynamiq.prompts import MessageRole
 
 backend = SQLite()
-memory_sqlite = Memory(backend=backend)
+memory = Memory(backend=backend)
 
-# Add messages
-memory_sqlite.add_message(MessageRole.USER, "This is a message for SQLite.")
-memory_sqlite.add_message(MessageRole.ASSISTANT, "SQLite is a great embedded database.")
+memory.add_message(MessageRole.USER, "This is a test message for SQLite.", metadata={"category": "testing"})
+memory.add_message(MessageRole.ASSISTANT, "SQLite is working!", metadata={"category": "testing"})
 
-# Get all messages
-print("\nSQLite messages:")
-messages = memory_sqlite.get_all_messages()
-for msg in messages:
-    print(f"{msg.role}: {msg.content}")
+# Search with filters only
+results = memory.search_messages(filters={"category": "testing"})
+print("SQLite results with filters only:", [r.content for r in results])
 
-# Search for messages
-print("\nSQLite search results:")
-search_results = memory_sqlite.search_messages("SQLite")
-for msg in search_results:
-    print(f"Search result: {msg.content}")
+# Search with query and filters
+results = memory.search_messages(query="SQLite", filters={"category": "testing"})
+print("SQLite results with query and filters:", [r.content for r in results])
 
-# Print all messages
-print("\nSQLite messages:")
-print(memory_sqlite.get_all_messages_as_string())
+# Search with query only
+results = memory.search_messages("working")
+print("SQLite results with query only:", [r.content for r in results])
 
-# Clear memory
-memory_sqlite.clear()
-print("\nIs SQLite memory empty?", memory_sqlite.is_memory_empty())
+memory.clear()
+print("Is memory empty?", memory.is_memory_empty())

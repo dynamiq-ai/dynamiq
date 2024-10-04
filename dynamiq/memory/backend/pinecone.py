@@ -91,17 +91,28 @@ class Pinecone(Backend):
         except Exception as e:
             raise PineconeError(f"Error retrieving messages from Pinecone: {e}") from e
 
-    def search(self, query: str, search_limit: int) -> list[Message]:
-        """Searches for messages in Pinecone based on the query."""
+    def search(self, query: str = None, search_limit: int = None, filters: dict = None) -> list[Message]:
+        """Searches for messages in Pinecone based on the query and/or filters."""
+        search_limit = search_limit or self.config.search_limit  # Use default if not provided
         try:
-            embedding_result = self.embedder.embed_text(query)
-            embeddings = embedding_result["embedding"]
-            results = self.index.query(vector=embeddings, top_k=search_limit, include_metadata=True)
+            if query:
+                embedding_result = self.embedder.embed_text(query)
+                embeddings = embedding_result["embedding"]
+                results = self.index.query(vector=embeddings, top_k=search_limit, include_metadata=True, filter=filters)
+            elif filters:
+                dummy_vector = [0.0] * self.embedder.embedding_size
+                results = self.index.query(
+                    vector=dummy_vector, top_k=search_limit, include_metadata=True, filter=filters
+                )
+            else:
+                return []
+
             messages = [
                 Message(
                     content=match["metadata"]["content"],
                     role=match["metadata"]["role"],
-                    metadata=match["metadata"].get("metadata"),  # Extract additional metadata
+                    metadata=match["metadata"].get("metadata"),
+                    timestamp=match["metadata"].get("timestamp"),
                 )
                 for match in results["matches"]
             ]

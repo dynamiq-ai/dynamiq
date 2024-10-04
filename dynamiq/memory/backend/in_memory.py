@@ -28,13 +28,24 @@ class InMemory(Backend):
         """Retrieves all messages from the in-memory list."""
         return self.messages
 
-    def search(self, query: str, search_limit: int) -> list[Message]:
-        """Searches for messages in the in-memory list based on substring matching."""
-        try:
-            matching_messages = [msg for msg in self.messages if query.lower() in msg.content.lower()][:search_limit]
-            return matching_messages
-        except Exception as e:
-            raise InMemoryError(f"Error searching in InMemory backend: {e}") from e
+    def search(self, query: str = None, search_limit: int = None, filters: dict = None) -> list[Message]:
+        """Searches for messages, applying optional query and/or filters."""
+        search_limit = search_limit or self.config.search_limit
+        matching_messages = self.messages
+
+        if query:
+            matching_messages = [msg for msg in matching_messages if query.lower() in msg.content.lower()]
+
+        if filters:
+            for key, value in filters.items():
+                if isinstance(value, list):
+                    matching_messages = [
+                        msg for msg in matching_messages if any(v in str(msg.metadata.get(key, "")) for v in value)
+                    ]
+                else:
+                    matching_messages = [msg for msg in matching_messages if value in str(msg.metadata.get(key, ""))]
+
+        return matching_messages[:search_limit]
 
     def is_empty(self) -> bool:
         """Checks if the in-memory list is empty."""
