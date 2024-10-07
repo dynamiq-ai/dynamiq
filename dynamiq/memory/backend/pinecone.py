@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from pinecone import Pinecone as PineconeClient
 from pinecone import ServerlessSpec
@@ -47,11 +48,11 @@ class Pinecone(MemoryBackend):
             if self.index_name not in self.pc.list_indexes().names():
                 self.pc.create_index(
                     name=self.index_name,
-                    dimension=embedder.embedding_size,
+                    dimension=self.embedder.embedding_size,
                     metric="cosine",
                     spec=ServerlessSpec(cloud=self.connection.cloud, region=self.connection.region),
                 )
-            self.index = self.pc.Index(self.index_name)
+            self._index = self.pc.Index(self.index_name)
         except Exception as e:
             raise PineconeError(f"Error initializing Pinecone index: {e}") from e
 
@@ -67,14 +68,14 @@ class Pinecone(MemoryBackend):
             if message.metadata:
                 metadata.update(message.metadata)
             message_id = str(uuid.uuid4())
-            self.index.upsert(vectors=[(message_id, embedding, metadata)])
+            self._index.upsert(vectors=[{"id": message_id, "values": embedding, "metadata": metadata}])
         except Exception as e:
             raise PineconeError(f"Error adding message to Pinecone: {e}") from e
 
     def get_all(self, limit: int = 10000) -> list[Message]:
         """Retrieves all messages from Pinecone."""
         try:
-            query_response = self.index.query(
+            query_response = self._index.query(
                 vector=[0] * self.embedder.embedding_size,
                 top_k=limit,
                 include_metadata=True,
@@ -83,47 +84,60 @@ class Pinecone(MemoryBackend):
                 Message(
                     content=match.metadata["content"],
                     role=match.metadata["role"],
-                    metadata=match.metadata.get("metadata", {}),
+                    metadata={k: v for k, v in match.metadata.items() if k not in ("content", "role")},
                 )
                 for match in query_response["matches"]
             ]
-            return messages
+            return sorted(messages, key=lambda msg: msg.metadata.get("timestamp", 0))
         except Exception as e:
             raise PineconeError(f"Error retrieving messages from Pinecone: {e}") from e
 
-    def search(self, query: str = None, search_limit: int = None, filters: dict = None) -> list[Message]:
+    def search(self, query: str = None, filters: dict = None, search_limit: int = None) -> list[Message]:
         """Searches for messages in Pinecone based on the query and/or filters."""
-        search_limit = search_limit or self.config.search_limit  # Use default if not provided
+        search_limit = search_limit or self.config.search_limit
+        normalized_filters = self._normalize_filters(filters) if filters else None
         try:
             if query:
                 embedding_result = self.embedder.embed_text(query)
-                embeddings = embedding_result["embedding"]
-                results = self.index.query(vector=embeddings, top_k=search_limit, include_metadata=True, filter=filters)
-            elif filters:
+                embedding = embedding_result["embedding"]
+                response = self._index.query(
+                    vector=embedding,
+                    top_k=search_limit,
+                    include_metadata=True,
+                    filter=normalized_filters,
+                )
+            elif normalized_filters:
                 dummy_vector = [0.0] * self.embedder.embedding_size
-                results = self.index.query(
-                    vector=dummy_vector, top_k=search_limit, include_metadata=True, filter=filters
+                response = self._index.query(
+                    vector=dummy_vector,
+                    top_k=search_limit,
+                    include_metadata=True,
+                    filter=normalized_filters,
                 )
             else:
                 return []
-
-            messages = [
-                Message(
-                    content=match["metadata"]["content"],
-                    role=match["metadata"]["role"],
-                    metadata=match["metadata"].get("metadata"),
-                    timestamp=match["metadata"].get("timestamp"),
-                )
-                for match in results["matches"]
-            ]
+            messages = [Message(**match.metadata) for match in response.matches]
             return messages
         except Exception as e:
             raise PineconeError(f"Error searching in Pinecone: {e}") from e
 
+    def _normalize_filters(self, filters: dict[str, Any]) -> dict[str, Any]:
+        """Normalizes filters to ensure Pinecone compatibility."""
+        normalized_filters = {}
+        for key, value in filters.items():
+            if isinstance(value, dict):
+                normalized_filters[key] = value
+            elif isinstance(value, list):
+                normalized_filters[key] = {"$in": value}
+            else:
+                normalized_filters[key] = value
+
+        return normalized_filters
+
     def is_empty(self) -> bool:
         """Checks if the Pinecone index is empty."""
         try:
-            stats = self.index.describe_index_stats()
+            stats = self._index.describe_index_stats()
             is_empty = stats.get("total_vector_count", 0) == 0
             return is_empty
         except Exception as e:
@@ -132,6 +146,6 @@ class Pinecone(MemoryBackend):
     def clear(self):
         """Clears the Pinecone index."""
         try:
-            self.index.delete(delete_all=True)
+            self._index.delete(delete_all=True)
         except Exception as e:
             raise PineconeError(f"Error clearing Pinecone index: {e}") from e

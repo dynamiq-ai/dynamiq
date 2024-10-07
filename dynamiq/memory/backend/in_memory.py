@@ -26,7 +26,7 @@ class InMemory(MemoryBackend):
 
     def get_all(self) -> list[Message]:
         """Retrieves all messages from the in-memory list."""
-        return self.messages
+        return sorted(self.messages, key=lambda msg: msg.metadata.get("timestamp", 0))  # Sort by timestamp
 
     def search(self, query: str = None, search_limit: int = None, filters: dict = None) -> list[Message]:
         """Searches for messages, applying optional query and/or filters."""

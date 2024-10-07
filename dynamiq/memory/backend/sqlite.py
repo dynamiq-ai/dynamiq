@@ -57,7 +57,9 @@ class SQLite(MemoryBackend):
             id TEXT PRIMARY KEY,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
-            metadata TEXT
+            metadata TEXT,
+            timestamp REAL
+
         )
         """  # nosec B608
         try:
@@ -73,14 +75,21 @@ class SQLite(MemoryBackend):
         try:
             self._validate_table_name()  # Ensure table exists
             query = f"""
-            INSERT INTO {self.table_name} (id, role, content, metadata)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO {self.table_name} (id, role, content, metadata, timestamp)
+            VALUES (?, ?, ?, ?, ?)
             """  # nosec B608
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 message_id = str(uuid.uuid4())
                 cursor.execute(
-                    query, (message_id, message.role.value, message.content, json.dumps(message.metadata))
+                    query,
+                    (
+                        message_id,
+                        message.role.value,
+                        message.content,
+                        json.dumps(message.metadata),
+                        message.metadata.get("timestamp", 0),
+                    ),
                 )  # nosec B608
                 conn.commit()
 
@@ -91,12 +100,15 @@ class SQLite(MemoryBackend):
         """Retrieves all messages from the SQLite database."""
         try:
             self._validate_table_name()  # Ensure table exists
-            query = f"SELECT id, role, content, metadata FROM {self.table_name}"  # nosec B608
+            query = f"SELECT id, role, content, metadata, timestamp FROM {self.table_name} ORDER BY timestamp ASC"  # nosec B608 # noqa: E501
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(query)  # nosec B608
                 rows = cursor.fetchall()
-            return [Message(role=row[1], content=row[2], metadata=json.loads(row[3])) for row in rows]
+            return [
+                Message(role=row[1], content=row[2], metadata=json.loads(row[3] or "{}"), timestamp=row[4])
+                for row in rows
+            ]
 
         except sqlite3.Error as e:
             raise SQLiteError(f"Error retrieving messages from database: {e}") from e

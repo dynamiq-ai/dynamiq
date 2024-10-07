@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from dynamiq.memory.backend import InMemory, MemoryBackend
 from dynamiq.memory.config import Config
 from dynamiq.prompts import Message, MessageRole
@@ -20,6 +22,8 @@ class Memory:
     def add_message(self, role: MessageRole, content: str, metadata: dict = None):
         """Adds a message to the memory."""
         try:
+            metadata = metadata or {}
+            metadata["timestamp"] = datetime.utcnow().timestamp()
             message = Message(role=role, content=content, metadata=metadata)
             self.backend.add(message)
             logger.debug(f"Memory {self.backend.name}: Added message: {message.role}: {message.content[:20]}...")
@@ -48,9 +52,9 @@ class Memory:
         )
         return search_results
 
-    def get_search_results_as_string(self, query: str, format: str = "plain") -> str:
+    def get_search_results_as_string(self, query: str, filters: dict = None, format: str = "plain") -> str:
         """Searches for messages relevant to the query and returns them as a string."""
-        messages = self.search_messages(query)
+        messages = self.search_messages(query, filters)
         return self._format_messages_as_string(messages, format)
 
     def _format_messages_as_string(self, messages: list[Message], format: str = "plain") -> str:
