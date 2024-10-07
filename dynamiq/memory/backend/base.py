@@ -5,6 +5,7 @@ from dynamiq.prompts import Message
 
 class MemoryBackend(ABC):
     """Abstract base class for memory storage backends."""
+    #TODO: Vector stores and backend consolidation
 
     @abstractmethod
     def add(self, message: Message):
