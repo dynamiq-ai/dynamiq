@@ -138,8 +138,7 @@ class Pinecone(MemoryBackend):
         """Checks if the Pinecone index is empty."""
         try:
             stats = self._index.describe_index_stats()
-            is_empty = stats.get("total_vector_count", 0) == 0
-            return is_empty
+            return stats.get("total_vector_count", 0) == 0
         except Exception as e:
             raise PineconeError(f"Error checking if Pinecone index is empty: {e}") from e
 

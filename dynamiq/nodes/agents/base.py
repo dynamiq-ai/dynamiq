@@ -61,11 +61,7 @@ class Agent(Node):
     role: str | None = None
     goal: str | None = None
     max_loops: int = 1
-    memory: Memory | None = Field(
-        None,
-        description="Memory node for the agent. If not provided, a default in-memory"
-        "memory will be used. Configure using MemoryConfig.",
-    )
+    memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_retrieval_strategy: str = "all"  # all, relevant, both
 
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
@@ -78,8 +74,6 @@ class Agent(Node):
         self._intermediate_steps: dict[int, dict] = {}
         self._run_depends: list[dict] = []
         self._init_prompt_blocks()
-        if self.memory is None:
-            self.memory = Memory()
 
     @property
     def to_dict_exclude_params(self):
@@ -143,18 +137,21 @@ class Agent(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         user_id = input_data.get("user_id", None)
-        self.memory.add_message(role=MessageRole.USER, content=input_data.get("input"), metadata={"user_id": user_id})
-
-        self._retrieve_memory(input_data)
+        if self.memory:
+            self.memory.add_message(
+                role=MessageRole.USER, content=input_data.get("input"), metadata={"user_id": user_id}
+            )
+            self._retrieve_memory(input_data)
 
         self._prompt_variables.update(input_data)
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
         result = self._run_agent(config=config, **kwargs)
-        self.memory.add_message(
-            role=MessageRole.ASSISTANT, content=result, metadata={"user_id": input_data.get("user_id", "")}
-        )
+        if self.memory:
+            self.memory.add_message(
+                role=MessageRole.ASSISTANT, content=result, metadata={"user_id": input_data.get("user_id", "")}
+            )
 
         execution_result = {
             "content": result,
