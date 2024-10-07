@@ -3,7 +3,7 @@ import re
 import sqlite3
 import uuid
 
-from dynamiq.memory.backend.base import Backend
+from dynamiq.memory.backend.base import MemoryBackend
 from dynamiq.prompts import Message
 
 
@@ -13,7 +13,7 @@ class SQLiteError(Exception):
     pass
 
 
-class SQLite(Backend):
+class SQLite(MemoryBackend):
     """SQLite implementation of the memory storage backend."""
 
     name = "SQLite"

@@ -6,7 +6,7 @@ from qdrant_client.models import FieldCondition, Filter, MatchValue, Range
 
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Qdrant as QdrantConnection
-from dynamiq.memory.backend.base import Backend
+from dynamiq.memory.backend.base import MemoryBackend
 from dynamiq.prompts import Message
 
 
@@ -16,7 +16,7 @@ class QdrantError(Exception):
     pass
 
 
-class Qdrant(Backend):
+class Qdrant(MemoryBackend):
     """Qdrant implementation of the memory storage backend."""
 
     name = "Qdrant"

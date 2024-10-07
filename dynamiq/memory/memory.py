@@ -1,4 +1,4 @@
-from dynamiq.memory.backend import Backend, InMemory
+from dynamiq.memory.backend import InMemory, MemoryBackend
 from dynamiq.memory.config import Config
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
@@ -7,12 +7,12 @@ from dynamiq.utils.logger import logger
 class Memory:
     """Manages the storage and retrieval of messages."""
 
-    def __init__(self, config: Config = Config(), backend: Backend = InMemory()):
+    def __init__(self, config: Config = Config(), backend: MemoryBackend = InMemory()):
         """Initializes the Memory with the given configuration and backend.
 
         If no backend is provided, an InMemory backend is used by default.
         """
-        if not isinstance(backend, Backend):
+        if not isinstance(backend, MemoryBackend):
             raise TypeError("backend must be an instance of Backend")
         self.config = config
         self.backend = backend

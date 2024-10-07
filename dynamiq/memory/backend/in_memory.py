@@ -1,4 +1,4 @@
-from dynamiq.memory.backend.base import Backend
+from dynamiq.memory.backend.base import MemoryBackend
 from dynamiq.prompts import Message
 
 
@@ -8,7 +8,7 @@ class InMemoryError(Exception):
     pass
 
 
-class InMemory(Backend):
+class InMemory(MemoryBackend):
     """In-memory implementation of the memory storage backend."""
 
     name = "InMemory"

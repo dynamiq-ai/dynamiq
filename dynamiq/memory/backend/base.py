@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from dynamiq.prompts import Message
 
 
-class Backend(ABC):
+class MemoryBackend(ABC):
     """Abstract base class for memory storage backends."""
 
     @abstractmethod

@@ -5,7 +5,7 @@ from pinecone import ServerlessSpec
 
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Pinecone as PineconeConnection
-from dynamiq.memory.backend.base import Backend
+from dynamiq.memory.backend.base import MemoryBackend
 from dynamiq.prompts import Message
 
 
@@ -15,7 +15,7 @@ class PineconeError(Exception):
     pass
 
 
-class Pinecone(Backend):
+class Pinecone(MemoryBackend):
     """Pinecone implementation of the memory storage backend."""
 
     name = "Pinecone"
