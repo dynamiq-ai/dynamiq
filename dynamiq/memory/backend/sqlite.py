@@ -18,10 +18,10 @@ class SQLite(MemoryBackend):
 
     name = "SQLite"
 
-    def __init__(self, db_path: str = "conversations.db", table_name: str = "conversations"):
+    def __init__(self, db_path: str = "conversations.db", index_name: str = "conversations"):
         """Initializes the SQLite memory storage."""
         self.db_path = db_path
-        self.table_name = table_name
+        self.index_name = index_name
 
         try:
             self._validate_table_name(create_if_not_exists=True)
@@ -30,14 +30,14 @@ class SQLite(MemoryBackend):
 
     def _validate_table_name(self, create_if_not_exists: bool = False):
         """Validates the table name to prevent SQL injection and optionally creates it."""
-        if not re.match(r"^[A-Za-z0-9_]+$", self.table_name):
-            raise SQLiteError(f"Invalid table name: '{self.table_name}'")
+        if not re.match(r"^[A-Za-z0-9_]+$", self.index_name):
+            raise SQLiteError(f"Invalid table name: '{self.index_name}'")
 
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (self.table_name,)
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (self.index_name,)
                 )  # nosec B608
                 result = cursor.fetchone()
 
@@ -45,7 +45,7 @@ class SQLite(MemoryBackend):
                     if create_if_not_exists:
                         self._create_table()
                     else:
-                        raise SQLiteError(f"Table '{self.table_name}' does not exist in the database.")
+                        raise SQLiteError(f"Table '{self.index_name}' does not exist in the database.")
 
         except sqlite3.Error as e:
             raise SQLiteError(f"Error validating or creating table: {e}") from e
@@ -53,7 +53,7 @@ class SQLite(MemoryBackend):
     def _create_table(self):
         """Creates the messages table."""
         query = f"""
-        CREATE TABLE IF NOT EXISTS {self.table_name} (
+        CREATE TABLE IF NOT EXISTS {self.index_name} (
             id TEXT PRIMARY KEY,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
@@ -75,7 +75,7 @@ class SQLite(MemoryBackend):
         try:
             self._validate_table_name()  # Ensure table exists
             query = f"""
-            INSERT INTO {self.table_name} (id, role, content, metadata, timestamp)
+            INSERT INTO {self.index_name} (id, role, content, metadata, timestamp)
             VALUES (?, ?, ?, ?, ?)
             """  # nosec B608
             with sqlite3.connect(self.db_path) as conn:
@@ -100,7 +100,7 @@ class SQLite(MemoryBackend):
         """Retrieves all messages from the SQLite database."""
         try:
             self._validate_table_name()  # Ensure table exists
-            query = f"SELECT id, role, content, metadata, timestamp FROM {self.table_name} ORDER BY timestamp ASC"  # nosec B608 # noqa: E501
+            query = f"SELECT id, role, content, metadata, timestamp FROM {self.index_name} ORDER BY timestamp ASC"  # nosec B608 # noqa: E501
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(query)  # nosec B608
@@ -117,7 +117,7 @@ class SQLite(MemoryBackend):
         """Checks if the SQLite database is empty."""
         try:
             self._validate_table_name()
-            query = f"SELECT COUNT(*) FROM {self.table_name}"  # nosec B608
+            query = f"SELECT COUNT(*) FROM {self.index_name}"  # nosec B608
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(query)  # nosec B608
@@ -131,7 +131,7 @@ class SQLite(MemoryBackend):
         """Clears the SQLite database by deleting all rows in the table."""
         try:
             self._validate_table_name()
-            query = f"DELETE FROM {self.table_name}"  # nosec B608
+            query = f"DELETE FROM {self.index_name}"  # nosec B608
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(query)  # nosec B608
@@ -160,7 +160,7 @@ class SQLite(MemoryBackend):
                         where_clauses.append(f"json_extract(metadata, '$.{key}') = ?")
                         params.append(value)
 
-            query_str = f"SELECT id, role, content, metadata FROM {self.table_name}"  # nosec B608
+            query_str = f"SELECT id, role, content, metadata FROM {self.index_name}"  # nosec B608
             if where_clauses:
                 query_str += f" WHERE {' AND '.join(where_clauses)}"
             query_str += " ORDER BY id DESC LIMIT ?"

@@ -136,11 +136,15 @@ class Agent(Node):
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
+
         user_id = input_data.get("user_id", None)
+        session_id = input_data.get("session_id", None)
+        custom_metadata = input_data.get("metadata", {}).copy()
+        custom_metadata.update({k: v for k, v in input_data.items() if k not in ["user_id", "session_id", "input"]})
+        metadata = {**custom_metadata, "user_id": user_id, "session_id": session_id}
+
         if self.memory:
-            self.memory.add_message(
-                role=MessageRole.USER, content=input_data.get("input"), metadata={"user_id": user_id}
-            )
+            self.memory.add_message(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
             self._retrieve_memory(input_data)
 
         self._prompt_variables.update(input_data)
@@ -149,9 +153,7 @@ class Agent(Node):
 
         result = self._run_agent(config=config, **kwargs)
         if self.memory:
-            self.memory.add_message(
-                role=MessageRole.ASSISTANT, content=result, metadata={"user_id": input_data.get("user_id", "")}
-            )
+            self.memory.add_message(role=MessageRole.ASSISTANT, content=result, metadata=metadata)
 
         execution_result = {
             "content": result,

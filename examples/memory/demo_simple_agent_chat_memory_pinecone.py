@@ -9,7 +9,7 @@ from examples.llm_setup import setup_llm
 def setup_agent():
     llm = setup_llm()
     pinecone_connection = PineconeConnection()
-    embedder = OpenAIEmbedder()
+    embedder = OpenAIEmbedder(dimensions=1536)
 
     # Create a memory instance with Pinecone storage
     backend = Pinecone(connection=pinecone_connection, embedder=embedder)

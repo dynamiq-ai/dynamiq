@@ -5,7 +5,7 @@ from dynamiq.memory.memory import Memory
 from dynamiq.prompts import MessageRole
 
 qdrant_connection = QdrantConnection()
-embedder = OpenAIEmbedder()
+embedder = OpenAIEmbedder(dimensions=1536)
 
 qdrant_backend = Qdrant(connection=qdrant_connection, embedder=embedder)
 memory = Memory(backend=qdrant_backend)

@@ -5,7 +5,7 @@ from dynamiq.memory.backend import Pinecone
 from dynamiq.prompts import MessageRole
 
 pinecone_connection = PineconeConnection()
-embedder = OpenAIEmbedder()
+embedder = OpenAIEmbedder(dimensions=1536)
 config = Config()
 backend = Pinecone(connection=pinecone_connection, embedder=embedder)
 memory = Memory(config=config, backend=backend)

@@ -14,10 +14,10 @@ AGENT_ROLE = "friendly helpful assistant"
 def setup_agent():
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.5)
     qdrant_connection = QdrantConnection()
-    embedder = OpenAIEmbedder()
+    embedder = OpenAIEmbedder(dimensions=1536)
 
     # Create a memory instance with Qdrant storage
-    backend = Qdrant(connection=qdrant_connection, embedder=embedder, collection_name=MEMORY_NAME)
+    backend = Qdrant(connection=qdrant_connection, embedder=embedder, index_name=MEMORY_NAME)
     config = Config()
 
     memory = Memory(config=config, backend=backend)

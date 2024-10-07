@@ -48,7 +48,7 @@ class Pinecone(MemoryBackend):
             if self.index_name not in self.pc.list_indexes().names():
                 self.pc.create_index(
                     name=self.index_name,
-                    dimension=self.embedder.embedding_size,
+                    dimension=self.embedder.dimensions,
                     metric="cosine",
                     spec=ServerlessSpec(cloud=self.connection.cloud, region=self.connection.region),
                 )
@@ -76,7 +76,7 @@ class Pinecone(MemoryBackend):
         """Retrieves all messages from Pinecone."""
         try:
             query_response = self._index.query(
-                vector=[0] * self.embedder.embedding_size,
+                vector=[0] * self.embedder.dimensions,
                 top_k=limit,
                 include_metadata=True,
             )
@@ -107,7 +107,7 @@ class Pinecone(MemoryBackend):
                     filter=normalized_filters,
                 )
             elif normalized_filters:
-                dummy_vector = [0.0] * self.embedder.embedding_size
+                dummy_vector = [0.0] * self.embedder.dimensions
                 response = self._index.query(
                     vector=dummy_vector,
                     top_k=search_limit,

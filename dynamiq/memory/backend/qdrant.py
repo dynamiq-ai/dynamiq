@@ -21,10 +21,10 @@ class Qdrant(MemoryBackend):
 
     name = "Qdrant"
 
-    def __init__(self, connection: QdrantConnection, embedder: BaseEmbedder, collection_name: str = "conversations"):
+    def __init__(self, connection: QdrantConnection, embedder: BaseEmbedder, index_name: str = "conversations"):
         """Initializes the Qdrant memory storage."""
         self.connection = connection
-        self.collection_name = collection_name
+        self.index_name = index_name
         self.embedder = embedder
 
         try:
@@ -33,24 +33,24 @@ class Qdrant(MemoryBackend):
             raise QdrantError(f"Failed to connect to Qdrant: {e}") from e
 
         # Check if the collection exists, create it if not
-        if not self.client.collection_exists(collection_name=self.collection_name):
-            print(f"Qdrant collection '{self.collection_name}' not found, creating it...")
+        if not self.client.collection_exists(collection_name=self.index_name):
+            print(f"Qdrant collection '{self.index_name}' not found, creating it...")
             self._create_collection()
         else:
-            print(f"Connected to existing Qdrant collection '{self.collection_name}'")
+            print(f"Connected to existing Qdrant collection '{self.index_name}'")
 
     def _create_collection(self):
         """Creates the Qdrant collection."""
         try:
             self.client.create_collection(
-                collection_name=self.collection_name,
+                collection_name=self.index_name,
                 vectors_config=qdrant_models.VectorParams(
-                    size=self.embedder.embedding_size, distance=qdrant_models.Distance.COSINE
+                    size=self.embedder.dimensions, distance=qdrant_models.Distance.COSINE
                 ),
             )
-            print(f"Collection '{self.collection_name}' created successfully.")
+            print(f"Collection '{self.index_name}' created successfully.")
         except ApiException as e:
-            raise QdrantError(f"Failed to create collection '{self.collection_name}': {e}") from e
+            raise QdrantError(f"Failed to create collection '{self.index_name}': {e}") from e
 
     def add(self, message: Message):
         """Stores a message in Qdrant."""
@@ -59,7 +59,7 @@ class Qdrant(MemoryBackend):
             embedding = embedding_result["embedding"]
             message_id = str(uuid.uuid4())
             self.client.upsert(
-                collection_name=self.collection_name,
+                collection_name=self.index_name,
                 points=[
                     qdrant_models.PointStruct(
                         id=message_id,
@@ -75,7 +75,7 @@ class Qdrant(MemoryBackend):
         """Retrieves all messages from Qdrant."""
         try:
             search_result = self.client.scroll(
-                collection_name=self.collection_name,
+                collection_name=self.index_name,
                 scroll_filter=None,
                 with_payload=True,
                 limit=limit,
@@ -94,7 +94,7 @@ class Qdrant(MemoryBackend):
                 embedding_result = self.embedder.embed_text(query)
                 embedding = embedding_result["embedding"]
                 search_result = self.client.search(
-                    collection_name=self.collection_name,
+                    collection_name=self.index_name,
                     query_vector=embedding,
                     query_filter=self._create_filter(filters) if filters else None,
                     limit=search_limit,
@@ -104,7 +104,7 @@ class Qdrant(MemoryBackend):
             elif filters:
                 qdrant_filter = self._create_filter(filters)
                 scroll_result = self.client.scroll(
-                    collection_name=self.collection_name,
+                    collection_name=self.index_name,
                     scroll_filter=qdrant_filter,
                     limit=search_limit,
                     with_payload=True,
@@ -131,7 +131,7 @@ class Qdrant(MemoryBackend):
     def is_empty(self) -> bool:
         """Checks if the Qdrant collection is empty or doesn't exist."""
         try:
-            collection_info = self.client.get_collection(collection_name=self.collection_name)
+            collection_info = self.client.get_collection(collection_name=self.index_name)
             return collection_info.points_count == 0
         except UnexpectedResponse as e:
             if e.status_code == 404:  # Collection doesn't exist
@@ -141,6 +141,6 @@ class Qdrant(MemoryBackend):
     def clear(self):
         """Clears the Qdrant collection."""
         try:
-            self.client.delete_collection(collection_name=self.collection_name)
+            self.client.delete_collection(collection_name=self.index_name)
         except Exception as e:
             raise QdrantError(f"Failed to clear Qdrant collection: {e}") from e

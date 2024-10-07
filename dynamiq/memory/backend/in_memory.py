@@ -11,6 +11,8 @@ class InMemoryError(Exception):
 class InMemory(MemoryBackend):
     """In-memory implementation of the memory storage backend."""
 
+    # TODO: to fix race conditions later
+
     name = "InMemory"
 
     def __init__(self):
