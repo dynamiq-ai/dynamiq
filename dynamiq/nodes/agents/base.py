@@ -144,7 +144,7 @@ class Agent(Node):
         metadata = {**custom_metadata, "user_id": user_id, "session_id": session_id}
 
         if self.memory:
-            self.memory.add_message(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
+            self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
             self._retrieve_memory(input_data)
 
         self._prompt_variables.update(input_data)
@@ -153,7 +153,7 @@ class Agent(Node):
 
         result = self._run_agent(config=config, **kwargs)
         if self.memory:
-            self.memory.add_message(role=MessageRole.ASSISTANT, content=result, metadata=metadata)
+            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=metadata)
 
         execution_result = {
             "content": result,

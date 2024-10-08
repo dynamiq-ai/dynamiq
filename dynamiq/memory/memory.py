@@ -19,19 +19,21 @@ class Memory:
         self.config = config
         self.backend = backend
 
-    def add_message(self, role: MessageRole, content: str, metadata: dict = None):
+    def add(self, role: MessageRole, content: str, metadata: dict = None):
         """Adds a message to the memory."""
         try:
             metadata = metadata or {}
             metadata["timestamp"] = datetime.utcnow().timestamp()
             message = Message(role=role, content=content, metadata=metadata)
             self.backend.add(message)
-            logger.debug(f"Memory {self.backend.name}: Added message: {message.role}: {message.content[:20]}...")
+            logger.debug(
+                f"Memory {self.backend.name}: Added message: {message.role}: {message.content[:min(20, len(message.content))]}..."  # noqa: E501
+            )
         except Exception as e:
             logger.error(f"Error adding message: {e}")
             raise
 
-    def get_all_messages(self) -> list[Message]:
+    def get_all(self) -> list[Message]:
         """Retrieves all messages from the memory."""
         messages = self.backend.get_all()
         logger.debug(f"Memory {self.backend.name}: Retrieved {len(messages)} messages")
@@ -39,10 +41,10 @@ class Memory:
 
     def get_all_messages_as_string(self, format: str = "plain") -> str:
         """Retrieves all messages as a formatted string."""
-        messages = self.get_all_messages()
+        messages = self.get_all()
         return self._format_messages_as_string(messages, format)
 
-    def search_messages(self, query: str = None, filters: dict = None) -> list[Message]:
+    def search(self, query: str = None, filters: dict = None) -> list[Message]:
         """Searches for messages relevant to the query or filters."""
         search_results = self.backend.search(
             query=query, limit=self.config.search_limit, filters=filters or self.config.search_filters
@@ -54,7 +56,7 @@ class Memory:
 
     def get_search_results_as_string(self, query: str, filters: dict = None, format: str = "plain") -> str:
         """Searches for messages relevant to the query and returns them as a string."""
-        messages = self.search_messages(query, filters)
+        messages = self.search(query, filters)
         return self._format_messages_as_string(messages, format)
 
     def _format_messages_as_string(self, messages: list[Message], format: str = "plain") -> str:
@@ -75,7 +77,7 @@ class Memory:
         else:
             raise ValueError(f"Unsupported format: {format}")
 
-    def is_memory_empty(self) -> bool:
+    def is_empty(self) -> bool:
         """Checks if the memory is empty."""
         return self.backend.is_empty()
 

@@ -21,10 +21,10 @@ def setup_agent():
     config = Config()
 
     memory = Memory(config=config, backend=backend)
-    memory.add_message(
+    memory.add(
         MessageRole.USER, "Hey! I'm Oleksii, machine learning engineer from Dynamiq.", metadata={"user_id": USER_ID}
     )
-    memory.add_message(
+    memory.add(
         MessageRole.USER,
         "My hobbies are: tennis, reading and cinema. I prefer science and sci-fi books.",
         metadata={"user_id": USER_ID},
