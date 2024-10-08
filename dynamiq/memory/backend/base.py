@@ -3,10 +3,9 @@ from abc import ABC, abstractmethod
 from dynamiq.prompts import Message
 
 
+# TODO: Vector stores and backend consolidation
 class MemoryBackend(ABC):
     """Abstract base class for memory storage backends."""
-    #TODO: Vector stores and backend consolidation
-
     @abstractmethod
     def add(self, message: Message):
         """Adds a message to the memory storage."""
