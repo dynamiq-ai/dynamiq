@@ -17,7 +17,7 @@ class MemoryBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def search(self, query: str, search_limit: int) -> list[Message]:
+    def search(self, query: str, limit: int) -> list[Message]:
         """Searches for messages relevant to the query."""
         raise NotImplementedError
 

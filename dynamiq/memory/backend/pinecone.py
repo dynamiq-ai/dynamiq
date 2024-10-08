@@ -1,7 +1,6 @@
 import uuid
 from typing import Any
 
-from pinecone import Pinecone as PineconeClient
 from pinecone import ServerlessSpec
 
 from dynamiq.components.embedders.base import BaseEmbedder
@@ -33,28 +32,26 @@ class Pinecone(MemoryBackend):
         self.embedder = embedder
 
         self.api_key = self.connection.api_key
-        if not self.api_key:
-            raise PineconeError(
-                "Pinecone API key not found. Set PINECONE_API_KEY environment variable or "
-                "pass it in the PineconeConnection constructor."
-            )
-
         try:
-            self.pc = PineconeClient(api_key=self.api_key)
+            self.client = self.connection.connect()
         except Exception as e:
             raise PineconeError(f"Failed to connect to Pinecone: {e}") from e
 
         try:
-            if self.index_name not in self.pc.list_indexes().names():
-                self.pc.create_index(
-                    name=self.index_name,
-                    dimension=self.embedder.dimensions,
-                    metric="cosine",
-                    spec=ServerlessSpec(cloud=self.connection.cloud, region=self.connection.region),
-                )
-            self._index = self.pc.Index(self.index_name)
+            self._index = self._get_index()
         except Exception as e:
             raise PineconeError(f"Error initializing Pinecone index: {e}") from e
+
+    def _get_index(self):
+        """Gets the Pinecone index, creating it if it doesn't exist."""
+        if self.index_name not in self.client.list_indexes().names():
+            self.client.create_index(
+                name=self.index_name,
+                dimension=self.embedder.dimensions,
+                metric="cosine",
+                spec=ServerlessSpec(cloud=self.connection.cloud, region=self.connection.region),
+            )
+        return self.client.Index(self.index_name)
 
     def add(self, message: Message):
         """Stores a message in Pinecone."""
@@ -92,9 +89,9 @@ class Pinecone(MemoryBackend):
         except Exception as e:
             raise PineconeError(f"Error retrieving messages from Pinecone: {e}") from e
 
-    def search(self, query: str = None, filters: dict = None, search_limit: int = None) -> list[Message]:
+    def search(self, query: str = None, filters: dict = None, limit: int = None) -> list[Message]:
         """Searches for messages in Pinecone based on the query and/or filters."""
-        search_limit = search_limit or self.config.search_limit
+        limit = limit or self.config.search_limit
         normalized_filters = self._normalize_filters(filters) if filters else None
         try:
             if query:
@@ -102,7 +99,7 @@ class Pinecone(MemoryBackend):
                 embedding = embedding_result["embedding"]
                 response = self._index.query(
                     vector=embedding,
-                    top_k=search_limit,
+                    top_k=limit,
                     include_metadata=True,
                     filter=normalized_filters,
                 )
@@ -110,7 +107,7 @@ class Pinecone(MemoryBackend):
                 dummy_vector = [0.0] * self.embedder.dimensions
                 response = self._index.query(
                     vector=dummy_vector,
-                    top_k=search_limit,
+                    top_k=limit,
                     include_metadata=True,
                     filter=normalized_filters,
                 )

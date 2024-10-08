@@ -45,7 +45,7 @@ class Memory:
     def search_messages(self, query: str = None, filters: dict = None) -> list[Message]:
         """Searches for messages relevant to the query or filters."""
         search_results = self.backend.search(
-            query=query, search_limit=self.config.search_limit, filters=filters or self.config.search_filters
+            query=query, limit=self.config.search_limit, filters=filters or self.config.search_filters
         )
         logger.debug(
             f"Memory {self.backend.name}: Found {len(search_results)} search results for query: {query}, filters: {filters}"  # noqa: E501

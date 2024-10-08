@@ -11,8 +11,6 @@ class InMemoryError(Exception):
 class InMemory(MemoryBackend):
     """In-memory implementation of the memory storage backend."""
 
-    # TODO: to fix race conditions later
-
     name = "InMemory"
 
     def __init__(self):
@@ -30,9 +28,9 @@ class InMemory(MemoryBackend):
         """Retrieves all messages from the in-memory list."""
         return sorted(self.messages, key=lambda msg: msg.metadata.get("timestamp", 0))  # Sort by timestamp
 
-    def search(self, query: str = None, search_limit: int = None, filters: dict = None) -> list[Message]:
+    def search(self, query: str = None, limit: int = None, filters: dict = None) -> list[Message]:
         """Searches for messages, applying optional query and/or filters."""
-        search_limit = search_limit or self.config.search_limit
+        limit = limit or self.config.search_limit
         matching_messages = self.messages
 
         if query:
@@ -47,7 +45,7 @@ class InMemory(MemoryBackend):
                 else:
                     matching_messages = [msg for msg in matching_messages if value in str(msg.metadata.get(key, ""))]
 
-        return matching_messages[:search_limit]
+        return matching_messages[:limit]
 
     def is_empty(self) -> bool:
         """Checks if the in-memory list is empty."""

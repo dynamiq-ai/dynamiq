@@ -68,13 +68,14 @@ def test_workflow_with_agent_and_in_memory_memory(openai_node, memory_config):
 
     all_messages = memory.get_all_messages()
     assert len(all_messages) == 4
-    assert all_messages[0].role == MessageRole.USER and all_messages[0].content == user_input_1
-    assert (
-        all_messages[1].role == MessageRole.ASSISTANT
-        and all_messages[1].content == result_1.output[agent.id]["output"]["content"]
-    )  # noqa: E501
-    assert all_messages[2].role == MessageRole.USER and all_messages[2].content == user_input_2
-    assert (
-        all_messages[3].role == MessageRole.ASSISTANT
-        and all_messages[3].content == result_2.output[agent.id]["output"]["content"]
-    )  # noqa: E501
+    assert all_messages[0].role == MessageRole.USER
+    assert all_messages[0].content == user_input_1
+
+    assert all_messages[1].role == MessageRole.ASSISTANT
+    assert all_messages[1].content == result_1.output[agent.id]["output"]["content"]
+
+    assert all_messages[2].role == MessageRole.USER
+    assert all_messages[2].content == user_input_2
+
+    assert all_messages[3].role == MessageRole.ASSISTANT
+    assert all_messages[3].content == result_2.output[agent.id]["output"]["content"]

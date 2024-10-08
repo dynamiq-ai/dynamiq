@@ -34,10 +34,7 @@ class Qdrant(MemoryBackend):
 
         # Check if the collection exists, create it if not
         if not self.client.collection_exists(collection_name=self.index_name):
-            print(f"Qdrant collection '{self.index_name}' not found, creating it...")
             self._create_collection()
-        else:
-            print(f"Connected to existing Qdrant collection '{self.index_name}'")
 
     def _create_collection(self):
         """Creates the Qdrant collection."""
@@ -48,7 +45,6 @@ class Qdrant(MemoryBackend):
                     size=self.embedder.dimensions, distance=qdrant_models.Distance.COSINE
                 ),
             )
-            print(f"Collection '{self.index_name}' created successfully.")
         except ApiException as e:
             raise QdrantError(f"Failed to create collection '{self.index_name}': {e}") from e
 
@@ -85,10 +81,10 @@ class Qdrant(MemoryBackend):
         except Exception as e:
             raise QdrantError(f"Failed to retrieve messages from Qdrant: {e}") from e
 
-    def search(self, query: str = None, search_limit: int = None, filters: dict = None) -> list[Message]:
+    def search(self, query: str = None, limit: int = None, filters: dict = None) -> list[Message]:
         """Handles all search scenarios correctly."""
 
-        search_limit = search_limit or self.config.search_limit
+        limit = limit or self.config.search_limit
         try:
             if query:
                 embedding_result = self.embedder.embed_text(query)
@@ -97,7 +93,7 @@ class Qdrant(MemoryBackend):
                     collection_name=self.index_name,
                     query_vector=embedding,
                     query_filter=self._create_filter(filters) if filters else None,
-                    limit=search_limit,
+                    limit=limit,
                     with_payload=True,
                 )
                 return [Message(**hit.payload) for hit in search_result]
@@ -106,7 +102,7 @@ class Qdrant(MemoryBackend):
                 scroll_result = self.client.scroll(
                     collection_name=self.index_name,
                     scroll_filter=qdrant_filter,
-                    limit=search_limit,
+                    limit=limit,
                     with_payload=True,
                 )[0]
                 return [Message(**hit.payload) for hit in scroll_result]
