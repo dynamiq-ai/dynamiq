@@ -152,7 +152,6 @@ class SQLite(MemoryBackend):
         """Searches for messages in SQLite based on the query and/or filters."""
         limit = limit or self.config.search_limit  # Use default if not provided
         try:
-            self._validate_table_name()
             where_clauses = []
             params = []
 
