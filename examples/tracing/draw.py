@@ -162,6 +162,16 @@ def draw_react_agent_graph_in_png(
     draw_graph_in_png(graph, output_path)
 
 
+def draw_simple_agent_with_memory_graph_in_png(
+    output_path: str = os.path.join(os.path.dirname(__file__), "simple_agent__with_memory_graph.png")
+) -> None:
+    from examples.memory.demo_memory_agent_wf import run_simple_workflow
+
+    _, traces = run_simple_workflow()
+    graph = get_graph_by_traces([run for _, run in traces.items()])
+    draw_graph_in_png(graph, output_path)
+
+
 def draw_job_posting_linear_agent_graph_in_png(
     output_path: str = os.path.join(
         os.path.dirname(__file__), "job_posting_linear_agent_graph.png"
@@ -198,6 +208,7 @@ def draw_adaptive_coding_react_agent_graph_in_png(
 
 if __name__ == "__main__":
     draw_simple_agent_graph_in_png()
+    draw_simple_agent_with_memory_graph_in_png()
     draw_reflexion_agent_graph_in_png()
     draw_react_agent_graph_in_png()
     draw_job_posting_linear_agent_graph_in_png()

@@ -27,14 +27,15 @@ class VisionDetail(str, enum.Enum):
 class Message(BaseModel):
     """
     Represents a message in a conversation.
-
     Attributes:
         content (str): The content of the message.
         role (MessageRole): The role of the message sender.
+        metadata (dict | None): Additional metadata for the message, default is None.
     """
 
     content: str
     role: MessageRole = MessageRole.USER
+    metadata: dict | None = None
 
 
 class VisionMessageTextContent(BaseModel):
