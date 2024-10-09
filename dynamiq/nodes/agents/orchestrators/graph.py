@@ -44,11 +44,6 @@ class Action(BaseModel):
     answer: str | None = None
 
 
-# class Edge(BaseModel):
-#     destination_state: 'State' = None
-#     condition: str
-
-
 class State(BaseModel):
     description: str = ""
     connected: list["State"] = []
@@ -123,10 +118,6 @@ class GraphOrchestrator(Node):
 
         self.states[name_source].condition = path_func
 
-    # def add_edge(self, name, function: Callable) -> None:
-    #     if n
-    #     self.states[name].
-
     @property
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"manager": True, "agents": True}
@@ -186,7 +177,7 @@ class GraphOrchestrator(Node):
                 next_state_name = state.condition(str(self._chat_history))
                 return self.states[next_state_name]
 
-            # Rely next state choice on Manager
+            # Rely next state choice on Manager based on descriptions
             pass
         else:
             return state.connected[0]
