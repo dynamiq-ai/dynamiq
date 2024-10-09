@@ -15,7 +15,7 @@ if __name__ == "__main__":
     create_task_agent = ReActAgent(
         name="Task creation Agent",
         llm=llm,
-        role="Create simple coding task.X",
+        role="Create simple coding task.",
         goal="Create simple coding task taylored to request.",
         max_loops=15,
         inference_mode=InferenceMode.XML,
