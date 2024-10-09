@@ -4,7 +4,7 @@ import uuid
 import pytest
 
 from dynamiq import Workflow, connections, flows, prompts
-from dynamiq.memory import Config, Memory
+from dynamiq.memory import Memory
 from dynamiq.memory.backend import InMemory
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.llms import OpenAI
@@ -41,13 +41,8 @@ def openai_node(openai_connection):
     )
 
 
-@pytest.fixture
-def memory_config():
-    return Config()
-
-
-def test_workflow_with_agent_and_in_memory_memory(openai_node, memory_config):
-    memory = Memory(config=memory_config, backend=InMemory())
+def test_workflow_with_agent_and_in_memory_memory(openai_node):
+    memory = Memory(backend=InMemory())
     agent = SimpleAgent(
         name="Agent",
         llm=openai_node,

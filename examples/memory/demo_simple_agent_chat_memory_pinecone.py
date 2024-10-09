@@ -1,6 +1,6 @@
 from dynamiq.components.embedders.openai import OpenAIEmbedder
 from dynamiq.connections import Pinecone as PineconeConnection
-from dynamiq.memory import Config, Memory
+from dynamiq.memory import Memory
 from dynamiq.memory.backend import Pinecone
 from dynamiq.nodes.agents.simple import SimpleAgent
 from examples.llm_setup import setup_llm
@@ -13,9 +13,8 @@ def setup_agent():
 
     # Create a memory instance with Pinecone storage
     backend = Pinecone(connection=pinecone_connection, embedder=embedder)
-    config = Config()
 
-    memory_pinecone = Memory(config=config, backend=backend)
+    memory_pinecone = Memory(backend=backend)
 
     AGENT_ROLE = "helpful assistant"
     AGENT_GOAL = "is to provide useful information and answer questions"

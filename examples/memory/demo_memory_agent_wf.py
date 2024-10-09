@@ -3,7 +3,7 @@ import json
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.memory import Config, Memory
+from dynamiq.memory import Memory
 from dynamiq.memory.backend.in_memory import InMemory
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.prompts import MessageRole
@@ -28,8 +28,7 @@ def run_simple_workflow() -> tuple[str, dict]:
         Exception: Captures and prints any errors during workflow execution.
     """
     llm = setup_llm()
-    config = Config()
-    memory = Memory(config=config, backend=InMemory())
+    memory = Memory(backend=InMemory())
     memory.add(
         MessageRole.USER, "Hey! I'm Oleksii, machine learning engineer from Dynamiq.", metadata={"user_id": "01"}
     )

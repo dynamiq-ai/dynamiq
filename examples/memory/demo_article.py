@@ -1,6 +1,6 @@
 from dynamiq.components.embedders.openai import OpenAIEmbedder
 from dynamiq.connections import Qdrant as QdrantConnection
-from dynamiq.memory import Config, Memory
+from dynamiq.memory import Memory
 from dynamiq.memory.backend import Qdrant
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.prompts import MessageRole
@@ -18,9 +18,8 @@ def setup_agent():
 
     # Create a memory instance with Qdrant storage
     backend = Qdrant(connection=qdrant_connection, embedder=embedder, index_name=MEMORY_NAME)
-    config = Config()
 
-    memory = Memory(config=config, backend=backend)
+    memory = Memory(backend=backend)
     memory.add(
         MessageRole.USER, "Hey! I'm Oleksii, machine learning engineer from Dynamiq.", metadata={"user_id": USER_ID}
     )

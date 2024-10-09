@@ -1,14 +1,13 @@
 from dynamiq.components.embedders.openai import OpenAIEmbedder
 from dynamiq.connections import Pinecone as PineconeConnection
-from dynamiq.memory import Config, Memory
+from dynamiq.memory import Memory
 from dynamiq.memory.backend import Pinecone
 from dynamiq.prompts import MessageRole
 
 pinecone_connection = PineconeConnection()
 embedder = OpenAIEmbedder(dimensions=1536)
-config = Config()
 backend = Pinecone(connection=pinecone_connection, embedder=embedder)
-memory = Memory(config=config, backend=backend)
+memory = Memory(backend=backend)
 
 
 # Add messages with metadata

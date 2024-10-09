@@ -1,7 +1,6 @@
 from datetime import datetime
 
 from dynamiq.memory.backend import InMemory, MemoryBackend
-from dynamiq.memory.config import Config
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
 
@@ -9,14 +8,16 @@ from dynamiq.utils.logger import logger
 class Memory:
     """Manages the storage and retrieval of messages."""
 
-    def __init__(self, config: Config = Config(), backend: MemoryBackend = InMemory()):
-        """Initializes the Memory with the given configuration and backend.
+    def __init__(self, search_limit: int = 5, search_filters: dict = None, backend: MemoryBackend = InMemory()):
+        """Initializes the Memory with the given search parameters and backend.
 
         If no backend is provided, an InMemory backend is used by default.
         """
         if not isinstance(backend, MemoryBackend):
             raise TypeError("backend must be an instance of Backend")
-        self.config = config
+
+        self.search_limit = search_limit
+        self.search_filters = search_filters or {}
         self.backend = backend
 
     def add(self, role: MessageRole, content: str, metadata: dict | None = None):
@@ -47,7 +48,7 @@ class Memory:
     def search(self, query: str = None, filters: dict = None) -> list[Message]:
         """Searches for messages relevant to the query or filters."""
         search_results = self.backend.search(
-            query=query, limit=self.config.search_limit, filters=filters or self.config.search_filters
+            query=query, limit=self.search_limit, filters=filters or self.search_filters
         )
         logger.debug(
             f"Memory {self.backend.name}: Found {len(search_results)} search results for query: {query}, filters: {filters}"  # noqa: E501

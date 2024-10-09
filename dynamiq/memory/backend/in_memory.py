@@ -14,35 +14,35 @@ class InMemoryError(Exception):
 class BM25:
     """BM25 implementation for scoring documents."""
 
-    def __init__(self, messages, k1=1.5, b=0.75):
-        """Initialize with a list of messages and parameters for BM25."""
-        self.messages = messages
+    def __init__(self, documents: list[str], k1=1.5, b=0.75):
+        """Initialize with a list of documents and parameters for BM25."""
+        self.documents = documents
         self.k1 = k1
         self.b = b
         self.avg_dl = self._calculate_avg_dl()
 
     def _calculate_avg_dl(self):
-        """Calculates the average document length (number of terms per message)."""
-        total_length = sum(len(msg.content.lower().split()) for msg in self.messages)
-        return total_length / len(self.messages) if self.messages else 0
+        """Calculates the average document length (number of terms per document)."""
+        total_length = sum(len(doc.lower().split()) for doc in self.documents)
+        return total_length / len(self.documents) if self.documents else 0
 
     def _idf(self, term: str, N: int, df: int) -> float:
         """Calculates the IDF (inverse document frequency) of a term."""
         return math.log((N - df + 0.5) / (df + 0.5) + 1)
 
-    def score(self, query_terms: list[str], document: Message) -> float:
+    def score(self, query_terms: list[str], document: str) -> float:
         """Calculates the BM25 score for a document."""
-        doc_terms = document.content.lower().split()
+        doc_terms = document.lower().split()
         doc_len = len(doc_terms)
         doc_term_freqs = Counter(doc_terms)
-        N = len(self.messages)
+        N = len(self.documents)
         score = 0.0
 
         for term in query_terms:
             term_freq = doc_term_freqs.get(term, 0)
             if term_freq == 0:
                 continue
-            df = sum(1 for msg in self.messages if term in msg.content.lower().split())
+            df = sum(1 for doc in self.documents if term in doc.lower().split())
             idf = self._idf(term, N, df)
             numerator = term_freq * (self.k1 + 1)
             denominator = term_freq + self.k1 * (1 - self.b + self.b * (doc_len / self.avg_dl))
@@ -88,29 +88,15 @@ class InMemory(MemoryBackend):
         if not query and not filters:
             return self.get_all()[:limit]
 
-        # Apply filters first if any
         filtered_messages = self._apply_filters(self.messages, filters)
-
         if not query:
-            # If no query, return filtered results only
             return filtered_messages[:limit]
-
-        # Split the query into terms
         query_terms = query.lower().split()
-
-        # Initialize the BM25 scorer with the filtered messages
-        bm25 = BM25(filtered_messages)
-
-        # Score all filtered messages using BM25
-        scored_messages = [(msg, bm25.score(query_terms, msg)) for msg in filtered_messages]
-
-        # Filter out messages with a score of 0 (irrelevant)
+        document_texts = [msg.content for msg in filtered_messages]
+        bm25 = BM25(document_texts)
+        scored_messages = [(msg, bm25.score(query_terms, msg.content)) for msg in filtered_messages]
         scored_messages = [(msg, score) for msg, score in scored_messages if score > 0]
-
-        # Sort messages by score in descending order
         scored_messages.sort(key=lambda x: x[1], reverse=True)
-
-        # Return the top messages based on the limit
         return [msg for msg, _ in scored_messages][:limit]
 
     def is_empty(self) -> bool:
