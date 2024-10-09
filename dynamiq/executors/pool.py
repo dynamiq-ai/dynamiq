@@ -189,7 +189,7 @@ class ProcessExecutor(PoolExecutor):
         Returns:
             Node: Node instance.
         """
-        return jsonpickle.decode(node_data) # nosec
+        return jsonpickle.decode(node_data)  # nosec
 
     @classmethod
     def _run_node(cls, node_data: str, **kwargs) -> RunnableResult:
