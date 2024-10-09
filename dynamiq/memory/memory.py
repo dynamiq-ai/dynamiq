@@ -19,7 +19,7 @@ class Memory:
         self.config = config
         self.backend = backend
 
-    def add(self, role: MessageRole, content: str, metadata: dict = None):
+    def add(self, role: MessageRole, content: str, metadata: dict | None = None):
         """Adds a message to the memory."""
         try:
             metadata = metadata or {}

@@ -1,3 +1,6 @@
+import math
+from collections import Counter
+
 from dynamiq.memory.backend.base import MemoryBackend
 from dynamiq.prompts import Message
 
@@ -6,6 +9,46 @@ class InMemoryError(Exception):
     """Base exception class for InMemory backend errors."""
 
     pass
+
+
+class BM25:
+    """BM25 implementation for scoring documents."""
+
+    def __init__(self, messages, k1=1.5, b=0.75):
+        """Initialize with a list of messages and parameters for BM25."""
+        self.messages = messages
+        self.k1 = k1
+        self.b = b
+        self.avg_dl = self._calculate_avg_dl()
+
+    def _calculate_avg_dl(self):
+        """Calculates the average document length (number of terms per message)."""
+        total_length = sum(len(msg.content.lower().split()) for msg in self.messages)
+        return total_length / len(self.messages) if self.messages else 0
+
+    def _idf(self, term: str, N: int, df: int) -> float:
+        """Calculates the IDF (inverse document frequency) of a term."""
+        return math.log((N - df + 0.5) / (df + 0.5) + 1)
+
+    def score(self, query_terms: list[str], document: Message) -> float:
+        """Calculates the BM25 score for a document."""
+        doc_terms = document.content.lower().split()
+        doc_len = len(doc_terms)
+        doc_term_freqs = Counter(doc_terms)
+        N = len(self.messages)
+        score = 0.0
+
+        for term in query_terms:
+            term_freq = doc_term_freqs.get(term, 0)
+            if term_freq == 0:
+                continue
+            df = sum(1 for msg in self.messages if term in msg.content.lower().split())
+            idf = self._idf(term, N, df)
+            numerator = term_freq * (self.k1 + 1)
+            denominator = term_freq + self.k1 * (1 - self.b + self.b * (doc_len / self.avg_dl))
+            score += idf * (numerator / denominator)
+
+        return score
 
 
 class InMemory(MemoryBackend):
@@ -28,24 +71,47 @@ class InMemory(MemoryBackend):
         """Retrieves all messages from the in-memory list."""
         return sorted(self.messages, key=lambda msg: msg.metadata.get("timestamp", 0))  # Sort by timestamp
 
+    def _apply_filters(self, messages: list[Message], filters: dict) -> list[Message]:
+        """Applies metadata filters to the list of messages."""
+        if not filters:
+            return messages
+        filtered_messages = messages
+        for key, value in filters.items():
+            if isinstance(value, list):
+                filtered_messages = [msg for msg in filtered_messages if any(v == msg.metadata.get(key) for v in value)]
+            else:
+                filtered_messages = [msg for msg in filtered_messages if value == msg.metadata.get(key)]
+        return filtered_messages
+
     def search(self, query: str = None, limit: int = None, filters: dict = None) -> list[Message]:
-        """Searches for messages, applying optional query and/or filters."""
-        limit = limit or self.config.search_limit
-        matching_messages = self.messages
+        """Searches for messages using BM25 scoring, with optional filters."""
+        if not query and not filters:
+            return self.get_all()[:limit]
 
-        if query:
-            matching_messages = [msg for msg in matching_messages if query.lower() in msg.content.lower()]
+        # Apply filters first if any
+        filtered_messages = self._apply_filters(self.messages, filters)
 
-        if filters:
-            for key, value in filters.items():
-                if isinstance(value, list):
-                    matching_messages = [
-                        msg for msg in matching_messages if any(v in str(msg.metadata.get(key, "")) for v in value)
-                    ]
-                else:
-                    matching_messages = [msg for msg in matching_messages if value in str(msg.metadata.get(key, ""))]
+        if not query:
+            # If no query, return filtered results only
+            return filtered_messages[:limit]
 
-        return matching_messages[:limit]
+        # Split the query into terms
+        query_terms = query.lower().split()
+
+        # Initialize the BM25 scorer with the filtered messages
+        bm25 = BM25(filtered_messages)
+
+        # Score all filtered messages using BM25
+        scored_messages = [(msg, bm25.score(query_terms, msg)) for msg in filtered_messages]
+
+        # Filter out messages with a score of 0 (irrelevant)
+        scored_messages = [(msg, score) for msg, score in scored_messages if score > 0]
+
+        # Sort messages by score in descending order
+        scored_messages.sort(key=lambda x: x[1], reverse=True)
+
+        # Return the top messages based on the limit
+        return [msg for msg, _ in scored_messages][:limit]
 
     def is_empty(self) -> bool:
         """Checks if the in-memory list is empty."""

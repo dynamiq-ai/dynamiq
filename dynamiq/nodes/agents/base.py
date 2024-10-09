@@ -106,7 +106,7 @@ class Agent(Node):
             "date": self.DEFAULT_DATE,
             "tools": "{tool_description}",
             "instructions": "",
-            "output_format": "Provide your answer in a clear and concise manner.",
+            "output_format": "",
             "relevant_information": "{relevant_memory}",
             "conversation_history": "{context}",
             "request": "User request: {input}",

@@ -29,5 +29,6 @@ print("All messages:")
 for msg in messages:
     print(f"{msg.role}: {msg.content}")
 
-
+# Clear
+memory.clear()
 print("Is memory empty?", memory.is_empty())
