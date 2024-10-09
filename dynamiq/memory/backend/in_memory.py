@@ -11,7 +11,7 @@ class InMemoryError(Exception):
     pass
 
 
-class BM25:
+class BM25DocumentRanker:
     """BM25 implementation for scoring documents."""
 
     def __init__(self, documents: list[str], k1: float = 1.5, b: float = 0.75):
@@ -93,7 +93,7 @@ class InMemory(MemoryBackend):
             return filtered_messages[:limit]
         query_terms = query.lower().split()
         document_texts = [msg.content for msg in filtered_messages]
-        bm25 = BM25(document_texts)
+        bm25 = BM25DocumentRanker(document_texts)
         scored_messages = [(msg, bm25.score(query_terms, msg.content)) for msg in filtered_messages]
         scored_messages = [(msg, score) for msg, score in scored_messages if score > 0]
         scored_messages.sort(key=lambda x: x[1], reverse=True)
