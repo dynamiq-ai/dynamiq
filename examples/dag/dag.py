@@ -110,7 +110,7 @@ ANTHROPIC_2_NODE = Anthropic(
     connection=ANTHROPIC_CONNECTION,
     input_transformer=InputTransformer(
         selector={
-            "ai": f"${[OPENAI_NODE.id]}.content",
+            "ai": f"$.{[OPENAI_NODE.id]}.content",
             "ds": f"$.{[OPENAI_2_NODE.id]}.content",
             "llm": f"$.{[ANTHROPIC_NODE.id]}.content",
         },

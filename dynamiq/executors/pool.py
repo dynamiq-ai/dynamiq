@@ -1,8 +1,10 @@
 import os
 from concurrent import futures
 
+import jsonpickle
+
 from dynamiq.executors.base import BaseExecutor
-from dynamiq.nodes.node import NodeReadyToRun
+from dynamiq.nodes.node import Node, NodeReadyToRun
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils.logger import logger
 
@@ -32,7 +34,7 @@ class PoolExecutor(BaseExecutor):
         self.executor = pool_executor(max_workers=max_workers)
         self.node_by_future = {}
 
-    def shutdown(self, wait=True):
+    def shutdown(self, wait: bool = True):
         """
         Shuts down the executor.
 
@@ -82,13 +84,7 @@ class PoolExecutor(BaseExecutor):
         """
         for ready_node in ready_nodes:
             if ready_node.is_ready:
-                future = self.executor.submit(
-                    ready_node.node.run,
-                    input_data=ready_node.input_data,
-                    config=config,
-                    depends_result=ready_node.depends_result,
-                    **kwargs,
-                )
+                future = self.run_node(ready_node=ready_node, config=config, **kwargs)
                 self.node_by_future[future] = ready_node.node
             else:
                 logger.error(
@@ -122,6 +118,23 @@ class PoolExecutor(BaseExecutor):
 
         return results
 
+    def run_node(self, ready_node: NodeReadyToRun, config: RunnableConfig = None, **kwargs):
+        """
+        Submits ready node for execution.
+
+        Args:
+            ready_node (NodeReadyToRun): node ready to run.
+            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
+            **kwargs: Additional keyword arguments.
+        """
+        return self.executor.submit(
+            ready_node.node.run,
+            input_data=ready_node.input_data,
+            config=config,
+            depends_result=ready_node.depends_result,
+            **kwargs,
+        )
+
 
 class ThreadExecutor(PoolExecutor):
     """
@@ -150,4 +163,60 @@ class ProcessExecutor(PoolExecutor):
         max_workers = max_workers or MAX_WORKERS_PROCESS_POOL_EXECUTOR
         super().__init__(
             pool_executor=futures.ProcessPoolExecutor, max_workers=max_workers
+        )
+
+    @staticmethod
+    def serialize_node(node: Node) -> str:
+        """
+        Serializes node data.
+
+        Args:
+            node (Node): Node instance.
+
+        Returns:
+            str: Serialized node data
+        """
+        return jsonpickle.encode(node)
+
+    @staticmethod
+    def deserialize_node(node_data: str) -> Node:
+        """
+        Deserializes node data.
+
+        Args:
+            node_data (str): Serialized node data.
+
+        Returns:
+            Node: Node instance.
+        """
+        return jsonpickle.decode(node_data) # nosec
+
+    @classmethod
+    def _run_node(cls, node_data: str, **kwargs) -> RunnableResult:
+        """
+        Deserializes node data and runs the node.
+
+        Args:
+            node_data (str): Serialized node data.
+            **kwargs: Additional keyword arguments.
+        """
+        node_instance = cls.deserialize_node(node_data)
+        return node_instance.run(**kwargs)
+
+    def run_node(self, ready_node: NodeReadyToRun, config: RunnableConfig = None, **kwargs):
+        """
+        Submits ready node for execution.
+
+        Args:
+            ready_node (NodeReadyToRun): node ready to run.
+            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
+            **kwargs: Additional keyword arguments.
+        """
+        return self.executor.submit(
+            self._run_node,
+            node_data=self.serialize_node(ready_node.node),
+            input_data=ready_node.input_data,
+            config=config,
+            depends_result=ready_node.depends_result,
+            **kwargs,
         )
