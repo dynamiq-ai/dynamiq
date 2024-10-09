@@ -186,6 +186,7 @@ class GraphOrchestrator(Node):
                 next_state_name = state.condition(str(self._chat_history))
                 return self.states[next_state_name]
 
+            # Rely next state choice on Manager
             pass
         else:
             return state.connected[0]
@@ -229,7 +230,10 @@ class GraphOrchestrator(Node):
             action (Action): The action containing the delegation command and details.
         """
 
+        # Parallelize
         for agent in state.tasks:
+
+            # Create actions where manager will determine input for each agent/tool
             result = agent.run(
                 input_data={
                     "input": "Here is the history of converastion" + str(self._chat_history) + "Continue with your goal"
