@@ -66,7 +66,7 @@ def test_workflow_with_agent_and_in_memory_memory(openai_node, memory_config):
     result_2 = wf.run(input_data={"input": user_input_2})
     assert result_2.status == RunnableStatus.SUCCESS
 
-    all_messages = memory.get_all_messages()
+    all_messages = memory.get_all()
     assert len(all_messages) == 4
     assert all_messages[0].role == MessageRole.USER
     assert all_messages[0].content == user_input_1
