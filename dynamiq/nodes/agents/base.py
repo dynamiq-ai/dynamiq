@@ -8,6 +8,7 @@ from typing import Any, Callable, ClassVar
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections.managers import ConnectionManager
+from dynamiq.memory import Memory
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -16,7 +17,7 @@ from dynamiq.nodes.agents.exceptions import (
     ToolExecutionException,
 )
 from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.prompts import Message, Prompt
+from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils.logger import logger
@@ -60,6 +61,8 @@ class Agent(Node):
     role: str | None = None
     goal: str | None = None
     max_loops: int = 1
+    memory: Memory | None = Field(None, description="Memory node for the agent.")
+    memory_retrieval_strategy: str = "all"  # all, relevant, both
 
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -74,7 +77,7 @@ class Agent(Node):
 
     @property
     def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"llm": True, "tools": True}
+        return super().to_dict_exclude_params | {"llm": True, "tools": True, "memory": True}
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
@@ -103,13 +106,16 @@ class Agent(Node):
             "date": self.DEFAULT_DATE,
             "tools": "{tool_description}",
             "instructions": "",
-            "output_format": "Provide your answer in a clear and concise manner.",
+            "output_format": "",
+            "relevant_information": "{relevant_memory}",
+            "conversation_history": "{context}",
             "request": "User request: {input}",
-            "context": "",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
             "user_input": "",
+            "context": "",
+            "relevant_memory": "",
         }
 
     def add_block(self, block_name: str, content: str):
@@ -131,11 +137,23 @@ class Agent(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
+        user_id = input_data.get("user_id", None)
+        session_id = input_data.get("session_id", None)
+        custom_metadata = input_data.get("metadata", {}).copy()
+        custom_metadata.update({k: v for k, v in input_data.items() if k not in ["user_id", "session_id", "input"]})
+        metadata = {**custom_metadata, "user_id": user_id, "session_id": session_id}
+
+        if self.memory:
+            self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
+            self._retrieve_memory(input_data)
+
         self._prompt_variables.update(input_data)
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
         result = self._run_agent(config=config, **kwargs)
+        if self.memory:
+            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=metadata)
 
         execution_result = {
             "content": result,
@@ -149,6 +167,27 @@ class Agent(Node):
 
         logger.debug(f"Agent {self.name} - {self.id}: finished with result {result}")
         return execution_result
+
+    def _retrieve_memory(self, input_data):
+        """
+        Retrieves memory based on the selected strategy: 'relevant', 'all', or 'both'.
+        """
+        user_id = input_data.get("user_id", None)
+        filters = {"user_id": user_id} if user_id else None
+
+        if self.memory_retrieval_strategy == "relevant":
+            relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
+            self._prompt_variables["relevant_memory"] = relevant_memory
+
+        elif self.memory_retrieval_strategy == "all":
+            context = self.memory.get_all_messages_as_string()
+            self._prompt_variables["context"] = context
+
+        elif self.memory_retrieval_strategy == "both":
+            relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
+            context = self.memory.get_all_messages_as_string()
+            self._prompt_variables["relevant_memory"] = relevant_memory
+            self._prompt_variables["context"] = context
 
     def _run_llm(self, prompt: str, config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and returns the result."""
@@ -288,13 +327,9 @@ class Agent(Node):
                     prompt += f"{block.upper()}:\n{formatted_content}\n\n"
 
         prompt = textwrap.dedent(prompt)
-        # Split into lines, strip each line, and then join with a single newline
         lines = prompt.splitlines()
-        stripped_lines = [
-            line.strip() for line in lines if line.strip()
-        ]  # Remove empty lines if you want to avoid multiple newlines
+        stripped_lines = [line.strip() for line in lines if line.strip()]
         prompt = "\n".join(stripped_lines)
-        # Remove redundant spaces between words in each line
         prompt = "\n".join(" ".join(line.split()) for line in prompt.split("\n"))
         return prompt
 

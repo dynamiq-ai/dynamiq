@@ -1,63 +1,47 @@
-# Customer Support Workflow
+# Customer Support Workflow Example
 
-This project demonstrates a customer support workflow using AI agents and simulated banking tools. It showcases the use of Retrieval-Augmented Generation (RAG) and API simulation for handling customer inquiries in a banking context.
-
-## Project Structure
-
-```
-customer_support_workflow/
-    bank_rag_tool.py
-    __init__.py
-    bank_api_sim.py
-    main.py
-```
+This directory contains an example of a customer support workflow built using Dynamiq agents and tools. The workflow demonstrates how to orchestrate multiple agents to handle different types of customer requests, such as accessing internal bank APIs and retrieving information from documentation.
 
 ## Components
 
-### 1. Bank RAG Tool (bank_rag_tool.py)
+### `bank_api_sim.py`
 
-This module implements a Retrieval-Augmented Generation (RAG) tool for accessing and querying internal bank documents and policies. It uses the following components:
+- Simulates an internal bank API using OpenAI's language model.
+- Responds to queries about account information, transactions, etc., in JSON format.
 
-- PineconeVectorStore for document storage
-- OpenAITextEmbedder for text embedding
-- PineconeDocumentRetriever for document retrieval
-- OpenAI GPT-4 for answer generation
+### `bank_rag_tool.py`
 
-The BankRagSim class provides a method to query the bank's internal documents and generate responses based on the retrieved information.
+- Implements a Retrieval-Augmented Generation (RAG) tool for accessing bank documentation.
+- Uses Pinecone for document retrieval and OpenAI for text embedding and answer generation.
 
-### 2. Bank API Simulator (bank_api_sim.py)
+### `main.py`
 
-This module simulates an internal bank API. It uses OpenAI's GPT-4 model to generate responses that mimic a real bank system API. The BankApiSim class can handle various types of requests related to clients, customers, transactions, and accounts.
+- Defines the main workflow logic.
+- Creates instances of `ReActAgent` for handling API and documentation queries.
+- Creates a `LinearOrchestrator` to manage the workflow of multiple agents.
+- Executes the workflow with a sample input.
 
-### 3. Main Workflow (main.py)
+## Workflow Logic
 
-The main script orchestrates the customer support workflow using the following components:
+1. The user provides a query (e.g., "fast block my card").
+2. The `LinearOrchestrator` receives the query and determines which agent should handle it.
+3. If the query relates to internal bank APIs, the `agent_bank_support` (using `BankApiSim`) is invoked.
+4. If the query relates to bank documentation, the `agent_bank_documentation` (using `BankRAGTool`) is invoked.
+5. The selected agent processes the query using its tools and returns a response.
+6. The `LinearOrchestrator` receives the agent's response and returns it to the user.
 
-- ManagerAgent: Oversees the workflow and delegates tasks to specialized agents
-- ReActAgent: Implements agents for bank support and documentation queries
-- LinearOrchestrator: Manages the workflow execution
-- OpenAI and Anthropic language models
+## Usage
 
-## Setup and Usage
+1. **Set up environment variables:**
+   - `OPENAI_API_KEY`: Your OpenAI API key.
+   - `OPENAI_MODEL`: The OpenAI model to use (defaults to "gpt-4").
+   - `PINECONE_API_KEY`: Your Pinecone API key.
+   - `PINECONE_ENVIRONMENT`: Your Pinecone environment.
+2. **Run the workflow:** `python main.py`
 
-1. Install the required dependencies (dynamiq and its components).
-2. Set up API keys for OpenAI and Anthropic as environment variables.
-3. Configure Pinecone for document storage (for the RAG tool).
-4. Run the main script: `python customer_support_workflow/main.py`
+## Key Concepts
 
-## Workflow Overview
-
-1. The main script initializes two specialized agents:
-   - Bank Support Agent: Handles queries using the simulated bank API
-   - Bank Documentation Agent: Handles queries using the RAG tool for internal documents
-2. A ManagerAgent oversees the workflow and delegates tasks to the appropriate agent.
-3. The LinearOrchestrator manages the execution of the workflow, passing the customer query through the agents.
-4. The system generates a response based on the combined knowledge from the bank API and internal documentation.
-
-## Customization
-
-You can modify the `main.py` script to change the language model provider (OpenAI or Anthropic) and adjust the agent configurations as needed.
-
-## Note
-
-This project is for demonstration purposes and showcases how AI agents can be used to create a customer support workflow in a banking context. The bank API and document retrieval are simulated, but the structure can be adapted for use with real banking systems and document repositories.
+- **Agent Orchestration:** Managing the interaction and collaboration of multiple agents to solve complex tasks.
+- **Retrieval-Augmented Generation (RAG):** Combining information retrieval with language model generation to provide more accurate and comprehensive answers.
+- **Tool Usage:** Leveraging specialized tools to extend the capabilities of agents.
+- **Human Feedback:** Integrating human feedback to improve the accuracy and reliability of agents.
