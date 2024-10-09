@@ -14,7 +14,7 @@ class InMemoryError(Exception):
 class BM25:
     """BM25 implementation for scoring documents."""
 
-    def __init__(self, documents: list[str], k1=1.5, b=0.75):
+    def __init__(self, documents: list[str], k1: float = 1.5, b: float = 0.75):
         """Initialize with a list of documents and parameters for BM25."""
         self.documents = documents
         self.k1 = k1
