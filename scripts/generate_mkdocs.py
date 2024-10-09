@@ -8,7 +8,7 @@ def create_directory(path):
 
 
 def get_python_files(directory):
-    """Get all Python files in the specified directory, excluding __init__.py.py files."""
+    """Get all Python files in the specified directory, excluding __init__.py files."""
     py_files = glob.glob(os.path.join(directory, "**", "*.py"), recursive=True)
     return [file for file in py_files if "__init__.py" not in file]
 
