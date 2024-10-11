@@ -46,11 +46,3 @@ class InvalidActionException(RecoverableAgentException):
     """
 
     pass
-
-
-class AgentMaxLoopsReached(RecoverableAgentException):
-    """
-    Exception raised when the agent reaches the maximum number of loops without a final answer.
-    """
-
-    pass

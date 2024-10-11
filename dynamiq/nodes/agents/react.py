@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import Field
 
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
-from dynamiq.nodes.agents.exceptions import ActionParsingException, AgentMaxLoopsReached, RecoverableAgentException
+from dynamiq.nodes.agents.exceptions import ActionParsingException, RecoverableAgentException
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, Prompt
@@ -163,6 +163,31 @@ REACT_BLOCK_REQUEST = "User request: {input}"
 REACT_BLOCK_CONTEXT = "Below is the conversation: {context}"
 
 
+REACT_MAX_LOOPS_PROMPT = """
+You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
+Your goal is to analyze the given context and formulate a clear, concise response.
+First, carefully review the following context, which contains thoughts and information gathered during the process:
+<context>
+{context}
+</context>
+Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
+Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
+1. Fully supported by the information found in the context
+2. Clear and concise
+3. Directly addressing the original question or task, if possible
+If you cannot provide a full answer based on the given context, explain that due to limitations in the number of steps or potential issues with the tools used, you are unable to fully answer the question. In this case, suggest one or more of the following:
+1. Increasing the maximum number of loops for the agent setup
+2. Reviewing the tools settings
+3. Revising the input task description
+Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
+Provide your final answer or explanation within <answer> tags.
+Your response should be clear, concise, and professional.
+<answer>
+[Your final answer or explanation goes here]
+</answer>
+"""  # noqa: E501
+
+
 def function_calling_schema(tool_names):
     return [
         {
@@ -245,7 +270,7 @@ class ReActAgent(Agent):
     """Agent that uses the ReAct strategy for processing tasks by interacting with tools in a loop."""
 
     name: str = "React"
-    max_loops: int = Field(default=15, ge=1)
+    max_loops: int = Field(default=15, ge=2)
     inference_mode: InferenceMode = InferenceMode.DEFAULT
 
     def parse_xml_content(self, text: str, tag: str) -> str:
@@ -455,8 +480,21 @@ class ReActAgent(Agent):
                 logger.error(f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. failed with error: {str(e)}")
                 previous_responses.append(f"{type(e).__name__}: {e}")
                 continue
-        logger.error(f"Agent {self.name} - {self.id}: Maximum number of loops reached.")
-        raise AgentMaxLoopsReached(f"Agent {self.name} - {self.id}: Maximum number of loops reached.")
+        logger.warning(f"Agent {self.name} - {self.id}: Maximum number of loops reached.")
+        return self._handle_max_loops_exceeded(previous_responses, config, kwargs)
+
+    def _handle_max_loops_exceeded(
+        self, previous_responses: list, config: RunnableConfig | None = None, **kwargs
+    ) -> str:
+        """
+        Handle the case where max loops are exceeded by crafting a thoughtful response.
+        """
+        final_attempt_prompt = REACT_MAX_LOOPS_PROMPT.format(context="\n".join(previous_responses))
+        llm_final_attempt = self._run_llm(final_attempt_prompt, config=config, **kwargs)
+        self._run_depends = [NodeDependency(node=self.llm).to_dict()]
+        final_answer = self.parse_xml_content(llm_final_attempt, "answer")
+
+        return f"Max loops reached but here's my final attempt:\n{final_answer}"
 
     def _extract_final_answer_xml(self, llm_output: str) -> str:
         """Extract the final answer from the LLM output."""
