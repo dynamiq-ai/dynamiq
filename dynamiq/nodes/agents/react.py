@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import Field
 
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
-from dynamiq.nodes.agents.exceptions import ActionParsingException, RecoverableAgentException
+from dynamiq.nodes.agents.exceptions import ActionParsingException, MaxLoopsExceededException, RecoverableAgentException
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, Prompt
@@ -272,6 +272,7 @@ class ReActAgent(Agent):
     name: str = "React"
     max_loops: int = Field(default=15, ge=2)
     inference_mode: InferenceMode = InferenceMode.DEFAULT
+    raise_on_max_loops: bool = Field(default=True, description="Raise exception when max loops are exceeded.")
 
     def parse_xml_content(self, text: str, tag: str) -> str:
         """Extract content from XML-like tags."""
@@ -481,7 +482,14 @@ class ReActAgent(Agent):
                 previous_responses.append(f"{type(e).__name__}: {e}")
                 continue
         logger.warning(f"Agent {self.name} - {self.id}: Maximum number of loops reached.")
-        return self._handle_max_loops_exceeded(previous_responses, config, kwargs)
+        if self.raise_on_max_loops:
+            error_message = (
+                f"Agent {self.name} (ID: {self.id}) has reached the maximum loop limit of {self.max_loops} without finding a final answer. "  # noqa: E501
+                f"Consider increasing the maximum number of loops or reviewing the task complexity to ensure completion."  # noqa: E501
+            )
+            raise MaxLoopsExceededException(message=error_message)
+        else:
+            return self._handle_max_loops_exceeded(previous_responses, config, kwargs)
 
     def _handle_max_loops_exceeded(
         self, previous_responses: list, config: RunnableConfig | None = None, **kwargs
