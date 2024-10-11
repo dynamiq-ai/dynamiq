@@ -1,3 +1,4 @@
+import json
 from enum import Enum
 from typing import Any, Callable
 
@@ -30,6 +31,12 @@ class AgentNotFoundError(OrchestratorError):
     pass
 
 
+class StateNotFoundError(OrchestratorError):
+    """Raised when proposed next state was not found."""
+
+    pass
+
+
 class ActionCommand(Enum):
     DELEGATE = "delegate"
     CLARIFY = "clarify"
@@ -45,18 +52,19 @@ class Action(BaseModel):
 
 
 class State(BaseModel):
+    name: str = ""
     description: str = ""
-    connected: list["State"] = []
-    tasks: list[Node] = []
+    connected: list["str"] = []
+    tasks: list[Agent] = []
     condition: Callable = None
-
-
-START_STATE = State(description="Initial state")
-END_STATE = State(description="Final state")
 
 
 START = "START"
 END = "END"
+
+
+START_STATE = State(name=START, description="Initial state")
+END_STATE = State(name=END, description="Final state")
 
 
 class GraphOrchestrator(Node):
@@ -95,7 +103,7 @@ class GraphOrchestrator(Node):
     def add_node(self, name: str, tasks: list[Node]) -> None:
         if name in self.states:
             raise ValueError(f"State with name {name} is already present")
-        state = State(tasks=tasks)
+        state = State(name=name, tasks=tasks)
 
         self.states[name] = state
 
@@ -105,9 +113,45 @@ class GraphOrchestrator(Node):
 
         if name_destination not in self.states:
             raise ValueError(f"State with name {name_destination} is not present")
-        self.states[name_source].connected.append(self.states[name_destination])
+        self.states[name_source].connected.append(name_destination)
 
-    def add_conditional_edge(self, name_source: str, name_destination: list[str], path_func: Callable) -> None:
+    # def states_names(self, states: list[State]):
+    #     return '\n'.join([state.name for state in states])
+
+    def default_path_function(self, state: State, config: RunnableConfig, **kwargs):
+        """This function is default function for state changes"""
+        manager_result = self.manager.run(
+            input_data={
+                "action": "plan",
+                # "states": self.states_names(state.connected),
+                "states_description": self.states_descriptions(state.connected),
+                "chat_history": self._chat_history,
+            },
+            config=config,
+            run_depends=self._run_depends,
+            **kwargs,
+        )
+        self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+
+        if manager_result.status != RunnableStatus.SUCCESS:
+            logger.error(f"GraphOrchestrator {self.id}: Error generating final answer")
+            raise OrchestratorError("Failed to generate final answer")
+
+        try:
+            next_state = json.loads(
+                manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
+            )["state"]
+        except Exception as e:
+            logger.error("GraphOrchestrator: Error when parsing response about next state.")
+            raise OrchestratorError(f"Error when parsing response about next state {e}")
+
+        if next_state in list(self.states.keys()):
+            return next_state
+        else:
+            logger.error(f"GraphOrchestrator: State with name {next_state} was not found.")
+            raise StateNotFoundError(f"State with name {next_state} was not found.")
+
+    def add_conditional_edge(self, name_source: str, name_destination: list[str], path_func: Callable = None) -> None:
         if name_source not in self.states:
             raise ValueError(f"State with name {name_source} is not present")
 
@@ -152,42 +196,77 @@ class GraphOrchestrator(Node):
             if agent.is_postponed_component_init:
                 agent.init_components(connection_manager)
 
-    @property
-    def agents_descriptions(self) -> str:
-        """Get a formatted string of agent descriptions."""
-        return "\n".join([f"{i}. {agent.name}" for i, agent in enumerate(self.agents)]) if self.agents else ""
-
     def get_next_state(self, state: State, config: RunnableConfig = None, **kwargs) -> Action:
         """
-        Determine the next action based on the current state and LLM output.
+        Determine the next state based on the current state and chat history.
 
         Returns:
-            Action: The next action to be taken.
-
-        Raises:
-            ActionParseError: If there is an error parsing the action from the LLM response.
+            state: Next state.
         """
         prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self._chat_history])
 
         logger.debug(f"GraphOrchestrator {self.id}: PROMPT {prompt}")
 
         if len(state.connected) > 1:
-
             if state.condition:
                 next_state_name = state.condition(str(self._chat_history))
                 return self.states[next_state_name]
-
-            # Rely next state choice on Manager based on descriptions
-            pass
+            return self.states[self.default_path_function(state=state, config=config)]
         else:
-            return state.connected[0]
+            return self.states[state.connected[0]]
+
+    def task_description(self, task: Agent):
+        return ("Name:", task.name, "Role:", task.role)
+
+    def get_actions(self, state: State, config: RunnableConfig = None, **kwargs) -> Action:
+        """
+        Determine actions for current state.
+
+        Returns:
+            Action: The next action to be taken for current state.
+        """
+
+        actions = {}
+        for agent in state.tasks:
+            manager_result = self.manager.run(
+                input_data={
+                    "action": "assign",
+                    "task": self.task_description(agent),
+                    "chat_history": self._chat_history,
+                },
+                config=config,
+                run_depends=self._run_depends,
+                **kwargs,
+            )
+            self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+
+            if manager_result.status != RunnableStatus.SUCCESS:
+                logger.error(f"GraphOrchestrator {self.id}: Error generating actions for state.")
+                raise OrchestratorError("Error generating actions for state.")
+
+            try:
+                agent_input = json.loads(
+                    manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
+                )["input"]
+
+                actions[agent.name] = agent_input
+
+            except Exception as e:
+                logger.error("GraphOrchestrator: Error when parsing response about next state.")
+                raise OrchestratorError(f"Error when parsing response about next state {e}")
+
+        return actions
+
+    def states_descriptions(self, states: list[State]) -> str:
+        """Get a formatted string of state descriptions."""
+        return "\n".join([f"'{self.states[state].name}': {self.states[state].description}" for state in states])
 
     def run_task(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
         """
         Process the given task using the manager agent logic.
 
         Args:
-            task (str): The task to be processed.
+            task (str): The task to be processed.xxfx
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
@@ -197,23 +276,24 @@ class GraphOrchestrator(Node):
 
         state = self.states[self.initial_state]
         while True:
-
             logger.debug(f"GraphOrchestrator {self.id}: chat history: {self._chat_history}")
             logger.debug(f"GraphOrchestrator {self.id}: Next action: {state.model_dump()}")
-            if state == self.states[END]:
+            if state.name == END:
                 return self.get_final_result(
                     input_task=task,
                     preliminary_answer="",
                     config=config,
                     **kwargs,
                 )
-            elif state != self.states[START]:
-                # actions = self.get_actions(state) Should be added because currently relies on agent capabilities only
-                self._handle_state_execution(state=state, config=config, **kwargs)
+            elif state.name != START:
+                actions = self.get_actions(state)
+                self._handle_state_execution(state, actions, config=config, **kwargs)
 
             state = self.get_next_state(state, config=config, **kwargs)
 
-    def _handle_state_execution(self, state: State, config: RunnableConfig = None, **kwargs) -> None:
+    def _handle_state_execution(
+        self, state: State, actions: dict[str, str], config: RunnableConfig = None, **kwargs
+    ) -> None:
         """
         Handle task delegation to a specialized agent.
 
@@ -223,12 +303,9 @@ class GraphOrchestrator(Node):
 
         # Parallelize
         for agent in state.tasks:
-
             # Create actions where manager will determine input for each agent/tool
             result = agent.run(
-                input_data={
-                    "input": "Here is the history of converastion" + str(self._chat_history) + "Continue with your goal"
-                },
+                input_data={"input": actions[agent.name]},
                 config=config,
                 run_depends=self._run_depends,
                 **kwargs,
