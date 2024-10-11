@@ -11,6 +11,7 @@ AGENT_GOAL = """is to provide concise answer to user,
               before answering try to create plan for solving task
               you can search any api, and then use any of free open-source APi that dont require authorization
               """  # noqa: E501
+
 if __name__ == "__main__":
     connection_e2b = E2B()
 

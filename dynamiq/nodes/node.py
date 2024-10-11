@@ -165,6 +165,7 @@ class Node(BaseModel, Runnable, ABC):
         metadata (NodeMetadata | None): Optional metadata for the node.
         is_postponed_component_init (bool): Whether component initialization is postponed.
         is_optimized_for_agents (bool): Whether to optimize output for agents. By default is set to False.
+        has_access_for_files (bool): Whether the node has access to files. By default is set to False.
     """
     id: str = Field(default_factory=generate_uuid)
     name: str | None = None
@@ -180,6 +181,7 @@ class Node(BaseModel, Runnable, ABC):
 
     is_postponed_component_init: bool = False
     is_optimized_for_agents: bool = False
+    has_access_for_files: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

@@ -57,6 +57,7 @@ class Agent(Node):
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     streaming: StreamingConfig = StreamingConfig()
     tools: list[Node] = []
+    files: list[tuple[str | bytes, str]] | None = None
     name: str = "AI Agent"
     role: str | None = None
     goal: str | None = None
@@ -105,6 +106,7 @@ class Agent(Node):
             "goal": self.goal or "",
             "date": self.DEFAULT_DATE,
             "tools": "{tool_description}",
+            "files": "{file_description}",
             "instructions": "",
             "output_format": "",
             "relevant_information": "{relevant_memory}",
@@ -113,6 +115,7 @@ class Agent(Node):
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
+            "file_description": self.file_description,
             "user_input": "",
             "context": "",
             "relevant_memory": "",
@@ -146,6 +149,11 @@ class Agent(Node):
         if self.memory:
             self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
             self._retrieve_memory(input_data)
+
+        agent_files = input_data.get("files", self.files)
+        if agent_files:
+            self.files = agent_files
+            self._prompt_variables["file_description"] = self.file_description
 
         self._prompt_variables.update(input_data)
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
@@ -273,6 +281,9 @@ class Agent(Node):
     def _run_tool(self, tool: Node, tool_input: str, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
         logger.debug(f"Agent {self.name} - {self.id}: Running tool '{tool.name}'")
+        if self.files:
+            if tool.has_access_for_files is True:
+                tool_input["files"] = self.files
 
         tool_result = tool.run(
             input_data=tool_input,
@@ -299,6 +310,16 @@ class Agent(Node):
             if self.tools
             else ""
         )
+
+    @property
+    def file_description(self) -> str:
+        """Returns a description of the tools available to the agent."""
+        if self.files:
+            file_description = "You can work with such files.\n"
+            for file in self.files:
+                file_description += f"<file>: {file[0]} <\\file>\n<file description>: {file[1]} <\\file description>\n"
+            return file_description
+        return ""
 
     @property
     def tool_names(self) -> str:

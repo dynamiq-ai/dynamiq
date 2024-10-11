@@ -76,6 +76,7 @@ class E2BInterpreterTool(ConnectionNode):
     files: list[tuple[str | bytes, str]] | None = None
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
+    has_access_for_files: bool = True
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -104,6 +105,11 @@ class E2BInterpreterTool(ConnectionNode):
         if packages:
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
             sandbox.process.start_and_wait(f"pip install -qq {' '.join(packages.split(','))}")
+
+    def _upload_files(self, files: list, sandbox: Sandbox) -> None:
+        """Uploads the specified files to the sandbox."""
+        for file_data, file_description in files:
+            self._upload_file(file_data, file_description, sandbox)
 
     def _upload_initial_files(self, sandbox: Sandbox) -> None:
         """Uploads the initial files to the specified sandbox."""
@@ -138,7 +144,10 @@ class E2BInterpreterTool(ConnectionNode):
             file_like_object.name = filename
             uploaded_path = sandbox.upload_file(file=file_like_object)
         else:
-            raise ValueError(f"Invalid file data type: {type(file_data)}")
+            raise ToolExecutionException(
+                f"Error: Invalid file data type: {type(file_data)}. Please keep just tuples with file data and description, without any additional wording.",  # noqa: E501
+                recoverable=False,
+            )
 
         logger.debug(f"Tool {self.name} - {self.id}: Uploaded file to {uploaded_path}")
         return uploaded_path
@@ -188,22 +197,24 @@ class E2BInterpreterTool(ConnectionNode):
                 self._upload_initial_files(sandbox)
                 self._update_description()
 
-        try:
+        logger.info(f"{input_data.get('files')}, {type(input_data.get('files'))}, {type(input_data.get('files')[0])}")
 
+        try:
             content = {}
+            if files := input_data.get("files"):
+                content["files_installation"] = self._upload_files(files=files, sandbox=sandbox)
             if packages := input_data.get("packages"):
                 self._install_packages(sandbox=sandbox, packages=packages)
                 content["packages_installation"] = f"Installed packages: {input_data['packages']}"
-            if files := input_data.get("files"):
-                content["files_installation"] = self._upload_file(file_data=files, sandbox=sandbox)
             if shell_command := input_data.get("shell_command"):
                 content["shell_command_execution"] = self._execute_shell_command(shell_command, sandbox=sandbox)
             if python := input_data.get("python"):
                 content["code_execution"] = self._execute_python_code(python, sandbox=sandbox)
             if not (packages or files or shell_command or python):
                 raise ToolExecutionException(
-                    "Error: Invalid input data. Please provide 'files' for file upload (local path or bytes), "
-                    "'python' for Python code execution, or 'shell_command' for shell command execution."
+                    "Error: Invalid input data. Please provide 'files' for file upload (local path or bytes)"  # noqa: E501
+                    "There should be either list of tuples with file data and description, like [(file_data, file_description)]"  # noqa: E501
+                    "'python' for Python code execution, or 'shell_command' for shell command execution."  # noqa: E501
                     "You can also provide 'packages' to install packages.",
                     recoverable=True,
                 )
@@ -215,10 +226,10 @@ class E2BInterpreterTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result = ""
-            if packages_installation := content.get("packages_installation"):
-                result += "<Package installation>\n" + packages_installation + "\n</Package installation>"
             if files_installation := content.get("files_installation"):
                 result += "<Files installation>\n" + files_installation + "\n</Files installation>"
+            if packages_installation := content.get("packages_installation"):
+                result += "<Package installation>\n" + packages_installation + "\n</Package installation>"
             if shell_command_execution := content.get("shell_command_execution"):
                 result += "<Shell command execution>\n" + shell_command_execution + "\n</Shell command execution>"
             if code_execution := content.get("code_execution"):
