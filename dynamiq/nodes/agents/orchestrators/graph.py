@@ -55,7 +55,7 @@ class State(BaseModel):
     name: str = ""
     description: str = ""
     connected: list["str"] = []
-    tasks: list[Agent] = []
+    tasks: list[Agent | Callable] = []
     condition: Callable = None
 
 
@@ -65,6 +65,10 @@ END = "END"
 
 START_STATE = State(name=START, description="Initial state")
 END_STATE = State(name=END, description="Final state")
+
+
+class BaseContext(BaseModel):
+    history: list = []
 
 
 class GraphOrchestrator(Node):
@@ -88,6 +92,7 @@ class GraphOrchestrator(Node):
     objective: str | None = None
     initial_state: str = START
     states: dict[str, State] = {START: START_STATE, END: END_STATE}
+    context: BaseContext = BaseContext()
 
     def __init__(self, **kwargs):
         """
@@ -97,10 +102,9 @@ class GraphOrchestrator(Node):
             **kwargs: Arbitrary keyword arguments.
         """
         super().__init__(**kwargs)
-        self._chat_history = []
         self._run_depends = []
 
-    def add_node(self, name: str, tasks: list[Node]) -> None:
+    def add_node(self, name: str, tasks: list[Agent | Callable]) -> None:
         if name in self.states:
             raise ValueError(f"State with name {name} is already present")
         state = State(name=name, tasks=tasks)
@@ -115,17 +119,13 @@ class GraphOrchestrator(Node):
             raise ValueError(f"State with name {name_destination} is not present")
         self.states[name_source].connected.append(name_destination)
 
-    # def states_names(self, states: list[State]):
-    #     return '\n'.join([state.name for state in states])
-
     def default_path_function(self, state: State, config: RunnableConfig, **kwargs):
         """This function is default function for state changes"""
         manager_result = self.manager.run(
             input_data={
                 "action": "plan",
-                # "states": self.states_names(state.connected),
                 "states_description": self.states_descriptions(state.connected),
-                "chat_history": self._chat_history,
+                "chat_history": self.context.history,
             },
             config=config,
             run_depends=self._run_depends,
@@ -178,7 +178,6 @@ class GraphOrchestrator(Node):
         return data
 
     def reset_run_state(self):
-        self._chat_history = []
         self._run_depends = []
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
@@ -203,13 +202,13 @@ class GraphOrchestrator(Node):
         Returns:
             state: Next state.
         """
-        prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self._chat_history])
+        prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self.context.history])
 
         logger.debug(f"GraphOrchestrator {self.id}: PROMPT {prompt}")
 
         if len(state.connected) > 1:
             if state.condition:
-                next_state_name = state.condition(str(self._chat_history))
+                next_state_name = state.condition(self.context)
                 return self.states[next_state_name]
             return self.states[self.default_path_function(state=state, config=config)]
         else:
@@ -228,32 +227,37 @@ class GraphOrchestrator(Node):
 
         actions = {}
         for agent in state.tasks:
-            manager_result = self.manager.run(
-                input_data={
-                    "action": "assign",
-                    "task": self.task_description(agent),
-                    "chat_history": self._chat_history,
-                },
-                config=config,
-                run_depends=self._run_depends,
-                **kwargs,
-            )
-            self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+            if isinstance(agent, Agent):
+                manager_result = self.manager.run(
+                    input_data={
+                        "action": "assign",
+                        "task": self.task_description(agent),
+                        "chat_history": self.context.history,
+                    },
+                    config=config,
+                    run_depends=self._run_depends,
+                    **kwargs,
+                )
+                self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
-            if manager_result.status != RunnableStatus.SUCCESS:
-                logger.error(f"GraphOrchestrator {self.id}: Error generating actions for state.")
-                raise OrchestratorError("Error generating actions for state.")
+                if manager_result.status != RunnableStatus.SUCCESS:
+                    logger.error(f"GraphOrchestrator {self.id}: Error generating actions for state.")
+                    raise OrchestratorError("Error generating actions for state.")
 
-            try:
-                agent_input = json.loads(
-                    manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
-                )["input"]
+                try:
+                    agent_input = json.loads(
+                        manager_result.output.get("content")
+                        .get("result")
+                        .replace("json", "")
+                        .replace("```", "")
+                        .strip()
+                    )["input"]
 
-                actions[agent.name] = agent_input
+                    actions[agent.name] = agent_input
 
-            except Exception as e:
-                logger.error("GraphOrchestrator: Error when parsing response about next state.")
-                raise OrchestratorError(f"Error when parsing response about next state {e}")
+                except Exception as e:
+                    logger.error("GraphOrchestrator: Error when parsing response about next state.")
+                    raise OrchestratorError(f"Error when parsing response about next state {e}")
 
         return actions
 
@@ -272,11 +276,11 @@ class GraphOrchestrator(Node):
         Returns:
             str: The final answer generated after processing the task.
         """
-        self._chat_history.append({"role": "user", "content": task})
+        self.context.history.append({"role": "user", "content": task})
 
         state = self.states[self.initial_state]
         while True:
-            logger.debug(f"GraphOrchestrator {self.id}: chat history: {self._chat_history}")
+            logger.debug(f"GraphOrchestrator {self.id}: chat history: {self.context.history}")
             logger.debug(f"GraphOrchestrator {self.id}: Next action: {state.model_dump()}")
             if state.name == END:
                 return self.get_final_result(
@@ -286,6 +290,7 @@ class GraphOrchestrator(Node):
                     **kwargs,
                 )
             elif state.name != START:
+                # Get input for agents
                 actions = self.get_actions(state)
                 self._handle_state_execution(state, actions, config=config, **kwargs)
 
@@ -302,25 +307,29 @@ class GraphOrchestrator(Node):
         """
 
         # Parallelize
-        for agent in state.tasks:
+        for task in state.tasks:
             # Create actions where manager will determine input for each agent/tool
-            result = agent.run(
-                input_data={"input": actions[agent.name]},
-                config=config,
-                run_depends=self._run_depends,
-                **kwargs,
-            )
-            self._run_depends = [NodeDependency(node=agent).to_dict()]
-            if result.status != RunnableStatus.SUCCESS:
-                logger.error(f"GraphOrchestrator {self.id}: Error executing Agent {agent.name}")
-                raise OrchestratorError(
-                    f"Failed to execute Agent {agent.name} with Error: {result.output.get('content')}"
+            if isinstance(task, Agent):
+                result = task.run(
+                    input_data={"input": actions[task.name]},
+                    config=config,
+                    run_depends=self._run_depends,
+                    **kwargs,
                 )
 
-            self._chat_history.append(
+                output = result.output.get("content")
+                # self._run_depends = [NodeDependency(node=agent).to_dict()]
+                if result.status != RunnableStatus.SUCCESS:
+                    logger.error(f"GraphOrchestrator {self.id}: Error executing Agent {task.name}")
+                    raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {output}")
+
+            elif isinstance(task, Callable):
+                output = task(self.context, config=config)
+
+            self.context.history.append(
                 {
                     "role": "system",
-                    "content": f"Agent {agent.name} result: {result.output.get('content')}",
+                    "content": f"Result: {output}",
                 }
             )
 
@@ -350,7 +359,7 @@ class GraphOrchestrator(Node):
             input_data={
                 "action": "final",
                 "input_task": input_task,
-                "chat_history": self._chat_history,
+                "chat_history": self.context.history,
                 "preliminary_answer": preliminary_answer,
             },
             config=config,

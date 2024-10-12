@@ -13,7 +13,7 @@ For delegation:
 "command": "delegate", "state": "<state_name>", "task": "<task_description>"
 
 Provide your response in JSON format only, without any additional text.
-For the final answer this means providing the final answer as the value for the "answer" key. But text in answer keep as it is.
+For the final answe r this means providing the final answer as the value for the "answer" key. But text in answer keep as it is.
 {chat_history}
 """  # noqa: E501
 
@@ -27,7 +27,7 @@ Agent:
 Provide your response in JSON format only, without any additional text.
 
 For providing action:
-"command": "action", "agent": "<agent_name>", "input": "<input_for_agent>"
+"command": "action", "agent": "<agent_name>", "input": "<input_to_agent>"
 
 Chat history:
 {chat_history}
