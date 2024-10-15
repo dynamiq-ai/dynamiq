@@ -1,5 +1,6 @@
 import json
 import re
+from enum import Enum
 from typing import Any
 
 from pydantic import Field
@@ -11,6 +12,12 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
+
+
+class BehaviorOnMaxLoops(str, Enum):
+    RAISE = "raise"
+    RETURN = "return"
+
 
 REACT_BLOCK_TOOLS = """
 You have access to a variety of tools, and you are responsible for using them in any order you choose to complete the task:
@@ -272,7 +279,10 @@ class ReActAgent(Agent):
     name: str = "React"
     max_loops: int = Field(default=15, ge=2)
     inference_mode: InferenceMode = InferenceMode.DEFAULT
-    raise_on_max_loops: bool = Field(default=True, description="Raise exception when max loops are exceeded.")
+    behaviour_on_max_loops: BehaviorOnMaxLoops = Field(
+        default=BehaviorOnMaxLoops.RAISE,
+        description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
+    )
 
     def parse_xml_content(self, text: str, tag: str) -> str:
         """Extract content from XML-like tags."""
@@ -482,7 +492,7 @@ class ReActAgent(Agent):
                 previous_responses.append(f"{type(e).__name__}: {e}")
                 continue
         logger.warning(f"Agent {self.name} - {self.id}: Maximum number of loops reached.")
-        if self.raise_on_max_loops:
+        if self.behaviour_on_max_loops == BehaviorOnMaxLoops.RAISE:
             error_message = (
                 f"Agent {self.name} (ID: {self.id}) has reached the maximum loop limit of {self.max_loops} without finding a final answer. "  # noqa: E501
                 f"Consider increasing the maximum number of loops or reviewing the task complexity to ensure completion."  # noqa: E501

@@ -56,6 +56,6 @@ class MaxLoopsExceededException(RecoverableAgentException):
     """
 
     def __init__(
-        self, message="Maximum number of loops reached without finding a final answer.", recoverable: bool = True
+        self, message: str = "Maximum number of loops reached without finding a final answer.", recoverable: bool = True
     ):
         super().__init__(message, recoverable=recoverable)
