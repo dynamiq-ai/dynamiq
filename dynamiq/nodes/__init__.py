@@ -1,8 +1,2 @@
-from .node import (
-    CachingConfig,
-    ErrorHandling,
-    InputTransformer,
-    Node,
-    OutputTransformer,
-)
-from .types import NodeGroup
+from .node import CachingConfig, ErrorHandling, InputTransformer, Node, OutputTransformer
+from .types import Behavior, NodeGroup
