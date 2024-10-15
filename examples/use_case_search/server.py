@@ -9,6 +9,7 @@ from dynamiq.nodes import InputTransformer
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
+from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
 
@@ -126,6 +127,7 @@ def process_query(query: str):
     result = wf.run(input_data={"input": query}, config=RunnableConfig(callbacks=[tracing]))
 
     result = result.output[agent_answer_synthesizer.id]["output"].get("content")
+    logger.info(f"result: {result}")
     result_answer = extract_answer(result)
     result_sources = extract_source(result)
 
