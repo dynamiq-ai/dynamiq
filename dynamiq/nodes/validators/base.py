@@ -1,15 +1,9 @@
-import enum
 from abc import abstractmethod
 from typing import Any, Literal
 
-from dynamiq.nodes import Node, NodeGroup
+from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
-
-
-class Behavior(str, enum.Enum):
-    RAISE = "raise"
-    RETURN = "return"
 
 
 class BaseValidator(Node):

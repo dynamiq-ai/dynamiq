@@ -20,8 +20,7 @@ Write code in Python that fits linear regression model between 4 features (numbe
                 In results provide initial and optimized loss of model.
                 also include the equation of the model.
 """  # noqa: E501
-INPUT_TASK = "Use code skills to gather data about NVIDIA and INTEL stocks prices for last 10 years, calulate average per year for each company and createa atable per me. Then craft a report and ad conclusion, what would be better if I could invest 100$ 10 yeasr ago. Use yahoo finance."  # noqa: E501
-# INPUT_TASK = "Add the first 10 numbers and tell if the result is prime"
+# INPUT_TASK = "Use code skills to gather data about NVIDIA and INTEL stocks prices for last 10 years, calulate average per year for each company and createa atable per me. Then craft a report and ad conclusion, what would be better if I could invest 100$ 10 yeasr ago. Use yahoo finance."  # noqa: E501
 
 if __name__ == "__main__":
     python_tool = E2BInterpreterTool(
@@ -35,7 +34,6 @@ if __name__ == "__main__":
         tools=[python_tool],
         role="Expert Agent with high programming skills, he can solve any problem using coding skills",
         goal="provide the best solution for request, using all his algorithmic knowledge and coding skills",
-        max_loops=15,
         inference_mode=InferenceMode.XML,
     )
 

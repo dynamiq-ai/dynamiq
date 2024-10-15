@@ -33,3 +33,8 @@ class InferenceMode(Enum):
     XML = "XML"
     FUNCTION_CALLING = "FUNCTION_CALLING"
     STRUCTURED_OUTPUT = "STRUCTURED_OUTPUT"
+
+
+class Behavior(str, Enum):
+    RAISE = "raise"
+    RETURN = "return"
