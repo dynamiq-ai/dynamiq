@@ -1,3 +1,4 @@
+import inspect
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
@@ -7,7 +8,7 @@ from queue import Empty
 from typing import Any, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler
@@ -148,6 +149,34 @@ class NodeMetadata(BaseModel):
     label: str | None = None
 
 
+class NodeOutputReference(BaseModel):
+    """
+    Represents a reference to a node output.
+
+    Attributes:
+        node (Node): The node to reference.
+        output_key (str): Key for the output.
+    """
+
+    node: "Node"
+    output_key: str
+
+
+class NodeOutputReferences:
+    """
+    Provides output references for a node.
+
+    Attributes:
+        node (Node): The node to provide output references for.
+    """
+
+    def __init__(self, node: "Node"):
+        self.node = node
+
+    def __getattr__(self, key: Any):
+        return NodeOutputReference(node=self.node, output_key=key)
+
+
 class Node(BaseModel, Runnable, ABC):
     """
     Abstract base class for all nodes in the workflow.
@@ -172,6 +201,7 @@ class Node(BaseModel, Runnable, ABC):
     group: NodeGroup
     error_handling: ErrorHandling = ErrorHandling()
     input_transformer: InputTransformer = InputTransformer()
+    input_mapping: dict[str, Any] = {}
     output_transformer: OutputTransformer = OutputTransformer()
     caching: CachingConfig = CachingConfig()
     streaming: StreamingConfig = StreamingConfig()
@@ -181,12 +211,16 @@ class Node(BaseModel, Runnable, ABC):
     is_postponed_component_init: bool = False
     is_optimized_for_agents: bool = False
 
+    _output_references: NodeOutputReferences = PrivateAttr()
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if not self.is_postponed_component_init:
             self.init_components()
+
+        self._output_references = NodeOutputReferences(node=self)
 
     @computed_field
     @cached_property
@@ -265,6 +299,48 @@ class Node(BaseModel, Runnable, ABC):
                     depend=dep, depends_result=depends_result
                 )
 
+    def transform_input(self, input_data: dict, depends_result: dict[Any, RunnableResult]) -> dict:
+        """
+        Transform input data for the node.
+
+        Args:
+            input_data (dict): Input data for the node.
+            depends_result (dict): Results of dependent nodes.
+
+        Raises:
+            NodeException: If a dependency result is missing or input mapping fails.
+
+        Returns:
+            dict: Transformed input data.
+        """
+        # Apply input transformer
+        if self.input_transformer.path or self.input_transformer.selector:
+            depends_result_as_dict = {k: result.to_depend_dict() for k, result in depends_result.items()}
+            inputs = self.transform(input_data | depends_result_as_dict, self.input_transformer, self.id)
+        else:
+            inputs = dict(input_data)
+
+        # Apply input bindings
+        for key, value in self.input_mapping.items():
+            if isinstance(value, NodeOutputReference):
+                depend_result = depends_result.get(value.node.id)
+                if not depend_result:
+                    raise NodeException(message=f"Dependency {value.node.id}: result not found.")
+                if value.output_key not in depend_result.output:
+                    raise NodeException(message=f"Dependency {value.node.id} output {value.output_key}: not found.")
+
+                inputs[key] = depend_result.output[value.output_key]
+
+            elif callable(value):
+                try:
+                    inputs[key] = value(inputs, {d_id: result.output for d_id, result in depends_result.items()})
+                except Exception:
+                    raise NodeException(message=f"Input mapping {key}: failed.")
+            else:
+                inputs[key] = value
+
+        return inputs
+
     def init_components(
         self, connection_manager: ConnectionManager = ConnectionManager()
     ):
@@ -293,18 +369,6 @@ class Node(BaseModel, Runnable, ABC):
         output = jsonpath_filter(data, transformer.path, node_id)
         output = jsonpath_mapper(output, transformer.selector, node_id)
         return output
-
-    def transform_input(self, input_data: Any) -> Any:
-        """
-        Transform input data for the node.
-
-        Args:
-            input_data (Any): Input data to transform.
-
-        Returns:
-            Any: Transformed input data.
-        """
-        return self.transform(input_data, self.input_transformer, self.id)
 
     def transform_output(self, output_data: Any) -> Any:
         """
@@ -371,11 +435,12 @@ class Node(BaseModel, Runnable, ABC):
         if depends_result is None:
             depends_result = {}
 
-        transformed_input = input_data | {k: result.to_tracing_depend_dict() for k, result in depends_result.items()}
-
         try:
             self.validate_depends(depends_result)
         except NodeException as e:
+            transformed_input = input_data | {
+                k: result.to_tracing_depend_dict() for k, result in depends_result.items()
+            }
             skip_data = {"failed_dependency": e.failed_depend.to_dict()}
             self.run_on_node_skip(
                 callbacks=config.callbacks,
@@ -391,10 +456,7 @@ class Node(BaseModel, Runnable, ABC):
             )
 
         try:
-            if self.input_transformer.path or self.input_transformer.selector:
-                depends_result_as_dict = {k: result.to_depend_dict() for k, result in depends_result.items()}
-
-                transformed_input = self.transform_input(input_data | depends_result_as_dict)
+            transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
 
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
             cache = cache_wf_entity(
@@ -782,6 +844,37 @@ class Node(BaseModel, Runnable, ABC):
         """
         self.streaming.enabled = True
         self.streaming.event = event
+        return self
+
+    @property
+    def outputs(self):
+        """
+        Provide the output references for the node.
+        """
+        return self._output_references
+
+    def inputs(self, **kwargs):
+        """
+        Add input mappings for the node.
+
+        Returns:
+            self: Enables method chaining.
+        """
+        # TODO: Check if add dependency automatically
+        for key, value in kwargs.items():
+            if callable(value):
+                params = inspect.signature(value).parameters
+                # Check if the function accepts the at least 'inputs' and 'outputs' parameters
+                if len(params) >= 2:
+                    return
+                # Check if the function accepts **kwargs
+                elif params and list(params.values())[0].kind == inspect.Parameter.VAR_KEYWORD:
+                    return
+                raise ValueError(
+                    f"Input function '{value.__name__}' must accept parameters 'inputs' and 'outputs' or **kwargs."
+                )
+
+            self.input_mapping[key] = value
         return self
 
 
