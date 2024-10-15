@@ -1,24 +1,21 @@
-import json
+import re
 
 from dotenv import load_dotenv
 
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
+from dynamiq.nodes.agents.base import Agent
+from dynamiq.nodes.agents.orchestrators.graph import BaseContext, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
-from dynamiq.nodes.agents.orchestrators.graph import GraphOrchestrator, START, END, BaseContext
-
 from dynamiq.nodes.agents.react import ReActAgent
-
-from dynamiq.runnables import RunnableConfig
-from dynamiq.utils import JsonWorkflowEncoder
-from dynamiq.utils.logger import logger
-from examples.llm_setup import setup_llm
 from dynamiq.nodes.tools.function_tool import function_tool
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
-from dynamiq.nodes.agents.base import Agent
 from dynamiq.prompts import Message, Prompt
-import re
+from dynamiq.runnables import RunnableConfig
+from dynamiq.utils.logger import logger
+from examples.llm_setup import setup_llm
+
 
 class CustomToolAgent(Agent):
     def execute(
@@ -54,6 +51,7 @@ class CustomToolAgent(Agent):
 # Load environment variables
 load_dotenv()
 
+
 class ConciergeContext(BaseContext):
     authenticated: bool = False
     current_task: str = ''
@@ -84,7 +82,6 @@ def create_workflow() -> Workflow:
             """Useful for searching for a stock symbol given a free-form company name."""
             logger.info("Searching for stock symbol")
             return str.upper()
-
 
         stock_lookup_agent = ReActAgent(
             name="stock_lookup_agent",
@@ -150,11 +147,10 @@ def create_workflow() -> Workflow:
             },
             config=config,
         )
-        
+
         return result
-        
+
     def account_balance(ctx: ConciergeContext, **kwargs):
-    # Account Balance Agent
         @function_tool
         def get_account_id(account_name: str) -> str:
             """Useful for looking up an account ID."""
@@ -165,7 +161,7 @@ def create_workflow() -> Workflow:
         @function_tool
         def get_account_name() -> str:
             """Useful for looking up an account name."""
-            print(f"Looking up account for account name")
+            print("Looking up account for account name")
             account_name = "john123"
             return f"Account name is {account_name}"
 
@@ -182,14 +178,14 @@ def create_workflow() -> Workflow:
             logger.info("Account balance agent is checking if authenticated")
             return "User is authentificated"
 
-
         account_balance_agent = ReActAgent(
             name="account_balance_agent",
             role="""
             You are a helpful assistant that is looking up account balances.
             The user may not know the account ID of the account they're interested in,
             so you can help them look it up by the name of the account.
-            If they're trying to transfer money, they have to check their account balance first, which you can help with.
+            If they're trying to transfer money, they have to check their account balance\
+                  first, which you can help with.
             """,
             goal="Provide actions according to role",  # noqa: E501
             llm=llm,
@@ -239,7 +235,8 @@ def create_workflow() -> Workflow:
             You are a helpful assistant that transfers money between accounts.
             The user can only do this if they are authenticated, which you can check with the is_authenticated tool.
             If they aren't authenticated, tell them to authenticate first.
-            The user must also have looked up their account balance already, which you can check with the has_balance tool.
+            The user must also have looked up their account balance already,\
+                  which you can check with the has_balance tool.
             """,
             goal="Provide actions according to role",  # noqa: E501
             llm=llm,
@@ -256,6 +253,7 @@ def create_workflow() -> Workflow:
         return output
 
     human_feedback_tool = HumanFeedbackTool()
+
     def concierge(ctx: ConciergeContext, **kwargs):
         if ctx.current_task:
             return f"Proceed with task {ctx.current_task}"
@@ -264,39 +262,37 @@ def create_workflow() -> Workflow:
             result = human_feedback_tool.run(
                 input_data={
                     "input": (
-                "Welcome to financial system! How do you want to continue:"
-                "* looking up a stock price"
-                "* authenticating the user"
-                "* checking an account balance (requires authentication first)"
-                "* transferring money between accounts (requires authentication and checking an account balance first)")
+                        "Welcome to financial system! How do you want to continue:"
+                        "* looking up a stock price"
+                        "* authenticating the user"
+                        "* checking an account balance (requires authentication first)"
+                        "* transferring money between accounts (requires authentication"
+                        "and checking an account balance first)"
+                    )
                 },
             )
 
             output = result.output.get('content')
             ctx.current_task = output
             return output
-            
 
     llm = llm
     agent_manager = GraphAgentManager(llm=llm)
 
     graph_orchestrator = GraphOrchestrator(
-        manager=agent_manager,
-        final_summarizer=True,
-        context = ConciergeContext(),
-        initial_state = 'concierge'
+        manager=agent_manager, final_summarizer=True, context=ConciergeContext(), initial_state="concierge"
     )
-
 
     # Orchestration path function
     def orchestration(context: ConciergeContext):
-        
+
         formatted_prompt = f"""
             You are on orchestration agent.
-            Your job is to decide which state to run based on the current state of the user and what they've asked to do. 
+            Your job is to decide which state to run based on the current state of the user
+            and what they've asked to do.
             You run an next state by calling the appropriate state name.
             You do not need to call more than one state.
-            
+
             Just return name of the state you want to do next:
             * stock_lookup - To find stock price
             * transfer_money - To transfer money
@@ -309,10 +305,7 @@ def create_workflow() -> Workflow:
             Conversation history:
             {context.history}
             """
-        result = llm.run(input_data={},
-                prompt=Prompt(
-                messages=[Message(role="user", content=formatted_prompt)]
-                    ))
+        result = llm.run(input_data={}, prompt=Prompt(messages=[Message(role="user", content=formatted_prompt)]))
 
         pattern = r'\b(stock_lookup|transfer_money|authenticate|account_balance|END)\b'
         match = re.search(pattern, result.output['content'])
@@ -333,16 +326,15 @@ def create_workflow() -> Workflow:
     graph_orchestrator.add_node('account_balance', [account_balance])
 
     # Add path to other nodes through concierge
-    graph_orchestrator.add_conditional_edge('concierge', ['stock_lookup', 'transfer_money', 'authenticate', 'account_balance', END], orchestration)
+    graph_orchestrator.add_conditional_edge("concierge", orchestration)
 
     # Add path back from specialized states to concierge
     graph_orchestrator.add_edge('stock_lookup', 'concierge')
     graph_orchestrator.add_edge('authenticate', 'concierge')
 
-    # This states require authorization, orchestrator will not allow to get here without being authorized. 
+    # This states require authorization, orchestrator will not allow to get here without being authorized.
     graph_orchestrator.add_edge('account_balance', 'concierge')
     graph_orchestrator.add_edge('transfer_money', 'concierge')
-
 
     return Workflow(
         flow=Flow(nodes=[graph_orchestrator]),
