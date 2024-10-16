@@ -1,4 +1,5 @@
 import re
+
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import ScaleSerp
@@ -80,7 +81,6 @@ Explain that you are not able to find the answer and provide some suggestions fo
 # Setup models
 llm_mini = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", max_tokens=500, temperature=0.5)
 llm = setup_llm(model_provider="gpt", model_name="gpt-4o", max_tokens=3000, temperature=0.1)
-
 # Define agents and search tool
 agent_query_rephraser = SimpleAgent(
     id="agent_query_rephraser",

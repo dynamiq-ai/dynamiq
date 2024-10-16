@@ -1,6 +1,6 @@
 import time
 import streamlit as st
-from examples.use_case_search.server_via_dynamiq import process_query
+from examples.use_case_search.server import process_query
 
 
 def reset_conversation():

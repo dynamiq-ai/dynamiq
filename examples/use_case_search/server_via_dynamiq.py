@@ -1,6 +1,6 @@
 """
 This script demonstrates how to build an approach using dynamically deployed workflows.
-It utilizes three workflows: rephrase, search, and answer.
+It utilizes workflow from three steps: rephrase, search, and answer.
 - The rephrase workflow rephrases the input query using a simple agent.
 - The search workflow finds the answer using the SERP scale tool.
 - The answer workflow extracts the final answer from the search results and formats it based on the sources.
@@ -13,10 +13,7 @@ import requests
 
 from dynamiq.utils.logger import logger
 
-# Define endpoints for the deployed workflows
-ENDPOINT_REPHRASE = os.getenv("ENDPOINT_REPHRASE", "YOUR_REPHRASE_ENDPOINT")
-ENDPOINT_SEARCH = os.getenv("ENDPOINT_SEARCH", "YOUR_SEARCH_ENDPOINT")
-ENDPOINT_ANSWER = os.getenv("ENDPOINT_ANSWER", "YOUR_ANSWER_ENDPOINT")
+ENDPOINT = os.getenv("DYNAMIQ_ENDPOINT", "Your Dynamiq endpoint")
 TOKEN = os.getenv("DYNAMIQ_API_KEY")
 
 headers = {
@@ -55,21 +52,7 @@ def process_query(query: str):
     try:
         # Step 1: Rephrase the query
         payload = {"input": {"input": query}}
-        response = requests.post(ENDPOINT_REPHRASE, json=payload, headers=headers)  # nosec B113
-        response.raise_for_status()
-        rephrased_query = response.json()["output"]
-        logger.info(f"Rephrased Query: {rephrased_query}")
-
-        # Step 2: Search for results based on the rephrased query
-        payload_search = {"input": {"input": rephrased_query}}
-        response = requests.post(ENDPOINT_SEARCH, json=payload_search, headers=headers)  # nosec B113
-        response.raise_for_status()
-        search_result = response.json()["output"]["result"]
-        logger.info(f"Search Result: {search_result}")
-
-        # Step 3: Extract the final answer using search results and rephrased query
-        payload_answer = {"input": {"input": f"{search_result}\n{rephrased_query}"}}
-        response = requests.post(ENDPOINT_ANSWER, json=payload_answer, headers=headers)  # nosec B113
+        response = requests.post(ENDPOINT, json=payload, headers=headers)  # nosec B113
         response.raise_for_status()
         final_response = response.json()["output"]
         logger.info(f"Final Response: {final_response}")
