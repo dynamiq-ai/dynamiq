@@ -48,9 +48,14 @@ class InvalidActionException(RecoverableAgentException):
     pass
 
 
-class AgentMaxLoopsReached(RecoverableAgentException):
+class MaxLoopsExceededException(RecoverableAgentException):
     """
-    Exception raised when the agent reaches the maximum number of loops without a final answer.
+    Exception raised when the agent exceeds the maximum number of allowed loops.
+
+    This exception is recoverable, meaning the agent can continue after catching this exception.
     """
 
-    pass
+    def __init__(
+        self, message: str = "Maximum number of loops reached without finding a final answer.", recoverable: bool = True
+    ):
+        super().__init__(message, recoverable=recoverable)
