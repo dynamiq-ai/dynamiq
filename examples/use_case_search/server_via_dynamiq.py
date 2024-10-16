@@ -1,3 +1,11 @@
+"""
+This script demonstrates how to build an approach using dynamically deployed workflows.
+It utilizes three workflows: rephrase, search, and answer.
+- The rephrase workflow rephrases the input query using a simple agent.
+- The search workflow finds the answer using the SERP scale tool.
+- The answer workflow extracts the final answer from the search results and formats it based on the sources.
+"""
+
 import os
 import re
 
@@ -5,73 +13,84 @@ import requests
 
 from dynamiq.utils.logger import logger
 
-ENDPOINT_REPHRASE = "https://cce4b55a-bd05-46c5-a512-a601b092ff82.apps.sandbox.getdynamiq.ai"  # for example
-ENDPOINT_SEARCH = "https://cb7f4ed9-d2e0-4cc2-84be-b56d39daa859.apps.sandbox.getdynamiq.ai"  # for example
-ENDPOINT_ANSWER = "https://fc150f29-af76-47f6-8f1c-352cd8cb8660.apps.sandbox.getdynamiq.ai"  # for example
-token = os.getenv("DYNAMIQ_API_KEY")
+# Define endpoints for the deployed workflows
+ENDPOINT_REPHRASE = os.getenv("ENDPOINT_REPHRASE", "YOUR_REPHRASE_ENDPOINT")
+ENDPOINT_SEARCH = os.getenv("ENDPOINT_SEARCH", "YOUR_SEARCH_ENDPOINT")
+ENDPOINT_ANSWER = os.getenv("ENDPOINT_ANSWER", "YOUR_ANSWER_ENDPOINT")
+TOKEN = os.getenv("DYNAMIQ_API_KEY")
 
 headers = {
     "Content-Type": "application/json",
-    "Authorization": f"Bearer {token}",
+    "Authorization": f"Bearer {TOKEN}",
 }
 
 
-def extract_answer(text):
-    answer_match = re.search(r"<answer>(.*?)</answer>", text, re.DOTALL)
-    if answer_match:
-        return answer_match.group(1).strip()
-    return None
+def extract_tag_content(text, tag):
+    """
+    Extract content wrapped within specific XML-like tags from the text.
 
+    Args:
+        text (str): The input text containing the tag.
+        tag (str): The tag name to extract content from.
 
-def extract_source(text):
-    answer_match = re.search(r"<sources>(.*?)</sources>", text, re.DOTALL)
-    if answer_match:
-        return answer_match.group(1).strip()
-    return None
+    Returns:
+        str: The content inside the tag if found, otherwise None.
+    """
+    pattern = rf"<{tag}>(.*?)</{tag}>"
+    match = re.search(pattern, text, re.DOTALL)
+    return match.group(1).strip() if match else None
 
 
 def process_query(query: str):
     """
-    Generator that processes the query and streams the result chunk by chunk.
-    This function yields each chunk to simulate real-time streaming of data.
+    Process the query using the deployed workflows and yield chunks of the result.
+    This function simulates real-time streaming of data.
+
+    Args:
+        query (str): The query string to process.
+
+    Yields:
+        str: Chunks of the final answer and sources.
     """
-    # Run the workflow with the provided query
-    payload = {
-        "input": {
-            "input": query,
-        }
-    }
-    response_refactor = requests.post(ENDPOINT_REPHRASE, json=payload, headers=headers, stream=False)  # nosec B113
-    response_refactor = response_refactor.json()["output"]
-    logger.info(f"response_refactor: {response_refactor}")
-    payload_search = {
-        "input": {
-            "input": response_refactor,
-        }
-    }
+    try:
+        # Step 1: Rephrase the query
+        payload = {"input": {"input": query}}
+        response = requests.post(ENDPOINT_REPHRASE, json=payload, headers=headers)  # nosec B113
+        response.raise_for_status()
+        rephrased_query = response.json()["output"]
+        logger.info(f"Rephrased Query: {rephrased_query}")
 
-    response_search = requests.post(ENDPOINT_SEARCH, json=payload_search, headers=headers, stream=False)  # nosec B113
-    response_search = response_search.json()["output"]["result"]
-    logger.info(f"response_search: {response_search}")
+        # Step 2: Search for results based on the rephrased query
+        payload_search = {"input": {"input": rephrased_query}}
+        response = requests.post(ENDPOINT_SEARCH, json=payload_search, headers=headers)  # nosec B113
+        response.raise_for_status()
+        search_result = response.json()["output"]["result"]
+        logger.info(f"Search Result: {search_result}")
 
-    payload_answer = {
-        "input": {
-            "input": response_search + "\n" + response_refactor,
-        }
-    }
+        # Step 3: Extract the final answer using search results and rephrased query
+        payload_answer = {"input": {"input": f"{search_result}\n{rephrased_query}"}}
+        response = requests.post(ENDPOINT_ANSWER, json=payload_answer, headers=headers)  # nosec B113
+        response.raise_for_status()
+        final_response = response.json()["output"]
+        logger.info(f"Final Response: {final_response}")
 
-    response_answer = requests.post(ENDPOINT_ANSWER, json=payload_answer, headers=headers, stream=False)  # nosec B113
+        answer = extract_tag_content(final_response, "answer")
+        sources = extract_tag_content(final_response, "sources")
 
-    response_answer = response_answer.json()["output"]
-    logger.info(f"response_answer: {response_answer}")
+        # Stream sources first
+        yield "Sources:\n\n"
+        for source in sources.split("\n"):
+            yield source + "\n\n"
 
-    result_answer = extract_answer(response_answer)
-    result_sources = extract_source(response_answer)
+        # Stream the answer
+        yield "\n\nAnswer:\n\n"
+        for chunk in answer.split(" "):
+            yield chunk + " "
 
-    result_answer_chunks = result_answer.split(" ")
-    result_sources_chunks = [chunk + "\n\n" for chunk in result_sources.split("\n")]
+    except requests.RequestException as e:
+        logger.error(f"HTTP request failed: {e}")
+        yield "Error: Unable to process the query."
 
-    yield from ["Sources:\n\n"]
-    yield from result_sources_chunks
-    yield from ["\n\nAnswer:\n\n"]
-    yield from result_answer_chunks
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        yield "Error: An unexpected error occurred."

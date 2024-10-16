@@ -1,6 +1,4 @@
-import os
 import re
-
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import ScaleSerp
@@ -13,21 +11,22 @@ from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
 
-def extract_answer(text):
-    answer_match = re.search(r"<answer>(.*?)</answer>", text, re.DOTALL)
-    if answer_match:
-        return answer_match.group(1).strip()
-    return None
+def extract_tag_content(text, tag):
+    """
+    Extract content wrapped within specific XML-like tags from the text.
+
+    Args:
+        text (str): The input text containing the tag.
+        tag (str): The tag name to extract content from.
+
+    Returns:
+        str: The content inside the tag if found, otherwise None.
+    """
+    pattern = rf"<{tag}>(.*?)</{tag}>"
+    match = re.search(pattern, text, re.DOTALL)
+    return match.group(1).strip() if match else None
 
 
-def extract_source(text):
-    answer_match = re.search(r"<sources>(.*?)</sources>", text, re.DOTALL)
-    if answer_match:
-        return answer_match.group(1).strip()
-    return None
-
-
-os.environ["SERP_API_KEY"] = os.getenv("SERP_API_KEY_DYN")
 AGENT_QUERY_ROLE = """
 You are an AI assistant tasked with processing and refactoring search queries.
 Your goal is to rewrite queries to be more concise, clear, and useful for search engines. Follow these guidelines:
@@ -78,10 +77,11 @@ If there are errors with the query or you are unable to craft a response, provid
 Explain that you are not able to find the answer and provide some suggestions for the user to improve the query.
 """  # noqa E501
 
-
+# Setup models
 llm_mini = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", max_tokens=500, temperature=0.5)
 llm = setup_llm(model_provider="gpt", model_name="gpt-4o", max_tokens=3000, temperature=0.1)
 
+# Define agents and search tool
 agent_query_rephraser = SimpleAgent(
     id="agent_query_rephraser",
     name="agent_query_rephraser",
@@ -113,28 +113,44 @@ agent_answer_synthesizer.input_transformer = InputTransformer(
     }
 )
 
-
 tracing = TracingCallbackHandler()
 wf = Workflow(flow=Flow(nodes=[agent_query_rephraser, search_tool, agent_answer_synthesizer]), callbacks=[tracing])
 
 
 def process_query(query: str):
     """
-    Generator that processes the query and streams the result chunk by chunk.
-    This function yields each chunk to simulate real-time streaming of data.
+    Process the user's query through a workflow that rephrases, searches, and synthesizes an answer.
+    Yields results chunk by chunk to simulate real-time streaming of data.
+
+    Args:
+        query (str): The original user query.
+
+    Yields:
+        str: Chunks of the final result (sources and answer).
     """
-    # Run the workflow with the provided query
-    result = wf.run(input_data={"input": query}, config=RunnableConfig(callbacks=[tracing]))
+    try:
+        # Run the workflow with the provided query
+        result = wf.run(input_data={"input": query}, config=RunnableConfig(callbacks=[tracing]))
 
-    result = result.output[agent_answer_synthesizer.id]["output"].get("content")
-    logger.info(f"result: {result}")
-    result_answer = extract_answer(result)
-    result_sources = extract_source(result)
+        output_content = result.output[agent_answer_synthesizer.id]["output"].get("content")
+        logger.info(f"Workflow result: {output_content}")
 
-    result_answer_chunks = result_answer.split(" ")
-    result_sources_chunks = [chunk + "\n\n" for chunk in result_sources.split("\n")]
+        answer = extract_tag_content(output_content, "answer")
+        sources = extract_tag_content(output_content, "sources")
 
-    yield from ["Sources:\n\n"]
-    yield from result_sources_chunks
-    yield from ["\n\nAnswer:\n\n"]
-    yield from result_answer_chunks
+        if answer and sources:
+            # Stream the sources first
+            yield "Sources:\n\n"
+            for source_chunk in sources.split("\n"):
+                yield source_chunk + "\n\n"
+
+            # Stream the answer next
+            yield "\n\nAnswer:\n\n"
+            for answer_chunk in answer.split(" "):
+                yield answer_chunk + " "
+        else:
+            yield "Error: Unable to extract answer or sources from the workflow output."
+
+    except Exception as e:
+        logger.error(f"An error occurred while processing the query: {e}")
+        yield f"Error: {str(e)}"
