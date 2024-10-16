@@ -141,11 +141,11 @@ class ScaleSerpTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result = (
-                "<Sources with URLs>\n",
-                "\n".join(sources_with_url),
-                "</Sources with URLs>\n\n<Search results>",
-                formatted_results,
-                "</Search results>",
+                "<Sources with URLs>\n"
+                + "\n".join(sources_with_url)
+                + "</Sources with URLs>\n\n<Search results>"
+                + formatted_results
+                + "</Search results>"
             )
         else:
             urls = [result.get("link") for result in content_results]
