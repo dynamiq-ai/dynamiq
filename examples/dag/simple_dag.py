@@ -156,10 +156,7 @@ with Workflow() as wf:
 
     # OpenAI node 5 depending on OpenAI node 3 and OpenAI node 4 and used custom inputs and transformations
     def merge_and_short_content(inputs: dict, outputs: dict[str, dict]):
-        # TODO: Improve outputs structure
-        return (
-            f"- {outputs[openai_4_node.id]['content'][:200]}" f"\n\n" f"- {outputs[openai_4_node.id]['content'][:200]}"
-        )
+        return f"- {outputs[openai_4_node.id]['content'][:200]} \n - {outputs[openai_4_node.id]['content'][:200]}"
 
     openai_5_node = (
         OpenAI(

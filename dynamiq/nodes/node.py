@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
-from typing import Any, Union
+from typing import Any, Callable, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
@@ -227,9 +227,8 @@ class Node(BaseModel, Runnable, ABC):
     def type(self) -> str:
         return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
-    def _validate_dependency_status(
-        self, depend: NodeDependency, depends_result: dict[str, RunnableResult]
-    ):
+    @staticmethod
+    def _validate_dependency_status(depend: NodeDependency, depends_result: dict[str, RunnableResult]):
         """
         Validate the status of a dependency.
 
@@ -258,9 +257,8 @@ class Node(BaseModel, Runnable, ABC):
                 failed_depend=depend, message=f"Dependency {depend.node.id}: skipped"
             )
 
-    def _validate_dependency_condition(
-        self, depend: NodeDependency, depends_result: dict[str, RunnableResult]
-    ):
+    @staticmethod
+    def _validate_dependency_condition(depend: NodeDependency, depends_result: dict[str, RunnableResult]):
         """
         Validate the condition of a dependency.
 
@@ -281,6 +279,29 @@ class Node(BaseModel, Runnable, ABC):
                     failed_depend=depend,
                     message=f"Dependency {depend.node.id} condition {depend.option}: result is false",
                 )
+
+    @staticmethod
+    def _validate_input_mapping_value_func(func: Callable):
+        """
+        Validate input mapping value function.
+
+        Args:
+            func (Callable): Input mapping value function.
+
+        Raises:
+            ValueError: If the function does not accept 'inputs' and 'outputs' or **kwargs.
+        """
+        params = inspect.signature(func).parameters
+
+        # Check if the function accepts the at least 'inputs' and 'outputs' parameters
+        if len(params) >= 2:
+            return
+
+        # Check if the function accepts **kwargs
+        elif params and list(params.values())[0].kind == inspect.Parameter.VAR_KEYWORD:
+            return
+
+        raise ValueError(f"Input function '{func.__name__}' must accept parameters 'inputs' and 'outputs' or **kwargs.")
 
     def validate_depends(self, depends_result):
         """
@@ -389,6 +410,7 @@ class Node(BaseModel, Runnable, ABC):
             "vector_store": True,
             "connection": {"api_key": True},
             "depends": True,
+            "input_mapping": True,
         }
 
     def to_dict(self, **kwargs) -> dict:
@@ -403,6 +425,7 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs,
         )
         data["depends"] = [depend.to_dict(**kwargs) for depend in self.depends]
+        data["input_mapping"] = format_value(self.input_mapping)
         return data
 
     def run(
@@ -859,20 +882,48 @@ class Node(BaseModel, Runnable, ABC):
 
         Returns:
             self: Enables method chaining.
+
+        Examples:
+            from dynamiq.nodes.llms import OpenAI
+
+            openai_1_node = OpenAI(...)
+            openai_2_node = OpenAI(...)
+            openai_3_node = OpenAI(...)
+
+            def merge_and_short_content(inputs: dict, outputs: dict[str, dict]):
+                return (
+                    f"- {outputs[openai_1_node.id]['content'][:200]} \n - {outputs[openai_2_node.id]['content'][:200]}"
+                )
+
+            openai_4_node = (
+                OpenAI(
+                    ...
+                    prompt=prompts.Prompt(
+                        messages=[
+                            prompts.Message(
+                                role="user",
+                                content=(
+                                    "Please simplify that information for {{purpose}}:\n"
+                                    "{{extra_instructions}}\n"
+                                    "{{content}}\n"
+                                    "{{extra_content}}"
+                                ),
+                            )
+                        ],
+                    ),
+                )
+                .inputs(
+                    purpose="10 years kids",
+                    extra_instructions="Please return information in readable format.",
+                    content=merge_and_short_content,
+                    extra_content=openai_3_node.outputs.content,
+                )
+                .depends_on([openai_1_node, openai_2_node, openai_3_node])
+            )
         """
-        # TODO: Check if add dependency automatically
         for key, value in kwargs.items():
             if callable(value):
-                params = inspect.signature(value).parameters
-                # Check if the function accepts the at least 'inputs' and 'outputs' parameters
-                if len(params) >= 2:
-                    return
-                # Check if the function accepts **kwargs
-                elif params and list(params.values())[0].kind == inspect.Parameter.VAR_KEYWORD:
-                    return
-                raise ValueError(
-                    f"Input function '{value.__name__}' must accept parameters 'inputs' and 'outputs' or **kwargs."
-                )
+                self._validate_input_mapping_value_func(value)
 
             self.input_mapping[key] = value
         return self
