@@ -43,5 +43,7 @@ def block_card():
     return jsonify({"response": "Card was blocked successfully."})
 
 
+# More endpoints
+
 if __name__ == "__main__":
     app.run(port=5004)

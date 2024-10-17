@@ -1,6 +1,6 @@
 # Customer Support Workflow Example
 
-This directory contains an example of a bank ustomer support workflow built using Dynamiq agents and tools. The workflow demonstrates how to integrate LLM Agents with RAG to handle different types of customer requests, such as accessing internal bank APIs and retrieving information from documentation.
+This directory contains an example of a bank customer support workflow built using Dynamiq agents and tools. The workflow demonstrates how to integrate LLM Agents with RAG to handle different types of customer requests by accessing internal bank API and its documentation.
 
 ## Components
 
@@ -16,15 +16,15 @@ This directory contains an example of a bank ustomer support workflow built usin
 
 ### `main.py`
 - Defines the main workflow logic.
-- Creates instances of `ReActAgent` for handling API and documentation queries.
+- Creates workflow with instances of `ReActAgent` for handling API and documentation queries.
 - Executes the workflow with a sample input.
 
 ## Workflow Logic
 
 1. The user provides a query (e.g., "fast block my card").
 2. `RAG Agent` is invoked to find relevant documentation how to proceed with request.
-3. `API Agent` starts with documentation provided by `RAG Agent`. It will gather required informatiom from user and proceed with API.
-4. Upon completion of the operation, brief updates regarding the operation and its status will be provided.
+3. `API Agent` starts with documentation provided by `RAG Agent`. It will gather required informatiom from user and execute operation with API.
+4. Upon completion of the operation, a concise summary of the request and its status will be provided.
 
 ## Usage
 
@@ -37,7 +37,7 @@ This directory contains an example of a bank ustomer support workflow built usin
 
 ## Key Concepts
 
-- **Agents Flow:** Creating flow of multiple agents to solve complex tasks.
+- **Workflows:** Creating flow of multiple agents to solve complex tasks.
 - **Retrieval-Augmented Generation (RAG):** Combining information retrieval with language model generation to provide more accurate and comprehensive answers.
 - **Tool Usage:** Leveraging specialized tools to extend the capabilities of agents.
 - **Human Feedback:** Integrating human feedback to improve the accuracy and reliability of agents.
