@@ -339,7 +339,7 @@ class Node(BaseModel, Runnable, ABC):
             depends_result_as_dict = {k: result.to_depend_dict() for k, result in depends_result.items()}
             inputs = self.transform(input_data | depends_result_as_dict, self.input_transformer, self.id)
         else:
-            inputs = dict(input_data)
+            inputs = input_data | {k: result.to_tracing_depend_dict() for k, result in depends_result.items()}
 
         # Apply input bindings
         for key, value in self.input_mapping.items():
@@ -913,7 +913,7 @@ class Node(BaseModel, Runnable, ABC):
                     ),
                 )
                 .inputs(
-                    purpose="10 years kids",
+                    purpose="10 years old kids",
                     extra_instructions="Please return information in readable format.",
                     content=merge_and_short_content,
                     extra_content=openai_3_node.outputs.content,

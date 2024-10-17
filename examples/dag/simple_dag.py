@@ -178,7 +178,7 @@ with Workflow() as wf:
             ),
         )
         .inputs(
-            purpose="10 years kids",
+            purpose="10 years old kids",
             extra_instructions="Please return information in readable format.",
             content=merge_and_short_content,
             extra_content=openai_2_node.outputs.content,

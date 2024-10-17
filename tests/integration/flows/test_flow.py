@@ -75,7 +75,7 @@ def test_workflow_with_depend_nodes_with_tracing(
         input=expected_input_openai,
         output=expected_output_openai,
     )
-    expected_input_anthropic = input_data
+    expected_input_anthropic = input_data | {openai_node.id: expected_result_openai.to_tracing_depend_dict()}
     expected_output_anthropic = {"content": mock_llm_response_text, "tool_calls": None}
     expected_result_anthropic = RunnableResult(
         status=RunnableStatus.SUCCESS,
@@ -83,7 +83,9 @@ def test_workflow_with_depend_nodes_with_tracing(
         output=expected_output_anthropic,
     )
 
-    expected_input_output = input_data
+    expected_input_output = expected_input_anthropic | {
+        anthropic_node_with_dependency.id: expected_result_anthropic.to_tracing_depend_dict()
+    }
     expected_result_output = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=expected_input_output,
@@ -381,8 +383,10 @@ def test_workflow_with_input_mappings(
         input=expected_input_openai,
         output=expected_output_openai,
     )
-    expected_input_output_node = input_data | dict(
-        test="a", openai=mock_llm_response_text, is_openai_output=True, multiplied_value_a=input_data["a"] * 10
+    expected_input_output_node = (
+        input_data
+        | {openai_node.id: expected_result_openai.to_tracing_depend_dict()}
+        | dict(test="a", openai=mock_llm_response_text, is_openai_output=True, multiplied_value_a=input_data["a"] * 10)
     )
     expected_output_output_node = expected_input_output_node
     expected_result_output_node = RunnableResult(
