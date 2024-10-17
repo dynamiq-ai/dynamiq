@@ -231,7 +231,6 @@ Workflow that takes input PDF files, pre-processes them, converts to vector embe
 from io import BytesIO
 
 from dynamiq import Workflow
-from dynamiq.nodes import InputTransformer
 from dynamiq.connections import OpenAI as OpenAIConnection, Pinecone as PineconeConnection
 from dynamiq.nodes.converters import PyPDFConverter
 from dynamiq.nodes.splitters.document import DocumentSplitter
@@ -245,41 +244,38 @@ converter = PyPDFConverter(document_creation_mode="one-doc-per-page")
 rag_wf.flow.add_nodes(converter)  # add node to the DAG
 
 # Document splitter
-document_splitter = DocumentSplitter(
-    split_by="sentence",
-    split_length=10,
-    split_overlap=1,
-    input_transformer=InputTransformer(
-        selector={
-            "documents": f"${[converter.id]}.output.documents",
-        },  # map output of the previous node to the expected input of the current node
-    ),
-).depends_on(converter)
+document_splitter = (
+    DocumentSplitter(
+        split_by="sentence",
+        split_length=10,
+        split_overlap=1,
+    )
+    .inputs(documents=converter.outputs.documents)  # map converter node output to the expected input of the current node
+    .depends_on(converter)
+)
 rag_wf.flow.add_nodes(document_splitter)
 
 # OpenAI vector embeddings
-embedder = OpenAIDocumentEmbedder(
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
-    model="text-embedding-3-small",
-    input_transformer=InputTransformer(
-        selector={
-            "documents": f"${[document_splitter.id]}.output.documents",
-        },
-    ),
-).depends_on(document_splitter)
+embedder = (
+    OpenAIDocumentEmbedder(
+        connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+        model="text-embedding-3-small",
+    )
+    .inputs(documents=document_splitter.outputs.documents)
+    .depends_on(document_splitter)
+)
 rag_wf.flow.add_nodes(embedder)
 
 # Pinecone vector storage
-vector_store = PineconeDocumentWriter(
-    connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
-    index_name="default",
-    dimension=1536,
-    input_transformer=InputTransformer(
-        selector={
-            "documents": f"${[embedder.id]}.output.documents",
-        },
-    ),
-).depends_on(embedder)
+vector_store = (
+    PineconeDocumentWriter(
+        connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
+        index_name="default",
+        dimension=1536,
+    )
+    .inputs(documents=embedder.outputs.documents)
+    .depends_on(embedder)
+)
 rag_wf.flow.add_nodes(vector_store)
 
 # Prepare input PDF files
@@ -323,17 +319,16 @@ embedder = OpenAITextEmbedder(
 retrieval_wf.flow.add_nodes(embedder)
 
 # Pinecone document retriever
-document_retriever = PineconeDocumentRetriever(
-    connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
-    index_name="default",
-    dimension=1536,
-    top_k=5,
-    input_transformer=InputTransformer(
-        selector={
-            "embedding": f"${[embedder.id]}.output.embedding",
-        },
-    ),
-).depends_on(embedder)
+document_retriever = (
+    PineconeDocumentRetriever(
+        connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
+        index_name="default",
+        dimension=1536,
+        top_k=5,
+    )
+    .inputs(embedding=embedder.outputs.embedding)
+    .depends_on(embedder)
+)
 retrieval_wf.flow.add_nodes(document_retriever)
 
 # Define the prompt template
@@ -352,17 +347,18 @@ Context:
 # OpenAI LLM for answer generation
 prompt = Prompt(messages=[Message(content=prompt_template, role="user")])
 
-answer_generator = OpenAI(
-    connection=openai_connection,
-    model="gpt-4o",
-    prompt=prompt,
-    input_transformer=InputTransformer(
-        selector={
-            "documents": f"${[document_retriever.id]}.output.documents",
-            "query": f"${[embedder.id]}.output.query",
-        },  # take documents from the vector store node and query from the embedder
-    ),
-).depends_on(document_retriever)
+answer_generator = (
+    OpenAI(
+        connection=openai_connection,
+        model="gpt-4o",
+        prompt=prompt,
+    )
+    .inputs(
+        documents=document_retriever.outputs.documents,
+        query=embedder.outputs.query,
+    )  # take documents from the vector store node and query from the embedder
+    .depends_on(document_retriever)
+)
 retrieval_wf.flow.add_nodes(answer_generator)
 
 # Run the RAG retrieval flow

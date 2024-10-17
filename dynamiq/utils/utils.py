@@ -91,11 +91,7 @@ class JsonWorkflowEncoder(JSONEncoder):
             return str(obj)
         if isinstance(obj, (datetime, date)):
             return obj.isoformat()
-        if isinstance(obj, BytesIO):
-            return getattr(obj, "name", None) or encode_bytes(obj.getvalue())
-        if isinstance(obj, bytes):
-            return encode_bytes(obj)
-        if isinstance(obj, Exception):
+        if isinstance(obj, (BytesIO, bytes, Exception)) or callable(obj):
             return format_value(obj)
         return JSONEncoder.default(self, obj)
 
@@ -144,6 +140,8 @@ def format_value(value: Any, skip_format_types: set = None, force_format_types: 
     if isinstance(value, Exception):
         recoverable = bool(kwargs.get("recoverable"))
         return {"content": f"{str(value)}", "error_type": type(value).__name__, "recoverable": recoverable}
+    if callable(value):
+        return f"func: {getattr(value, '__name__', str(value))}"
 
     try:
         return RootModel[type(value)](value).model_dump()
