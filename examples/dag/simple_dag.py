@@ -154,6 +154,39 @@ with Workflow() as wf:
     ).depends_on(openai_3_node)
     wf.flow.add_nodes(openai_4_node)
 
+    # OpenAI node 5 depending on OpenAI node 3 and OpenAI node 4 and used custom inputs and transformations
+    def merge_and_short_content(inputs: dict, outputs: dict[str, dict]):
+        return f"- {outputs[openai_4_node.id]['content'][:200]} \n - {outputs[openai_4_node.id]['content'][:200]}"
+
+    openai_5_node = (
+        OpenAI(
+            name="openai-5",
+            model="gpt-3.5-turbo",
+            connection=openai_connection,
+            prompt=prompts.Prompt(
+                messages=[
+                    prompts.Message(
+                        role="user",
+                        content=(
+                            "Please simplify that information for {{purpose}}:\n"
+                            "{{extra_instructions}}\n"
+                            "{{content}}\n"
+                            "{{extra_content}}"
+                        ),
+                    )
+                ],
+            ),
+        )
+        .inputs(
+            purpose="10 years old kids",
+            extra_instructions="Please return information in readable format.",
+            content=merge_and_short_content,
+            extra_content=openai_2_node.outputs.content,
+        )
+        .depends_on([openai_2_node, openai_3_node, openai_4_node])
+    )
+    wf.flow.add_nodes(openai_5_node)
+
     wf.run(input_data={"date": "4 May 2024", "next_date": "6 May 2024"})
 
     logger.info(f"Workflow {wf.id} finished. Results: ")
