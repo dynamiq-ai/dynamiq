@@ -150,9 +150,9 @@ class Agent(Node):
             self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
             self._retrieve_memory(input_data)
 
-        agent_files = input_data.get("files", self.files)
-        if agent_files:
-            self.files = agent_files
+        files = input_data.get("files", self.files)
+        if files:
+            self.files = files
             self._prompt_variables["file_description"] = self.file_description
 
         self._prompt_variables.update(input_data)
@@ -282,7 +282,7 @@ class Agent(Node):
         """Runs a specific tool with the given input."""
         logger.debug(f"Agent {self.name} - {self.id}: Running tool '{tool.name}'")
         if self.files:
-            if tool.has_access_for_files is True:
+            if tool.support_files is True:
                 tool_input["files"] = self.files
 
         tool_result = tool.run(

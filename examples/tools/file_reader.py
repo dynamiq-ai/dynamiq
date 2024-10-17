@@ -44,7 +44,7 @@ class FileReadTool(Node):
     files: list[tuple[str | bytes, str]] | None = None
     show_partial: bool = True
     max_display_length: int = 500
-    has_access_for_files: bool = True
+    support_files: bool = True
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

@@ -181,7 +181,7 @@ class Node(BaseModel, Runnable, ABC):
 
     is_postponed_component_init: bool = False
     is_optimized_for_agents: bool = False
-    has_access_for_files: bool = False
+    support_files: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
