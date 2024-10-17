@@ -3,6 +3,11 @@ from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from examples.llm_setup import setup_llm
 
+AGENT_ROLE = """
+Senior Data Scientist and Programmer with ability to write a well written python code inside
+<code> tags and you have access to python tool.
+Goal is to provide well explained answer to requests
+"""  # noqa: E501
 if __name__ == "__main__":
     tool = E2BInterpreterTool(
         connection=E2B(),
@@ -11,13 +16,8 @@ if __name__ == "__main__":
     llm = setup_llm()
 
     # Create the agent with tools and configuration
-    agent = ReActAgent(
-        name="React Agent",
-        llm=llm,
-        tools=[tool],
-        role="Senior Data Scientist and Programmer with ability to write a well written python code inside <code> tags and you have access to python tool",  # noqa: E501
-        goal="provide well explained final answers",
-    )
+    agent = ReActAgent(name="React Agent", llm=llm, tools=[tool], role=AGENT_ROLE)
+
     result_dice_game = agent.run(
         input_data={
             "input": "Add the first 10 numbers and tell if the result is prime, use functions",

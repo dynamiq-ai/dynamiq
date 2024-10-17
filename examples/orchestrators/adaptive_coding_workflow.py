@@ -12,6 +12,10 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
 
+AGENT_ROLE = """
+Expert Agent with high programming skills, he can solve any problem using coding skills.
+Goal is to provide the best solution for request, using all his algorithmic knowledge and coding skills
+"""  # noqa: E501
 # simple coding tasks
 INPUT_TASK = """
 Write code in Python that fits linear regression model between 4 features (number of rooms, size of a house, etc) and price of a house from the data.
@@ -33,8 +37,7 @@ def run_coding_task():
         name="Coding Agent",
         llm=llm,
         tools=[tool_python],
-        role="Expert Agent with high programming skills, he can solve any problem using coding skills",
-        goal="provide the best solution for request, using all his algorithmic knowledge and coding skills",
+        role=AGENT_ROLE,
         max_loops=15,
     )
 

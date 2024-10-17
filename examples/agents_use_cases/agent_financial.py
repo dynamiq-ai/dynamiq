@@ -5,8 +5,7 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
-AGENT_ROLE = "A helpful and general-purpose AI assistant that has strong language skills, Python skills, and Linux command line skills."  # noqa: E501
-AGENT_GOAL = """is to provide concise answer to user,
+AGENT_ROLE = """A helpful and general-purpose AI assistant that has strong language skills, Python skills, and Linux command line skills.Goal is to provide concise answer to user,
               also try to generate code for solve task, then run it accurately
               before answering try to create plan for solving task
               you can search any api, and then use any of free open-source APi that dont require authorization
@@ -23,7 +22,6 @@ if __name__ == "__main__":
         llm=llm,
         tools=[tool_code],
         role=AGENT_ROLE,
-        goal=AGENT_GOAL,
         inference_mode=InferenceMode.XML,
     )
 

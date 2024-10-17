@@ -15,6 +15,9 @@ from examples.trip_planner.prompts import generate_customer_prompt
 
 # Please use your own file path
 OUTPUT_FILE_PATH = "trip.md"
+AGENT_SELECTION_CITY_ROLE = """An expert in analyzing travel data to pick ideal destinations. Goal is to help select the best city for a trip based on specific criteria such as weather patterns, seasonal events, and travel costs."""  # noqa: E501
+AGENT_CITY_GUIDE_ROLE = """An expert in gathering information about a city. Goal is to compile an in-depth guide for someone traveling to a city, including key attractions, local customs, special events, and daily activity recommendations."""  # noqa: E501
+AGENT_WRITER_ROLE = """An expert in creating detailed travel guides. Goal is to write a detailed travel guide for a city, including key attractions, local customs, special events, and daily activity recommendations."""  # noqa: E501
 
 
 def choose_provider(model_type, model_name):
@@ -47,10 +50,7 @@ def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini") -> d
     # Create agents
     agent_selection_city = ReActAgent(
         name="City Selection Expert",
-        role="An expert in analyzing travel data to pick ideal destinations",
-        goal=(
-            "help select the best city for a trip based on specific criteria such as weather patterns, seasonal events, and travel costs."  # noqa: E501
-        ),
+        role=AGENT_SELECTION_CITY_ROLE,
         llm=llm_agent,
         tools=[tool_search],
         max_loops=10,
@@ -58,10 +58,7 @@ def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini") -> d
 
     agent_city_guide = ReActAgent(
         name="City Guide Expert",
-        role="An expert in gathering information about a city",
-        goal=(
-            "compile an in-depth guide for someone traveling to a city, including key attractions, local customs, special events, and daily activity recommendations."  # noqa: E501
-        ),
+        role=AGENT_CITY_GUIDE_ROLE,
         llm=llm_agent,
         tools=[tool_search],
         max_loops=10,
@@ -69,8 +66,7 @@ def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini") -> d
 
     agent_writer = Agent(
         name="City Guide Writer",
-        role="An expert in creating detailed travel guides",
-        goal="write a detailed travel guide for a city, including key attractions, local customs, special events, and daily activity recommendations.",  # noqa: E501
+        role=AGENT_WRITER_ROLE,
         llm=llm_agent,
     )
 

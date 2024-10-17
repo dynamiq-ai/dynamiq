@@ -85,8 +85,7 @@ def main():
     # Create a ReActAgent for handling internal bank API queries
     agent_bank_support = ReActAgent(
         name="Bank Support: Internal API",
-        role="customer support assistant for Internal Bank",
-        goal="help with provided customer requests",
+        role="customer support assistant for Internal Bank, goal is to help with provided customer requests",  # noqa: E501
         llm=llm_react_agent,
         tools=[BankApiSim(), HumanFeedbackTool()],
     )
@@ -94,8 +93,7 @@ def main():
     # Create a ReActAgent for handling bank documentation queries
     agent_bank_documentation = ReActAgent(
         name="Bank Support: Documentation",
-        role="customer support assistant for Internal Bank Documentation",
-        goal="help with provided customer requests regarding Internal Bank Documentation",
+        role="customer support assistant for Internal Bank Documentation, goal is to help with provided customer requests regarding Internal Bank Documentation",  # noqa: E501
         llm=llm_react_agent,
         tools=[BankRAGTool(), HumanFeedbackTool()],
     )

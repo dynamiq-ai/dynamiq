@@ -110,8 +110,7 @@ if __name__ == "__main__":
     agent = SimpleAgent(
         name="Agent",
         llm=llm,
-        role="Agent",
-        goal="to provide information based on the user input",
+        role="Agent, goal to provide information based on the user input",
     )
 
     workflow = Workflow(
