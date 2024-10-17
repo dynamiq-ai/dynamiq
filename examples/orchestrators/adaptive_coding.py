@@ -6,6 +6,10 @@ from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
 from examples.llm_setup import setup_llm
 
+AGENT_ROLE = """
+Expert Agent with high programming skills, he can solve any problem using coding skills.
+Goal is to provide the best solution for request, using all his algorithmic knowledge and coding skills
+"""  # noqa: E501
 INPUT_TASK = """
 write a report about weather in warsaw for september 2024 and compare with latest three years
 provide the results in clear table
@@ -32,8 +36,7 @@ if __name__ == "__main__":
         name="Coding Agent",
         llm=llm,
         tools=[python_tool],
-        role="Expert Agent with high programming skills, he can solve any problem using coding skills",
-        goal="provide the best solution for request, using all his algorithmic knowledge and coding skills",
+        role=AGENT_ROLE,
         inference_mode=InferenceMode.XML,
     )
 

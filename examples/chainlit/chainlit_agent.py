@@ -19,8 +19,7 @@ logger.setLevel(logging.INFO)
 TEMPERATURE = 0.1
 MAX_TOKENS = 1000
 OPENAI_MODEL = "gpt-4o"
-AGENT_ROLE = "professional writer"
-AGENT_GOAL = "is to produce a well written and informative response"
+AGENT_ROLE = "professional writer, goal is to provide high-quality content based on the user input"  # noqa: E501
 AGENT_STREAMING_EVENT = "writer-agent"
 
 
@@ -47,7 +46,6 @@ def create_writer_reflexion_agent():
         name="Professional Writer Agent",
         llm=llm_openai,
         role=AGENT_ROLE,
-        goal=AGENT_GOAL,
         streaming=StreamingConfig(enabled=True, event=AGENT_STREAMING_EVENT),
     )
     wf = Workflow(flow=Flow(nodes=[writer_agent]))

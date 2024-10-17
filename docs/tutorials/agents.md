@@ -49,7 +49,6 @@ agent = ReActAgent(
     llm=llm,
     tools=[e2b_tool],
     role="Senior Data Scientist",
-    goal="Provide well-explained final answers to analytical questions",
     max_loops=10,
 )
 ```
@@ -124,7 +123,6 @@ coding_agent = ReActAgent(
     llm=llm,
     tools=[python_tool],
     role="Expert agent with coding skills.",
-    goal="Provide the solution to the input task using Python software engineering skills.",
     max_loops=15,
 )
 
@@ -132,7 +130,6 @@ planner_agent = ReflectionAgent(
     name="planner-agent",
     llm=llm,
     role="Expert agent with planning skills.",
-    goal="Analyze complex requests and provide detailed action plan.",
 )
 
 search_agent = ReActAgent(
@@ -140,7 +137,6 @@ search_agent = ReActAgent(
     llm=llm,
     tools=[search_tool],
     role="Expert agent with web search skills.",
-    goal="Provide the best information available using web browsing and searching skills.",
     max_loops=10,
 )
 ```

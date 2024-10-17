@@ -31,13 +31,11 @@ OPENAI_NODE = llms.OpenAI(
 )
 
 memory_in_memory = Memory()
-AGENT_ROLE = "helpful assistant"
-AGENT_GOAL = "is to provide useful information and answer questions"
+AGENT_ROLE = "helpful assistant, goal is to provide useful information and answer questions"
 agent = SimpleAgent(
     name="Agent",
     llm=OPENAI_NODE,
     role=AGENT_ROLE,
-    goal=AGENT_GOAL,
     id="agent",
     memory=memory_in_memory,
 )

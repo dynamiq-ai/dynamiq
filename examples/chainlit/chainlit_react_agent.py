@@ -25,8 +25,7 @@ ZENROWS_API_URL = "https://api.zenrows.com/v1/"
 GPT_MODEL = "gpt-4o-mini"
 TEMPERATURE = 0.1
 MAX_TOKENS = 4000
-AGENT_ROLE = "professional recruiter"
-AGENT_GOAL = "is to engage the user and provide helpful job-related information"
+AGENT_ROLE = "professional recruiter, goal is to engage the user and provide helpful job-related information"
 AGENT_STREAMING_EVENT = "react-agent"
 
 
@@ -71,7 +70,6 @@ def create_react_agent():
         llm=llm_openai,
         tools=[tool_search, tool_scrape],
         role=AGENT_ROLE,
-        goal=AGENT_GOAL,
         streaming=StreamingConfig(enabled=True, event=AGENT_STREAMING_EVENT),
     )
 
