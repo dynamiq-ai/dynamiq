@@ -1,120 +1,69 @@
+from bank_rag_tool import BankRAGTool
+
 from dynamiq import Workflow
-from dynamiq.connections import Anthropic as AnthropicConnection
+from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.orchestrators import LinearOrchestrator
-from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
+from dynamiq.nodes import InputTransformer
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.llms.openai import OpenAI
+from dynamiq.nodes.node import NodeDependency
+from dynamiq.nodes.tools.http_api_call import HttpApiCall
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
-from dynamiq.utils.logger import logger
-from examples.customer_support_workflow.bank_api_sim import BankApiSim
-from examples.customer_support_workflow.bank_rag_tool import BankRAGTool
 
-# Constants
-GPT_MODEL = "gpt-4o"
-CLAUDE_MODEL = "claude-3-5-sonnet-20240620"
-MAX_TOKENS = 4000
-REACT_AGENT_TEMPERATURE = 0.1
-MANAGER_AGENT_TEMPERATURE = 0.1
-
-
-def create_llm_instances(
-    model: str = "gpt",
-) -> tuple[OpenAI | Anthropic, OpenAI | Anthropic]:
-    """
-    Create and return LLM instances based on the specified model.
-
-    Args:
-        model (str): The model to use, either "gpt" or "claude". Defaults to "gpt".
-
-    Returns:
-        Tuple[Union[OpenAI, Anthropic], Union[OpenAI, Anthropic]]: A tuple containing two LLM instances,
-        the first for the ReActAgent and the second for the ManagerAgent.
-
-    Raises:
-        ValueError: If an invalid model is specified.
-    """
-    if model == "gpt":
-        connection = OpenAIConnection()
-        llm_react_agent = OpenAI(
-            connection=connection,
-            model=GPT_MODEL,
-            temperature=REACT_AGENT_TEMPERATURE,
-            max_tokens=MAX_TOKENS,
-            stop=["Observation:", "\nObservation:", "\n\tObservation:"],
-        )
-        llm = OpenAI(
-            connection=connection,
-            model=GPT_MODEL,
-            temperature=MANAGER_AGENT_TEMPERATURE,
-            max_tokens=MAX_TOKENS,
-        )
-    elif model == "claude":
-        connection = AnthropicConnection()
-        llm_react_agent = Anthropic(
-            connection=connection,
-            model=CLAUDE_MODEL,
-            temperature=REACT_AGENT_TEMPERATURE,
-            max_tokens=MAX_TOKENS,
-            stop=["Observation:", "\nObservation:"],
-        )
-        llm = Anthropic(
-            connection=connection,
-            model=CLAUDE_MODEL,
-            temperature=MANAGER_AGENT_TEMPERATURE,
-            max_tokens=MAX_TOKENS,
-        )
-    else:
-        raise ValueError(f"Invalid model specified: {model}")
-
-    return llm_react_agent, llm
-
-
-def main():
-    """
-    Set up and run the customer support workflow.
-
-    This function creates the necessary agents and tools, sets up the workflow,
-    and executes it with a sample input.
-    """
-    # Create LLM instances
-    llm_react_agent, llm_agent = create_llm_instances(model="gpt")
-
-    # Create a ReActAgent for handling internal bank API queries
-    agent_bank_support = ReActAgent(
-        name="Bank Support: Internal API",
-        role="customer support assistant for Internal Bank",
-        goal="help with provided customer requests",
-        llm=llm_react_agent,
-        tools=[BankApiSim(), HumanFeedbackTool()],
+if __name__ == "__main__":
+    # Create connection to OpenAI
+    connection = OpenAIConnection()
+    llm = OpenAI(
+        connection=connection,
+        model="gpt-4o-mini",
+        temperature=0.01,
     )
 
     # Create a ReActAgent for handling bank documentation queries
     agent_bank_documentation = ReActAgent(
-        name="Bank Support: Documentation",
-        role="customer support assistant for Internal Bank Documentation",
-        goal="help with provided customer requests regarding Internal Bank Documentation",
-        llm=llm_react_agent,
-        tools=[BankRAGTool(), HumanFeedbackTool()],
+        name="RAG Agent",
+        role="Customer support assistant for Internal Bank Documentation",
+        llm=llm,
+        tools=[BankRAGTool()],
     )
 
-    # Create a ManagerAgent to oversee the workflow
-    agent_manager = LinearAgentManager(llm=llm_agent)
-
-    # Create a LinearOrchestrator to manage the workflow of multiple agents
-    linear_orchestrator = LinearOrchestrator(
-        manager=agent_manager,
-        agents=[agent_bank_support, agent_bank_documentation],
+    # Create connection to Bank API
+    connection = HttpConnection(
+        method="POST",
+        url="http://localhost:5004/",
     )
-    workflow = Workflow(flow=Flow(nodes=[linear_orchestrator]))
-    logger.info("Workflow created successfully")
 
-    # Run the workflow with a sample input
+    # Create api call tool
+    api_call = HttpApiCall(
+        connection=connection,
+        name="Bank API",
+        description="""
+        An internal bank API.
+
+        Available endpoints:
+        * 'block_card' (int card_number, int pin_code)
+        * 'make_transaction' (int card_number_sender, int card_number_reciever, int amoumt)
+        * 'request_report' (int userId, int pin_code)
+
+        Choose between endpoints and pass name of it in url_path parameter.
+        Parameters for endpoint have to be passed in `data` object.
+        """,
+    )
+
+    # Create user interaction tool
+    human_feedback_tool = HumanFeedbackTool()
+
+    # Create a ReActAgent for handling internal bank API queries
+    agent_bank_support = ReActAgent(
+        name="API Agent",
+        role="Customer support assistant with access to Internal Bank API",
+        llm=llm,
+        tools=[api_call, human_feedback_tool],
+        depends=[NodeDependency(node=agent_bank_documentation)],
+        input_transformer=InputTransformer(selector={"input": f"${[agent_bank_documentation.id]}.output.content"}),
+    )
+
+    workflow = Workflow(flow=Flow(nodes=[agent_bank_documentation, agent_bank_support]))
     result = workflow.run(input_data={"input": "fast block my card"})
-    print(result.output[linear_orchestrator.id]["output"]["content"]["result"])
-
-
-if __name__ == "__main__":
-    main()
+    print(result.output[agent_bank_support.id]["output"]["content"])
