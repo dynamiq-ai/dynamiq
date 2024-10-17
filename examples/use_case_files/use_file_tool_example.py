@@ -32,8 +32,8 @@ def read_file_as_bytes(file_path: str) -> bytes:
     return file_content
 
 
-CSV_PATH = "dynamiq/.data/sample_regression_data.csv"
-TXT_PATH = "dynamiq/.data/company_policies.txt"
+CSV_PATH = "/Users/oleksiibabych/Projects/Product_D/dynamiq/.data/sample_regression_data.csv"
+TXT_PATH = "/Users/oleksiibabych/Projects/Product_D/dynamiq/.data/company_policies.txt"
 
 txt_bytes = read_file_as_bytes(TXT_PATH)
 csv_bytes = read_file_as_bytes(CSV_PATH)
@@ -43,12 +43,15 @@ python_tool = E2BInterpreterTool(connection=E2B())
 files = [(CSV_PATH, "csv file")]
 llm = setup_llm()
 
+
 agent = ReActAgent(
     name="Agent",
     id="Agent",
     llm=llm,
     tools=[python_tool],
-    files=files,
 )
 
-result = agent.run(input_data={"input": "Describe the file"})
+result = agent.run(
+    input_data={"input": "Calculate the mean values for all columns and craft me table of this", "files": files}
+)
+print(result.output.get("content"))

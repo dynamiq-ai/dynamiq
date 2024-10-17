@@ -91,7 +91,7 @@ class E2BInterpreterTool(ConnectionNode):
         self._sandbox = Sandbox(api_key=self.connection.api_key)
         self._install_default_packages(self._sandbox)
         if self.files:
-            self._upload_initial_files(self._sandbox)
+            self._upload_files(files=self.files, sandbox=self._sandbox)
             self._update_description()
 
     def _install_default_packages(self, sandbox: Sandbox) -> None:
@@ -106,29 +106,23 @@ class E2BInterpreterTool(ConnectionNode):
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
             sandbox.process.start_and_wait(f"pip install -qq {' '.join(packages.split(','))}")
 
-    def _upload_files(self, files: list, sandbox: Sandbox) -> None:
-        """Uploads the specified files to the sandbox."""
+    def _upload_files(self, files: list[tuple[str | bytes, str]], sandbox: Sandbox) -> str:
+        """Uploads the initial files to the specified sandbox and returns details for each file."""
+        upload_details = []
         for file_data, file_description in files:
-            self._upload_file(file_data, file_description, sandbox)
-
-    def _upload_initial_files(self, sandbox: Sandbox) -> None:
-        """Uploads the initial files to the specified sandbox."""
-        for file_data, file_description in self.files:
             uploaded_path = self._upload_file(file_data, file_description, sandbox)
-            logger.debug(f"Tool {self.name} - {self.id}: Uploaded initial file to {uploaded_path}")
+            filename = os.path.basename(file_data) if isinstance(file_data, str) else "uploaded_file.bin"
+            upload_details.append(
+                {"original_name": filename, "description": file_description, "uploaded_path": uploaded_path}
+            )
+            logger.debug(f"Tool {self.name} - {self.id}: Uploaded file '{filename}' to {uploaded_path}")
 
-    def _update_description(self) -> None:
-        """Updates the tool description with information about uploaded files."""
-        if self.files:
-            self.description = self.description.strip().replace("</tool_description>", "")
-            self.description += "\n\n**Available Files:**"
-            for file_data, file_description in self.files:
-                filename = os.path.basename(file_data) if isinstance(file_data, str) else "uploaded_file.bin"
-                self.description += f"\n- **{filename}** ({file_description})"
-            self.description += "\n</tool_description>"
+        # Update the description after uploading all files
+        self._update_description_with_files(upload_details)
+        return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
     def _upload_file(self, file_data: str | bytes, file_description: str = "", sandbox: Sandbox | None = None) -> str:
-        """Uploads a file to the specified sandbox."""
+        """Uploads a single file to the specified sandbox and returns the uploaded path."""
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
@@ -146,11 +140,25 @@ class E2BInterpreterTool(ConnectionNode):
         else:
             raise ToolExecutionException(
                 f"Error: Invalid file data type: {type(file_data)}. Please keep just tuples with file data and description, without any additional wording.",  # noqa: E501
+                # noqa: E501
                 recoverable=False,
             )
 
         logger.debug(f"Tool {self.name} - {self.id}: Uploaded file to {uploaded_path}")
         return uploaded_path
+
+    def _update_description_with_files(self, upload_details: list[dict]) -> None:
+        """Updates the tool description with detailed information about the uploaded files."""
+        if upload_details:
+            self.description = self.description.strip().replace("</tool_description>", "")
+            self.description += "\n\n**Uploaded Files Details:**"
+            for file_info in upload_details:
+                self.description += (
+                    f"\n- **Original File Name**: {file_info['original_name']}\n"  # noqa: E501
+                    f"  **Description**: {file_info['description']}\n"  # noqa: E501
+                    f"  **Uploaded Path**: {file_info['uploaded_path']}\n"  # noqa: E501
+                )
+            self.description += "\n</tool_description>"
 
     def _execute_python_code(self, code: str, sandbox: Sandbox | None = None) -> str:
         """Executes Python code in the specified sandbox."""
@@ -196,9 +204,6 @@ class E2BInterpreterTool(ConnectionNode):
             if self.files:
                 self._upload_initial_files(sandbox)
                 self._update_description()
-
-        logger.info(f"{input_data.get('files')}, {type(input_data.get('files'))}, {type(input_data.get('files')[0])}")
-
         try:
             content = {}
             if files := input_data.get("files"):
