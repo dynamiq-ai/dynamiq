@@ -7,10 +7,6 @@ connections:
     api_key: ${oc.env:ANTHROPIC_API_KEY}
 
 prompts:
-  openai-ai-prompt:
-    messages:
-      - role: user
-        content: "What is AI?"
   openai-ds-prompt:  # id
     messages:
       - role: user
@@ -34,7 +30,11 @@ nodes:
     name: OpenAI-1
     model: gpt-3.5-turbo
     connection: openai-conn
-    prompt: openai-ai-prompt
+    prompt:
+      id: openai-ai-prompt
+      messages:
+        - role: user
+          content: "What is AI?"
     error_handling:
       timeout_seconds: 60
       retry_interval_seconds: 1
