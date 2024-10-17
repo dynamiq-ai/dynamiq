@@ -32,8 +32,8 @@ def read_file_as_bytes(file_path: str) -> bytes:
     return file_content
 
 
-CSV_PATH = "/Users/oleksiibabych/Projects/Product_D/dynamiq/.data/sample_regression_data.csv"
-TXT_PATH = "/Users/oleksiibabych/Projects/Product_D/dynamiq/.data/company_policies.txt"
+CSV_PATH = ".data/sample_regression_data.csv"
+TXT_PATH = ".data/company_policies.txt"
 
 txt_bytes = read_file_as_bytes(TXT_PATH)
 csv_bytes = read_file_as_bytes(CSV_PATH)
