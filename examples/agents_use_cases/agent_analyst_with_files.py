@@ -37,18 +37,14 @@ FILE_DESCRIPTION = """
 """
 
 
-def create_agent(file_paths: list[str], files_description: list[str]):
+def create_agent():
     """
     Create and configure the agent with necessary tools.
-
-    Args:
-        file_paths (List[str]): A list of file paths that have to be uploaded.
-        files_description (str): Description of files uploaded
 
     Returns:
         Workflow: A configured Dynamiq workflow ready to run.
     """
-    tool = E2BInterpreterTool(connection=E2B(), files=list(zip(file_paths, files_description)))
+    tool = E2BInterpreterTool(connection=E2B())
 
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.001)
     agent_software = ReActAgent(
@@ -79,10 +75,13 @@ def run_workflow(prompt: str, files_to_upload: list[str], files_description: lis
         raise ValueError("Number of file paths and file descriptions doesn't match")
 
     try:
-        agent = create_agent(files_to_upload, files_description)
+        agent = create_agent()
+        files = [
+            (file_path, file_description) for file_path, file_description in zip(files_to_upload, files_description)
+        ]
 
         result = agent.run(
-            input_data={"input": prompt},
+            input_data={"input": prompt, "files": files},
         )
         return result.output["content"]
     except Exception as e:

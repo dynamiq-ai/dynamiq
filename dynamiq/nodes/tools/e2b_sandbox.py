@@ -76,6 +76,7 @@ class E2BInterpreterTool(ConnectionNode):
     files: list[tuple[str | bytes, str]] | None = None
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
+    support_files: bool = True
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -90,7 +91,7 @@ class E2BInterpreterTool(ConnectionNode):
         self._sandbox = Sandbox(api_key=self.connection.api_key)
         self._install_default_packages(self._sandbox)
         if self.files:
-            self._upload_initial_files(self._sandbox)
+            self._upload_files(files=self.files, sandbox=self._sandbox)
             self._update_description()
 
     def _install_default_packages(self, sandbox: Sandbox) -> None:
@@ -105,24 +106,23 @@ class E2BInterpreterTool(ConnectionNode):
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
             sandbox.process.start_and_wait(f"pip install -qq {' '.join(packages.split(','))}")
 
-    def _upload_initial_files(self, sandbox: Sandbox) -> None:
-        """Uploads the initial files to the specified sandbox."""
-        for file_data, file_description in self.files:
+    def _upload_files(self, files: list[tuple[str | bytes, str]], sandbox: Sandbox) -> str:
+        """Uploads the initial files to the specified sandbox and returns details for each file."""
+        upload_details = []
+        for file_data, file_description in files:
             uploaded_path = self._upload_file(file_data, file_description, sandbox)
-            logger.debug(f"Tool {self.name} - {self.id}: Uploaded initial file to {uploaded_path}")
+            filename = os.path.basename(file_data) if isinstance(file_data, str) else "uploaded_file.bin"
+            upload_details.append(
+                {"original_name": filename, "description": file_description, "uploaded_path": uploaded_path}
+            )
+            logger.debug(f"Tool {self.name} - {self.id}: Uploaded file '{filename}' to {uploaded_path}")
 
-    def _update_description(self) -> None:
-        """Updates the tool description with information about uploaded files."""
-        if self.files:
-            self.description = self.description.strip().replace("</tool_description>", "")
-            self.description += "\n\n**Available Files:**"
-            for file_data, file_description in self.files:
-                filename = os.path.basename(file_data) if isinstance(file_data, str) else "uploaded_file.bin"
-                self.description += f"\n- **{filename}** ({file_description})"
-            self.description += "\n</tool_description>"
+        # Update the description after uploading all files
+        self._update_description_with_files(upload_details)
+        return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
     def _upload_file(self, file_data: str | bytes, file_description: str = "", sandbox: Sandbox | None = None) -> str:
-        """Uploads a file to the specified sandbox."""
+        """Uploads a single file to the specified sandbox and returns the uploaded path."""
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
@@ -138,10 +138,27 @@ class E2BInterpreterTool(ConnectionNode):
             file_like_object.name = filename
             uploaded_path = sandbox.upload_file(file=file_like_object)
         else:
-            raise ValueError(f"Invalid file data type: {type(file_data)}")
+            raise ToolExecutionException(
+                f"Error: Invalid file data type: {type(file_data)}. Please keep just tuples with file data and description, without any additional wording.",  # noqa: E501
+                # noqa: E501
+                recoverable=False,
+            )
 
         logger.debug(f"Tool {self.name} - {self.id}: Uploaded file to {uploaded_path}")
         return uploaded_path
+
+    def _update_description_with_files(self, upload_details: list[dict]) -> None:
+        """Updates the tool description with detailed information about the uploaded files."""
+        if upload_details:
+            self.description = self.description.strip().replace("</tool_description>", "")
+            self.description += "\n\n**Uploaded Files Details:**"
+            for file_info in upload_details:
+                self.description += (
+                    f"\n- **Original File Name**: {file_info['original_name']}\n"  # noqa: E501
+                    f"  **Description**: {file_info['description']}\n"  # noqa: E501
+                    f"  **Uploaded Path**: {file_info['uploaded_path']}\n"  # noqa: E501
+                )
+            self.description += "\n</tool_description>"
 
     def _execute_python_code(self, code: str, sandbox: Sandbox | None = None) -> str:
         """Executes Python code in the specified sandbox."""
@@ -187,23 +204,22 @@ class E2BInterpreterTool(ConnectionNode):
             if self.files:
                 self._upload_initial_files(sandbox)
                 self._update_description()
-
         try:
-
             content = {}
+            if files := input_data.get("files"):
+                content["files_installation"] = self._upload_files(files=files, sandbox=sandbox)
             if packages := input_data.get("packages"):
                 self._install_packages(sandbox=sandbox, packages=packages)
                 content["packages_installation"] = f"Installed packages: {input_data['packages']}"
-            if files := input_data.get("files"):
-                content["files_installation"] = self._upload_file(file_data=files, sandbox=sandbox)
             if shell_command := input_data.get("shell_command"):
                 content["shell_command_execution"] = self._execute_shell_command(shell_command, sandbox=sandbox)
             if python := input_data.get("python"):
                 content["code_execution"] = self._execute_python_code(python, sandbox=sandbox)
             if not (packages or files or shell_command or python):
                 raise ToolExecutionException(
-                    "Error: Invalid input data. Please provide 'files' for file upload (local path or bytes), "
-                    "'python' for Python code execution, or 'shell_command' for shell command execution."
+                    "Error: Invalid input data. Please provide 'files' for file upload (local path or bytes)"  # noqa: E501
+                    "There should be either list of tuples with file data and description, like [(file_data, file_description)]"  # noqa: E501
+                    "'python' for Python code execution, or 'shell_command' for shell command execution."  # noqa: E501
                     "You can also provide 'packages' to install packages.",
                     recoverable=True,
                 )
@@ -215,10 +231,10 @@ class E2BInterpreterTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result = ""
-            if packages_installation := content.get("packages_installation"):
-                result += "<Package installation>\n" + packages_installation + "\n</Package installation>"
             if files_installation := content.get("files_installation"):
                 result += "<Files installation>\n" + files_installation + "\n</Files installation>"
+            if packages_installation := content.get("packages_installation"):
+                result += "<Package installation>\n" + packages_installation + "\n</Package installation>"
             if shell_command_execution := content.get("shell_command_execution"):
                 result += "<Shell command execution>\n" + shell_command_execution + "\n</Shell command execution>"
             if code_execution := content.get("code_execution"):
