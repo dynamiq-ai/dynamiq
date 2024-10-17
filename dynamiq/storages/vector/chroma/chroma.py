@@ -41,7 +41,7 @@ class ChromaVectorStore:
         connection: Chroma | None = None,
         client: Optional["ClientAPI"] = None,
         index_name: str = "default",
-        create_if_not_exist: bool = True,
+        create_if_not_exist: bool = False,
     ):
         """
         Initialize the ChromaVectorStore.

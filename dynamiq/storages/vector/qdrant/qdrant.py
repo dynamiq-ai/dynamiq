@@ -123,7 +123,7 @@ class QdrantVectorStore:
         sparse_idf: bool = False,
         metric: QdrantSimilarityMetric = QdrantSimilarityMetric.COSINE,
         return_embedding: bool = False,
-        create_if_not_exist: bool = True,
+        create_if_not_exist: bool = False,
         recreate_index: bool = False,
         shard_number: int | None = None,
         replication_factor: int | None = None,
@@ -189,9 +189,10 @@ class QdrantVectorStore:
             payload_fields_to_index: List of payload fields to index.
         """
 
-        self._client = None
-        self.connection = connection or QdrantConnection()
-        self._client = client or self.connection.connect()
+        self._client = client
+        if self._client is None:
+            connection = connection or QdrantConnection()
+            self._client = connection.connect()
 
         # Store the Qdrant client specific attributes
         self.location = location

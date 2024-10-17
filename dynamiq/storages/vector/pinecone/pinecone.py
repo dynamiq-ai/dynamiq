@@ -36,7 +36,7 @@ class PineconeVectorStore:
         batch_size: int = 100,
         dimension: int = 1536,
         metric: str = "cosine",
-        create_if_not_exist: bool = True,
+        create_if_not_exist: bool = False,
         **index_creation_kwargs,
     ):
         """

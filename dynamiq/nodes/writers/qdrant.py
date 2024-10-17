@@ -44,7 +44,10 @@ class QdrantDocumentWriter(VectorStoreNode, QdrantWriterVectorStoreParams):
 
     @property
     def vector_store_params(self):
-        return self.model_dump(include=set(QdrantWriterVectorStoreParams.model_fields)) | {"client": self.client}
+        return self.model_dump(include=set(QdrantWriterVectorStoreParams.model_fields)) | {
+            "connection": self.connection,
+            "client": self.client,
+        }
 
     def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
         """
