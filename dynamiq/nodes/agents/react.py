@@ -70,32 +70,27 @@ If you cannot answer the request:
 
 REACT_BLOCK_INSTRUCTIONS = """
 Always structure your responses in the following format:
-
-Thought: [Your reasoning about the next step]
-Action: [The tool you choose to use, if any from ONLY [{tools_name}]]
+Thought: [Your reasoning for the next step]
+Action: [The tool you choose to use, if any, from ONLY [{tools_name}]]
 Action Input: [The input you provide to the tool]
 Remember:
-- Avoid using triple quotes (multi-line strings, docstrings) when providing multi line code.
-- You have to provide all nessesary information in 'Action Input' for successfull next step.
-- Provide Action Input in JSON format.
-- MUST Begin each response with a "Thought" explaining your reasoning.
-- If you need to use a tool, follow the thought with an "Action" (choosing from the available tools) and an "Action Input".
-- After each action, the user will provide an "Observation" with the result.
+- Avoid using triple quotes (multi-line strings, docstrings) when providing multi-line code.
+- Provide all necessary information in 'Action Input' for the next step to succeed.
+- Action Input must be in JSON format.
+- Always begin each response with a 'Thought' explaining your reasoning.
+- If you use a tool, follow the 'Thought' with an 'Action' (chosen from the available tools) and an 'Action Input'.
+- After each action, the user will provide an 'Observation' with the result.
 - Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
-
 When you have sufficient information, provide your final answer in one of these two formats:
-
 If you can answer the request:
-
 Thought: I can answer without using any tools
 Answer: [Your answer here]
 If you cannot answer the request:
-
 Thought: I cannot answer with the tools I have
 Answer: [Explanation of why you cannot answer]
 Remember:
 - Always start with a Thought.
-- Never use markdown code markers around your response.
+- Never use markdown code markers in your response.
 """  # noqa: E501
 
 
@@ -130,33 +125,28 @@ provide_final_answer - function that should be called when answer on initial req
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
 Always structure your responses in the following format:
-
-Thought: [Your reasoning why you can not answer on initial question fully]
-Observation: [Answer on initial question or part of it]
-- Do not add information that is not connected to main request.
-- MUST Begin each response with a "Thought" explaining your reasoning.
-- After each action, the user will provide an "Observation" with the result.
-- Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
-
-When you have sufficient information, provide your final answer in one of these two formats:
-
+Thought: [Your reasoning for why you cannot fully answer the initial question]
+Observation: [Answer to the initial question or part of it]
+- Only include information relevant to the main request.
+- Always start each response with a 'Thought' explaining your reasoning.
+- After each action, the user will provide an 'Observation' with the result.
+- Continue this Thought/Action/Action Input/Observation sequence until you have enough information to fully answer the request.
+When you have sufficient information, provide your final answer in one of these formats:
 If you can answer the request:
-
 Thought: I can answer without using any tools
 Answer: [Your answer here]
 If you cannot answer the request:
-
 Thought: I cannot answer with the tools I have
 Answer: [Explanation of why you cannot answer]
 Remember:
-- Always start with a Thought.
-- Never use markdown code markers around your response.
+- Always begin with a Thought.
+- Do not use markdown code markers in your response."
 """  # noqa: E501
 
 
 REACT_BLOCK_OUTPUT_FORMAT = """
-In your final answer do not use wording like `based on the information gathered or provided`.
-Just provide a clear and concise answer.
+In your final answer, avoid phrases like 'based on the information gathered or provided.'
+Simply give a clear and concise answer.
 """  # noqa: E501
 
 REACT_BLOCK_REQUEST = "User request: {input}"
@@ -293,8 +283,8 @@ class ReActAgent(Agent):
         except json.JSONDecodeError:
             raise ActionParsingException(
                 (
-                    "Error: Could not parse action and action input."
-                    "Please rewrite in the appropriate XML format with action_input as a valid dictionary."
+                    "Error: Unable to parse action and action input. "  # noqa: E501
+                    "Please rewrite in the correct XML format with action_input as a valid dictionary."  # noqa: E501
                 ),
                 recoverable=True,
             )

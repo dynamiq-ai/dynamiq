@@ -156,7 +156,7 @@ class AdaptiveOrchestrator(Node):
             logger.error(
                 f"AdaptiveOrchestrator {self.id}: Error getting next action from Manager"
             )
-            raise ActionParseError("Failed to get next action from Manager")
+            raise ActionParseError("Unable to retrieve the next action from Manager.")
 
         manager_result = (
             manager_result.output.get("content")
@@ -172,7 +172,7 @@ class AdaptiveOrchestrator(Node):
                 f"AdaptiveOrchestrator {self.id}: Error creation Agent based on LLM output. "
                 f"Raw LLM output: {manager_result}. Error: {e}"
             )
-            raise ActionParseError("Failed to create Action from LLM output")
+            raise ActionParseError("Unable to create Action from LLM output.")
 
     def run_task(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
         """
