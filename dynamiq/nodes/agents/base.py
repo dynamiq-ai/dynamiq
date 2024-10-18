@@ -47,9 +47,11 @@ class AgentIntermediateStep(BaseModel):
 class Agent(Node):
     """Base class for an AI Agent that interacts with a Language Model and tools."""
 
-    DEFAULT_INTRODUCTION: ClassVar[str] = (
-        "You are a helpful AI assistant designed to help with various tasks."
-    )
+    DEFAULT_INTRODUCTION: ClassVar[
+        str
+    ] = """
+    You are a helpful AI assistant designed to assist users with various tasks and queries.
+    """  # noqa: E501
     DEFAULT_DATE: ClassVar[str] = datetime.now().strftime("%d %B %Y")
 
     llm: Node = Field(..., description="Language Model (LLM) used by the agent.")
@@ -254,10 +256,9 @@ class Agent(Node):
             logger.error(f"Error parsing action: {e}")
             raise ActionParsingException(
                 (
-                    "Error: Could not parse action and action input. "
-                    "Please rewrite in the appropriate Action/Action Input "
-                    "format with action input as a valid dictionary "
-                    "Make sure all quotes are present."
+                    "Error: Unable to parse action and action input. "
+                    "Please rewrite using the correct Action/Action Input format with action input as a valid dictionary. "  # noqa: E501
+                    "Ensure all quotes are included."
                 ),
                 recoverable=True,
             )
@@ -272,9 +273,10 @@ class Agent(Node):
         tool = self.tool_by_names.get(action)
         if not tool:
             raise AgentUnknownToolException(
-                f"Unknown tool: {action} Use only available tools and provide only its name in action field.\
-                 Do not provide any aditional reasoning in action field.\
-                  Reiterate and provide proper value for action field or say that you cannot answer the question."
+                f"""Unknown tool: {action}.
+                Use only available tools and provide only the tool's name in the action field.
+                Do not include any additional reasoning.
+                Please correct the action field or state that you cannot answer the question."""
             )
         return tool
 
@@ -282,7 +284,7 @@ class Agent(Node):
         """Runs a specific tool with the given input."""
         logger.debug(f"Agent {self.name} - {self.id}: Running tool '{tool.name}'")
         if self.files:
-            if tool.support_files is True:
+            if tool.supports_files is True:
                 tool_input["files"] = self.files
 
         tool_result = tool.run(
@@ -315,7 +317,7 @@ class Agent(Node):
     def file_description(self) -> str:
         """Returns a description of the tools available to the agent."""
         if self.files:
-            file_description = "You can work with such files.\n"
+            file_description = "You can work with following files.\n"
             for file in self.files:
                 file_description += f"<file>: {file[0]} <\\file>\n<file description>: {file[1]} <\\file description>\n"
             return file_description
@@ -396,7 +398,7 @@ class AgentManager(Agent):
         action = input_data.get("action")
         if not action or action not in self._actions:
             raise InvalidActionException(
-                f"Invalid or missing action: {action}. Please choose action from {self._actions}"
+                f"Invalid or missing action: {action}. Please select an action from {self._actions}."  # nosec: B608
             )
 
         self._prompt_variables.update(input_data)

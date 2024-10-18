@@ -76,7 +76,7 @@ class E2BInterpreterTool(ConnectionNode):
     files: list[tuple[str | bytes, str]] | None = None
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
-    support_files: bool = True
+    supports_files: bool = True
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
