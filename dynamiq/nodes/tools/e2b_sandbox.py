@@ -1,6 +1,4 @@
 import io
-import os
-import uuid
 from hashlib import sha256
 from typing import Any, Literal
 
@@ -8,6 +6,7 @@ from e2b import Sandbox
 
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents import FileDataModel
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
@@ -52,6 +51,32 @@ packages = 'requests,pandas'
 """  # noqa: E501
 
 
+def generate_unique_file_name(file_data: bytes | io.BytesIO, file_description: str = "") -> str:
+    """
+    Generates a unique file name based on the file description and a hash of the file content.
+
+    Args:
+        file_data: The file content as bytes or BytesIO.
+        file_description: The description of the file (used as a prefix).
+
+    Returns:
+        A unique file name based on the description and content hash.
+    """
+    if isinstance(file_data, io.BytesIO):
+        file_data.seek(0)
+        file_content = file_data.read()
+        file_data.seek(0)
+    else:
+        file_content = file_data
+
+    file_hash = sha256(file_content).hexdigest()
+
+    description_part = file_description.replace(" ", "_") if file_description else "file"
+
+    unique_file_name = f"{description_part}_{file_hash[:8]}.bin"
+    return unique_file_name
+
+
 class E2BInterpreterTool(ConnectionNode):
     """
     A tool to interact with an E2B sandbox, allowing for file upload/download,
@@ -62,9 +87,9 @@ class E2BInterpreterTool(ConnectionNode):
         name (str): Name of the tool.
         description (str): Detailed description of the tool's capabilities.
         connection (E2BConnection): E2B connection object.
-        installed_packages (list): List of default packages to install.
-        files (list): List of tuples (file_data, file_description) for initial files.
-        persistent_sandbox (bool): Whether to use a persistent sandbox across executions.
+        installed_packages: list: List of default packages to install.
+        files: list[FileDataModel] | None: List of files to upload.
+        persistent_sandbox: bool: Whether to use a persistent sandbox across executions.
         _sandbox (Optional[Sandbox]): Persistent sandbox instance (if enabled).
     """
 
@@ -73,7 +98,7 @@ class E2BInterpreterTool(ConnectionNode):
     description: str = DESCRIPTION
     connection: E2BConnection
     installed_packages: list = []
-    files: list[tuple[str | bytes, str]] | None = None
+    files: list[FileDataModel] | None = None
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
     supports_files: bool = True
@@ -106,45 +131,50 @@ class E2BInterpreterTool(ConnectionNode):
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
             sandbox.process.start_and_wait(f"pip install -qq {' '.join(packages.split(','))}")
 
-    def _upload_files(self, files: list[tuple[str | bytes, str]], sandbox: Sandbox) -> str:
-        """Uploads the initial files to the specified sandbox and returns details for each file."""
+    def _upload_files(self, files: list[FileDataModel], sandbox: Sandbox) -> str:
+        """Uploads multiple files to the sandbox, generating unique names, and returns details for each file."""
         upload_details = []
-        for file_data, file_description in files:
-            uploaded_path = self._upload_file(file_data, file_description, sandbox)
-            filename = os.path.basename(file_data) if isinstance(file_data, str) else "uploaded_file.bin"
+        for file_model in files:
+            unique_file_name = generate_unique_file_name(file_model.file_data, file_model.description)
+            uploaded_path = self._upload_file(file_model.file_data, unique_file_name, sandbox)
             upload_details.append(
-                {"original_name": filename, "description": file_description, "uploaded_path": uploaded_path}
+                {
+                    "original_name": unique_file_name,
+                    "description": file_model.description,
+                    "uploaded_path": uploaded_path,
+                }
             )
-            logger.debug(f"Tool {self.name} - {self.id}: Uploaded file '{filename}' to {uploaded_path}")
+            logger.debug(f"Tool {self.name} - {self.id}: Uploaded file '{unique_file_name}' to {uploaded_path}")
 
-        # Update the description after uploading all files
         self._update_description_with_files(upload_details)
+
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
-    def _upload_file(self, file_data: str | bytes, file_description: str = "", sandbox: Sandbox | None = None) -> str:
+    def _upload_file(
+        self, file_data: bytes | io.BytesIO, file_description: str = "", sandbox: Sandbox | None = None
+    ) -> str:
         """Uploads a single file to the specified sandbox and returns the uploaded path."""
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
-        if isinstance(file_data, str):
-            if not os.path.exists(file_data):
-                raise ToolExecutionException(f"Error: Local file not found: {file_data}", recoverable=False)
-            uploaded_path = sandbox.upload_file(file=open(file_data, "rb"))
-        elif isinstance(file_data, bytes):
-            filename = (
-                f"{str(uuid.uuid4())}.bin" if not file_description else f"{file_description.replace(' ', '_')}.bin"
-            )
+        unique_file_name = generate_unique_file_name(file_data, file_description)
+
+        # Handle the file_data types (bytes or io.BytesIO)
+        if isinstance(file_data, bytes):
             file_like_object = io.BytesIO(file_data)
-            file_like_object.name = filename
-            uploaded_path = sandbox.upload_file(file=file_like_object)
+            file_like_object.name = unique_file_name
+        elif isinstance(file_data, io.BytesIO):
+            file_data.name = unique_file_name
+            file_like_object = file_data
         else:
             raise ToolExecutionException(
-                f"Error: Invalid file data type: {type(file_data)}. Please keep just tuples with file data and description, without any additional wording.",  # noqa: E501
-                # noqa: E501
-                recoverable=False,
+                f"Error: Invalid file data type: {type(file_data)}. Expected bytes or BytesIO.", recoverable=False
             )
 
+        # Upload the file to the sandbox
+        uploaded_path = sandbox.upload_file(file=file_like_object)
         logger.debug(f"Tool {self.name} - {self.id}: Uploaded file to {uploaded_path}")
+
         return uploaded_path
 
     def _update_description_with_files(self, upload_details: list[dict]) -> None:
@@ -154,9 +184,9 @@ class E2BInterpreterTool(ConnectionNode):
             self.description += "\n\n**Uploaded Files Details:**"
             for file_info in upload_details:
                 self.description += (
-                    f"\n- **Original File Name**: {file_info['original_name']}\n"  # noqa: E501
-                    f"  **Description**: {file_info['description']}\n"  # noqa: E501
-                    f"  **Uploaded Path**: {file_info['uploaded_path']}\n"  # noqa: E501
+                    f"\n- **Original File Name**: {file_info['original_name']}\n"
+                    f"  **Description**: {file_info['description']}\n"
+                    f"  **Uploaded Path**: {file_info['uploaded_path']}\n"
                 )
             self.description += "\n</tool_description>"
 
@@ -202,7 +232,7 @@ class E2BInterpreterTool(ConnectionNode):
             sandbox = Sandbox(api_key=self.connection.api_key)
             self._install_default_packages(sandbox)
             if self.files:
-                self._upload_initial_files(sandbox)
+                self._upload_files(files=self.files, sandbox=sandbox)
                 self._update_description()
         try:
             content = {}
@@ -217,10 +247,7 @@ class E2BInterpreterTool(ConnectionNode):
                 content["code_execution"] = self._execute_python_code(python, sandbox=sandbox)
             if not (packages or files or shell_command or python):
                 raise ToolExecutionException(
-                    "Error: Invalid input data. Please provide 'files' for file upload (local path or bytes)"  # noqa: E501
-                    "There should be either list of tuples with file data and description, like [(file_data, file_description)]"  # noqa: E501
-                    "'python' for Python code execution, or 'shell_command' for shell command execution."  # noqa: E501
-                    "You can also provide 'packages' to install packages.",
+                    "Error: Invalid input data. Please provide 'files' for file upload (bytes or BytesIO)",
                     recoverable=True,
                 )
 

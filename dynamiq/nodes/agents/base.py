@@ -1,3 +1,4 @@
+import io
 import json
 import re
 import textwrap
@@ -5,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory
@@ -44,22 +45,42 @@ class AgentIntermediateStep(BaseModel):
     final_answer: str | dict | None = None
 
 
+class FileDataModel(BaseModel):
+    file_data: bytes | io.BytesIO
+    description: str = ""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @field_validator("file_data")
+    def check_file_type(cls, value):
+        """Ensures file_data is either bytes or BytesIO."""
+        if not isinstance(value, (bytes, io.BytesIO)):
+            raise ValueError(f"Invalid type for file_data: {type(value)}. Must be bytes or BytesIO.")
+        return value
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        # Custom schema logic for BytesIO
+        if source_type == io.BytesIO:
+            return handler.generate_schema(bytes)
+        return super().__get_pydantic_core_schema__(source_type, handler)
+
+
 class Agent(Node):
     """Base class for an AI Agent that interacts with a Language Model and tools."""
 
-    DEFAULT_INTRODUCTION: ClassVar[
-        str
-    ] = """
-    You are a helpful AI assistant designed to assist users with various tasks and queries.
-    """  # noqa: E501
+    DEFAULT_INTRODUCTION: ClassVar[str] = (
+        "You are a helpful AI assistant designed to assist users with various tasks and queries."
+        "Your goal is to provide accurate, helpful, and friendly responses to the best of your abilities."
+    )
     DEFAULT_DATE: ClassVar[str] = datetime.now().strftime("%d %B %Y")
 
-    llm: Node = Field(..., description="Language Model (LLM) used by the agent.")
+    llm: Node = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     streaming: StreamingConfig = StreamingConfig()
     tools: list[Node] = []
-    files: list[tuple[str | bytes, str]] | None = None
+    files: list[FileDataModel] | None = None
     name: str = "AI Agent"
     role: str | None = None
     goal: str | None = None
@@ -80,13 +101,14 @@ class Agent(Node):
 
     @property
     def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"llm": True, "tools": True, "memory": True}
+        return super().to_dict_exclude_params | {"llm": True, "tools": True, "memory": True, "files": True}
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
         data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools]
+        data["files"] = [file.dict() for file in self.files] if self.files else None
         return data
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
@@ -152,7 +174,7 @@ class Agent(Node):
             self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
             self._retrieve_memory(input_data)
 
-        files = input_data.get("files", self.files)
+        files = input_data.get("files", [])
         if files:
             self.files = files
             self._prompt_variables["file_description"] = self.file_description
@@ -256,8 +278,9 @@ class Agent(Node):
             logger.error(f"Error parsing action: {e}")
             raise ActionParsingException(
                 (
-                    "Error: Unable to parse action and action input. "
-                    "Please rewrite using the correct Action/Action Input format with action input as a valid dictionary. "  # noqa: E501
+                    "Error: Unable to parse action and action input."
+                    "Please rewrite using the correct Action/Action Input format"
+                    "with action input as a valid dictionary."
                     "Ensure all quotes are included."
                 ),
                 recoverable=True,
@@ -273,10 +296,10 @@ class Agent(Node):
         tool = self.tool_by_names.get(action)
         if not tool:
             raise AgentUnknownToolException(
-                f"""Unknown tool: {action}.
-                Use only available tools and provide only the tool's name in the action field.
-                Do not include any additional reasoning.
-                Please correct the action field or state that you cannot answer the question."""
+                f"Unknown tool: {action}."
+                "Use only available tools and provide only the tool's name in the action field."
+                "Do not include any additional reasoning."
+                "Please correct the action field or state that you cannot answer the question."
             )
         return tool
 
@@ -315,11 +338,11 @@ class Agent(Node):
 
     @property
     def file_description(self) -> str:
-        """Returns a description of the tools available to the agent."""
+        """Returns a description of the files available to the agent."""
         if self.files:
-            file_description = "You can work with following files.\n"
+            file_description = "You can work with the following files:\n"
             for file in self.files:
-                file_description += f"<file>: {file[0]} <\\file>\n<file description>: {file[1]} <\\file description>\n"
+                file_description += f"<file>: {file.description} <\\file>\n"
             return file_description
         return ""
 
