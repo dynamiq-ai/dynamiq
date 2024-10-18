@@ -24,6 +24,18 @@ from examples.tools.scraper import ScraperSummarizerTool
 # Constants
 GPT_MODEL = "gpt-4o"
 CLAUDE_MODEL = "claude-3-5-sonnet-20240620"
+AGENT_RESAERCHER_ROLE = (
+    "the Senior Research Analyst, "
+    "that specializes in finding latest and most actual information,"
+    "goal is to find the most relevant information regarding"
+    "to the requested topic and provide to user"
+)
+AGENT_WRITER_ROLE = (
+    "the Senior Writer and Editor,"
+    "that specializes in creating high-quality content,"
+    "goal is to create a high-quality content based "
+    "on the information provided by the Research Analyst"
+)
 # Please use your own file path
 OUTPUT_FILE_PATH = "article_gpt.md"
 
@@ -107,8 +119,7 @@ def inference(user_prompt: str, model_type="gpt", model_name="gpt-4o-mini") -> d
         name="Research Analyst",
         llm=llm_react_agent,
         tools=[tool_search, tool_scrape_summarizer],
-        role="the Senior Research Analyst, that specializes in finding latest and most actual information",
-        goal="to find the most relevant information regarding to the requested topic and provide to user",
+        role=AGENT_RESAERCHER_ROLE,
         max_loops=8,
         function_calling=True,
     )
@@ -116,8 +127,7 @@ def inference(user_prompt: str, model_type="gpt", model_name="gpt-4o-mini") -> d
     agent_writer = Agent(
         name="Writer and Editor",
         llm=llm_agent,
-        role="the Senior Writer and Editor, that specializes in creating high-quality content",
-        goal="to create a high-quality content based on the information provided by the Research Analyst",
+        role=AGENT_WRITER_ROLE,
     )
 
     agent_manager = LinearAgentManager(llm=llm_agent)

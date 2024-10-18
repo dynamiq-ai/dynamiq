@@ -48,7 +48,8 @@ class Agent(Node):
     """Base class for an AI Agent that interacts with a Language Model and tools."""
 
     DEFAULT_INTRODUCTION: ClassVar[str] = (
-        "You are a helpful AI assistant designed to help with various tasks."
+        "You are a helpful AI assistant designed to assist users with various tasks and queries."
+        "Your goal is to provide accurate, helpful, and friendly responses to the best of your abilities."
     )
     DEFAULT_DATE: ClassVar[str] = datetime.now().strftime("%d %B %Y")
 
@@ -59,7 +60,6 @@ class Agent(Node):
     tools: list[Node] = []
     name: str = "AI Agent"
     role: str | None = None
-    goal: str | None = None
     max_loops: int = 1
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_retrieval_strategy: str = "all"  # all, relevant, both
@@ -102,7 +102,6 @@ class Agent(Node):
         self._prompt_blocks = {
             "introduction": self.DEFAULT_INTRODUCTION,
             "role": self.role or "",
-            "goal": self.goal or "",
             "date": self.DEFAULT_DATE,
             "tools": "{tool_description}",
             "instructions": "",
@@ -246,10 +245,10 @@ class Agent(Node):
             logger.error(f"Error parsing action: {e}")
             raise ActionParsingException(
                 (
-                    "Error: Could not parse action and action input. "
-                    "Please rewrite in the appropriate Action/Action Input "
-                    "format with action input as a valid dictionary "
-                    "Make sure all quotes are present."
+                    "Error: Unable to parse action and action input."
+                    "Please rewrite using the correct Action/Action Input format"
+                    "with action input as a valid dictionary."
+                    "Ensure all quotes are included."
                 ),
                 recoverable=True,
             )
@@ -264,9 +263,10 @@ class Agent(Node):
         tool = self.tool_by_names.get(action)
         if not tool:
             raise AgentUnknownToolException(
-                f"Unknown tool: {action} Use only available tools and provide only its name in action field.\
-                 Do not provide any aditional reasoning in action field.\
-                  Reiterate and provide proper value for action field or say that you cannot answer the question."
+                f"Unknown tool: {action}."
+                "Use only available tools and provide only the tool's name in the action field."
+                "Do not include any additional reasoning."
+                "Please correct the action field or state that you cannot answer the question."
             )
         return tool
 
@@ -375,7 +375,7 @@ class AgentManager(Agent):
         action = input_data.get("action")
         if not action or action not in self._actions:
             raise InvalidActionException(
-                f"Invalid or missing action: {action}. Please choose action from {self._actions}"
+                f"Invalid or missing action: {action}. Please select an action from {self._actions}."  # nosec B608
             )
 
         self._prompt_variables.update(input_data)
