@@ -980,7 +980,8 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
     @property
     def vector_store_params(self):
         return self.model_dump(include=set(BaseVectorStoreParams.model_fields)) | {
-            "client": self.client
+            "connection": self.connection,
+            "client": self.client,
         }
 
     def connect_to_vector_store(self):

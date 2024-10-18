@@ -45,7 +45,10 @@ class WeaviateDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
 
     @property
     def vector_store_params(self):
-        return self.model_dump(include=set(BaseWriterVectorStoreParams.model_fields)) | {"client": self.client}
+        return self.model_dump(include=set(BaseWriterVectorStoreParams.model_fields)) | {
+            "connection": self.connection,
+            "client": self.client,
+        }
 
     def execute(
         self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
