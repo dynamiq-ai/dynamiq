@@ -10,7 +10,6 @@ from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.retrievers import PineconeDocumentRetriever
 from dynamiq.prompts import Message, Prompt
-from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PineconeVectorStore
 
 # Constants
@@ -143,14 +142,13 @@ class BankRAGTool(Node):
         answer = flow_result.output.get(self.answer_generation_node.id).get("output")
         return answer
 
-    def execute(self, input_data: dict[str, Any], _: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
         """
         Execute the RAG tool to generate an answer based on the input query.
 
         Args:
             input_data (dict[str, Any]): A dictionary containing the input query
                 under the key 'input'.
-            config (RunnableConfig, optional): Configuration for the execution.
             **kwargs: Additional keyword arguments.
 
         Returns:
