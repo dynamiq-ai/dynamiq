@@ -25,7 +25,7 @@ ZENROWS_API_URL = "https://api.zenrows.com/v1/"
 GPT_MODEL = "gpt-4o-mini"
 TEMPERATURE = 0.1
 MAX_TOKENS = 4000
-AGENT_ROLE = "professional recruiter, goal is to engage the user and provide helpful job-related information"
+AGENT_ROLE = "professional recruiter, goal is to" "engage the user and provide helpful job-related information"
 AGENT_STREAMING_EVENT = "react-agent"
 
 

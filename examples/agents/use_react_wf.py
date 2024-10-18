@@ -20,8 +20,10 @@ from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
 
 # Constants
-AGENT_ROLE = "teacher for children, goal is to craft a well-structured and simple final answer, with a lot of emojis to empathize with the children."  # noqa: E501
-
+AGENT_ROLE = (
+    "teacher for children, goal is to craft a well-structured and simple final answer"
+    "with a lot of emojis to empathize with the children."
+)
 QUERY = "Who won the Euro 2024?"
 QUERY_FOR_CODING_SIMPLE = "Add the first 10 numbers and tell if the result is prime"
 QUERY_FOR_CODING_COMPLEX = (

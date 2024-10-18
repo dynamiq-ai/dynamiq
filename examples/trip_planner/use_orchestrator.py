@@ -16,9 +16,25 @@ from examples.trip_planner.prompts import generate_customer_prompt, generate_sim
 
 # Please use your own file path
 OUTPUT_FILE_PATH = "city_guide_gpt.md"
-AGENT_SELECTION_CITY_ROLE = """An expert in analyzing travel data to pick ideal destinations. Goal is to help select the best city for a trip based on specific criteria such as weather patterns, seasonal events, and travel costs."""  # noqa: E501
-AGENT_CITY_GUIDE_ROLE = """An expert in gathering information about a city. Goal is to compile an in-depth guide for someone traveling to a city, including key attractions, local customs, special events, and daily activity recommendations."""  # noqa: E501
-AGENT_WRITER_ROLE = """An expert in creating detailed travel guides. Goal is to write a detailed travel guide for a city, including key attractions, local customs, special events, and daily activity recommendations."""  # noqa: E501
+AGENT_SELECTION_CITY_ROLE = (
+    "An expert in analyzing travel data to pick ideal destinations. "
+    "Goal is to help select the best city for a trip based on specific "
+    "criteria such as weather patterns, seasonal events, and travel costs."
+)
+
+AGENT_CITY_GUIDE_ROLE = (
+    "An expert in gathering information about a city. "
+    "Goal is to compile an in-depth guide for someone traveling to a city, "
+    "including key attractions, local customs, special events, "
+    "and daily activity recommendations."
+)
+
+AGENT_WRITER_ROLE = (
+    "An expert in creating detailed travel guides. "
+    "Goal is to write a detailed travel guide for a city, "
+    "including key attractions, local customs, special events, "
+    "and daily activity recommendations."
+)
 
 
 def choose_provider(model_type, model_name):

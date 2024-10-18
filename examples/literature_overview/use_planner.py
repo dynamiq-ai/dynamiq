@@ -24,13 +24,18 @@ from examples.tools.scraper import ScraperSummarizerTool
 # Constants
 GPT_MODEL = "gpt-4o"
 CLAUDE_MODEL = "claude-3-5-sonnet-20240620"
-AGENT_RESAERCHER_ROLE = """
-the Senior Research Analyst, that specializes in finding latest and most actual information,
-goal is to find the most relevant information regarding to the requested topic and provide to user"""  # noqa: E501
-AGENT_WRITER_ROLE = """
-the Senior Writer and Editor, that specializes in creating high-quality content,
-goal is to create a high-quality content based on the information provided by the Research Analyst"""  # noqa: E501
-
+AGENT_RESAERCHER_ROLE = (
+    "the Senior Research Analyst, "
+    "that specializes in finding latest and most actual information,"
+    "goal is to find the most relevant information regarding"
+    "to the requested topic and provide to user"
+)
+AGENT_WRITER_ROLE = (
+    "the Senior Writer and Editor,"
+    "that specializes in creating high-quality content,"
+    "goal is to create a high-quality content based "
+    "on the information provided by the Research Analyst"
+)
 # Please use your own file path
 OUTPUT_FILE_PATH = "article_gpt.md"
 

@@ -25,12 +25,18 @@ from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
 
 # Constants
-AGENT_RESAERCHER_ROLE = """
-the Senior Research Analyst, that specializes in finding latest and most actual information,
-goal is to find the most relevant information regarding to the requested topic and provide to user"""  # noqa: E501
-AGENT_WRITER_ROLE = """
-the Senior Writer and Editor, that specializes in creating high-quality content,
-goal is to create a high-quality content based on the information provided by the Research Analyst"""  # noqa: E501
+AGENT_RESAERCHER_ROLE = (
+    "the Senior Research Analyst, "
+    "that specializes in finding latest and most actual information,"
+    "goal is to find the most relevant information regarding"
+    "to the requested topic and provide to user"
+)
+AGENT_WRITER_ROLE = (
+    "the Senior Writer and Editor,"
+    "that specializes in creating high-quality content,"
+    "goal is to create a high-quality content based "
+    "on the information provided by the Research Analyst"
+)
 
 REACT_AGENT_TEMPERATURE = 0.1
 REGULAR_AGENT_TEMPERATURE = 0.1

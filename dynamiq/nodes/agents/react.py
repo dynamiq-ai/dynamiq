@@ -12,14 +12,13 @@ from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
-REACT_BLOCK_TOOLS = """
-You have access to a variety of tools, and you are responsible for using them in any order you choose to complete the task:
-{tools_desc}
-"""  # noqa: E501
+REACT_BLOCK_TOOLS = (
+    "You have access to a variety of tools,"
+    "and you are responsible for using them in any order you choose to complete the task:"
+    "{tools_desc}"
+)
 
-REACT_BLOCK_NO_TOOLS = """
-You do not have access to any tools.
-"""  # noqa: E501
+REACT_BLOCK_NO_TOOLS = "You do not have access to any tools."
 
 REACT_BLOCK_XML_INSTRUCTIONS = """
 Here is how you will think about the user's request
@@ -68,8 +67,7 @@ If you cannot answer the request:
 """  # noqa: E501
 
 
-REACT_BLOCK_INSTRUCTIONS = """
-Always structure your responses in the following format:
+REACT_BLOCK_INSTRUCTIONS = """Always structure your responses in the following format:
 Thought: [Your reasoning for the next step]
 Action: [The tool you choose to use, if any, from ONLY [{tools_name}]]
 Action Input: [The input you provide to the tool]
@@ -94,8 +92,7 @@ Remember:
 """  # noqa: E501
 
 
-REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """
-If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
+REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
 If you can answer on request:
 {{thought: [Why you can provide final answer],
 action: finish
@@ -115,11 +112,9 @@ action_input: [The input you provide to the tool]}}
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
 You have to call appropriate functions.
-
 Function descriptions
 plan_next_action - function that should be called to use tools [{tools_name}]].
 provide_final_answer - function that should be called when answer on initial request can be provided
-
 """  # noqa: E501
 
 
@@ -144,10 +139,10 @@ Remember:
 """  # noqa: E501
 
 
-REACT_BLOCK_OUTPUT_FORMAT = """
-In your final answer, avoid phrases like 'based on the information gathered or provided.'
-Simply give a clear and concise answer.
-"""  # noqa: E501
+REACT_BLOCK_OUTPUT_FORMAT = (
+    "In your final answer, avoid phrases like 'based on the information gathered or provided.'"
+    "Simply give a clear and concise answer."
+)
 
 REACT_BLOCK_REQUEST = "User request: {input}"
 REACT_BLOCK_CONTEXT = "Below is the conversation: {context}"
@@ -283,8 +278,8 @@ class ReActAgent(Agent):
         except json.JSONDecodeError:
             raise ActionParsingException(
                 (
-                    "Error: Unable to parse action and action input. "  # noqa: E501
-                    "Please rewrite in the correct XML format with action_input as a valid dictionary."  # noqa: E501
+                    "Error: Unable to parse action and action input. "
+                    "Please rewrite in the correct XML format with action_input as a valid dictionary."
                 ),
                 recoverable=True,
             )

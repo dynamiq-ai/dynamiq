@@ -19,7 +19,7 @@ logger.setLevel(logging.INFO)
 TEMPERATURE = 0.1
 MAX_TOKENS = 1000
 OPENAI_MODEL = "gpt-4o"
-AGENT_ROLE = "professional writer, goal is to provide high-quality content based on the user input"  # noqa: E501
+AGENT_ROLE = "professional writer, goal is to " "provide high-quality content based on the user input"
 AGENT_STREAMING_EVENT = "writer-agent"
 
 

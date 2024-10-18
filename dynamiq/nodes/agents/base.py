@@ -47,13 +47,10 @@ class AgentIntermediateStep(BaseModel):
 class Agent(Node):
     """Base class for an AI Agent that interacts with a Language Model and tools."""
 
-    DEFAULT_INTRODUCTION: ClassVar[
-        str
-    ] = """
-    You are a helpful AI assistant designed to assist users with various tasks and queries.
-    Your goal is to provide accurate, helpful, and friendly responses to the best of your abilities.
-    """  # noqa E501
-
+    DEFAULT_INTRODUCTION: ClassVar[str] = (
+        "You are a helpful AI assistant designed to assist users with various tasks and queries."
+        "Your goal is to provide accurate, helpful, and friendly responses to the best of your abilities."
+    )
     DEFAULT_DATE: ClassVar[str] = datetime.now().strftime("%d %B %Y")
 
     llm: Node = Field(..., description="Language Model (LLM) used by the agent.")
@@ -248,10 +245,10 @@ class Agent(Node):
             logger.error(f"Error parsing action: {e}")
             raise ActionParsingException(
                 (
-                    """Error: Unable to parse action and action input.
-                    Please rewrite using the correct Action/Action Input format
-                    with action input as a valid dictionary.
-                    Ensure all quotes are included."""  # noqa E501
+                    "Error: Unable to parse action and action input."
+                    "Please rewrite using the correct Action/Action Input format"
+                    "with action input as a valid dictionary."
+                    "Ensure all quotes are included."
                 ),
                 recoverable=True,
             )
@@ -266,10 +263,10 @@ class Agent(Node):
         tool = self.tool_by_names.get(action)
         if not tool:
             raise AgentUnknownToolException(
-                f"""Unknown tool: {action}.
-                Use only available tools and provide only the tool's name in the action field.
-                Do not include any additional reasoning.
-                Please correct the action field or state that you cannot answer the question."""  # noqa E501
+                f"Unknown tool: {action}."
+                "Use only available tools and provide only the tool's name in the action field."
+                "Do not include any additional reasoning."
+                "Please correct the action field or state that you cannot answer the question."
             )
         return tool
 

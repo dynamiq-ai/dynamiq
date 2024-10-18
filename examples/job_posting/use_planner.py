@@ -18,9 +18,22 @@ from examples.tools.file_reader import FileReadTool
 
 # Load environment variables
 load_dotenv()
-AGENT_RESEARCHER_ROLE = """An expert in gathering information about a job. Goal is to analyze the company website and provided description to extract insights on culture, values, and specific needs."""  # noqa: E501
-AGENT_WRITER_ROLE = """An expert in creating job descriptions. Goal is to craft a detailed, engaging, and enticing job posting that resonates with the company's values and attracts the right candidates."""  # noqa: E501
-AGENT_REVIEWER_ROLE = """An expert in reviewing and editing content. Goal is to ensure the job description is accurate, engaging, and aligned with the company's values and needs."""  # noqa: E501
+AGENT_RESEARCHER_ROLE = (
+    "An expert in gathering information about a job."
+    "Goal is to analyze the company website and provided description"
+    "to extract insights on culture, values, and specific needs."
+)
+AGENT_WRITER_ROLE = (
+    "An expert in creating job descriptions."
+    "Goal is to craft a detailed, engaging, "
+    "and enticing job posting that resonates "
+    "with the company's values and attracts the right candidates."
+)
+AGENT_REVIEWER_ROLE = (
+    "An expert in reviewing and editing content."
+    "Goal is to ensure the job description is accurate, "
+    "engaging, and aligned with the company's values and needs."
+)
 
 
 def create_workflow() -> Workflow:
