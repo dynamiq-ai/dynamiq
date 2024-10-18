@@ -29,7 +29,7 @@ class BankRAGTool(Node):
     text embedding and answer generation.
     """
 
-    name: str = "Bank RAG Tool"
+    name: str = "Bank FAQ Search"
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     description: str = (
         """A tool with access to Internal Bank System Documents and Policies.

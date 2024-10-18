@@ -11,7 +11,8 @@ from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.tools.http_api_call import HttpApiCall
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
 
-if __name__ == "__main__":
+
+def inference(input: str) -> str:
     # Create connection to OpenAI
     connection = OpenAIConnection()
     llm = OpenAI(
@@ -31,7 +32,7 @@ if __name__ == "__main__":
     # Create connection to Bank API
     connection = HttpConnection(
         method="POST",
-        url="http://localhost:5004/",
+        url="http://localhost:8000/",
     )
 
     # Create api call tool
@@ -65,5 +66,9 @@ if __name__ == "__main__":
     )
 
     workflow = Workflow(flow=Flow(nodes=[agent_bank_documentation, agent_bank_support]))
-    result = workflow.run(input_data={"input": "fast block my card"})
-    print(result.output[agent_bank_support.id]["output"]["content"])
+    result = workflow.run(input_data={"input": input})
+    return result.output[agent_bank_support.id]["output"]["content"]
+
+
+if __name__ == "__main__":
+    print(inference("fast block my card"))
