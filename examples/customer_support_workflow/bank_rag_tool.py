@@ -5,13 +5,12 @@ from pydantic import ConfigDict
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes import InputTransformer, NodeGroup, llms
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.retrievers import PineconeDocumentRetriever
 from dynamiq.prompts import Message, Prompt
-from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PineconeVectorStore
-from dynamiq.utils.logger import logger
 
 # Constants
 EMBEDDING_MODEL = "text-embedding-ada-002"
@@ -29,7 +28,7 @@ class BankRAGTool(Node):
     text embedding and answer generation.
     """
 
-    name: str = "Bank LLM"
+    name: str = "Bank FAQ Search"
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     description: str = (
         """A tool with access to Internal Bank System Documents and Policies.
@@ -138,50 +137,27 @@ class BankRAGTool(Node):
         Returns:
             str: The generated answer based on retrieved documents.
         """
+
         flow_result = self.retriever_flow.run(input_data={"query": input_text})
         answer = flow_result.output.get(self.answer_generation_node.id).get("output")
-
-        logger.info(f"Input: {input_text}")
-        logger.info(f"Output: {answer}")
         return answer
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
         """
         Execute the RAG tool to generate an answer based on the input query.
 
         Args:
             input_data (dict[str, Any]): A dictionary containing the input query
                 under the key 'input'.
-            config (RunnableConfig, optional): Configuration for the execution.
             **kwargs: Additional keyword arguments.
 
         Returns:
             dict[str, Any]: A dictionary containing the generated answer under
                 the key 'content'.
-
-        Raises:
-            Exception: If there's an error during execution.
         """
-        try:
-            input_text = input_data.get("input", "")
-            result = self._use(input_text)
-        except Exception as error:
-            logger.error(f"Tool {self.name} has failed")
-            raise error
 
+        if input_text := input_data.get("input"):
+            result = self._use(str(input_text))
+        else:
+            raise ToolExecutionException("Error: Provide request with key 'input'.", recoverable=True)
         return {"content": result}
-
-    def generate_embeddings(self, chunk):
-        return self.text_embedder_node.execute(chunk)
-
-
-if __name__ == "__main__":
-    tool = BankRAGTool()
-    query = """procedure for blocking a card quickly:
-    1) Recieve card number and card pin_code
-    2) Access API to appropriate endpoint and submit card number and card pin_code
-    """
-    result = tool.generate_embeddings({"query": query})
-    print(f"Results for query '{query}':\n{result}")
