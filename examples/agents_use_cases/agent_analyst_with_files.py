@@ -1,4 +1,5 @@
 from dynamiq.connections import E2B
+from dynamiq.nodes.agents.base import FileDataModel
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
@@ -37,18 +38,14 @@ FILE_DESCRIPTION = """
 """
 
 
-def create_agent(file_paths: list[str], files_description: list[str]):
+def create_agent():
     """
     Create and configure the agent with necessary tools.
-
-    Args:
-        file_paths (List[str]): A list of file paths that have to be uploaded.
-        files_description (str): Description of files uploaded
 
     Returns:
         Workflow: A configured Dynamiq workflow ready to run.
     """
-    tool = E2BInterpreterTool(connection=E2B(), files=list(zip(file_paths, files_description)))
+    tool = E2BInterpreterTool(connection=E2B())
 
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.001)
     agent_software = ReActAgent(
@@ -73,25 +70,32 @@ def run_workflow(prompt: str, files_to_upload: list[str], files_description: lis
     Args:
         prompt (str): Question/task for agent to accomplish.
         files_to_upload (List[str]): A list of file paths that have to be uploaded.
-        files_description (str): Description of files uploaded
+        files_description (List[str]): Description of files uploaded
     """
-    if len(files_description) == len(files_to_upload):
+    if len(files_description) != len(files_to_upload):
         raise ValueError("Number of file paths and file descriptions doesn't match")
 
     try:
-        agent = create_agent(files_to_upload, files_description)
+        agent = create_agent()
+        files = []
+
+        for file_path, file_description in zip(files_to_upload, files_description):
+            with open(file_path, "rb") as file:
+                file_data = file.read()
+                file_model = FileDataModel(file_data=file_data, description=file_description)
+                files.append(file_model)
 
         result = agent.run(
-            input_data={"input": prompt},
+            input_data={"input": prompt, "files": files},
         )
-        return result.output["content"]
+        return result["content"], result.get("intermediate_steps", {})
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         return "", {}
 
 
 if __name__ == "__main__":
-    output = run_workflow(prompt=PROMPT, files_to_upload=[FILE_PATH], files_description=[FILE_DESCRIPTION])
+    output, steps = run_workflow(prompt=PROMPT, files_to_upload=[FILE_PATH], files_description=[FILE_DESCRIPTION])
 
     logger.info("---------------------------------Result-------------------------------------")
     logger.info(output)

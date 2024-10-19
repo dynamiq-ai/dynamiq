@@ -1,3 +1,4 @@
+import io
 import json
 import re
 import textwrap
@@ -5,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory
@@ -44,19 +45,42 @@ class AgentIntermediateStep(BaseModel):
     final_answer: str | dict | None = None
 
 
+class FileDataModel(BaseModel):
+    file: bytes | io.BytesIO
+    description: str = ""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @field_validator("file")
+    def check_file_type(cls, value):
+        """Ensures file is either bytes or BytesIO."""
+        if not isinstance(value, (bytes, io.BytesIO)):
+            raise ValueError(f"Invalid type for file: {type(value)}. Must be bytes or BytesIO.")
+        return value
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        # Custom schema logic for BytesIO
+        if source_type == io.BytesIO:
+            return handler.generate_schema(bytes)
+        return super().__get_pydantic_core_schema__(source_type, handler)
+
+
 class Agent(Node):
     """Base class for an AI Agent that interacts with a Language Model and tools."""
 
     DEFAULT_INTRODUCTION: ClassVar[str] = (
-        "You are a helpful AI assistant designed to help with various tasks."
+        "You are a helpful AI assistant designed to assist users with various tasks and queries."
+        "Your goal is to provide accurate, helpful, and friendly responses to the best of your abilities."
     )
     DEFAULT_DATE: ClassVar[str] = datetime.now().strftime("%d %B %Y")
 
-    llm: Node = Field(..., description="Language Model (LLM) used by the agent.")
+    llm: Node = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     streaming: StreamingConfig = StreamingConfig()
     tools: list[Node] = []
+    files: list[FileDataModel] | None = None
     name: str = "AI Agent"
     role: str | None = None
     goal: str | None = None
@@ -77,13 +101,14 @@ class Agent(Node):
 
     @property
     def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"llm": True, "tools": True, "memory": True}
+        return super().to_dict_exclude_params | {"llm": True, "tools": True, "memory": True, "files": True}
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
         data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools]
+        data["files"] = [file.dict() for file in self.files] if self.files else None
         return data
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
@@ -105,6 +130,7 @@ class Agent(Node):
             "goal": self.goal or "",
             "date": self.DEFAULT_DATE,
             "tools": "{tool_description}",
+            "files": "{file_description}",
             "instructions": "",
             "output_format": "",
             "relevant_information": "{relevant_memory}",
@@ -113,6 +139,7 @@ class Agent(Node):
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
+            "file_description": self.file_description,
             "user_input": "",
             "context": "",
             "relevant_memory": "",
@@ -146,6 +173,11 @@ class Agent(Node):
         if self.memory:
             self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
             self._retrieve_memory(input_data)
+
+        files = input_data.get("files", [])
+        if files:
+            self.files = files
+            self._prompt_variables["file_description"] = self.file_description
 
         self._prompt_variables.update(input_data)
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
@@ -246,10 +278,10 @@ class Agent(Node):
             logger.error(f"Error parsing action: {e}")
             raise ActionParsingException(
                 (
-                    "Error: Could not parse action and action input. "
-                    "Please rewrite in the appropriate Action/Action Input "
-                    "format with action input as a valid dictionary "
-                    "Make sure all quotes are present."
+                    "Error: Unable to parse action and action input."
+                    "Please rewrite using the correct Action/Action Input format"
+                    "with action input as a valid dictionary."
+                    "Ensure all quotes are included."
                 ),
                 recoverable=True,
             )
@@ -264,15 +296,19 @@ class Agent(Node):
         tool = self.tool_by_names.get(action)
         if not tool:
             raise AgentUnknownToolException(
-                f"Unknown tool: {action} Use only available tools and provide only its name in action field.\
-                 Do not provide any aditional reasoning in action field.\
-                  Reiterate and provide proper value for action field or say that you cannot answer the question."
+                f"Unknown tool: {action}."
+                "Use only available tools and provide only the tool's name in the action field."
+                "Do not include any additional reasoning."
+                "Please correct the action field or state that you cannot answer the question."
             )
         return tool
 
     def _run_tool(self, tool: Node, tool_input: str, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
         logger.debug(f"Agent {self.name} - {self.id}: Running tool '{tool.name}'")
+        if self.files:
+            if tool.supports_files is True:
+                tool_input["files"] = self.files
 
         tool_result = tool.run(
             input_data=tool_input,
@@ -299,6 +335,16 @@ class Agent(Node):
             if self.tools
             else ""
         )
+
+    @property
+    def file_description(self) -> str:
+        """Returns a description of the files available to the agent."""
+        if self.files:
+            file_description = "You can work with the following files:\n"
+            for file in self.files:
+                file_description += f"<file>: {file.description} <\\file>\n"
+            return file_description
+        return ""
 
     @property
     def tool_names(self) -> str:
@@ -375,7 +421,7 @@ class AgentManager(Agent):
         action = input_data.get("action")
         if not action or action not in self._actions:
             raise InvalidActionException(
-                f"Invalid or missing action: {action}. Please choose action from {self._actions}"
+                f"Invalid or missing action: {action}. Please select an action from {self._actions}."  # nosec: B608
             )
 
         self._prompt_variables.update(input_data)
