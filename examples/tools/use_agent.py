@@ -40,8 +40,7 @@ def run(input_data):
         name="AI Agent",
         llm=llm,
         tools=[web_request_tool, api_call],
-        role="is to help user with various tasks",
-        goal="to provide best of possible answers to user queries",
+        role="is to help user with various tasks, goal is to provide best of possible answers to user queries",  # noqa: E501
     )
 
     result = agent.run(
