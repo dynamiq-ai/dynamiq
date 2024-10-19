@@ -23,7 +23,7 @@ Input format:
 """
 
 
-class FileReadTool(Node):
+class FileReaderTool(Node):
     """
     A tool to read the content of one or more files from byte streams.
 
@@ -45,12 +45,12 @@ class FileReadTool(Node):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def _load_file_content(self, file_data: bytes | io.BytesIO, file_description: str) -> str:
+    def _load_file_content(self, file: bytes | io.BytesIO, file_description: str) -> str:
         """
         Load the content of a file from bytes or a byte stream.
 
         Args:
-            file_data (Union[bytes, io.BytesIO]): The byte content or stream of the file.
+            file (Union[bytes, io.BytesIO]): The byte content or stream of the file.
             file_description (str): Description of the file (for logging or reference).
 
         Returns:
@@ -60,17 +60,17 @@ class FileReadTool(Node):
             logger.debug(f"Reading file: {file_description or 'Unnamed file'}")
 
             # If the input is bytes
-            if isinstance(file_data, bytes):
-                content = file_data
+            if isinstance(file, bytes):
+                content = file
 
             # If the input is a BytesIO object
-            elif isinstance(file_data, io.BytesIO):
-                file_data.seek(0)  # Ensure we're at the start of the BytesIO stream
-                content = file_data.read()
+            elif isinstance(file, io.BytesIO):
+                file.seek(0)  # Ensure we're at the start of the BytesIO stream
+                content = file.read()
 
             else:
                 raise ToolExecutionException(
-                    f"Invalid input type. Expected bytes or BytesIO, got {type(file_data)}", recoverable=False
+                    f"Invalid input type. Expected bytes or BytesIO, got {type(file)}", recoverable=False
                 )
 
             # Return partial or full content based on configuration
@@ -134,7 +134,7 @@ class FileReadTool(Node):
         # Iterate over each file and read its content
         for idx, file_model in enumerate(files):
             file_description = file_model.description or f"File {idx + 1}"
-            content = self._load_file_content(file_model.file_data, file_description)
+            content = self._load_file_content(file_model.file, file_description)
             results[file_description] = content
 
         logger.debug(f"Tool {self.name} - {self.id}: finished processing files.")

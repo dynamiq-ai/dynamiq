@@ -5,7 +5,7 @@ from dynamiq.nodes.agents import FileDataModel
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from examples.llm_setup import setup_llm
-from examples.tools.file_reader import FileReadTool
+from examples.tools.file_reader import FileReaderTool
 
 
 def read_file_as_bytes(file_path: str) -> bytes:
@@ -34,16 +34,16 @@ def read_file_as_bytes(file_path: str) -> bytes:
 
 
 # Define file paths
-CSV_PATH = "/Users/oleksiibabych/Projects/Product_D/dynamiq/.data/sample_regression_data.csv"
+CSV_PATH = ".data/sample_regression_data.csv"
 
 # Read files as bytes
 csv_bytes = read_file_as_bytes(CSV_PATH)
 
 # Create FileDataModel instances
-file_csv_model = FileDataModel(file_data=csv_bytes, description="CSV file with regression data")
+file_csv_model = FileDataModel(file=csv_bytes, description="CSV file with regression data")
 
 # Initialize tools
-tool_csv = FileReadTool(files=[file_csv_model])
+tool_csv = FileReaderTool(files=[file_csv_model])
 python_tool = E2BInterpreterTool(connection=E2B())
 
 # Set up LLM

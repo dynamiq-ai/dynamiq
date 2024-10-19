@@ -51,23 +51,23 @@ packages = 'requests,pandas'
 """  # noqa: E501
 
 
-def generate_unique_file_name(file_data: bytes | io.BytesIO, file_description: str = "") -> str:
+def generate_unique_file_name(file: bytes | io.BytesIO, file_description: str = "") -> str:
     """
     Generates a unique file name based on the file description and a hash of the file content.
 
     Args:
-        file_data: The file content as bytes or BytesIO.
+        file: The file content as bytes or BytesIO.
         file_description: The description of the file (used as a prefix).
 
     Returns:
         A unique file name based on the description and content hash.
     """
-    if isinstance(file_data, io.BytesIO):
-        file_data.seek(0)
-        file_content = file_data.read()
-        file_data.seek(0)
+    if isinstance(file, io.BytesIO):
+        file.seek(0)
+        file_content = file.read()
+        file.seek(0)
     else:
-        file_content = file_data
+        file_content = file
 
     file_hash = sha256(file_content).hexdigest()
 
@@ -135,8 +135,8 @@ class E2BInterpreterTool(ConnectionNode):
         """Uploads multiple files to the sandbox, generating unique names, and returns details for each file."""
         upload_details = []
         for file_model in files:
-            unique_file_name = generate_unique_file_name(file_model.file_data, file_model.description)
-            uploaded_path = self._upload_file(file_model.file_data, unique_file_name, sandbox)
+            unique_file_name = generate_unique_file_name(file_model.file, file_model.description)
+            uploaded_path = self._upload_file(file_model.file, unique_file_name, sandbox)
             upload_details.append(
                 {
                     "original_name": unique_file_name,
@@ -150,25 +150,23 @@ class E2BInterpreterTool(ConnectionNode):
 
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
-    def _upload_file(
-        self, file_data: bytes | io.BytesIO, file_description: str = "", sandbox: Sandbox | None = None
-    ) -> str:
+    def _upload_file(self, file: bytes | io.BytesIO, file_description: str = "", sandbox: Sandbox | None = None) -> str:
         """Uploads a single file to the specified sandbox and returns the uploaded path."""
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
-        unique_file_name = generate_unique_file_name(file_data, file_description)
+        unique_file_name = generate_unique_file_name(file, file_description)
 
-        # Handle the file_data types (bytes or io.BytesIO)
-        if isinstance(file_data, bytes):
-            file_like_object = io.BytesIO(file_data)
+        # Handle the file types (bytes or io.BytesIO)
+        if isinstance(file, bytes):
+            file_like_object = io.BytesIO(file)
             file_like_object.name = unique_file_name
-        elif isinstance(file_data, io.BytesIO):
-            file_data.name = unique_file_name
-            file_like_object = file_data
+        elif isinstance(file, io.BytesIO):
+            file.name = unique_file_name
+            file_like_object = file
         else:
             raise ToolExecutionException(
-                f"Error: Invalid file data type: {type(file_data)}. Expected bytes or BytesIO.", recoverable=False
+                f"Error: Invalid file data type: {type(file)}. Expected bytes or BytesIO.", recoverable=False
             )
 
         # Upload the file to the sandbox

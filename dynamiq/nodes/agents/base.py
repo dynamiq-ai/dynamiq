@@ -46,16 +46,16 @@ class AgentIntermediateStep(BaseModel):
 
 
 class FileDataModel(BaseModel):
-    file_data: bytes | io.BytesIO
+    file: bytes | io.BytesIO
     description: str = ""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    @field_validator("file_data")
+    @field_validator("file")
     def check_file_type(cls, value):
-        """Ensures file_data is either bytes or BytesIO."""
+        """Ensures file is either bytes or BytesIO."""
         if not isinstance(value, (bytes, io.BytesIO)):
-            raise ValueError(f"Invalid type for file_data: {type(value)}. Must be bytes or BytesIO.")
+            raise ValueError(f"Invalid type for file: {type(value)}. Must be bytes or BytesIO.")
         return value
 
     @classmethod
