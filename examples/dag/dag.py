@@ -120,7 +120,7 @@ ANTHROPIC_2_NODE = Anthropic(
             prompts.Message(
                 role="user",
                 content=(
-                    "Please simplify that information for 10 years kids:\n"
+                    "Please simplify that information for 10 years old kids:\n"
                     "- {{ds}}\n\n"
                     "- {{llm}}\n\n"
                     "- {{ai}}\n\n"

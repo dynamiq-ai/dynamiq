@@ -24,7 +24,6 @@ if __name__ == "__main__":
         tools=[tool_code],
         role=AGENT_ROLE,
         goal=AGENT_GOAL,
-        max_loops=10,
         inference_mode=InferenceMode.XML,
     )
 

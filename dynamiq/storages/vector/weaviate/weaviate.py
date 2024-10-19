@@ -42,7 +42,7 @@ class WeaviateVectorStore:
         connection: Weaviate | None = None,
         client: Optional["WeaviateClient"] = None,
         index_name: str = "default",
-        create_if_not_exist: bool = True,
+        create_if_not_exist: bool = False,
     ):
         """
         Initialize a new instance of WeaviateDocumentStore and connect to the Weaviate instance.
