@@ -4,7 +4,11 @@ from dynamiq.nodes.tools.function_tool import function_tool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from examples.llm_setup import setup_llm
 
-AGENT_ROLE = "professional writer,goal is to produce a well written and informative response, that can be used for CHILDREN, with emojis and simple language."  # noqa: E501
+AGENT_ROLE = (
+    "professional writer, goal is to produce"
+    "a well written and informative response, that can be used for CHILDREN, "
+    "with emojis and simple language."
+)
 
 if __name__ == "__main__":
     llm = setup_llm()

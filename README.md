@@ -175,23 +175,27 @@ coding_agent = ReActAgent(
     name="coding-agent",
     llm=llm,
     tools=[python_tool],
-    role="Expert agent with coding skills.",
-    goal="Provide the solution to the input task using Python software engineering skills.",
+    role=("Expert agent with coding skills."
+          "Goal is to provide the solution to the input task"
+          "using Python software engineering skills."),
     max_loops=15,
 )
 
 planner_agent = ReflectionAgent(
     name="planner-agent",
     llm=llm,
-    role="Expert agent with planning skills.",
-    goal="Analyze complex requests and provide detailed action plan.",
+    role=("Expert agent with planning skills."
+          "Goal is to analyze complex requests"
+          "and provide a detailed action plan."),
 )
 
 search_agent = ReActAgent(
     name="search-agent",
     llm=llm,
     tools=[search_tool],
-    role="Expert agent with web search skills.",
+    role=("Expert agent with web search skills."
+          "Goal is to provide the solution to the input task"
+          "using web search and summarization skills."),
     max_loops=10,
 )
 
