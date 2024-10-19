@@ -4,7 +4,6 @@ from dynamiq import Workflow
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes import InputTransformer
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import NodeDependency
@@ -12,7 +11,7 @@ from dynamiq.nodes.tools.http_api_call import HttpApiCall
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
 
 
-def inference(input: str) -> str:
+def run_workflow(input: str) -> str:
     # Create connection to OpenAI
     connection = OpenAIConnection()
     llm = OpenAI(
@@ -56,14 +55,17 @@ def inference(input: str) -> str:
     human_feedback_tool = HumanFeedbackTool()
 
     # Create a ReActAgent for handling internal bank API queries
+
+    def merge_and_short_content(_: dict, outputs: dict[str, dict]):
+        return outputs[agent_bank_documentation.id]["content"]
+
     agent_bank_support = ReActAgent(
         name="API Agent",
         role="Customer support assistant with access to Internal Bank API",
         llm=llm,
         tools=[api_call, human_feedback_tool],
         depends=[NodeDependency(node=agent_bank_documentation)],
-        input_transformer=InputTransformer(selector={"input": f"${[agent_bank_documentation.id]}.output.content"}),
-    )
+    ).inputs(content=f"Follow this instructions: {agent_bank_documentation.outputs.content}")
 
     workflow = Workflow(flow=Flow(nodes=[agent_bank_documentation, agent_bank_support]))
     result = workflow.run(input_data={"input": input})
@@ -71,4 +73,4 @@ def inference(input: str) -> str:
 
 
 if __name__ == "__main__":
-    print(inference("fast block my card"))
+    print(run_workflow("fast block my card"))
