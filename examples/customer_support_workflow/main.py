@@ -33,7 +33,7 @@ def run_workflow(input: str) -> str:
         text_embedder=text_embedder,
         document_retriever=document_retriever,
     )
-    
+
     # Create a ReActAgent for handling bank documentation queries
     agent_bank_documentation = ReActAgent(
         name="RAG Agent",
@@ -41,7 +41,6 @@ def run_workflow(input: str) -> str:
         llm=llm,
         tools=[bank_retriever_tool],
     )
-    
 
     # Create connection to Bank API
     connection = HttpConnection(
