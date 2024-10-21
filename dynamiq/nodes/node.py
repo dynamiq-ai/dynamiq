@@ -16,6 +16,7 @@ from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.exceptions import (
     NodeConditionFailedException,
+    NodeConditionSkippedException,
     NodeException,
     NodeFailedException,
     NodeSkippedException,
@@ -268,16 +269,22 @@ class Node(BaseModel, Runnable, ABC):
 
         Raises:
             NodeConditionFailedException: If the dependency condition is not met.
+            NodeConditionSkippedException: If the dependency condition is skipped.
         """
-        if (dep_output_data := depends_result.get(depend.node.id)) and isinstance(
-            dep_output_data.output, dict
+        if (
+            (dep_output_data := depends_result.get(depend.node.id))
+            and (isinstance(dep_output_data.output, dict))
+            and (dep_condition_result := dep_output_data.output.get(depend.option))
         ):
-            if (
-                dep_condition_data := dep_output_data.output.get(depend.option)
-            ) and dep_condition_data.status == RunnableStatus.FAILURE:
+            if dep_condition_result.status == RunnableStatus.FAILURE:
                 raise NodeConditionFailedException(
                     failed_depend=depend,
                     message=f"Dependency {depend.node.id} condition {depend.option}: result is false",
+                )
+            if dep_condition_result.status == RunnableStatus.SKIP:
+                raise NodeConditionSkippedException(
+                    failed_depend=depend,
+                    message=f"Dependency {depend.node.id} condition {depend.option}: skipped",
                 )
 
     @staticmethod
