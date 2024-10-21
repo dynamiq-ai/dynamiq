@@ -83,7 +83,6 @@ class Agent(Node):
     files: list[FileDataModel] | None = None
     name: str = "AI Agent"
     role: str | None = None
-    goal: str | None = None
     max_loops: int = 1
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_retrieval_strategy: str = "all"  # all, relevant, both
@@ -127,7 +126,6 @@ class Agent(Node):
         self._prompt_blocks = {
             "introduction": self.DEFAULT_INTRODUCTION,
             "role": self.role or "",
-            "goal": self.goal or "",
             "date": self.DEFAULT_DATE,
             "tools": "{tool_description}",
             "files": "{file_description}",

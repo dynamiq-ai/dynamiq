@@ -18,6 +18,22 @@ from examples.tools.file_reader import FileReadTool
 
 # Load environment variables
 load_dotenv()
+AGENT_RESEARCHER_ROLE = (
+    "An expert in gathering information about a job."
+    "Goal is to analyze the company website and provided description"
+    "to extract insights on culture, values, and specific needs."
+)
+AGENT_WRITER_ROLE = (
+    "An expert in creating job descriptions."
+    "Goal is to craft a detailed, engaging, "
+    "and enticing job posting that resonates "
+    "with the company's values and attracts the right candidates."
+)
+AGENT_REVIEWER_ROLE = (
+    "An expert in reviewing and editing content."
+    "Goal is to ensure the job description is accurate, "
+    "engaging, and aligned with the company's values and needs."
+)
 
 
 def create_workflow() -> Workflow:
@@ -46,22 +62,19 @@ def create_workflow() -> Workflow:
     # Create agents
     agent_researcher = ReActAgent(
         name="Researcher Analyst",
-        role="An expert in gathering information about a job",
-        goal="Analyze the company website and provided description to extract insights on culture, values, and specific needs.",  # noqa: E501
+        role=AGENT_RESEARCHER_ROLE,
         llm=llm,
         tools=[tool_search],
     )
     agent_writer = ReActAgent(
         name="Job Description Writer",
-        role="An expert in creating content",
-        goal="Use insights from the Researcher Analyst to create a detailed, engaging, and enticing job posting. Skilled in crafting compelling job descriptions that resonate with the company's values and attract the right candidates.",  # noqa: E501
+        role=AGENT_WRITER_ROLE,
         llm=llm,
         tools=[tool_file_read, tool_search],
     )
     agent_reviewer = ReActAgent(
         name="Job Description Reviewer and Editor",
-        role="An expert in reviewing content and editing content",
-        goal="Review the job description created by the Job Description Writer to ensure it is accurate, engaging, and aligned with the company's values and needs.",  # noqa: E501
+        role=AGENT_REVIEWER_ROLE,
         llm=llm,
         tools=[tool_search, tool_file_read],
     )

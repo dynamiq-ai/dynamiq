@@ -12,8 +12,7 @@ from dynamiq.prompts import MessageRole
 from dynamiq.runnables import RunnableStatus
 
 # Constants
-AGENT_ROLE = "helpful assistant"
-AGENT_GOAL = "is to provide useful information and answer questions"
+AGENT_ROLE = "helpful assistant, goal is to provide useful information and answer questions"
 
 
 @pytest.fixture
@@ -47,7 +46,6 @@ def test_workflow_with_agent_and_in_memory_memory(openai_node):
         name="Agent",
         llm=openai_node,
         role=AGENT_ROLE,
-        goal=AGENT_GOAL,
         id="agent",
         memory=memory,
     )

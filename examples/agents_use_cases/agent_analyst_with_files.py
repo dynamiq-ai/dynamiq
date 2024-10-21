@@ -10,7 +10,6 @@ AGENT_ROLE = """
  Senior Data Scientist and Programmer with ability to write a well written
  python code and you have access to python tool
  You have access to web to search for best solutions for a problem.
-
  Generally, you follow these rules:
     - ALWAYS FORMAT YOUR RESPONSE IN MARKDOWN
     - Use double quotes for property names
