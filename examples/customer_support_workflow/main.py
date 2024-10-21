@@ -53,6 +53,12 @@ def run_workflow(input: str) -> str:
 
     # Create user interaction tool
     human_feedback_tool = HumanFeedbackTool()
+    
+    def combine_inputs(_: dict, outputs: dict[str, dict]):
+        return (
+            f"Request: {input}\n"
+            f"Follow this instruction: {outputs[agent_bank_documentation.id]['content']}"
+        )
 
     # Create a ReActAgent for handling internal bank API queries
     agent_bank_support = ReActAgent(
@@ -61,7 +67,7 @@ def run_workflow(input: str) -> str:
         llm=llm,
         tools=[api_call, human_feedback_tool],
         depends=[NodeDependency(node=agent_bank_documentation)],
-    ).inputs(content=f"Follow this instructions: {agent_bank_documentation.outputs.content}")
+    ).inputs(input=combine_inputs)
 
     workflow = Workflow(flow=Flow(nodes=[agent_bank_documentation, agent_bank_support]))
     result = workflow.run(input_data={"input": input})
