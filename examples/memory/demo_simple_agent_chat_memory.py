@@ -7,13 +7,11 @@ from examples.llm_setup import setup_llm
 def setup_agent():
     llm = setup_llm()
     memory = Memory(backend=InMemory())
-    AGENT_ROLE = "helpful assistant"
-    AGENT_GOAL = "is to provide useful information and answer questions"
+    AGENT_ROLE = "helpful assistant," "goal is to provide useful information and answer questions"
     agent = SimpleAgent(
         name="Agent",
         llm=llm,
         role=AGENT_ROLE,
-        goal=AGENT_GOAL,
         id="agent",
         memory=memory,
     )

@@ -14,8 +14,7 @@ from examples.llm_setup import setup_llm
 llm = setup_llm()
 
 # Constants
-AGENT_ROLE = "Dynamiq AI, an AI model who is expert at searching the web and answering user's queries."
-AGENT_GOAL = """
+AGENT_ROLE = """Dynamiq AI, an AI model who is expert at searching the web and answering user's queries.Goal is
 Generate a response that is informative and relevant to the user's query.
 You must use this context to answer the user's query in the best way possible. Use an unbaised and journalistic tone in your response. Do not repeat the text.
 You must not tell the user to open any link or visit any website to get the answer. You must provide the answer in the response itself.
@@ -46,7 +45,6 @@ def setup_agent() -> ReActAgent:
         llm=llm,
         tools=[tool_search],
         role=AGENT_ROLE,
-        goal=AGENT_GOAL,
     )
 
 

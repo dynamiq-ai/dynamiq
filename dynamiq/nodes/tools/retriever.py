@@ -2,6 +2,7 @@ from typing import Any, Literal
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
@@ -21,7 +22,7 @@ class RetrievalTool(Node):
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Retrieval Tool"
-    description: str = "A tool for retrieving relevant documents based on a query."
+    description: str = "A tool for retrieving relevant documents based on a query. Provide query with key 'input'."
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     connection_manager: ConnectionManager | None = None
     text_embedder: ConnectionNode | None = None
@@ -96,29 +97,30 @@ class RetrievalTool(Node):
         Returns:
             dict[str, Any]: Result of the retrieval.
         """
-        query = input_data.get("input", "")
-        logger.debug(f"Tool {self.name} - {self.id}: started with query '{query}'")
+        if query := input_data.get("input", ""):
+            logger.debug(f"Tool {self.name} - {self.id}: started with query '{query}'")
 
-        if not self.text_embedder:
-            raise ValueError(f"{self.name}: Text embedder is not initialized.")
-        if not self.document_retriever:
-            raise ValueError(f"{self.name}: Document retriever is not initialized.")
+            if not self.text_embedder:
+                raise ValueError(f"{self.name}: Text embedder is not initialized.")
+            if not self.document_retriever:
+                raise ValueError(f"{self.name}: Document retriever is not initialized.")
 
-        try:
-            text_embedder_output = self.text_embedder.run(input_data={"query": query})
-            embedding = text_embedder_output.output.get("embedding")
+            try:
+                text_embedder_output = self.text_embedder.run(input_data={"query": query})
+                embedding = text_embedder_output.output.get("embedding")
 
-            document_retriever_output = self.document_retriever.run(input_data={"embedding": embedding})
-            retrieved_documents = document_retriever_output.output.get("documents", [])
-            logger.info(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")
+                document_retriever_output = self.document_retriever.run(input_data={"embedding": embedding})
+                retrieved_documents = document_retriever_output.output.get("documents", [])
+                logger.info(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")
 
-            formatted_content = self.format_content(retrieved_documents)
-            logger.debug(f"Tool {self.name} - {self.id}: finished retrieval. Content: {formatted_content[:100]}...")
+                formatted_content = self.format_content(retrieved_documents)
+                logger.debug(f"Tool {self.name} - {self.id}: finished retrieval. Content: {formatted_content[:100]}...")
 
-            return {"content": formatted_content}
-        except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
-            raise
+                return {"content": formatted_content}
+            except Exception as e:
+                logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
+                raise
+        raise ToolExecutionException("Provide query with key 'input'.")
 
     def to_dict(self, **kwargs) -> dict:
         """Convert the RetrievalTool object to a dictionary.
