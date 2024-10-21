@@ -4,7 +4,7 @@ from pydantic import ConfigDict
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes import  NodeGroup, llms
+from dynamiq.nodes import NodeGroup, llms
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.node import Node, NodeDependency
