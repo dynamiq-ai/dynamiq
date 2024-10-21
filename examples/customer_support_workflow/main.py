@@ -27,7 +27,7 @@ def run_workflow(input: str) -> str:
         top_k=3, vector_store=PineconeVectorStore(index_name="default", dimension=1536)
     )
 
-    bank_tool_retriever = RetrievalTool(
+    bank_retriever_tool = RetrievalTool(
         name="Bank FAQ Search",
         text_embedder=text_embedder,
         document_retriever=retriever,
@@ -38,7 +38,7 @@ def run_workflow(input: str) -> str:
         name="RAG Agent",
         role="Customer support assistant for Internal Bank Documentation.",
         llm=llm,
-        tools=[bank_tool_retriever],
+        tools=[bank_retriever_tool],
     )
 
     # Create connection to Bank API
