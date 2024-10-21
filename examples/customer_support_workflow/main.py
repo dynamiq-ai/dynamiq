@@ -13,6 +13,7 @@ from dynamiq.nodes.tools.retriever import RetrievalTool
 from dynamiq.storages.vector import PineconeVectorStore
 from bank_api import HOST, PORT
 
+
 def run_workflow(input: str) -> str:
     # Create connection to OpenAI
     connection = OpenAIConnection()
