@@ -4,7 +4,7 @@ from pydantic import ConfigDict
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes import InputTransformer, NodeGroup, llms
+from dynamiq.nodes import  NodeGroup, llms
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.node import Node, NodeDependency
@@ -56,13 +56,8 @@ class BankRAGTool(Node):
     def _create_document_retriever(self) -> PineconeDocumentRetriever:
         return PineconeDocumentRetriever(
             vector_store=self.vector_store,
-            depends=[NodeDependency(self.text_embedder_node)],
-            input_transformer=InputTransformer(
-                selector={
-                    "embedding": f"${[self.text_embedder_node.id]}.output.embedding"
-                }
-            ),
-        )
+            depends=[NodeDependency(self.text_embedder_node)]
+        ).inputs(embedding=self.text_embedder_node.outputs.embedding)
 
     def _create_answer_generation_node(self) -> llms.OpenAI:
         prompt = Prompt(
@@ -75,13 +70,8 @@ class BankRAGTool(Node):
             model=LLM_MODEL,
             prompt=prompt,
             connection=OpenAIConnection(),
-            depends=[NodeDependency(self.document_retriever_node)],
-            input_transformer=InputTransformer(
-                selector={
-                    "documents": f"${[self.document_retriever_node.id]}.output.documents"
-                }
-            ),
-        )
+            depends=[NodeDependency(self.document_retriever_node)]
+        ).inputs(documents=self.document_retriever_node.outputs.documents)
 
     def _create_retriever_flow(self) -> Flow:
         return Flow(

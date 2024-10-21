@@ -43,8 +43,8 @@ def run_workflow(input: str) -> str:
 
         Available endpoints:
         * 'block_card' (int card_number, int pin_code)
-        * 'make_transaction' (int card_number_sender, int card_number_reciever, int amoumt)
-        * 'request_report' (int userId, int pin_code)
+        * 'make_transaction' (int card_number_sender, int card_number_reciever, int amount)
+        * 'request_report' (int card_number, int pin_code)
 
         Choose between endpoints and pass name of it in url_path parameter.
         Parameters for endpoint have to be passed in `data` object.
@@ -55,10 +55,6 @@ def run_workflow(input: str) -> str:
     human_feedback_tool = HumanFeedbackTool()
 
     # Create a ReActAgent for handling internal bank API queries
-
-    def merge_and_short_content(_: dict, outputs: dict[str, dict]):
-        return outputs[agent_bank_documentation.id]["content"]
-
     agent_bank_support = ReActAgent(
         name="API Agent",
         role="Customer support assistant with access to Internal Bank API",

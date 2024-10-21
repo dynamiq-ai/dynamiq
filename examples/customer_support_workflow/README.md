@@ -22,7 +22,7 @@ This directory contains an example of a bank customer support workflow built usi
 ## Workflow Logic
 
 1. The user provides a query (e.g., "fast block my card").
-2. `RAG Agent` is invoked to find relevant documentation how to proceed with request.
+2. `RAG Agent` is invoked to find relevant documentation on how to proceed with request.
 3. `API Agent` starts with documentation provided by `RAG Agent`. It will gather required informatiom from user and execute operation with API.
 4. Upon completion of the operation, a concise summary of the request and its status will be provided.
 
