@@ -49,3 +49,13 @@ class NodeConditionFailedException(NodeException):
     """
 
     pass
+
+
+class NodeConditionSkippedException(NodeException):
+    """
+    Exception raised when a node's condition skipped.
+
+    This exception is a subclass of NodeException and inherits its attributes and methods.
+    """
+
+    pass
