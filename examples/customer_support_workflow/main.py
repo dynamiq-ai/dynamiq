@@ -53,7 +53,7 @@ def run_workflow(input: str) -> str:
 
     # Create user interaction tool
     human_feedback_tool = HumanFeedbackTool()
-    
+
     def combine_inputs(_: dict, outputs: dict[str, dict]):
         return (
             f"Request: {input}\n"
