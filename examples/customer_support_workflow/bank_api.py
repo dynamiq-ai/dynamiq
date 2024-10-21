@@ -3,6 +3,8 @@ from fastapi import FastAPI, Form
 
 app = FastAPI()
 
+HOST = "127.0.0.1"
+PORT = 8000
 
 database = {
     "1234567890": {
@@ -59,4 +61,4 @@ def request_report(card_number: str = Form(...), pin_code: str = Form(...)):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host=HOST, port=PORT)

@@ -11,7 +11,7 @@ from dynamiq.nodes.tools.http_api_call import HttpApiCall
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
 from dynamiq.nodes.tools.retriever import RetrievalTool
 from dynamiq.storages.vector import PineconeVectorStore
-
+from bank_api import HOST, PORT
 
 def run_workflow(input: str) -> str:
     # Create connection to OpenAI
@@ -44,7 +44,7 @@ def run_workflow(input: str) -> str:
     # Create connection to Bank API
     connection = HttpConnection(
         method="POST",
-        url="http://localhost:8000/",
+        url=f"http://{HOST}:{PORT}/",
     )
 
     # Create api call tool
