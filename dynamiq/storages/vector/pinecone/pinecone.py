@@ -1,17 +1,32 @@
+import enum
 from copy import copy
+from functools import partial
 from typing import TYPE_CHECKING, Any, Optional
 
-from dynamiq.connections import Pinecone, PineconeIndexType
+from pydantic import Field
+
+from dynamiq.connections import Pinecone
 from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.pinecone.filters import _normalize_filters
 from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
+from dynamiq.utils.env import get_env_var
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
     from pinecone import Pinecone as PineconeClient
 
 TOP_K_LIMIT = 1_000
+
+
+class PineconeIndexType(str, enum.Enum):
+    """
+    This enum defines various index types for different Pinecone deployments.
+    """
+
+    SERVERLESS = "serverless"
+    POD = "pod"
+    UNDEFINED = "undefined"
 
 
 class PineconeVectorStoreParams(BaseVectorStoreParams):
@@ -22,6 +37,12 @@ class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVecto
     batch_size: int = 100
     dimension: int = 1536
     metric: str = "cosine"
+    cloud: str | None = Field(default_factory=partial(get_env_var, "PINECONE_CLOUD"))
+    region: str | None = Field(default_factory=partial(get_env_var, "PINECONE_REGION"))
+    index_type: PineconeIndexType = PineconeIndexType.UNDEFINED
+    environment: str | None = Field(default_factory=partial(get_env_var, "PINECONE_ENVIRONMENT"))
+    pod_type: str | None = Field(default_factory=partial(get_env_var, "PINECONE_POD_TYPE"))
+    pods: int = 1
 
 
 class PineconeVectorStore:
@@ -37,6 +58,12 @@ class PineconeVectorStore:
         dimension: int = 1536,
         metric: str = "cosine",
         create_if_not_exist: bool = False,
+        index_type: PineconeIndexType = PineconeIndexType.UNDEFINED,
+        cloud: str | None = None,
+        region: str | None = None,
+        environment: str | None = None,
+        pod_type: str | None = None,
+        pods: int = 1,
         **index_creation_kwargs,
     ):
         """
@@ -57,21 +84,70 @@ class PineconeVectorStore:
 
         self.index_name = index_name
         self.namespace = namespace
-        if self.connection.index_type == PineconeIndexType.SERVERLESS:
-            self._spec = self.connection.serverless_spec
-        else:
-            self._spec = self.connection.pod_spec
+        self.index_type = index_type
 
         self.create_if_not_exist = create_if_not_exist
+        self._spec = self._get_spec()
+
         self.batch_size = batch_size
         self.metric = metric
-        self.index_creation_kwargs = index_creation_kwargs
         self.dimension = dimension
+        self.cloud = cloud
+        self.region = region
+        self.environment = environment
+        self.pod_type = pod_type
+        self.pods = pods
+
+        self.index_creation_kwargs = index_creation_kwargs
+
         self._dummy_vector = [-10.0] * dimension
         self._index = self.connect_to_index()
-        logger.debug(
-            f"PineconeVectorStore initialized with index {self.index_name} and namespace {self.namespace}."
-        )
+        logger.debug(f"PineconeVectorStore initialized with index {self.index_name} and namespace {self.namespace}.")
+
+    def _get_spec(self):
+        """
+        Returns the serverless or pod specification for the Pinecone service.
+
+        Returns:
+            ServerlessSpec | PodSpec | None: The serverless or pod specification.
+        """
+        if self.index_type == PineconeIndexType.SERVERLESS:
+            return self.serverless_spec
+        elif self.index_type == PineconeIndexType.POD:
+            return self.pod_spec
+        else:
+            return None
+
+    @property
+    def serverless_spec(self):
+        """
+        Returns the serverless specification for the Pinecone service.
+
+        Returns:
+            ServerlessSpec: The serverless specification.
+        """
+        # Import in runtime to save memory
+        from pinecone import ServerlessSpec
+
+        if self.cloud is None or self.region is None:
+            raise ValueError("Cloud and region must be specified for serverless indexes")
+        return ServerlessSpec(cloud=self.cloud, region=self.region)
+
+    @property
+    def pod_spec(self):
+        """
+        Returns the pod specification for the Pinecone service.
+
+        Returns:
+            PodSpec: The pod specification.
+        """
+        # Import in runtime to save memory
+        from pinecone import PodSpec
+
+        if self.environment is None or self.pod_type is None:
+            raise ValueError("Environment and pod type must be specified for pod indexes")
+
+        return PodSpec(environment=self.environment, pod_type=self.pod_type, pods=self.pods)
 
     def connect_to_index(self):
         """
@@ -82,6 +158,7 @@ class PineconeVectorStore:
         """
         available_indexes = self.client.list_indexes().index_list["indexes"]
         indexes_names = [index["name"] for index in available_indexes]
+
         if self.index_name not in indexes_names:
             if self.create_if_not_exist:
                 logger.debug(f"Index {self.index_name} does not exist. Creating a new index.")
