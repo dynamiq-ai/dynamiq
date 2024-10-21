@@ -1,9 +1,10 @@
 import os
+from typing import Any
 
 from dynamiq.utils.logger import logger
 
 
-def get_env_var(var_name: str, default_value: str = None) -> str:
+def get_env_var(var_name: str, default_value: Any = None):
     """Retrieves the value of an environment variable.
 
     This function attempts to retrieve the value of the specified environment variable. If the
