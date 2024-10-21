@@ -359,7 +359,7 @@ answer_generator = (
         documents=document_retriever.outputs.documents,
         query=embedder.outputs.query,
     )  # take documents from the vector store node and query from the embedder
-    .depends_on(document_retriever)
+    .depends_on([document_retriever, embedder])
 )
 retrieval_wf.flow.add_nodes(answer_generator)
 
