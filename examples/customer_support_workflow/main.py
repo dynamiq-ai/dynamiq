@@ -23,14 +23,14 @@ def run_workflow(input: str) -> str:
     )
 
     text_embedder = OpenAITextEmbedder(model="text-embedding-ada-002")
-    retriever = PineconeDocumentRetriever(
+    document_retriever = PineconeDocumentRetriever(
         top_k=3, vector_store=PineconeVectorStore(index_name="default", dimension=1536)
     )
 
     bank_retriever_tool = RetrievalTool(
         name="Bank FAQ Search",
         text_embedder=text_embedder,
-        document_retriever=retriever,
+        document_retriever=document_retriever,
     )
 
     # Create a ReActAgent for handling bank documentation queries
