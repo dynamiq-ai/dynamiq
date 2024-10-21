@@ -1,14 +1,16 @@
-from bank_rag_tool import BankRAGTool
-
 from dynamiq import Workflow
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import NodeDependency
+from dynamiq.nodes.retrievers import PineconeDocumentRetriever
 from dynamiq.nodes.tools.http_api_call import HttpApiCall
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
+from dynamiq.nodes.tools.retriever import RetrievalTool
+from dynamiq.storages.vector import PineconeVectorStore
 
 
 def run_workflow(input: str) -> str:
@@ -20,12 +22,23 @@ def run_workflow(input: str) -> str:
         temperature=0.01,
     )
 
+    text_embedder = OpenAITextEmbedder(model="text-embedding-ada-002")
+    retriever = PineconeDocumentRetriever(
+        top_k=3, vector_store=PineconeVectorStore(index_name="default", dimension=1536)
+    )
+
+    bank_tool_retriever = RetrievalTool(
+        name="Bank FAQ Search",
+        text_embedder=text_embedder,
+        document_retriever=retriever,
+    )
+
     # Create a ReActAgent for handling bank documentation queries
     agent_bank_documentation = ReActAgent(
         name="RAG Agent",
-        role="Customer support assistant for Internal Bank Documentation",
+        role="Customer support assistant for Internal Bank Documentation.",
         llm=llm,
-        tools=[BankRAGTool()],
+        tools=[bank_tool_retriever],
     )
 
     # Create connection to Bank API
