@@ -39,6 +39,7 @@ def read_file_as_bytes(file_path: str) -> bytes:
 
     return file_content
 
+
 def run_workflow(
     agent: ReActAgent,
     input_prompt: str
@@ -70,6 +71,7 @@ def run_workflow(
     except Exception as e:
         print(f"An error occurred: {e}")
         return "", {}
+
 
 # Define file paths
 CSV_PATH = ".data/sample_regression_data.csv"
@@ -105,4 +107,3 @@ output, traces = run_workflow(
     input_prompt=INPUT_PROMPT
 )
 print("Agent Output:", output)
-
