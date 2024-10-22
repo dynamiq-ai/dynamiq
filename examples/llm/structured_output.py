@@ -25,8 +25,12 @@ def validate_json_response(response: str) -> Document:
 
 
 def run_openai_node(prompt: Prompt, schema: dict, inference_mode: InferenceMode):
-    openai_node = OpenAI(model="gpt-4o-mini")
-    response = openai_node.run(input_data={}, schema=schema, prompt=prompt, inference_mode=inference_mode)
+    openai_node = OpenAI(
+        model="gpt-4o-mini",
+        schema=schema,
+        inference_mode=inference_mode,
+    )
+    response = openai_node.run(input_data={}, prompt=prompt)
     return response
 
 
