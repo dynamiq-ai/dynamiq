@@ -80,7 +80,7 @@ class Agent(Node):
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     streaming: StreamingConfig = StreamingConfig()
     tools: list[Node] = []
-    files: list[FileDataModel] | None = None
+    files: list[io.BytesIO | bytes] | None = None
     name: str = "AI Agent"
     role: str | None = None
     max_loops: int = 1
@@ -107,7 +107,6 @@ class Agent(Node):
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
         data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools]
-        data["files"] = [file.dict() for file in self.files] if self.files else None
         return data
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
@@ -340,7 +339,7 @@ class Agent(Node):
         if self.files:
             file_description = "You can work with the following files:\n"
             for file in self.files:
-                file_description += f"<file>: {file.description} <\\file>\n"
+                file_description += f"<file>: {file.name} - {file.description} <\\file>\n"
             return file_description
         return ""
 

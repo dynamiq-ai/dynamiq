@@ -1,3 +1,4 @@
+import io
 import json
 from pathlib import Path
 
@@ -5,7 +6,6 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import E2B
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents import FileDataModel
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.runnables import RunnableConfig
@@ -13,17 +13,20 @@ from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
 
 INPUT_PROMPT = "Calculate the mean values for all columns in the CSV"
+FILE_PATH = ".data/sample_regression_data.csv"
 
 
-def read_file_as_bytes(file_path: str) -> bytes:
+def read_file_as_bytesio(file_path: str, filename: str = None, description: str = None) -> io.BytesIO:
     """
-    Reads the content of a file and returns it as bytes.
+    Reads the content of a file and returns it as a BytesIO object with custom attributes for filename and description.
 
     Args:
         file_path (str): The path to the file.
+        filename (str, optional): Custom filename for the BytesIO object.
+        description (str, optional): Custom description for the BytesIO object.
 
     Returns:
-        bytes: The file content in bytes.
+        io.BytesIO: The file content in a BytesIO object with custom attributes.
 
     Raises:
         FileNotFoundError: If the file does not exist.
@@ -34,10 +37,16 @@ def read_file_as_bytes(file_path: str) -> bytes:
         raise FileNotFoundError(f"The file {file_path} does not exist.")
     if not file_path_obj.is_file():
         raise OSError(f"The path {file_path} is not a valid file.")
+
     with file_path_obj.open("rb") as file:
         file_content = file.read()
 
-    return file_content
+    file_io = io.BytesIO(file_content)
+
+    file_io.name = filename if filename else file_path_obj.name
+    file_io.description = description if description else ""
+
+    return file_io
 
 
 def run_workflow(
@@ -73,22 +82,14 @@ def run_workflow(
         return "", {}
 
 
-# Define file paths
-CSV_PATH = ".data/sample_regression_data.csv"
+csv_bytes_io = read_file_as_bytesio(
+    FILE_PATH, filename="custom_regression_data.csv", description="Custom CSV file with regression data"
+)
 
-# Read files as bytes
-csv_bytes = read_file_as_bytes(CSV_PATH)
-
-# Create FileDataModel instances
-file_csv_model = FileDataModel(file=csv_bytes, description="CSV file with regression data")
-
-# Initialize tools
 python_tool = E2BInterpreterTool(connection=E2B())
 
-# Set up LLM
 llm = setup_llm()
 
-# Initialize agent with tools
 agent = ReActAgent(
     name="Agent",
     id="Agent",
@@ -96,10 +97,8 @@ agent = ReActAgent(
     tools=[python_tool],
 )
 
-# Agent execution with input data and files
-result = agent.run(input_data={"input": INPUT_PROMPT, "files": [file_csv_model]})
+result = agent.run(input_data={"input": INPUT_PROMPT, "files": [csv_bytes_io]})
 
-# Print the result content
 print(result.output.get("content"))
 
 output, traces = run_workflow(

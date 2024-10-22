@@ -6,7 +6,6 @@ from e2b import Sandbox
 
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.agents import FileDataModel
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
@@ -77,6 +76,27 @@ def generate_unique_file_name(file: bytes | io.BytesIO, file_description: str = 
     return unique_file_name
 
 
+def generate_file_description(file: bytes | io.BytesIO, length: int = 20) -> str:
+    """
+    Generates a file description based on the first few bytes of the file content.
+
+    Args:
+        file: The file content as bytes or BytesIO.
+        length: The number of bytes to include in the description (default is 20).
+
+    Returns:
+        A short description based on the file's content.
+    """
+    if isinstance(file, io.BytesIO):
+        file.seek(0)
+        file_content = file.read(length)
+        file.seek(0)
+    else:
+        file_content = file[:length]
+
+    return f"File starting with: {file_content[:length].hex()}"
+
+
 class E2BInterpreterTool(ConnectionNode):
     """
     A tool to interact with an E2B sandbox, allowing for file upload/download,
@@ -98,7 +118,7 @@ class E2BInterpreterTool(ConnectionNode):
     description: str = DESCRIPTION
     connection: E2BConnection
     installed_packages: list = []
-    files: list[FileDataModel] | None = None
+    files: list[io.BytesIO | bytes] | None = None
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
     supports_files: bool = True
@@ -109,6 +129,10 @@ class E2BInterpreterTool(ConnectionNode):
             self._initialize_persistent_sandbox()
         else:
             logger.debug(f"Tool {self.name} - {self.id}: Will initialize sandbox on each execute")
+
+    @property
+    def to_dict_exclude_params(self):
+        return super().to_dict_exclude_params | {"files": True}
 
     def _initialize_persistent_sandbox(self):
         """Initializes the persistent sandbox, installs packages, and uploads initial files."""
@@ -131,16 +155,24 @@ class E2BInterpreterTool(ConnectionNode):
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
             sandbox.process.start_and_wait(f"pip install -qq {' '.join(packages.split(','))}")
 
-    def _upload_files(self, files: list[FileDataModel], sandbox: Sandbox) -> str:
+    def _upload_files(self, files: list[bytes | io.BytesIO], sandbox: Sandbox) -> str:
         """Uploads multiple files to the sandbox, generating unique names, and returns details for each file."""
         upload_details = []
-        for file_model in files:
-            unique_file_name = generate_unique_file_name(file_model.file, file_model.description)
-            uploaded_path = self._upload_file(file_model.file, unique_file_name, sandbox)
+        for file in files:
+            if isinstance(file, bytes):
+                file = io.BytesIO(file)
+
+            if not getattr(file, "name", None):
+                file.name = generate_unique_file_name(file)
+
+            description = generate_file_description(file)
+
+            unique_file_name = file.name
+            uploaded_path = self._upload_file(file, unique_file_name, sandbox)
             upload_details.append(
                 {
                     "original_name": unique_file_name,
-                    "description": file_model.description,
+                    "description": description,
                     "uploaded_path": uploaded_path,
                 }
             )
@@ -150,19 +182,17 @@ class E2BInterpreterTool(ConnectionNode):
 
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
-    def _upload_file(self, file: bytes | io.BytesIO, file_description: str = "", sandbox: Sandbox | None = None) -> str:
+    def _upload_file(self, file: bytes | io.BytesIO, file_name: str, sandbox: Sandbox | None = None) -> str:
         """Uploads a single file to the specified sandbox and returns the uploaded path."""
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
-        unique_file_name = generate_unique_file_name(file, file_description)
-
         # Handle the file types (bytes or io.BytesIO)
         if isinstance(file, bytes):
             file_like_object = io.BytesIO(file)
-            file_like_object.name = unique_file_name
+            file_like_object.name = file_name
         elif isinstance(file, io.BytesIO):
-            file.name = unique_file_name
+            file.name = file_name
             file_like_object = file
         else:
             raise ToolExecutionException(

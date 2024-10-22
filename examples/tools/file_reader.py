@@ -4,7 +4,6 @@ from typing import Any, Literal
 from pydantic import ConfigDict
 
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.agents import FileDataModel
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.runnables import RunnableConfig
@@ -18,7 +17,7 @@ Features:
 - Configurable to display partial content to manage output size
 - Handles multiple files in a single operation
 Input format:
-- List of files with byte content (bytes or BytesIO) and a file description.
+- List of files with byte content (bytes or BytesIO) with filename and description attributes.
 </tool_description>
 """
 
@@ -30,7 +29,7 @@ class FileReaderTool(Node):
     Attributes:
         name (str): The name of the tool.
         description (str): The description of the tool.
-        files (list[FileDataModel] | None): List of files to read content from.
+        files (list[bytes | io.BytesIO] | None): List of files to read content from.
         show_partial (bool): Whether to show only a part of the content to avoid overwhelming the output.
         max_display_length (int): Maximum number of characters/bytes to display in the output.
     """
@@ -38,34 +37,33 @@ class FileReaderTool(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "file-reader-tool"
     description: str = DESCRIPTION
-    files: list[FileDataModel] | None = None
+    files: list[bytes | io.BytesIO] | None = None
     show_partial: bool = True
     max_display_length: int = 500
     supports_files: bool = True
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def _load_file_content(self, file: bytes | io.BytesIO, file_description: str) -> str:
+    def _load_file_content(self, file: bytes | io.BytesIO) -> str:
         """
         Load the content of a file from bytes or a byte stream.
 
         Args:
             file (Union[bytes, io.BytesIO]): The byte content or stream of the file.
-            file_description (str): Description of the file (for logging or reference).
 
         Returns:
             str: The loaded content, either fully or partially (based on configuration).
         """
         try:
-            logger.debug(f"Reading file: {file_description or 'Unnamed file'}")
+            file_description = getattr(file, "description", "Unnamed file")
 
-            # If the input is bytes
+            logger.debug(f"Reading file: {file_description}")
+
             if isinstance(file, bytes):
                 content = file
 
-            # If the input is a BytesIO object
             elif isinstance(file, io.BytesIO):
-                file.seek(0)  # Ensure we're at the start of the BytesIO stream
+                file.seek(0)
                 content = file.read()
 
             else:
@@ -73,14 +71,11 @@ class FileReaderTool(Node):
                     f"Invalid input type. Expected bytes or BytesIO, got {type(file)}", recoverable=False
                 )
 
-            # Return partial or full content based on configuration
             return self._get_partial_content(content)
 
         except Exception as e:
-            logger.error(f"Failed to read file: {file_description or 'Unnamed file'}. Error: {e}")
-            raise ToolExecutionException(
-                f"Failed to read the file: {file_description or 'Unnamed file'}. Error: {e}", recoverable=True
-            )
+            logger.error(f"Failed to read file: {file_description}. Error: {e}")
+            raise ToolExecutionException(f"Failed to read the file: {file_description}. Error: {e}", recoverable=True)
 
     def _get_partial_content(self, content: bytes) -> str:
         """
@@ -93,14 +88,12 @@ class FileReaderTool(Node):
             str: Partial content to display.
         """
         try:
-            # Attempt to decode as UTF-8, fallback to hex for binary data
             content_str = content.decode("utf-8", errors="ignore")
         except UnicodeDecodeError:
             content_str = content.hex()
 
-        # Return partial content if content exceeds max_display_length
         if self.show_partial and len(content_str) > self.max_display_length:
-            return content_str[: self.max_display_length] + "..."  # Append ellipsis for truncated content
+            return content_str[: self.max_display_length] + "..."
         else:
             return content_str
 
@@ -131,10 +124,9 @@ class FileReaderTool(Node):
 
         results = {}
 
-        # Iterate over each file and read its content
-        for idx, file_model in enumerate(files):
-            file_description = file_model.description or f"File {idx + 1}"
-            content = self._load_file_content(file_model.file, file_description)
+        for idx, file in enumerate(files):
+            file_description = getattr(file, "description", f"File {idx + 1}")
+            content = self._load_file_content(file)
             results[file_description] = content
 
         logger.debug(f"Tool {self.name} - {self.id}: finished processing files.")
