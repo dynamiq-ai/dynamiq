@@ -51,9 +51,11 @@ class BaseLLM(ConnectionNode):
         presence_penalty (float | None): Penalize new tokens based on their existence in the text.
         frequency_penalty (float | None): Penalize new tokens based on their frequency in the text.
         tool_choice (str | None): Value to control which function is called by the model.
-        inference_mode (InferenceMode): Mode of inference. Defaults to InferenceMode.DEFAULT.
+        inference_mode (InferenceMode): Determines how the model handles inference tasks and formats outputs.
+        - InferenceMode.DEFAULT: Generates unstructured, free-form natural language text.
+        - InferenceMode.STRUCTURED_OUTPUT: Produces structured JSON output.
+        - InferenceMode.FUNCTION_CALLING: Structured output for tools (functions) to be called.
         schema_ (Dict[str, Any]): schema_ for structured output or function calling. Defaults to empty dict.
-
     """
 
     MODEL_PREFIX: ClassVar[str | None] = None
