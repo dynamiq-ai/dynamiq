@@ -9,12 +9,8 @@ This directory contains an example of a bank customer support workflow built usi
 - Simple API with single endpoint
 - Responds to queries in JSON format.
 
-### `bank_rag_tool.py`
-
-- Implements a Retrieval-Augmented Generation (RAG) tool for accessing bank documentation.
-- Uses Pinecone for document retrieval and OpenAI for text embedding and answer generation.
-
 ### `main.py`
+
 - Defines the main workflow logic.
 - Creates workflow with instances of `ReActAgent` for handling API and documentation queries.
 - Executes the workflow with a sample input.
