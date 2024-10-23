@@ -55,7 +55,7 @@ class BaseLLM(ConnectionNode):
         - InferenceMode.DEFAULT: Generates unstructured, free-form natural language text.
         - InferenceMode.STRUCTURED_OUTPUT: Produces structured JSON output.
         - InferenceMode.FUNCTION_CALLING: Structured output for tools (functions) to be called.
-        schema_ (Dict[str, Any]): schema_ for structured output or function calling. Defaults to empty dict.
+        dict[str, Any] | type[BaseModel] | None: schema_ for structured output. Defaults to empty dict.
     """
 
     MODEL_PREFIX: ClassVar[str | None] = None
