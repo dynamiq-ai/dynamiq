@@ -335,11 +335,12 @@ class Agent(Node):
 
     @property
     def file_description(self) -> str:
-        """Returns a description of the files available to the agent."""
         if self.files:
             file_description = "You can work with the following files:\n"
             for file in self.files:
-                file_description += f"<file>: {file.name} - {file.description} <\\file>\n"
+                name = getattr(file, "name", "Unnamed file")
+                description = getattr(file, "description", "No description")
+                file_description += f"<file>: {name} - {description} <\\file>\n"
             return file_description
         return ""
 

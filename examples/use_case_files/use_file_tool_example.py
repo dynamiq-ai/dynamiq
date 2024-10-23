@@ -44,8 +44,8 @@ def read_file_as_bytesio(file_path: str, filename: str = None, description: str 
     file_io = io.BytesIO(file_content)
 
     file_io.name = filename if filename else file_path_obj.name
-    file_io.description = description if description else ""
-
+    if description:
+        file_io.description = description
     return file_io
 
 

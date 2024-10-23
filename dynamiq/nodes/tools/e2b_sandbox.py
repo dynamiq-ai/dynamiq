@@ -50,30 +50,18 @@ packages = 'requests,pandas'
 """  # noqa: E501
 
 
-def generate_unique_file_name(file: bytes | io.BytesIO, file_description: str = "") -> str:
+def generate_fallback_filename(file: bytes | io.BytesIO) -> str:
     """
-    Generates a unique file name based on the file description and a hash of the file content.
+    Generates a simple fallback filename when none is provided.
 
     Args:
         file: The file content as bytes or BytesIO.
-        file_description: The description of the file (used as a prefix).
 
     Returns:
-        A unique file name based on the description and content hash.
+        A basic filename with an incremental number.
     """
-    if isinstance(file, io.BytesIO):
-        file.seek(0)
-        file_content = file.read()
-        file.seek(0)
-    else:
-        file_content = file
-
-    file_hash = sha256(file_content).hexdigest()
-
-    description_part = file_description.replace(" ", "_") if file_description else "file"
-
-    unique_file_name = f"{description_part}_{file_hash[:8]}.bin"
-    return unique_file_name
+    # You could maintain a counter as a class variable to ensure unique names
+    return f"uploaded_file_{id(file)}.bin"
 
 
 def generate_file_description(file: bytes | io.BytesIO, length: int = 20) -> str:
@@ -156,30 +144,28 @@ class E2BInterpreterTool(ConnectionNode):
             sandbox.process.start_and_wait(f"pip install -qq {' '.join(packages.split(','))}")
 
     def _upload_files(self, files: list[bytes | io.BytesIO], sandbox: Sandbox) -> str:
-        """Uploads multiple files to the sandbox, generating unique names, and returns details for each file."""
+        """Uploads multiple files to the sandbox and returns details for each file."""
         upload_details = []
         for file in files:
             if isinstance(file, bytes):
                 file = io.BytesIO(file)
 
-            if not getattr(file, "name", None):
-                file.name = generate_unique_file_name(file)
+            file_name = getattr(file, "name", None) or generate_fallback_filename(file)
+            file.name = file_name
 
-            description = generate_file_description(file)
+            description = getattr(file, "description", generate_file_description(file))
 
-            unique_file_name = file.name
-            uploaded_path = self._upload_file(file, unique_file_name, sandbox)
+            uploaded_path = self._upload_file(file, file_name, sandbox)
             upload_details.append(
                 {
-                    "original_name": unique_file_name,
+                    "original_name": file_name,
                     "description": description,
                     "uploaded_path": uploaded_path,
                 }
             )
-            logger.debug(f"Tool {self.name} - {self.id}: Uploaded file '{unique_file_name}' to {uploaded_path}")
+            logger.debug(f"Tool {self.name} - {self.id}: Uploaded file '{file_name}' to {uploaded_path}")
 
         self._update_description_with_files(upload_details)
-
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
     def _upload_file(self, file: bytes | io.BytesIO, file_name: str, sandbox: Sandbox | None = None) -> str:
