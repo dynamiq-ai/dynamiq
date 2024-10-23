@@ -52,55 +52,53 @@ packages = 'requests,pandas'
 
 def generate_fallback_filename(file: bytes | io.BytesIO) -> str:
     """
-    Generates a simple fallback filename when none is provided.
+    Generate a unique fallback filename for uploaded files.
 
     Args:
-        file: The file content as bytes or BytesIO.
+        file: File content as bytes or BytesIO object.
 
     Returns:
-        A basic filename with an incremental number.
+        str: A unique filename based on the object's id.
     """
-    # You could maintain a counter as a class variable to ensure unique names
     return f"uploaded_file_{id(file)}.bin"
 
 
 def generate_file_description(file: bytes | io.BytesIO, length: int = 20) -> str:
     """
-    Generates a file description based on the first few bytes of the file content.
+    Generate a description for a file based on its content.
 
     Args:
-        file: The file content as bytes or BytesIO.
-        length: The number of bytes to include in the description (default is 20).
+        file: File content as bytes or BytesIO object.
+        length: Maximum number of bytes to include in the description.
 
     Returns:
-        A short description based on the file's content.
+        str: A description of the file's content or existing description.
     """
-    if isinstance(file, io.BytesIO):
-        file.seek(0)
-        file_content = file.read(length)
-        file.seek(0)
-    else:
-        file_content = file[:length]
+    if description := getattr(file, "description", None):
+        return description
 
-    return f"File starting with: {file_content[:length].hex()}"
+    file_content = file.getbuffer()[:length] if isinstance(file, io.BytesIO) else file[:length]
+    return f"File starting with: {file_content.hex()}"
 
 
 class E2BInterpreterTool(ConnectionNode):
     """
-    A tool to interact with an E2B sandbox, allowing for file upload/download,
-    Python code execution, and shell command execution.
+    A tool for executing code and managing files in an E2B sandbox environment.
+
+    This tool provides a secure execution environment for running Python code,
+    shell commands, and managing file operations.
 
     Attributes:
-        group (Literal[NodeGroup.TOOLS]): Node group type.
-        name (str): Name of the tool.
-        description (str): Detailed description of the tool's capabilities.
-        connection (E2BConnection): E2B connection object.
-        installed_packages: list: List of default packages to install.
-        files: list[FileDataModel] | None: List of files to upload.
-        persistent_sandbox: bool: Whether to use a persistent sandbox across executions.
-        _sandbox (Optional[Sandbox]): Persistent sandbox instance (if enabled).
+        group (Literal[NodeGroup.TOOLS]): The node group identifier.
+        name (str): The unique name of the tool.
+        description (str): Detailed usage instructions and capabilities.
+        connection (E2BConnection): Configuration for E2B connection.
+        installed_packages (List[str]): Pre-installed packages in the sandbox.
+        files (Optional[List[Union[io.BytesIO, bytes]]]): Files to be uploaded.
+        persistent_sandbox (bool): Whether to maintain sandbox between executions.
+        is_files_allowed (bool): Whether file uploads are permitted.
+        _sandbox (Optional[Sandbox]): Internal sandbox instance for persistent mode.
     """
-
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "code-interpreter_e2b"
     description: str = DESCRIPTION
@@ -109,7 +107,7 @@ class E2BInterpreterTool(ConnectionNode):
     files: list[io.BytesIO | bytes] | None = None
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
-    supports_files: bool = True
+    is_files_allowed: bool = True
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -119,8 +117,29 @@ class E2BInterpreterTool(ConnectionNode):
             logger.debug(f"Tool {self.name} - {self.id}: Will initialize sandbox on each execute")
 
     @property
-    def to_dict_exclude_params(self):
+    def to_dict_exclude_params(self) -> set:
+        """
+        Get parameters to exclude from dictionary representation.
+
+        Returns:
+            set: Set of parameters to exclude.
+        """
         return super().to_dict_exclude_params | {"files": True}
+
+    def to_dict(self, **kwargs) -> dict[str, Any]:
+        """
+        Convert instance to dictionary format.
+
+        Args:
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            Dict[str, Any]: Dictionary representation of the instance.
+        """
+        data = super().to_dict(**kwargs)
+        if self.files:
+            data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
+        return data
 
     def _initialize_persistent_sandbox(self):
         """Initializes the persistent sandbox, installs packages, and uploads initial files."""

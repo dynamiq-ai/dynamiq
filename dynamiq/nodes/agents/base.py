@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory
@@ -43,27 +43,6 @@ class AgentIntermediateStep(BaseModel):
     input_data: str | dict
     model_observation: AgentIntermediateStepModelObservation
     final_answer: str | dict | None = None
-
-
-class FileDataModel(BaseModel):
-    file: bytes | io.BytesIO
-    description: str = ""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @field_validator("file")
-    def check_file_type(cls, value):
-        """Ensures file is either bytes or BytesIO."""
-        if not isinstance(value, (bytes, io.BytesIO)):
-            raise ValueError(f"Invalid type for file: {type(value)}. Must be bytes or BytesIO.")
-        return value
-
-    @classmethod
-    def __get_pydantic_core_schema__(cls, source_type, handler):
-        # Custom schema logic for BytesIO
-        if source_type == io.BytesIO:
-            return handler.generate_schema(bytes)
-        return super().__get_pydantic_core_schema__(source_type, handler)
 
 
 class Agent(Node):
@@ -304,7 +283,7 @@ class Agent(Node):
         """Runs a specific tool with the given input."""
         logger.debug(f"Agent {self.name} - {self.id}: Running tool '{tool.name}'")
         if self.files:
-            if tool.supports_files is True:
+            if tool.is_files_allowed is True:
                 tool_input["files"] = self.files
 
         tool_result = tool.run(
