@@ -114,4 +114,4 @@ def main(
 
 
 if __name__ == "__main__":
-    indexing_flow("https://thedubaimall.com/")
+    app()
