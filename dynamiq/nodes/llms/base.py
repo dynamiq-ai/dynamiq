@@ -209,24 +209,31 @@ class BaseLLM(ConnectionNode):
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
 
     def _get_response_format_and_tools(
-        self, inference_mode: InferenceMode, schema: dict[str, Any]
+        self, inference_mode: InferenceMode, schema: dict[str, Any] | type[BaseModel] | None
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        """Get response format and tools based on inference mode and schema_.
+        """Get response format and tools based on inference mode and schema.
 
         Args:
             inference_mode (InferenceMode): The inference mode to use.
-            schema (Dict[str, Any]): The schema to use.
+            schema (dict[str, Any] | type[BaseModel] | None): The schema to use.
 
         Returns:
-            tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]: Response format and tools.
+            tuple[dict[str, Any] | None, dict[str, Any] | None]: Response format and tools.
+
+        Raises:
+            ValueError: If schema is None when using STRUCTURED_OUTPUT or FUNCTION_CALLING modes.
         """
         response_format = None
         tools = None
 
         match inference_mode:
             case InferenceMode.STRUCTURED_OUTPUT:
+                if schema is None:
+                    raise ValueError("Schema must be provided when using STRUCTURED_OUTPUT inference mode")
                 response_format = schema
             case InferenceMode.FUNCTION_CALLING:
+                if schema is None:
+                    raise ValueError("Schema must be provided when using FUNCTION_CALLING inference mode")
                 tools = schema
 
         return response_format, tools
