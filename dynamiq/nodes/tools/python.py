@@ -7,6 +7,7 @@ from RestrictedPython.Eval import default_guarded_getattr, default_guarded_getit
 from RestrictedPython.Guards import guarded_unpack_sequence
 
 from dynamiq.nodes import Node, NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -48,27 +49,16 @@ class Python(Node):
     Attributes:
         group (Literal[NodeGroup.TOOLS]): Group for the node. Defaults to NodeGroup.TOOLS.
         name (str): Name of the node. Defaults to "Python Code Executor".
-        base_description (str): Base description of the node.
         description (str): Description of the node.
         code (str): Python code to execute.
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Python Code Executor"
-    base_description: str = (
+    description: str = (
         "The tool, that executes Python code in a secure sandbox environment."
         "All arguments are passed as a dictionary to the 'run' main function."
     )
-    description: str = ""
     code: str
-
-    def __init__(self, **data):
-        """Initialize the Python node.
-
-        Args:
-            **data: Additional keyword arguments.
-        """
-        super().__init__(**data)
-        self.description = f"{self.base_description}.{self.description}"
 
     def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> Any:
         """Execute the Python code.
@@ -158,11 +148,15 @@ class Python(Node):
             if "run" not in restricted_globals:
                 raise ValueError("The 'run' function is not defined in the provided code.")
 
-            result = restricted_globals["run"](**input_data)
-            return {"content": str(result)}
+            result = restricted_globals["run"](input_data)
+            if self.is_optimized_for_agents:
+                result = str(result)
         except Exception as e:
-            logger.error(f"Code execution error: {str(e)}")
-            return {"content": "Code execution error: '{str(e)}'"}
+            error_msg = f"Code execution error: {str(e)}"
+            logger.error(error_msg)
+            raise ToolExecutionException(error_msg, recoverable=True)
+
+        return {"content": result}
 
     @staticmethod
     def _inplacevar(op, x, y):

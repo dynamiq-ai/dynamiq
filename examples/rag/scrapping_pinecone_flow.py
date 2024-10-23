@@ -14,7 +14,7 @@ from dynamiq.storages.vector import PineconeVectorStore
 app = typer.Typer()
 
 python_code = """
-def run(input_data):
+def run(inputs):
     from dynamiq.types import Document
 
     raw_content = input_data.get('content')
@@ -114,4 +114,4 @@ def main(
 
 
 if __name__ == "__main__":
-    app()
+    indexing_flow("https://thedubaimall.com/")
