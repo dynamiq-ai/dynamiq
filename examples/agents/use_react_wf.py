@@ -31,6 +31,12 @@ QUERY_FOR_CODING_COMPLEX = (
 )
 QUERY_FOR_PYTHON_TOOL = "Show me content of example.com"
 QUERY_FOR_HTTP_TOOL = "Show me some random fact about cat"
+PYTHON_TOOL_CODE = """
+def run(inputs):
+    import requests
+    response = requests.get("https://example.com")
+    return {"content": response.text}
+"""
 
 
 def setup_react_agent() -> ReActAgent:
@@ -91,12 +97,7 @@ def setup_react_agent_http_python() -> ReActAgent:
     web_request_tool = Python(
         name="WebRequestTool",
         description="Makes a GET request to example.com and returns the response text",
-        code="""
-    def run(input_data):
-        import requests
-        response = requests.get("https://example.com")
-        return {"content": response.text}
-    """,
+        code=PYTHON_TOOL_CODE,
     )
 
     connection = HttpConnection(
