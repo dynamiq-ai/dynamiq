@@ -108,4 +108,3 @@ output, traces = run_workflow(
     input_files=[csv_bytes_io],
 )
 print("Agent Output:", output)
-print("Traces:", traces)
