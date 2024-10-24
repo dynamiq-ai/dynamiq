@@ -414,15 +414,6 @@ class ElevenLabs(Http):
         return super().connect()
 
 
-class PineconeIndexType(str, enum.Enum):
-    """
-    This enum defines various index types for different Pinecone deployments.
-    """
-
-    SERVERLESS = "serverless"
-    POD = "pod"
-
-
 class Pinecone(BaseApiKeyConnection):
     """
     Represents a connection to the Pinecone service.
@@ -431,55 +422,10 @@ class Pinecone(BaseApiKeyConnection):
         type (Literal[ConnectionType.Pinecone]): The type of connection, always 'Pinecone'.
         api_key (str): The API key for the service.
             Defaults to the environment variable 'PINECONE_API_KEY'.
-        cloud (str): The cloud provider for the service.
-            Defaults to the environment variable 'PINECONE_CLOUD'.
-        region (str): The region for the service.
-            Defaults to the environment variable 'PINECONE_REGION'.
-        index_type (PineconeIndexType): The type of index. Defaults to 'serverless'.
-        environment (str): The environment for the service.
-            Defaults to the environment variable 'PINECONE_ENVIRONMENT'.
-        pod_type (str): The type of pod for the service.
-            Defaults to the environment variable 'PINECONE_POD_TYPE'.
-        pods (int): The number of pods. Defaults to 1.
     """
 
     type: Literal[ConnectionType.Pinecone] = ConnectionType.Pinecone
     api_key: str = Field(default_factory=partial(get_env_var, "PINECONE_API_KEY"))
-    cloud: str = Field(default_factory=partial(get_env_var, "PINECONE_CLOUD"))
-    region: str = Field(default_factory=partial(get_env_var, "PINECONE_REGION"))
-    index_type: PineconeIndexType = PineconeIndexType.SERVERLESS
-    environment: str = Field(
-        default_factory=partial(get_env_var, "PINECONE_ENVIRONMENT")
-    )
-    pod_type: str = Field(default_factory=partial(get_env_var, "PINECONE_POD_TYPE"))
-    pods: int = 1
-
-    @property
-    def serverless_spec(self):
-        """
-        Returns the serverless specification for the Pinecone service.
-
-        Returns:
-            ServerlessSpec: The serverless specification.
-        """
-        # Import in runtime to save memory
-        from pinecone import ServerlessSpec
-        return ServerlessSpec(cloud=self.cloud, region=self.region)
-
-    @property
-    def pod_spec(self):
-        """
-        Returns the pod specification for the Pinecone service.
-
-        Returns:
-            PodSpec: The pod specification.
-        """
-        # Import in runtime to save memory
-        from pinecone import PodSpec
-
-        return PodSpec(
-            environment=self.environment, pod_type=self.pod_type, pods=self.pods
-        )
 
     def connect(self) -> "PineconeClient":
         """

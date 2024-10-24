@@ -17,6 +17,7 @@ from dynamiq.nodes.writers import (
     WeaviateDocumentWriter,
 )
 from dynamiq.storages.vector import ChromaVectorStore, PineconeVectorStore, QdrantVectorStore, WeaviateVectorStore
+from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -61,7 +62,7 @@ def run_pinecone_indexing(documents):
 
     document_writer_node = PineconeDocumentWriter(
         index_name="test-filtering",
-        dimension=1536,
+        index_type=PineconeIndexType.SERVERLESS,
         depends=[
             NodeDependency(document_embedder_node),
         ],
@@ -96,7 +97,6 @@ def run_pinecone_retrieval():
     text_embedder_node = OpenAITextEmbedder()
     document_retriever_node = PineconeDocumentRetriever(
         index_name="test-filtering",
-        dimension=1536,
         depends=[
             NodeDependency(text_embedder_node),
         ],
@@ -135,7 +135,7 @@ def run_pinecone_retrieval():
         "documents"
     ]
 
-    pinecone_storage = PineconeVectorStore(index_name="test-filtering", dimension=1536)
+    pinecone_storage = PineconeVectorStore(index_name="test-filtering")
     pinecone_storage.delete_documents(delete_all=True)
 
     logger.info(f"Output documents: {len(output_documents)}")

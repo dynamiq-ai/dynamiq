@@ -27,7 +27,7 @@ This directory contains examples demonstrating the usage of the `Memory` module 
 
 Each example file can be run independently to observe the functionality of the `Memory` module in different scenarios.
 
-**Note:** For examples using Pinecone, ensure you have a Pinecone account and set the `PINECONE_API_KEY` environment variable. For SQLite examples, a database file (`conversations.db`) will be created in the same directory.
+**Note:** For examples using Pinecone, ensure you have a Pinecone account and set the `PINECONE_API_KEY`, `PINECONE_CLOUD` and `PINECONE_REGION` environment variables. For SQLite examples, a database file (`conversations.db`) will be created in the same directory.
 
 ## Key Concepts
 

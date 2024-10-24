@@ -10,7 +10,6 @@ from dynamiq.nodes.retrievers import PineconeDocumentRetriever
 from dynamiq.nodes.tools.http_api_call import HttpApiCall
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
 from dynamiq.nodes.tools.retriever import RetrievalTool
-from dynamiq.storages.vector import PineconeVectorStore
 from bank_api import HOST, PORT
 
 
@@ -25,7 +24,8 @@ def run_workflow(input: str) -> str:
 
     text_embedder = OpenAITextEmbedder(model="text-embedding-ada-002")
     document_retriever = PineconeDocumentRetriever(
-        top_k=3, vector_store=PineconeVectorStore(index_name="default", dimension=1536)
+        index_name="default",
+        top_k=3,
     )
 
     bank_retriever_tool = RetrievalTool(

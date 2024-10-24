@@ -24,11 +24,15 @@ class Pinecone(MemoryBackend):
         self,
         connection: PineconeConnection,
         embedder: BaseEmbedder,
+        cloud: str,
+        region: str,
         index_name: str = "conversations",
     ):
         """Initializes the Pinecone memory storage."""
         self.connection = connection
         self.index_name = index_name
+        self.cloud = cloud
+        self.region = region
         self.embedder = embedder
 
         self.api_key = self.connection.api_key
@@ -49,7 +53,7 @@ class Pinecone(MemoryBackend):
                 name=self.index_name,
                 dimension=self.embedder.dimensions,
                 metric="cosine",
-                spec=ServerlessSpec(cloud=self.connection.cloud, region=self.connection.region),
+                spec=ServerlessSpec(cloud=self.cloud, region=self.region),
             )
         return self.client.Index(self.index_name)
 
@@ -64,6 +68,8 @@ class Pinecone(MemoryBackend):
             }
             if message.metadata:
                 metadata.update(message.metadata)
+            # Clear up metadata
+            metadata = {k: v for k, v in metadata.items() if v is not None}
             message_id = str(uuid.uuid4())
             self._index.upsert(vectors=[{"id": message_id, "values": embedding, "metadata": metadata}])
         except Exception as e:
