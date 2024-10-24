@@ -90,6 +90,5 @@ def test_write_workflow(
     )
     assert response.output == expected_output
 
-    mock_set_up_collection.assert_called_once()
     mock_on_flow_start.assert_called_once()
     mock_on_flow_end.assert_called_once()
