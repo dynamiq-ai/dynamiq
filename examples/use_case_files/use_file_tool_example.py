@@ -51,7 +51,8 @@ def read_file_as_bytesio(file_path: str, filename: str = None, description: str 
 
 def run_workflow(
     agent: ReActAgent,
-    input_prompt: str
+    input_prompt: str,
+    input_files: list,
 ) -> tuple[str, dict]:
     """
     Execute a workflow using the ReAct agent to process a predefined query.
@@ -67,7 +68,7 @@ def run_workflow(
 
     try:
         result = wf.run(
-            input_data={"input": input_prompt},
+            input_data={"input": input_prompt, "files": input_files},
             config=RunnableConfig(callbacks=[tracing]),
         )
         # Verify that traces can be serialized to JSON
@@ -103,6 +104,8 @@ print(result.output.get("content"))
 
 output, traces = run_workflow(
     agent=agent,
-    input_prompt=INPUT_PROMPT
+    input_prompt=INPUT_PROMPT,
+    input_files=[csv_bytes_io],
 )
 print("Agent Output:", output)
+print("Traces:", traces)
