@@ -86,6 +86,8 @@ class Agent(Node):
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
         data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools]
+        if self.files:
+            data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         return data
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
@@ -314,6 +316,7 @@ class Agent(Node):
 
     @property
     def file_description(self) -> str:
+        """Returns a description of the files available to the agent."""
         if self.files:
             file_description = "You can work with the following files:\n"
             for file in self.files:

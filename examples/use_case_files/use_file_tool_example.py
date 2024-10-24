@@ -98,10 +98,6 @@ agent = ReActAgent(
     tools=[python_tool],
 )
 
-result = agent.run(input_data={"input": INPUT_PROMPT, "files": [csv_bytes_io]})
-
-print(result.output.get("content"))
-
 output, traces = run_workflow(
     agent=agent,
     input_prompt=INPUT_PROMPT,
