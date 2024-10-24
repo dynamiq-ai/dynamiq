@@ -4,9 +4,12 @@ from dynamiq.memory import Memory
 from dynamiq.memory.backend import Pinecone
 from dynamiq.prompts import MessageRole
 
+
+INDEX_NAME = "conv-pinecone"
 pinecone_connection = PineconeConnection()
 embedder = OpenAIEmbedder(dimensions=1536)
-backend = Pinecone(connection=pinecone_connection, embedder=embedder)
+
+backend = Pinecone(connection=pinecone_connection, embedder=embedder, index_name=INDEX_NAME)
 memory = Memory(backend=backend)
 
 
@@ -35,5 +38,5 @@ results = memory.search(filters={"user_id": "123"})
 print("Results with filter only:", [r.content for r in results])
 
 # Clear memory
-memory.clear()
-print("Is memory empty?", memory.is_empty())
+# memory.clear()
+# print("Is memory empty?", memory.is_empty())

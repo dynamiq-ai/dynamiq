@@ -85,13 +85,14 @@ class PineconeVectorStore:
         if self.index_name not in indexes_names:
             if self.create_if_not_exist:
                 logger.debug(f"Index {self.index_name} does not exist. Creating a new index.")
-                return self.client.create_index(
+                self.client.create_index(
                     name=self.index_name,
                     spec=self._spec,
                     dimension=self.dimension,
                     metric=self.metric,
                     **self.index_creation_kwargs,
                 )
+                return self.client.Index(name=self.index_name)
             else:
                 raise ValueError(
                     f"Index {self.index_name} does not exist. Set 'create_if_not_exist' to True to create a new index."
