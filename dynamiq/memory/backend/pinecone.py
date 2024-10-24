@@ -6,7 +6,6 @@ from dynamiq.memory.backend.base import MemoryBackend
 from dynamiq.prompts import Message
 from dynamiq.storages.vector.pinecone import PineconeVectorStore
 from dynamiq.types import Document
-from dynamiq.utils.logger import logger
 
 
 class PineconeError(Exception):
@@ -68,7 +67,6 @@ class Pinecone(MemoryBackend):
             document.embedding = embedding_result["embedding"]
 
             self.vector_store.write_documents([document])
-            logger.debug(f"Added message to Pinecone: {message.role}: {message.content[:50]}...")
         except Exception as e:
             raise PineconeError(f"Error adding message to Pinecone: {e}") from e
 
@@ -86,13 +84,12 @@ class Pinecone(MemoryBackend):
         if not filters:
             return None
 
-        # Convert simple key-value filters to Pinecone format
         if all(isinstance(v, (str, int, float, bool)) for v in filters.values()):
             conditions = []
             for key, value in filters.items():
                 conditions.append({"field": key, "operator": "==", "value": value})
             return {"operator": "AND", "conditions": conditions}
-        return filters  # Return as-is if already in correct format
+        return filters
 
     def search(self, query: str = None, filters: dict = None, limit: int = None) -> list[Message]:
         """Searches for messages in Pinecone based on the query and/or filters."""
