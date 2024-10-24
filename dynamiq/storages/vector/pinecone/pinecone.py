@@ -16,8 +16,6 @@ from dynamiq.utils.logger import logger
 if TYPE_CHECKING:
     from pinecone import Pinecone as PineconeClient
 
-TOP_K_LIMIT = 1_000
-
 
 class PineconeIndexType(str, enum.Enum):
     """
@@ -26,7 +24,6 @@ class PineconeIndexType(str, enum.Enum):
 
     SERVERLESS = "serverless"
     POD = "pod"
-    UNDEFINED = "undefined"
 
 
 class PineconeVectorStoreParams(BaseVectorStoreParams):
@@ -37,9 +34,9 @@ class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVecto
     batch_size: int = 100
     dimension: int = 1536
     metric: str = "cosine"
+    index_type: PineconeIndexType | None = None
     cloud: str | None = Field(default_factory=partial(get_env_var, "PINECONE_CLOUD"))
     region: str | None = Field(default_factory=partial(get_env_var, "PINECONE_REGION"))
-    index_type: PineconeIndexType = PineconeIndexType.UNDEFINED
     environment: str | None = Field(default_factory=partial(get_env_var, "PINECONE_ENVIRONMENT"))
     pod_type: str | None = Field(default_factory=partial(get_env_var, "PINECONE_POD_TYPE"))
     pods: int = 1
@@ -58,7 +55,7 @@ class PineconeVectorStore:
         dimension: int = 1536,
         metric: str = "cosine",
         create_if_not_exist: bool = False,
-        index_type: PineconeIndexType = PineconeIndexType.UNDEFINED,
+        index_type: PineconeIndexType | None = None,
         cloud: str | None = None,
         region: str | None = None,
         environment: str | None = None,
@@ -72,22 +69,24 @@ class PineconeVectorStore:
         Args:
             connection (Optional[Pinecone]): Pinecone connection instance. Defaults to None.
             client (Optional[PineconeClient]): Pinecone client instance. Defaults to None.
-            index_name (str): Name of the Pinecone index. Defaults to 'default'.
+            index_name (str): Name of the Pinecone index. Defaults to None.
             namespace (str): Namespace for the index. Defaults to 'default'.
             batch_size (int): Size of batches for operations. Defaults to 100.
             dimension (int): Number of dimensions for vectors. Defaults to 1536.
             metric (str): Metric for calculating vector similarity. Defaults to 'cosine'.
             **index_creation_kwargs: Additional arguments for index creation.
         """
-        self.connection = connection or Pinecone()
-        self.client = client or self.connection.connect()
+        self.client = client
+        if self.client is None:
+            if connection is None:
+                connection = Pinecone()
+            self.client = connection.connect()
 
         self.index_name = index_name
         self.namespace = namespace
         self.index_type = index_type
 
         self.create_if_not_exist = create_if_not_exist
-        self._spec = self._get_spec()
 
         self.batch_size = batch_size
         self.metric = metric
@@ -100,6 +99,7 @@ class PineconeVectorStore:
 
         self.index_creation_kwargs = index_creation_kwargs
 
+        self._spec = self._get_spec()
         self._dummy_vector = [-10.0] * dimension
         self._index = self.connect_to_index()
         logger.debug(f"PineconeVectorStore initialized with index {self.index_name} and namespace {self.namespace}.")
@@ -115,8 +115,6 @@ class PineconeVectorStore:
             return self.serverless_spec
         elif self.index_type == PineconeIndexType.POD:
             return self.pod_spec
-        else:
-            return None
 
     @property
     def serverless_spec(self):
@@ -130,7 +128,7 @@ class PineconeVectorStore:
         from pinecone import ServerlessSpec
 
         if self.cloud is None or self.region is None:
-            raise ValueError("Cloud and region must be specified for serverless indexes")
+            raise ValueError("'cloud' and 'region' must be specified for 'serverless' index")
         return ServerlessSpec(cloud=self.cloud, region=self.region)
 
     @property
@@ -145,7 +143,7 @@ class PineconeVectorStore:
         from pinecone import PodSpec
 
         if self.environment is None or self.pod_type is None:
-            raise ValueError("Environment and pod type must be specified for pod indexes")
+            raise ValueError("'environment' and 'pod_type' must be specified for 'pod' index")
 
         return PodSpec(environment=self.environment, pod_type=self.pod_type, pods=self.pods)
 
@@ -160,7 +158,7 @@ class PineconeVectorStore:
         indexes_names = [index["name"] for index in available_indexes]
 
         if self.index_name not in indexes_names:
-            if self.create_if_not_exist:
+            if self.create_if_not_exist and self.index_type is not None:
                 logger.debug(f"Index {self.index_name} does not exist. Creating a new index.")
                 return self.client.create_index(
                     name=self.index_name,
@@ -171,7 +169,8 @@ class PineconeVectorStore:
                 )
             else:
                 raise ValueError(
-                    f"Index {self.index_name} does not exist. Set 'create_if_not_exist' to True to create a new index."
+                    f"Index {self.index_name} does not exist."
+                    f"'create_if_not_exist' must be set to True and 'index_type' must be specified."
                 )
         else:
             logger.debug(f"Index {self.index_name} already exists. Connecting to it.")
@@ -230,7 +229,7 @@ class PineconeVectorStore:
             filters (dict[str, Any]): Filters to select documents to delete.
             top_k (int): Maximum number of documents to retrieve for deletion. Defaults to 1000.
         """
-        if self.connection.index_type == PineconeIndexType.SERVERLESS:
+        if self.index_type == PineconeIndexType.SERVERLESS:
             """
             Serverless and Starter indexes do not support deleting with metadata filtering.
             """

@@ -13,15 +13,13 @@ from dynamiq.nodes.retrievers import PineconeDocumentRetriever
 from dynamiq.nodes.splitters.document import DocumentSplitter
 from dynamiq.nodes.writers import PineconeDocumentWriter
 from dynamiq.prompts import Message, Prompt
-from dynamiq.storages.vector import PineconeVectorStore
+from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from examples.rag.utils import list_data_folder_paths, read_bytes_io_files
 
 app = typer.Typer()
 
 
 def create_indexing_flow(index_name="default"):
-    vector_store = PineconeVectorStore(index_name=index_name, dimension=1536)
-
     # initialize indexing nodes
     file_converter_node = UnstructuredFileConverter(strategy="auto")
     document_splitter_node = DocumentSplitter(
@@ -46,7 +44,8 @@ def create_indexing_flow(index_name="default"):
         ),
     )
     document_writer_node = PineconeDocumentWriter(
-        vector_store=vector_store,
+        index_name=index_name,
+        index_type=PineconeIndexType.SERVERLESS,
         depends=[
             NodeDependency(document_embedder_node),
         ],
@@ -120,13 +119,10 @@ def default_prompt_template() -> str:
 
 
 def create_retrieval_flow(index_name: str = "default"):
-    # initialize the vector store
-    vector_store = PineconeVectorStore(index_name=index_name, dimension=1536)
-
     # initialize the retriver nodes
     text_embedder_node = OpenAITextEmbedder()
     document_retriever_node = PineconeDocumentRetriever(
-        vector_store=vector_store,
+        index_name=index_name,
         depends=[
             NodeDependency(text_embedder_node),
         ],
@@ -195,4 +191,4 @@ def main(
 
 
 if __name__ == "__main__":
-    app()
+    main()
