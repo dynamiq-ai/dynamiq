@@ -1,6 +1,7 @@
 import os
 
 import typer
+from dotenv import find_dotenv, load_dotenv
 
 from dynamiq import ROOT_PATH
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -15,6 +16,8 @@ from dynamiq.nodes.writers import PineconeDocumentWriter
 from dynamiq.prompts import Message, Prompt
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from examples.rag.utils import list_data_folder_paths, read_bytes_io_files
+
+load_dotenv(find_dotenv())
 
 app = typer.Typer()
 
