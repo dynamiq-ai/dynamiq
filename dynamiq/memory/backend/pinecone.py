@@ -20,12 +20,16 @@ class Pinecone(MemoryBackend):
         self,
         connection: PineconeConnection,
         embedder: BaseEmbedder,
+        cloud: str,
+        region: str,
         index_name: str = "conversations",
         namespace: str = "default",
     ):
         """Initializes the Pinecone memory storage."""
         self.connection = connection
         self.index_name = index_name
+        self.cloud = cloud
+        self.region = region
         self.embedder = embedder
         self.namespace = namespace
 
@@ -36,6 +40,8 @@ class Pinecone(MemoryBackend):
                 namespace=namespace,
                 dimension=embedder.dimensions,
                 create_if_not_exist=True,
+                cloud=cloud,
+                region=region,
             )
             # Verify connection
             if not self.vector_store._index:
@@ -59,6 +65,7 @@ class Pinecone(MemoryBackend):
         role = metadata.pop("role")
         return Message(content=document.content, role=role, metadata=metadata, score=document.score)
 
+
     def add(self, message: Message):
         """Stores a message in Pinecone."""
         try:
@@ -67,6 +74,7 @@ class Pinecone(MemoryBackend):
             document.embedding = embedding_result["embedding"]
 
             self.vector_store.write_documents([document])
+
         except Exception as e:
             raise PineconeError(f"Error adding message to Pinecone: {e}") from e
 

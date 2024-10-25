@@ -980,6 +980,7 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
     def validate_connection_client(self):
         if not self.vector_store and not self.connection:
             raise ValueError("'connection' or 'vector_store' should be specified")
+        return self
 
     @property
     @abstractmethod
