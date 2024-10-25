@@ -41,5 +41,5 @@ results = memory.search(filters={"user_id": "123"})
 print("Results with filter only:", [r.content for r in results])
 
 # Clear memory
-# memory.clear()
-# print("Is memory empty?", memory.is_empty())
+memory.clear()
+print("Is memory empty?", memory.is_empty())
