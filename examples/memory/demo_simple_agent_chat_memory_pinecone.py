@@ -1,5 +1,3 @@
-import os
-
 from dynamiq.components.embedders.openai import OpenAIEmbedder
 from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory import Memory
@@ -16,8 +14,6 @@ def setup_agent():
     # Create a memory instance with Pinecone storage
     backend = Pinecone(
         connection=pinecone_connection,
-        cloud=os.getenv("PINECONE_CLOUD"),
-        region=os.getenv("PINECONE_REGION"),
         embedder=embedder,
     )
 

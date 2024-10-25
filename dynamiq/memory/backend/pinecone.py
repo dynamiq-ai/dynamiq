@@ -5,6 +5,7 @@ from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory.backend.base import MemoryBackend
 from dynamiq.prompts import Message
 from dynamiq.storages.vector.pinecone import PineconeVectorStore
+from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.types import Document
 
 
@@ -20,16 +21,18 @@ class Pinecone(MemoryBackend):
         self,
         connection: PineconeConnection,
         embedder: BaseEmbedder,
-        cloud: str,
-        region: str,
         index_name: str = "conversations",
         namespace: str = "default",
+        index_type: PineconeIndexType | None = None,
+        cloud: str | None = None,
+        region: str | None = None,
+        environment: str | None = None,
+        pod_type: str | None = None,
+        pods: int = 1,
     ):
         """Initializes the Pinecone memory storage."""
         self.connection = connection
         self.index_name = index_name
-        self.cloud = cloud
-        self.region = region
         self.embedder = embedder
         self.namespace = namespace
 
@@ -40,8 +43,12 @@ class Pinecone(MemoryBackend):
                 namespace=namespace,
                 dimension=embedder.dimensions,
                 create_if_not_exist=True,
+                index_type=index_type,
                 cloud=cloud,
                 region=region,
+                environment=environment,
+                pod_type=pod_type,
+                pods=pods,
             )
             # Verify connection
             if not self.vector_store._index:
@@ -64,7 +71,6 @@ class Pinecone(MemoryBackend):
         metadata = dict(document.metadata)
         role = metadata.pop("role")
         return Message(content=document.content, role=role, metadata=metadata, score=document.score)
-
 
     def add(self, message: Message):
         """Stores a message in Pinecone."""
