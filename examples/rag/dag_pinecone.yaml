@@ -10,12 +10,6 @@ connections:
   pinecone-conn:  # id
     type: dynamiq.connections.Pinecone
     api_key: ${oc.env:PINECONE_API_KEY}
-    cloud: ${oc.env:PINECONE_CLOUD}
-    region: ${oc.env:PINECONE_REGION}
-    # environment: ${oc.env:PINECONE_ENVIRONMENT}
-    # pod_type: ${oc.env:PINECONE_POD_TYPE}
-    index_type: serverless
-    pods: 1
 
 prompt_template: |
   Please answer the following question based on the information found
@@ -85,6 +79,10 @@ nodes:
     batch_size: 125
     dimension: 1536
     metric: cosine
+    index_type: serverless
+    cloud: ${oc.env:PINECONE_CLOUD}
+    region: ${oc.env:PINECONE_REGION}
+    pods: 1
     depends:
       - node: document-embedder-node-1
     input_transformer:
@@ -104,9 +102,6 @@ nodes:
     name: Pinecone Document Retriever
     connection: pinecone-conn
     index_name: default
-    batch_size: 125
-    dimension: 1536
-    metric: cosine
     depends:
       - node: openai-text-embedder-1
     input_transformer:

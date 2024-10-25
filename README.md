@@ -227,7 +227,8 @@ print(result.output.get("content"))
 ```
 
 ### RAG - document indexing flow
-Workflow that takes input PDF files, pre-processes them, converts to vector embeddings and stores in Pinecone vector database.
+This workflow takes input PDF files, pre-processes them, converts them to vector embeddings, and stores them in the Pinecone vector database.
+The example provided is for an existing index in Pinecone. You can find examples for index creation on the `docs/tutorials/rag` page.
 
 ```python
 from io import BytesIO
@@ -359,7 +360,7 @@ answer_generator = (
         documents=document_retriever.outputs.documents,
         query=embedder.outputs.query,
     )  # take documents from the vector store node and query from the embedder
-    .depends_on(document_retriever)
+    .depends_on([document_retriever, embedder])
 )
 retrieval_wf.flow.add_nodes(answer_generator)
 

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from functools import partial
 
 import chainlit as cl
@@ -8,6 +9,7 @@ from chainlit.input_widget import Select, Slider
 from dynamiq import Workflow, flows, runnables
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.connections import Pinecone
 from dynamiq.flows import Flow
 from dynamiq.nodes import llms
 from dynamiq.nodes.converters import UnstructuredFileConverter
@@ -18,6 +20,7 @@ from dynamiq.nodes.splitters.document import DocumentSplitter
 from dynamiq.nodes.writers import PineconeDocumentWriter
 from dynamiq.prompts import Message, Prompt
 from dynamiq.storages.vector import PineconeVectorStore
+from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
@@ -221,7 +224,16 @@ async def start_chat():
     await msg.send()
 
     # initialize the vector store
-    vector_store = PineconeVectorStore(index_name="default", dimension=1536)
+    connection = Pinecone()
+    vector_store = PineconeVectorStore(
+        connection=connection,
+        index_name="default",
+        dimension=1536,
+        index_type=PineconeIndexType.SERVERLESS,
+        create_if_not_exist=True,
+        cloud=os.getenv("PINECONE_CLOUD"),
+        region=os.getenv("PINECONE_REGION"),
+    )
     if vector_store.count_documents() > 0:
         vector_store.delete_documents(delete_all=True)
 
