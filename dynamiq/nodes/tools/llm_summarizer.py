@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, BaseModel
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
@@ -9,6 +9,8 @@ from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
+from dynamiq.nodes.tools.basetool import Tool
+
 
 PROMPT_TEMPLATE_SUMMARIZER = """
 You are tasked with cleaning up and formatting extracted text from an HTML file. The text contains content from various HTML elements like paragraphs, headers, and tables, but without any HTML tags. Your goal is to produce a well-written, coherent piece of content by removing unnecessary information and formatting the remaining text.
@@ -48,8 +50,10 @@ Follow these steps to clean up and format the text:
 Ensure that only the relevant, informative content remains, and that it is presented in a clear, readable format.
 """  # noqa E501
 
+class SummarizerInputSchema(BaseModel):
+    input: str = Field(default={}, description="Parameter to provide input text to summarize")
 
-class SummarizerTool(Node):
+class SummarizerTool(Tool):
     """
     A tool for summarizing and cleaning up text extracted from HTML.
 
@@ -81,6 +85,7 @@ class SummarizerTool(Node):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_shema: type[SummarizerInputSchema] = SummarizerInputSchema
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
         """
@@ -150,7 +155,7 @@ class SummarizerTool(Node):
             raise ValueError("LLM execution failed")
         return result.output["content"]
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(self, input_data: SummarizerInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
         Execute the summarization tool on the input data.
 
@@ -172,12 +177,7 @@ class SummarizerTool(Node):
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        if "input" not in input_data:
-            raise ToolExecutionException(
-                "Input data must contain an 'input' key with the text to summarize.", recoverable=True
-            )
-
-        input_text = input_data["input"]
+        input_text = input_data.input
         logger.debug(
             f"Tool {self.name} - {self.id}: started with input text length: {len(input_text)}, "
             f"word count: {len(input_text.split())}"

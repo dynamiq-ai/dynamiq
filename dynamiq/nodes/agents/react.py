@@ -37,11 +37,16 @@ Here is how you will think about the user's request
 
 REMEMBER:
 * Inside 'action' provide just name of one tool from this list: [{tools_name}]
+* Each 'action' has its own input format strictly adhere to it.
+
+Input formats for tools:
+{input_formats}
 
 After each action, the user will provide an "Observation" with the result.
 Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
 
 When you have sufficient information, provide your final answer in one of these two formats:
+
 If you can answer the request:
 <output>
     <thought>
@@ -53,8 +58,6 @@ If you can answer the request:
 </output>
 
 If you cannot answer the request:
-
-
 <output>
     <thought>
         I cannot answer with the tools I have
@@ -63,8 +66,6 @@ If you cannot answer the request:
         Explanation of why you cannot answer
     </answer>
 </output>
-
-
 """  # noqa: E501
 
 
@@ -73,7 +74,7 @@ Thought: [Your reasoning for the next step]
 Action: [The tool you choose to use, if any, from ONLY [{tools_name}]]
 Action Input: [The input you provide to the tool]
 Remember:
-- Each tool has is specific input format you have strickly adhere to it.
+- Each tool has its specific input format you have strickly adhere to it.
 - Avoid using triple quotes (multi-line strings, docstrings) when providing multi-line code.
 - Provide all necessary information in 'Action Input' for the next step to succeed.
 - Action Input must be in JSON format.
@@ -81,19 +82,22 @@ Remember:
 - If you use a tool, follow the 'Thought' with an 'Action' (chosen from the available tools) and an 'Action Input'.
 - After each action, the user will provide an 'Observation' with the result.
 - Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
+
+Input formats for tools:
+{input_formats}
+
 When you have sufficient information, provide your final answer in one of these two formats:
 If you can answer the request:
 Thought: I can answer without using any tools
 Answer: [Your answer here]
+
 If you cannot answer the request:
 Thought: I cannot answer with the tools I have
 Answer: [Explanation of why you cannot answer]
+
 Remember:
 - Always start with a Thought.
 - Never use markdown code markers in your response.
-
-Input formats for tools:
-{input_formats}
 """  # noqa: E501
 
 
@@ -111,11 +115,12 @@ answer: [Response for request]}}
 Structure you responses in JSON format.
 {{thought: [Your reasoning about the next step],
 action: [The tool you choose to use, if any from ONLY [{tools_name}]],
-action_input: [JSON input you provide to the tool]}}
+action_input: [JSON input in correct format you provide to the tool]}}
 
 Remember:
 - Each tool has is specific input format you have strickly adhere to it.
-- In action_input you have to provide input in JSON format
+- In action_input you have to provide input in JSON format.
+- Avoid using extra backslashes
 
 Input formats for tools:
 {input_formats}
@@ -124,7 +129,8 @@ Input formats for tools:
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
 You have to call appropriate functions.
-Function descriptions
+
+Function descriptions:
 plan_next_action - function that should be called to use tools [{tools_name}]].
 provide_final_answer - function that should be called when answer on initial request can be provided
 """  # noqa: E501
@@ -138,6 +144,7 @@ Observation: [Answer to the initial question or part of it]
 - Always start each response with a 'Thought' explaining your reasoning.
 - After each action, the user will provide an 'Observation' with the result.
 - Continue this Thought/Action/Action Input/Observation sequence until you have enough information to fully answer the request.
+
 When you have sufficient information, provide your final answer in one of these formats:
 If you can answer the request:
 Thought: I can answer without using any tools
@@ -145,6 +152,7 @@ Answer: [Your answer here]
 If you cannot answer the request:
 Thought: I cannot answer with the tools I have
 Answer: [Explanation of why you cannot answer]
+
 Remember:
 - Always begin with a Thought.
 - Do not use markdown code markers in your response."
@@ -185,7 +193,7 @@ Your response should be clear, concise, and professional.
 """  # noqa: E501
 
 
-final_answer_schema = {
+final_answer_function_schema = {
         "type": "function",
         "function": {
             "name": "provide_final_answer",
@@ -302,8 +310,7 @@ class ReActAgent(Agent):
             logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}. Prompt:\n{formatted_prompt}")
 
             try:
-                print("llm_result ------------------")
-                
+
                 # Execute the prompt using the LLM
                 llm_result = self.llm.run(
                     input_data={},
@@ -316,7 +323,6 @@ class ReActAgent(Agent):
                     inference_mode=self.inference_mode,
                     **kwargs,
                 )
-                print(llm_result)
                 self._run_depends = [NodeDependency(node=self.llm).to_dict()]
 
                 if llm_result.status != RunnableStatus.SUCCESS:
@@ -456,7 +462,7 @@ class ReActAgent(Agent):
     def generate_input_formats(self, tools: List[Tool]) -> str:
         input_formats = []
         for tool in tools:
-            params = [" ".join(param) for param in tool.input_params]
+            params = [" ".join(param[:-1]) for param in tool.input_params if param[-1].get("is_accessible_to_agent", True)]
             input_formats.append(
                         f" - {tool.name}\n"
                         f"\t* {"\n\t* ".join(params)}")
@@ -496,14 +502,15 @@ class ReActAgent(Agent):
 
 
     def generate_function_calling_schemas(self):
-        self.format_shema.append(final_answer_schema)
+        self.format_shema.append(final_answer_function_schema)
         for tool in self.tools:
             properties = {}
-            for name, param_type, description in tool.input_params:
-                properties[name] = {
-                            "type": param_type,
-                            "description": description
-                        }
+            for name, param_type, description, tags in tool.input_params:
+                if tags.get("is_accessible_to_agent", True):
+                    properties[name] = {
+                                "type": param_type,
+                                "description": description
+                            }
 
             schema = {
                 "type": "function",

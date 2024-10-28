@@ -40,11 +40,11 @@ Notes:
 - For API requests or Filesystem operations, use either shell commands or Python code
 """  # noqa: E501
 
-class E2BInterpreterSchema(BaseModel):
-    packages: str = Field(default="", description="Parameter to provide packages to install", is_accessible_to_agent = True)
-    shell_command: str = Field(default="", description="Parameter to provide shell command to execute", visible_to_agent = True)
-    python: str = Field(default="", description="Parameter to provide python code to execute", visible_to_agent = True)
-    files: Any = Field(default=None, description="Parameter to provide files to upload to sendbox")
+class E2BInterpreterInputSchema(BaseModel):
+    packages: str = Field(default="", description="Parameter to provide packages to install")
+    shell_command: str = Field(default="", description="Parameter to provide shell command to execute")
+    python: str = Field(default="", description="Parameter to provide python code to execute")
+    files: Any = Field(default=None, description="Parameter to provide files to upload to sendbox", is_accessible_to_agent = False)
     
 class E2BInterpreterTool(Tool):
     """
@@ -68,7 +68,7 @@ class E2BInterpreterTool(Tool):
     files: list[tuple[str | bytes, str]] | None = None
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
-    input_shema: type[E2BInterpreterSchema] = E2BInterpreterSchema
+    input_shema: type[E2BInterpreterInputSchema] = E2BInterpreterInputSchema
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -164,7 +164,7 @@ class E2BInterpreterTool(Tool):
             raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
         return output.stdout
 
-    def run_tool(self, input_data: E2BInterpreterSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def run_tool(self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """Executes the requested action based on the input data."""
         config = ensure_config(config)
 

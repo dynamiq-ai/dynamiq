@@ -6,9 +6,13 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
+from dynamiq.nodes.tools.basetool import Tool
+from pydantic import Field, BaseModel
 
+class RetrievalInputSchema(BaseModel):
+    query: str = Field(default={}, description="Parameter to provide query to retrive relevant documents")
 
-class RetrievalTool(Node):
+class RetrievalTool(Tool):
     """Tool for retrieving relevant documents based on a query.
 
     Attributes:
@@ -27,6 +31,7 @@ class RetrievalTool(Node):
     connection_manager: ConnectionManager | None = None
     text_embedder: ConnectionNode | None = None
     document_retriever: ConnectionNode | None = None
+    input_shema: type[RetrievalInputSchema] = RetrievalInputSchema
 
     def __init__(
         self,
@@ -87,7 +92,7 @@ class RetrievalTool(Node):
             formatted_docs.append(formatted_doc)
         return "\n\n".join(formatted_docs)
 
-    def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+    def run_tool(self, input_data: RetrievalInputSchema, **kwargs) -> dict[str, Any]:
         """Execute the retrieval tool.
 
         Args:
@@ -97,30 +102,30 @@ class RetrievalTool(Node):
         Returns:
             dict[str, Any]: Result of the retrieval.
         """
-        if query := input_data.get("input", ""):
-            logger.debug(f"Tool {self.name} - {self.id}: started with query '{query}'")
+        
+        logger.debug(f"Tool {self.name} - {self.id}: started with query '{input_data.query}'")
 
-            if not self.text_embedder:
-                raise ValueError(f"{self.name}: Text embedder is not initialized.")
-            if not self.document_retriever:
-                raise ValueError(f"{self.name}: Document retriever is not initialized.")
+        if not self.text_embedder:
+            raise ValueError(f"{self.name}: Text embedder is not initialized.")
+        if not self.document_retriever:
+            raise ValueError(f"{self.name}: Document retriever is not initialized.")
 
-            try:
-                text_embedder_output = self.text_embedder.run(input_data={"query": query})
-                embedding = text_embedder_output.output.get("embedding")
+        try:
+            text_embedder_output = self.text_embedder.run(input_data={"query": input_data.query})
+            embedding = text_embedder_output.output.get("embedding")
 
-                document_retriever_output = self.document_retriever.run(input_data={"embedding": embedding})
-                retrieved_documents = document_retriever_output.output.get("documents", [])
-                logger.info(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")
+            document_retriever_output = self.document_retriever.run(input_data={"embedding": embedding})
+            retrieved_documents = document_retriever_output.output.get("documents", [])
+            logger.info(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")
 
-                formatted_content = self.format_content(retrieved_documents)
-                logger.debug(f"Tool {self.name} - {self.id}: finished retrieval. Content: {formatted_content[:100]}...")
+            formatted_content = self.format_content(retrieved_documents)
+            logger.debug(f"Tool {self.name} - {self.id}: finished retrieval. Content: {formatted_content[:100]}...")
 
-                return {"content": formatted_content}
-            except Exception as e:
-                logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
-                raise
-        raise ToolExecutionException("Provide query with key 'input'.")
+            return {"content": formatted_content}
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
+            raise
+        
 
     def to_dict(self, **kwargs) -> dict:
         """Convert the RetrievalTool object to a dictionary.

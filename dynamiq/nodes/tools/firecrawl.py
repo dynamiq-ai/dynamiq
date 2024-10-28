@@ -7,7 +7,7 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-
+from dynamiq.nodes.tools.basetool import Tool
 
 class PageOptions(BaseModel):
     """Options for configuring page scraping behavior."""
@@ -30,17 +30,20 @@ class ExtractorOptions(BaseModel):
     extraction_schema: dict | None = None
 
 
-class FirecrawlTool(ConnectionNode):
+class FirecrawlInputSchema(BaseModel):
+    url: str = Field(default="", description="Parameter to provide url of the page to scrape.")
+    
+class FirecrawlTool(Tool):
     """A tool for scraping web pages using the Firecrawl service."""
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Firecrawl Scrape Tool"
     description: str = (
         "A tool for scraping web pages, powered by Firecrawl."
         "You can use this tool to scrape the content of a web page."
-        "Input should be a dictionary with a key 'input' containing the URL of the page to scrape."
     )
     connection: Firecrawl
     url: str | None = None
+    input_shema: type[FirecrawlInputSchema] = FirecrawlInputSchema
 
     # Default parameters
     page_options: PageOptions = Field(
@@ -75,8 +78,8 @@ class FirecrawlTool(ConnectionNode):
         else:
             return data
 
-    def run(
-        self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs
+    def run_tool(
+        self, input_data: FirecrawlInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Execute the scraping tool with the provided input data."""
         logger.debug(
@@ -86,7 +89,7 @@ class FirecrawlTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        url = input_data.get("url") or input_data.get("input") or self.url
+        url = input_data.url or self.url
         if not url:
             logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
             raise ValueError("URL is required for scraping")

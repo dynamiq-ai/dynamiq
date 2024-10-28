@@ -29,14 +29,16 @@ class Tool(ConnectionNode):
         """Return list of input parameters along with their type and description."""
         params = []
         for name, field in self.input_shema.model_fields.items():
-            if field.json_schema_extra and field.json_schema_extra.get("visible_to_agent", False):
-                description = field.description or "No description"
-                field_type: str = field.annotation.__name__
-                match field_type:
-                    case "str":
-                        field_type = "string"
+            tags = {}
+            if field.json_schema_extra:
+                tags = field.json_schema_extra
+            description = field.description or "No description"
+            field_type: str = field.annotation.__name__
+            match field_type:
+                case "str":
+                    field_type = "string"
 
-                params.append((name, field_type, description))
+            params.append((name, field_type, description, tags))
         return params
 
     def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:

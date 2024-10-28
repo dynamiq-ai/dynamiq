@@ -1,15 +1,18 @@
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, BaseModel
 
 from dynamiq.connections import ZenRows
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
+from dynamiq.nodes.tools.basetool import Tool
 
+class ZenRowsInputSchema(BaseModel):
+    url: str = Field(default={}, description="Parameter to the URL of the page to scrape")
 
-class ZenRowsTool(ConnectionNode):
+class ZenRowsTool(Tool):
     """
     A tool for scraping web pages, powered by ZenRows.
 
@@ -33,8 +36,10 @@ class ZenRowsTool(ConnectionNode):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+    input_shema: type[ZenRowsInputSchema] = ZenRowsInputSchema
+
+    def run_tool(
+        self, input_data: ZenRowsInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """
         Executes the web scraping process.
@@ -55,7 +60,7 @@ class ZenRowsTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        url = input_data.get("input", "") or input_data.get("url", "") or self.url
+        url = input_data.url or self.url
         if not url:
             raise ValueError("The 'input' key must contain a valid URL.")
 

@@ -1,17 +1,18 @@
 import inspect
 from typing import Any, Callable, Generic, Literal, TypeVar
 
-from pydantic import Field, create_model
+from pydantic import Field, create_model, BaseModel
 
-from dynamiq.nodes import ErrorHandling, Node, NodeGroup
+from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.tools.basetool import Tool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
+import inspect
 
 T = TypeVar("T")
 
-
-class FunctionTool(Node, Generic[T]):
+class FunctionTool(Tool, Generic[T]):
     """
     A tool node for executing a specified function with the given input data.
     """
@@ -25,7 +26,8 @@ class FunctionTool(Node, Generic[T]):
         default_factory=lambda: ErrorHandling(timeout_seconds=600)
     )
 
-    def run_tool(self, **kwargs: Any) -> Any:
+
+    def run_func(self, **kwargs: Any) -> Any:
         """
         Execute the function logic with provided arguments.
 
@@ -34,9 +36,9 @@ class FunctionTool(Node, Generic[T]):
         :param kwargs: Arguments to pass to the function.
         :return: Result of the function execution.
         """
-        raise NotImplementedError("run_tool must be implemented by subclasses")
+        raise NotImplementedError("run_func must be implemented by subclasses")
 
-    def execute(
+    def run_tool(
         self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """
@@ -50,7 +52,7 @@ class FunctionTool(Node, Generic[T]):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
-            result = self.run_tool(**input_data)
+            result = self.run_func(**input_data)
         except TypeError as e:
             logger.error(f"Invalid input parameters: {e}")
             raise ValueError("Invalid input parameters")
@@ -65,7 +67,7 @@ class FunctionTool(Node, Generic[T]):
         :return: Dictionary representing the input and output schema.
         """
         cls = self.__class__
-        run_tool_method = self.run_tool
+        run_tool_method = self.run_func
         if hasattr(cls, "_original_func"):
             run_tool_method = cls._original_func
 
@@ -102,6 +104,13 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
     :param func: Function to be converted into a tool.
     :return: A FunctionTool subclass that wraps the provided function.
     """
+    def create_input_schema(func) -> type[BaseModel]:
+        signature = inspect.signature(func)
+        params_dict = {
+            param.name: (param.annotation, param.default) for param in signature.parameters.values()
+        }
+        return create_model('FunctionToolInputSchema', **{k: (v[0], ...) if v[1] is inspect.Parameter.empty else (v[0], v[1]) for k, v in params_dict.items()})
+ 
 
     class FunctionToolFromDecorator(FunctionTool[T]):
         name: str = Field(default=func.__name__)
@@ -110,9 +119,10 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
             or f"A tool for executing the {func.__name__} function."
         )
         _original_func = staticmethod(func)
+        input_shema = create_input_schema(func)
 
-        def run_tool(self, **kwargs: Any) -> T:
-            return func(**kwargs)
+        def run_func(self, input_data: BaseModel, **kwargs) -> T:
+            return func(**input_data.dict())
 
     FunctionToolFromDecorator.__name__ = func.__name__
     FunctionToolFromDecorator.__qualname__ = (

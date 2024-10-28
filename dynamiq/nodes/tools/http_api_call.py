@@ -2,11 +2,12 @@ import enum
 from typing import Any, Literal
 from urllib.parse import urljoin
 
-from pydantic import Field
+from pydantic import Field, BaseModel
 
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.tools.basetool import Tool
 from dynamiq.runnables import RunnableConfig
 
 
@@ -16,7 +17,13 @@ class ResponseType(str, enum.Enum):
     JSON = "json"
 
 
-class HttpApiCall(ConnectionNode):
+class HttpApiCallInputSchema(BaseModel):
+    data: str = Field(default={}, description="Parameter to provide payload data")
+    url_path: str = Field(default="", description="Parameter to path to endpoint")
+    headers: str = Field(default={}, description="Parameter to provide headers to request")
+    params: Any = Field(default={}, description="Parameter to provide GET parameters")
+    
+class HttpApiCall(Tool):
     """
     A component for sending API requests using requests library.
 
@@ -42,9 +49,10 @@ class HttpApiCall(ConnectionNode):
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     response_type: ResponseType | str | None = ResponseType.RAW
+    input_schema: type[HttpApiCallInputSchema] = HttpApiCallInputSchema
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+    def run_tool(
+        self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs
     ):
         """Execute the API call.
 
@@ -63,12 +71,12 @@ class HttpApiCall(ConnectionNode):
         """
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        data = input_data.get("data", {})
+        data = input_data.data
         url = self.connection.url
-        if url_path := input_data.get("url_path", ""):
+        if url_path := input_data.url_path
             url = urljoin(url, url_path)
-        headers = input_data.get("headers", {})
-        params = input_data.get("params", {})
+        headers = input_data.headers
+        params = input_data.params
         response = self.client.request(
             method=self.connection.method,
             url=url,
