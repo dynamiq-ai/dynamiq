@@ -1,6 +1,7 @@
 import json
 import re
-from typing import Any
+from typing import Any, List
+from dynamiq.nodes.tools.basetool import Tool
 
 from pydantic import Field
 
@@ -72,6 +73,7 @@ Thought: [Your reasoning for the next step]
 Action: [The tool you choose to use, if any, from ONLY [{tools_name}]]
 Action Input: [The input you provide to the tool]
 Remember:
+- Each tool has is specific input format you have strickly adhere to it.
 - Avoid using triple quotes (multi-line strings, docstrings) when providing multi-line code.
 - Provide all necessary information in 'Action Input' for the next step to succeed.
 - Action Input must be in JSON format.
@@ -89,6 +91,9 @@ Answer: [Explanation of why you cannot answer]
 Remember:
 - Always start with a Thought.
 - Never use markdown code markers in your response.
+
+Input formats for tools:
+{input_formats}
 """  # noqa: E501
 
 
@@ -106,7 +111,14 @@ answer: [Response for request]}}
 Structure you responses in JSON format.
 {{thought: [Your reasoning about the next step],
 action: [The tool you choose to use, if any from ONLY [{tools_name}]],
-action_input: [The input you provide to the tool]}}
+action_input: [JSON input you provide to the tool]}}
+
+Remember:
+- Each tool has is specific input format you have strickly adhere to it.
+- In action_input you have to provide input in JSON format
+
+Input formats for tools:
+{input_formats}
 """  # noqa: E501
 
 
@@ -173,79 +185,21 @@ Your response should be clear, concise, and professional.
 """  # noqa: E501
 
 
-def function_calling_schema(tool_names):
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": "plan_next_action",
-                "description": "Provide next action and action input",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "thought": {
-                            "type": "string",
-                            "description": "Your reasoning about the next step.",
-                        },
-                        "action": {
-                            "type": "string",
-                            "enum": tool_names,
-                            "description": "Next action to make.",
-                        },
-                        "action_input": {
-                            "type": "string",
-                            "description": "Input for chosen action.",
-                        },
-                    },
-                    "required": ["thought", "action", "action_input"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "provide_final_answer",
-                "description": "Function should be called when if you can answer the initial request",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "thought": {
-                            "type": "string",
-                            "description": "Your reasoning about why you can answer original question.",
-                        },
-                        "answer": {"type": "string", "description": "Answer on initial request."},
-                    },
-                    "required": ["thought", "answer"],
-                },
-            },
-        },
-    ]
-
-
-def structured_output_schema(tool_names):
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "strict": True,
-            "name": "plan_next_action",
-            "schema": {
+final_answer_schema = {
+        "type": "function",
+        "function": {
+            "name": "provide_final_answer",
+            "description": "Function should be called when if you can answer the initial request",
+            "parameters": {
                 "type": "object",
-                "required": ["thought", "action", "action_input"],
                 "properties": {
                     "thought": {
                         "type": "string",
-                        "description": "Your reasoning about the next step.",
+                        "description": "Your reasoning about why you can answer original question.",
                     },
-                    "action": {
-                        "type": "string",
-                        "description": f"Next action to make (choose from [{tool_names}, finish]).",
-                    },
-                    "action_input": {
-                        "type": "string",
-                        "description": "Input for chosen action.",
-                    },
+                    "answer": {"type": "string", "description": "Answer on initial request."},
                 },
-                "additionalProperties": False,
+                "required": ["thought", "answer"],
             },
         },
     }
@@ -261,6 +215,7 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
+    format_shema: list = []
 
     def parse_xml_content(self, text: str, tag: str) -> str:
         """Extract content from XML-like tags."""
@@ -313,6 +268,11 @@ class ReActAgent(Agent):
             ),
         ).model_dump()
 
+    def convert_string_to_dict(string: str) -> dict:
+        string = re.sub(r'\\+', r'\\', string)
+        return json.loads(string)
+
+
     def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """
         Executes the ReAct strategy by iterating through thought, action, and observation cycles.
@@ -335,19 +295,15 @@ class ReActAgent(Agent):
                 tools_desc=self.tool_description,
                 tools_name=self.tool_names,
                 context="\n".join(previous_responses),
+                input_formats=self.generate_input_formats(self.tools)
             )
             logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1} started.")
 
             logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}. Prompt:\n{formatted_prompt}")
 
             try:
-                schema = {}
-                match self.inference_mode:
-                    case InferenceMode.FUNCTION_CALLING:
-                        schema = function_calling_schema(self.tool_names.split(","))
-                    case InferenceMode.STRUCTURED_OUTPUT:
-                        schema = structured_output_schema(self.tool_names.split(","))
-
+                print("llm_result ------------------")
+                
                 # Execute the prompt using the LLM
                 llm_result = self.llm.run(
                     input_data={},
@@ -356,11 +312,11 @@ class ReActAgent(Agent):
                         messages=[Message(role="user", content=formatted_prompt)]
                     ),
                     run_depends=self._run_depends,
-                    schema=schema,
+                    schema=self.format_shema,
                     inference_mode=self.inference_mode,
                     **kwargs,
                 )
-
+                print(llm_result)
                 self._run_depends = [NodeDependency(node=self.llm).to_dict()]
 
                 if llm_result.status != RunnableStatus.SUCCESS:
@@ -389,37 +345,36 @@ class ReActAgent(Agent):
                         action, action_input = self._parse_action(llm_generated_output)
 
                     case InferenceMode.FUNCTION_CALLING:
-                        function_name = llm_result.output["tool_calls"][0]["function"]["name"].strip()
+                        action = llm_result.output["tool_calls"][0]["function"]["name"].strip()
                         llm_generated_output_json = json.loads(
                             llm_result.output["tool_calls"][0]["function"]["arguments"]
                         )
                         llm_generated_output = json.dumps(llm_generated_output_json)
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
 
-                        if function_name == "provide_final_answer":
+                        if action == "provide_final_answer":
                             final_answer = llm_generated_output_json["answer"]
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             return final_answer
 
-                        action, action_input = llm_generated_output_json["action"], {
-                            "input": llm_generated_output_json["action_input"]
-                        }
+                        action_input = llm_generated_output_json["action_input"]
                         logger.debug(
                             f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. "
                             f"RAW LLM output:n{llm_generated_output}"
                         )
                     case InferenceMode.STRUCTURED_OUTPUT:
                         llm_generated_output_json = json.loads(llm_result.output["content"])
-                        action, action_input = llm_generated_output_json["action"], {
-                            "input": llm_generated_output_json["action_input"]
-                        }
-                        llm_generated_output = json.dumps(llm_generated_output_json)
+                        action = llm_generated_output_json["action"]
+
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
 
                         if action == "finish":
                             final_answer = llm_generated_output_json["action_input"]
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             return final_answer
+                        
+                        action_input = json.loads(llm_generated_output_json["action_input"])
+                        llm_generated_output = json.dumps(llm_generated_output_json)
 
                     case InferenceMode.XML:
                         llm_generated_output = llm_result.output["content"]
@@ -498,6 +453,84 @@ class ReActAgent(Agent):
         logger.info(f"Agent {self.name} - {self.id}: Final answer found: {final_answer['answer']}")
         return final_answer["answer"]
 
+    def generate_input_formats(self, tools: List[Tool]) -> str:
+        input_formats = []
+        for tool in tools:
+            params = [" ".join(param) for param in tool.input_params]
+            input_formats.append(
+                        f" - {tool.name}\n"
+                        f"\t* {"\n\t* ".join(params)}")
+        return "\n".join(input_formats)
+    
+    def generate_structured_output_schemas(self):
+        tool_names = [tool.name for tool in self.tools]
+        shema = {
+        "type": "json_schema",
+        "json_schema": {
+            "strict": True,
+            "name": "plan_next_action",
+            "schema": {
+                "type": "object",
+                "required": ["thought", "action", "action_input"],
+                "properties": {
+                    "thought": {
+                        "type": "string",
+                        "description": "Your reasoning about the next step.",
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": f"Next action to make (choose from [{tool_names}, finish]).",
+                    },
+                    "action_input": {
+                        "type": "string",
+                        "description": "Input for chosen action.",
+                    },
+                },
+                "additionalProperties": False,
+                },
+            },
+        }
+    
+        self.format_shema = shema
+
+
+
+    def generate_function_calling_schemas(self):
+        self.format_shema.append(final_answer_schema)
+        for tool in self.tools:
+            properties = {}
+            for name, param_type, description in tool.input_params:
+                properties[name] = {
+                            "type": param_type,
+                            "description": description
+                        }
+
+            schema = {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description[:1024], # Expected a string with maximum length 1024
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "thought": {
+                                "type": "string",
+                                "description": "Your reasoning about why you can answer original question.",
+                            },
+                            "action_input": {
+                                "type": "object",
+                                "description": "Input for chosen action.",
+                                "properties": properties
+                            },
+                        },
+                        "required": ["thought", "action_input"],
+                    },
+                },
+
+            }
+            self.format_shema.append(schema)
+
+
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
@@ -512,8 +545,10 @@ class ReActAgent(Agent):
 
         match self.inference_mode:
             case InferenceMode.FUNCTION_CALLING:
+                self.generate_function_calling_schemas()
                 prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING
             case InferenceMode.STRUCTURED_OUTPUT:
+                self.generate_structured_output_schemas()
                 prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT
             case InferenceMode.DEFAULT:
                 if not self.tools:

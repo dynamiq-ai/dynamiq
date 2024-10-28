@@ -2,29 +2,31 @@ import io
 import os
 import uuid
 from hashlib import sha256
-from typing import Any, Literal
+from typing import Any
 
 from e2b import Sandbox
 
 from dynamiq.connections import E2B as E2BConnection
-from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
-from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
+from dynamiq.nodes.tools.basetool import Tool
+from pydantic import BaseModel, Field
+from typing import Any
+
 
 DESCRIPTION = """
-<tool_description>
 This tool enables interaction with an E2B sandbox environment,
-providing capabilities for Python code execution and shell command execution.
+providing capabilities for Python code and shell command execution.
 It offers internet access, API request functionality, and filesystem operations.
-Key Features:
+Features:
 1. Python Code Execution
 2. Shell Command Execution
 3. Internet Access
 4. API Request Capability
 5. Filesystem Access (Read/Write)
-Usage Instructions:
+Instructions:
 1. Shell Command Execution:
    - Provide the command in the 'shell_command' field.
 2. Python Code Execution:
@@ -33,26 +35,18 @@ Usage Instructions:
    - The code will be executed in a clean environment with default packages installed.
    - IMPORTANT: Always write the whole code from beginning to end, including imports.
    - IMPORTANT: Always print the final result when executing Python code.
+   - IMPORTANT: Always provide packages, which are used in the code
 Notes:
-- For API requests, use either shell commands or Python code.
-- Filesystem operations can be performed using appropriate Python libraries or shell commands.
-Example:
-# Python code execution
-python = '''
-import requests
-
-response = requests.get('https://api.example.com/data')
-print(response.json())
-'''
-# Shell command execution
-shell_command = 'ls -la /path/to/directory'
-# Package installation (optional)
-packages = 'requests,pandas'
-</tool_description>
+- For API requests or Filesystem operations, use either shell commands or Python code
 """  # noqa: E501
 
-
-class E2BInterpreterTool(ConnectionNode):
+class E2BInterpreterSchema(BaseModel):
+    packages: str = Field(default="", description="Parameter to provide packages to install", is_accessible_to_agent = True)
+    shell_command: str = Field(default="", description="Parameter to provide shell command to execute", visible_to_agent = True)
+    python: str = Field(default="", description="Parameter to provide python code to execute", visible_to_agent = True)
+    files: Any = Field(default=None, description="Parameter to provide files to upload to sendbox")
+    
+class E2BInterpreterTool(Tool):
     """
     A tool to interact with an E2B sandbox, allowing for file upload/download,
     Python code execution, and shell command execution.
@@ -67,8 +61,6 @@ class E2BInterpreterTool(ConnectionNode):
         persistent_sandbox (bool): Whether to use a persistent sandbox across executions.
         _sandbox (Optional[Sandbox]): Persistent sandbox instance (if enabled).
     """
-
-    group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "code-interpreter_e2b"
     description: str = DESCRIPTION
     connection: E2BConnection
@@ -76,6 +68,7 @@ class E2BInterpreterTool(ConnectionNode):
     files: list[tuple[str | bytes, str]] | None = None
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
+    input_shema: type[E2BInterpreterSchema] = E2BInterpreterSchema
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -171,12 +164,9 @@ class E2BInterpreterTool(ConnectionNode):
             raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
         return output.stdout
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def run_tool(self, input_data: E2BInterpreterSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """Executes the requested action based on the input data."""
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data}")
-
         config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         if self.persistent_sandbox:
             sandbox = self._sandbox
@@ -191,14 +181,14 @@ class E2BInterpreterTool(ConnectionNode):
         try:
 
             content = {}
-            if packages := input_data.get("packages"):
+            if packages := input_data.packages:
                 self._install_packages(sandbox=sandbox, packages=packages)
-                content["packages_installation"] = f"Installed packages: {input_data['packages']}"
-            if files := input_data.get("files"):
+                content["packages_installation"] = f"Installed packages: {input_data.packages}"
+            if files := input_data.files:
                 content["files_installation"] = self._upload_file(file_data=files, sandbox=sandbox)
-            if shell_command := input_data.get("shell_command"):
+            if shell_command := input_data.shell_command:
                 content["shell_command_execution"] = self._execute_shell_command(shell_command, sandbox=sandbox)
-            if python := input_data.get("python"):
+            if python := input_data.python:
                 content["code_execution"] = self._execute_python_code(python, sandbox=sandbox)
             if not (packages or files or shell_command or python):
                 raise ToolExecutionException(

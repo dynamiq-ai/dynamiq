@@ -75,7 +75,7 @@ class FirecrawlTool(ConnectionNode):
         else:
             return data
 
-    def execute(
+    def run(
         self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Execute the scraping tool with the provided input data."""
