@@ -1,4 +1,4 @@
-from typing import Any, Literal, Self
+from typing import Any, Literal
 
 from pydantic import model_validator
 
@@ -42,12 +42,12 @@ class PineconeDocumentWriter(VectorStoreNode, PineconeWriterVectorStoreParams):
         super().__init__(**kwargs)
 
     @model_validator(mode="after")
-    def check_required_params(self) -> Self:
+    def check_required_params(self) -> "PineconeDocumentWriter":
         """
         Validate required parameters
 
         Returns:
-            Self: The updated instance.
+            self: The updated instance.
         """
         if self.vector_store is None:
             if self.create_if_not_exist and self.index_type is None:

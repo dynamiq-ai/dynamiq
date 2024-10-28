@@ -19,7 +19,7 @@ repos:
     rev: v2.34.0
     hooks:
       - id: pyupgrade
-        args: ["--py311-plus"]
+        args: ["--py310-plus"]
 
   - repo: https://github.com/akaihola/darker
     rev: v2.1.0
