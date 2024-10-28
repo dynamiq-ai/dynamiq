@@ -1,13 +1,15 @@
 import enum
+import json
 from typing import Any, Literal
 from urllib.parse import urljoin
 
-from pydantic import Field, BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.node import ensure_config
-from dynamiq.nodes.tools.basetool import Tool
+from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutionException
+from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.basetool import ToolMixin
 from dynamiq.runnables import RunnableConfig
 
 
@@ -18,12 +20,25 @@ class ResponseType(str, enum.Enum):
 
 
 class HttpApiCallInputSchema(BaseModel):
-    data: str = Field(default={}, description="Parameter to provide payload data")
+    data: dict = Field(default={}, description="Parameter to provide payload data")
     url_path: str = Field(default="", description="Parameter to path to endpoint")
-    headers: str = Field(default={}, description="Parameter to provide headers to request")
-    params: Any = Field(default={}, description="Parameter to provide GET parameters")
-    
-class HttpApiCall(Tool):
+    headers: dict = Field(default={}, description="Parameter to provide headers to request")
+    params: dict = Field(default={}, description="Parameter to provide GET parameters in URL")
+
+    @field_validator("data", "headers", "params", mode="before")
+    def validate_dict_fields(cls, value: Any, field: str) -> Any:
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError as e:
+                raise ActionParsingException(f"Invalid JSON string provided for '{field}'. Error: {e}")
+        elif isinstance(value, dict):
+            return value
+        else:
+            raise ActionParsingException(f"Expected a dictionary or a JSON string for '{field}'.")
+
+
+class HttpApiCall(ToolMixin, ConnectionNode):
     """
     A component for sending API requests using requests library.
 
@@ -39,7 +54,7 @@ class HttpApiCall(Tool):
         response_type(ResponseType|str): The type of response content.
     """
 
-    name: str = "The name of the API call tool"
+    name: str = "api-call-tool"
     description: str = "The description of the API call tool"
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     connection: HttpConnection
@@ -72,11 +87,13 @@ class HttpApiCall(Tool):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         data = input_data.data
+
         url = self.connection.url
-        if url_path := input_data.url_path
+        if url_path := input_data.url_path:
             url = urljoin(url, url_path)
         headers = input_data.headers
         params = input_data.params
+
         response = self.client.request(
             method=self.connection.method,
             url=url,
@@ -85,8 +102,9 @@ class HttpApiCall(Tool):
             data=self.connection.data | self.data | data,
             timeout=self.timeout,
         )
+
         if response.status_code not in self.success_codes:
-            raise ValueError(
+            raise ToolExecutionException(
                 f"Request failed with unexpected status code: {response.status_code} and response: {response.text}"
             )
 

@@ -1,18 +1,20 @@
 from typing import Any, Literal
 
+from pydantic import BaseModel, Field
+
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node
-from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup
+from dynamiq.nodes.tools.basetool import ToolMixin
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.tools.basetool import Tool
-from pydantic import Field, BaseModel
+
 
 class RetrievalInputSchema(BaseModel):
     query: str = Field(default={}, description="Parameter to provide query to retrive relevant documents")
 
-class RetrievalTool(Tool):
+
+class RetrievalTool(ToolMixin, Node):
     """Tool for retrieving relevant documents based on a query.
 
     Attributes:
@@ -25,13 +27,13 @@ class RetrievalTool(Tool):
         document_retriever (ConnectionNode | None): Document retriever node.
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Retrieval Tool"
+    name: str = "retrieval-tool"
     description: str = "A tool for retrieving relevant documents based on a query. Provide query with key 'input'."
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     connection_manager: ConnectionManager | None = None
     text_embedder: ConnectionNode | None = None
     document_retriever: ConnectionNode | None = None
-    input_shema: type[RetrievalInputSchema] = RetrievalInputSchema
+    input_schema: type[RetrievalInputSchema] = RetrievalInputSchema
 
     def __init__(
         self,
@@ -92,7 +94,7 @@ class RetrievalTool(Tool):
             formatted_docs.append(formatted_doc)
         return "\n\n".join(formatted_docs)
 
-    def run_tool(self, input_data: RetrievalInputSchema, **kwargs) -> dict[str, Any]:
+    def run_tool(self, input_data: RetrievalInputSchema, **_) -> dict[str, Any]:
         """Execute the retrieval tool.
 
         Args:
@@ -102,7 +104,7 @@ class RetrievalTool(Tool):
         Returns:
             dict[str, Any]: Result of the retrieval.
         """
-        
+
         logger.debug(f"Tool {self.name} - {self.id}: started with query '{input_data.query}'")
 
         if not self.text_embedder:
@@ -125,7 +127,6 @@ class RetrievalTool(Tool):
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
             raise
-        
 
     def to_dict(self, **kwargs) -> dict:
         """Convert the RetrievalTool object to a dictionary.

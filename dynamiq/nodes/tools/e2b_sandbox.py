@@ -5,16 +5,14 @@ from hashlib import sha256
 from typing import Any
 
 from e2b import Sandbox
+from pydantic import BaseModel, Field
 
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
-from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.basetool import ToolMixin
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.tools.basetool import Tool
-from pydantic import BaseModel, Field
-from typing import Any
-
 
 DESCRIPTION = """
 This tool enables interaction with an E2B sandbox environment,
@@ -40,13 +38,17 @@ Notes:
 - For API requests or Filesystem operations, use either shell commands or Python code
 """  # noqa: E501
 
+
 class E2BInterpreterInputSchema(BaseModel):
     packages: str = Field(default="", description="Parameter to provide packages to install")
     shell_command: str = Field(default="", description="Parameter to provide shell command to execute")
     python: str = Field(default="", description="Parameter to provide python code to execute")
-    files: Any = Field(default=None, description="Parameter to provide files to upload to sendbox", is_accessible_to_agent = False)
-    
-class E2BInterpreterTool(Tool):
+    files: Any = Field(
+        default=None, description="Parameter to provide files to upload to sendbox", is_accessible_to_agent=False
+    )
+
+
+class E2BInterpreterTool(ToolMixin, ConnectionNode):
     """
     A tool to interact with an E2B sandbox, allowing for file upload/download,
     Python code execution, and shell command execution.
@@ -61,14 +63,15 @@ class E2BInterpreterTool(Tool):
         persistent_sandbox (bool): Whether to use a persistent sandbox across executions.
         _sandbox (Optional[Sandbox]): Persistent sandbox instance (if enabled).
     """
-    name: str = "code-interpreter_e2b"
+
+    name: str = "code-interpreter-e2b"
     description: str = DESCRIPTION
     connection: E2BConnection
     installed_packages: list = []
     files: list[tuple[str | bytes, str]] | None = None
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
-    input_shema: type[E2BInterpreterInputSchema] = E2BInterpreterInputSchema
+    input_schema: type[E2BInterpreterInputSchema] = E2BInterpreterInputSchema
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -164,7 +167,9 @@ class E2BInterpreterTool(Tool):
             raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
         return output.stdout
 
-    def run_tool(self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def run_tool(
+        self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **_
+    ) -> dict[str, Any]:
         """Executes the requested action based on the input data."""
         config = ensure_config(config)
 

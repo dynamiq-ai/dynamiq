@@ -1,14 +1,15 @@
 from typing import Any, Literal
 from urllib.parse import urljoin
 
-from pydantic import ConfigDict, Field, BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import ScaleSerp
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.basetool import ToolMixin
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.tools.basetool import Tool
+
 
 class ScaleSerpInputSchema(BaseModel):
     query: str = Field(default={}, description="Parameter to provide the query to search")
@@ -16,7 +17,7 @@ class ScaleSerpInputSchema(BaseModel):
     limit: str = Field(default={}, description="Parameter to specify the number of results to return, default is 10")
 
 
-class ScaleSerpTool(Tool):
+class ScaleSerpTool(ToolMixin, ConnectionNode):
     """
     A tool for performing web searches using the Scale SERP API.
 
@@ -32,7 +33,7 @@ class ScaleSerpTool(Tool):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Scale SERP Search Tool"
+    name: str = "scale-serp-search-tool"
     description: str = (
         "A tool for searching the web, powered by Scale SERP. "
         "You can use this tool to search the web for information."
@@ -46,7 +47,7 @@ class ScaleSerpTool(Tool):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    input_shema: type [ScaleSerpInputSchema] = ScaleSerpInputSchema
+    input_schema: type[ScaleSerpInputSchema] = ScaleSerpInputSchema
 
     def _format_search_results(self, results: dict[str, Any]) -> str:
         """

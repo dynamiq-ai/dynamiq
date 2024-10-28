@@ -5,9 +5,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.basetool import ToolMixin
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.tools.basetool import Tool
+
 
 class PageOptions(BaseModel):
     """Options for configuring page scraping behavior."""
@@ -32,18 +33,19 @@ class ExtractorOptions(BaseModel):
 
 class FirecrawlInputSchema(BaseModel):
     url: str = Field(default="", description="Parameter to provide url of the page to scrape.")
-    
-class FirecrawlTool(Tool):
+
+
+class FirecrawlTool(ToolMixin, ConnectionNode):
     """A tool for scraping web pages using the Firecrawl service."""
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Firecrawl Scrape Tool"
+    name: str = "firecrawl-tool"
     description: str = (
         "A tool for scraping web pages, powered by Firecrawl."
         "You can use this tool to scrape the content of a web page."
     )
     connection: Firecrawl
     url: str | None = None
-    input_shema: type[FirecrawlInputSchema] = FirecrawlInputSchema
+    input_schema: type[FirecrawlInputSchema] = FirecrawlInputSchema
 
     # Default parameters
     page_options: PageOptions = Field(
@@ -132,7 +134,7 @@ class FirecrawlTool(Tool):
             if scrape_result.get("data", {}).get("content", "") != "":
                 result += f"\n\n<Scraped result>\n{scrape_result.get('data', {}).get('content')}\n<\\Scraped result>"
             if scrape_result.get("data", {}).get("markdown", "") != "":
-                result += f"\n\n<Markdown>\n{scrape_result.get.get('data', {}).get('markdown')}\n<\\Markdown>"
+                result += f"\n\n<Markdown>\n{scrape_result.get('data', {}).get('markdown')}\n<\\Markdown>"
             if scrape_result.get("data", {}).get("llm_extraction", "") != "":
                 result += (
                     f"\n\n<LLM Extraction>\n{scrape_result.get('data', {}).get('llm_extraction')}\n<\\LLM Extraction>"

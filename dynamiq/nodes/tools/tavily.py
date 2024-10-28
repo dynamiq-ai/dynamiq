@@ -1,20 +1,21 @@
 from typing import Any, Literal
 from urllib.parse import urljoin
 
-from pydantic import ConfigDict, Field, BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import Tavily
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.basetool import ToolMixin
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.tools.basetool import Tool
 
 
 class TavilyInputSchema(BaseModel):
     query: str = Field(default={}, description="Parameter to provide the query to search")
 
-class TavilyTool(Tool):
+
+class TavilyTool(ToolMixin, ConnectionNode):
     """
     TavilyTool is a ConnectionNode that interfaces with the Tavily search service.
 
@@ -35,7 +36,7 @@ class TavilyTool(Tool):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Tavily Search Tool"
+    name: str = "tavily-search-tool"
     description: str = (
         "A tool for searching the web, powered by Tavily. "
     )
@@ -68,7 +69,7 @@ class TavilyTool(Tool):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    input_shema: type[TavilyInputSchema] = TavilyInputSchema
+    input_schema: type[TavilyInputSchema] = TavilyInputSchema
 
     def _format_search_results(self, results: dict[str, Any]) -> str:
         """

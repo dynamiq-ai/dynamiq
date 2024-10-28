@@ -5,12 +5,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import Node, ensure_config
+from dynamiq.nodes.tools.basetool import ToolMixin
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingEventMessage
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.tools.basetool import Tool
+
 
 class InputMethod(str, enum.Enum):
     console = "console"
@@ -54,10 +54,12 @@ class InputMethodCallable(ABC):
         """
         pass
 
-class HumanFeedbackInputSchema(BaseModel):
-    input: str = Field(default={}, description="Parameter to provide request to the user")
 
-class HumanFeedbackTool(Tool):
+class HumanFeedbackInputSchema(BaseModel):
+    input: str = Field(default="", description="Parameter to provide request to the user")
+
+
+class HumanFeedbackTool(ToolMixin, Node):
     """
     A tool for gathering user information through human feedback.
 
@@ -72,14 +74,14 @@ class HumanFeedbackTool(Tool):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Human Feedback"
+    name: str = "human-feedback-tool"
     description: str = (
         "Tool to gather user information. Use it to check actual information or get additional input. "
         "Input should be a dictionary with a key 'input' containing the request to human."
     )
     input_method: InputMethod | InputMethodCallable = InputMethod.console
-    input_schema: type[HumanFeedbackInputSchema] = HumanFeedbackInputSchema
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_schema: type[HumanFeedbackInputSchema] = HumanFeedbackInputSchema
 
     def input_method_console(self, prompt: str) -> str:
         """
@@ -122,7 +124,9 @@ class HumanFeedbackTool(Tool):
 
         return event.data.content
 
-    def run_tool(self, input_data: HumanFeedbackInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def run_tool(
+        self, input_data: HumanFeedbackInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
         """
         Execute the tool with the provided input data and configuration.
 
@@ -142,7 +146,6 @@ class HumanFeedbackTool(Tool):
         logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-
 
         input_text = input_data.input
         if isinstance(self.input_method, InputMethod):

@@ -1,13 +1,13 @@
 import json
 import re
-from typing import Any, List
-from dynamiq.nodes.tools.basetool import Tool
+from typing import Any
 
 from pydantic import Field
 
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import ActionParsingException, MaxLoopsExceededException, RecoverableAgentException
 from dynamiq.nodes.node import NodeDependency
+from dynamiq.nodes.tools.basetool import ToolMixin
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -280,7 +280,6 @@ class ReActAgent(Agent):
         string = re.sub(r'\\+', r'\\', string)
         return json.loads(string)
 
-
     def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """
         Executes the ReAct strategy by iterating through thought, action, and observation cycles.
@@ -378,7 +377,7 @@ class ReActAgent(Agent):
                             final_answer = llm_generated_output_json["action_input"]
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             return final_answer
-                        
+
                         action_input = json.loads(llm_generated_output_json["action_input"])
                         llm_generated_output = json.dumps(llm_generated_output_json)
 
@@ -459,53 +458,67 @@ class ReActAgent(Agent):
         logger.info(f"Agent {self.name} - {self.id}: Final answer found: {final_answer['answer']}")
         return final_answer["answer"]
 
-    def generate_input_formats(self, tools: List[Tool]) -> str:
+    def generate_input_formats(self, tools: list[ToolMixin]) -> str:
         input_formats = []
         for tool in tools:
-            params = [" ".join(param[:-1]) for param in tool.input_params if param[-1].get("is_accessible_to_agent", True)]
-            input_formats.append(
-                        f" - {tool.name}\n"
-                        f"\t* {"\n\t* ".join(params)}")
+            params = [
+                " ".join(param[:-1]) for param in tool.input_params if param[-1].get("is_accessible_to_agent", True)
+            ]
+            input_formats.append(f" - {tool.name}\n" f"\t* {"\n\t* ".join(params)}")
         return "\n".join(input_formats)
-    
+
     def generate_structured_output_schemas(self):
         tool_names = [tool.name for tool in self.tools]
-        shema = {
-        "type": "json_schema",
-        "json_schema": {
-            "strict": True,
-            "name": "plan_next_action",
-            "schema": {
-                "type": "object",
-                "required": ["thought", "action", "action_input"],
-                "properties": {
-                    "thought": {
-                        "type": "string",
-                        "description": "Your reasoning about the next step.",
+        schema = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "plan_next_action",
+                "schema": {
+                    "type": "object",
+                    "required": ["thought", "action", "action_input"],
+                    "properties": {
+                        "thought": {
+                            "type": "string",
+                            "description": "Your reasoning about the next step.",
+                        },
+                        "action": {
+                            "type": "string",
+                            "description": f"Next action to make (choose from [{tool_names}, finish]).",
+                        },
+                        "action_input": {
+                            "type": "string",
+                            "description": "Input for chosen action.",
+                        },
                     },
-                    "action": {
-                        "type": "string",
-                        "description": f"Next action to make (choose from [{tool_names}, finish]).",
+                    "additionalProperties": False,
                     },
-                    "action_input": {
-                        "type": "string",
-                        "description": "Input for chosen action.",
-                    },
-                },
-                "additionalProperties": False,
-                },
             },
         }
-    
-        self.format_shema = shema
 
+        self.format_shema = schema
 
+    @staticmethod
+    def filter_format_type(param_type: str) -> str:
+        "Filters proper type for an function calling schema"
+        match param_type:
+            case "bool":
+                return "boolean"
+            case "int":
+                return "integer"
+            case "float":
+                return "float"
+        return "string"
 
     def generate_function_calling_schemas(self):
+        def form_function_name(input_string):
+            "Converts tool name to proper function schema name"
+            return re.sub(r"[^a-zA-Z0-9_-]", "", input_string)
+
         self.format_shema.append(final_answer_function_schema)
         for tool in self.tools:
             properties = {}
             for name, param_type, description, tags in tool.input_params:
+                param_type = self.filter_format_type(param_type)
                 if tags.get("is_accessible_to_agent", True):
                     properties[name] = {
                                 "type": param_type,
@@ -514,9 +527,10 @@ class ReActAgent(Agent):
 
             schema = {
                 "type": "function",
+                "strict": True,
                 "function": {
-                    "name": tool.name,
-                    "description": tool.description[:1024], # Expected a string with maximum length 1024
+                    "name": form_function_name(tool.name),
+                    "description": tool.description[:1024],  # Expected a string with maximum length 1024
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -527,7 +541,7 @@ class ReActAgent(Agent):
                             "action_input": {
                                 "type": "object",
                                 "description": "Input for chosen action.",
-                                "properties": properties
+                                "properties": properties,
                             },
                         },
                         "required": ["thought", "action_input"],
@@ -535,8 +549,8 @@ class ReActAgent(Agent):
                 },
 
             }
-            self.format_shema.append(schema)
 
+            self.format_shema.append(schema)
 
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""

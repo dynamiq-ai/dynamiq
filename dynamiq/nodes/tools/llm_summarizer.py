@@ -1,16 +1,14 @@
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.tools.basetool import ToolMixin
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.tools.basetool import Tool
-
 
 PROMPT_TEMPLATE_SUMMARIZER = """
 You are tasked with cleaning up and formatting extracted text from an HTML file. The text contains content from various HTML elements like paragraphs, headers, and tables, but without any HTML tags. Your goal is to produce a well-written, coherent piece of content by removing unnecessary information and formatting the remaining text.
@@ -50,10 +48,12 @@ Follow these steps to clean up and format the text:
 Ensure that only the relevant, informative content remains, and that it is presented in a clear, readable format.
 """  # noqa E501
 
+
 class SummarizerInputSchema(BaseModel):
     input: str = Field(default={}, description="Parameter to provide input text to summarize")
 
-class SummarizerTool(Tool):
+
+class SummarizerTool(ToolMixin, Node):
     """
     A tool for summarizing and cleaning up text extracted from HTML.
 
@@ -71,7 +71,7 @@ class SummarizerTool(Tool):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Summarizer"
+    name: str = "summarizer-tool"
     description: str = (
         "A tool for summarizing and cleaning up text extracted from HTML. "
         "Input should be a dictionary with a key 'input' containing the text to summarize."
@@ -85,7 +85,7 @@ class SummarizerTool(Tool):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    input_shema: type[SummarizerInputSchema] = SummarizerInputSchema
+    input_schema: type[SummarizerInputSchema] = SummarizerInputSchema
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
         """
@@ -155,7 +155,9 @@ class SummarizerTool(Tool):
             raise ValueError("LLM execution failed")
         return result.output["content"]
 
-    def execute(self, input_data: SummarizerInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self, input_data: SummarizerInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
         """
         Execute the summarization tool on the input data.
 
