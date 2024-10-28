@@ -105,7 +105,7 @@ class Pinecone(MemoryBackend):
             return {"operator": "AND", "conditions": conditions}
         return filters
 
-    def search(self, query: str = None, filters: dict = None, limit: int = None) -> list[Message]:
+    def search(self, query: str = None, filters: dict = None, limit: int = 10) -> list[Message]:
         """Searches for messages in Pinecone based on the query and/or filters."""
         try:
             normalized_filters = self._prepare_filters(filters)
@@ -114,9 +114,9 @@ class Pinecone(MemoryBackend):
                 embedding_result = self.embedder.embed_text(query)
                 documents = self.vector_store._embedding_retrieval(
                     query_embedding=embedding_result["embedding"],
-                    namespace=self.namespace,  # Add namespace
+                    namespace=self.namespace,
                     filters=normalized_filters,
-                    top_k=limit or 10,
+                    top_k=limit,
                     exclude_document_embeddings=True,
                 )
             elif normalized_filters:

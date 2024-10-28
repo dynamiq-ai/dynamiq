@@ -29,6 +29,7 @@ class Qdrant(MemoryBackend):
         index_name: str = "conversations",
         metric: str = "cosine",
         on_disk: bool = False,
+        create_if_not_exist: bool = True,
     ):
         """Initializes the Qdrant memory storage.
 
@@ -46,7 +47,7 @@ class Qdrant(MemoryBackend):
                 connection=connection,
                 index_name=index_name,
                 dimension=embedder.dimensions,
-                create_if_not_exist=True,
+                create_if_not_exist=create_if_not_exist,
                 metric=metric,
                 on_disk=on_disk,
                 recreate_index=False,
@@ -54,17 +55,6 @@ class Qdrant(MemoryBackend):
             self.client = self.vector_store._client
             if not self.client:
                 raise QdrantError("Failed to initialize Qdrant client")
-            # Ensure collection is properly set up
-            self.vector_store._set_up_collection(
-                collection_name=index_name,
-                embedding_dim=embedder.dimensions,
-                create_if_not_exist=True,
-                recreate_collection=False,
-                similarity=metric,
-                use_sparse_embeddings=False,
-                sparse_idf=False,
-                on_disk=on_disk,
-            )
         except Exception as e:
             raise QdrantError(f"Failed to connect to Qdrant: {e}") from e
 
