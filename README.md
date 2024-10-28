@@ -372,6 +372,48 @@ answer = result.output.get(answer_generator.id).get("output", {}).get("content")
 print(answer)
 ```
 
+### Simple Chatbot with Memory
+A simple chatbot that uses the `Memory` module to store and retrieve conversation history.
+
+```python
+from dynamiq.memory import Memory
+from dynamiq.memory.backend.in_memory import InMemory
+from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.nodes.llms import OpenAI
+
+AGENT_ROLE = ("helpful assistant,"
+              "goal is to provide useful information and answer questions")
+llm = OpenAI(
+    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+    model="gpt-4o",
+    temperature=0.1,)
+
+memory = Memory(backend=InMemory())
+agent = SimpleAgent(
+        name="Agent",
+        llm=llm,
+        role=AGENT_ROLE,
+        id="agent",
+        memory=memory,
+    )
+
+
+def main():
+    print("Welcome to the AI Chat! (Type 'exit' to end)")
+    while True:
+        user_input = input("You: ")
+        if user_input.lower() == "exit":
+            break
+
+        response = agent.run({"input": user_input})
+        response_content = response.output.get("content")
+        print(f"AI: {response_content}")
+
+if __name__ == "__main__":
+    main()
+```
+
 ## Contributing
 
 We love contributions! Whether it's bug reports, feature requests, or pull requests, head over to our [CONTRIBUTING.md](CONTRIBUTING.md) to see how you can help.
