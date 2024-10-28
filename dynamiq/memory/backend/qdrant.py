@@ -55,6 +55,16 @@ class Qdrant(MemoryBackend):
             self.client = self.vector_store._client
             if not self.client:
                 raise QdrantError("Failed to initialize Qdrant client")
+            self.vector_store._set_up_collection(
+                collection_name=index_name,
+                embedding_dim=embedder.dimensions,
+                create_if_not_exist=True,
+                recreate_collection=False,
+                similarity=metric,
+                use_sparse_embeddings=False,
+                sparse_idf=False,
+                on_disk=on_disk,
+            )
         except Exception as e:
             raise QdrantError(f"Failed to connect to Qdrant: {e}") from e
 

@@ -234,19 +234,6 @@ class QdrantVectorStore:
         self.write_batch_size = write_batch_size
         self.scroll_size = scroll_size
 
-        # Call collection setup only once here
-        self._set_up_collection(
-            collection_name=self.index_name,
-            embedding_dim=self.dimension,
-            create_if_not_exist=self.create_if_not_exist,
-            recreate_collection=self.recreate_index,
-            similarity=self.metric,
-            use_sparse_embeddings=self.use_sparse_embeddings,
-            sparse_idf=self.sparse_idf,
-            on_disk=self.on_disk,
-            payload_fields_to_index=None,
-        )
-
     @property
     def client(self):
         if not self._client:
