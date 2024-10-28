@@ -62,4 +62,3 @@ def run_simple_workflow() -> tuple[str, dict]:
 if __name__ == "__main__":
     output, traces = run_simple_workflow()
     print(output)
-    print(traces)

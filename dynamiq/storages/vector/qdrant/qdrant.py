@@ -334,17 +334,6 @@ class QdrantVectorStore:
             if not isinstance(doc, Document):
                 msg = f"DocumentStore.write_documents() expects a list of Documents but got an element of {type(doc)}."
                 raise ValueError(msg)
-        self._set_up_collection(
-            collection_name=self.index_name,
-            embedding_dim=self.dimension,
-            create_if_not_exist=self.create_if_not_exist,
-            recreate_collection=self.recreate_collection,
-            similarity=self.metric,
-            use_sparse_embeddings=self.use_sparse_embeddings,
-            sparse_idf=self.sparse_idf,
-            on_disk=self.on_disk,
-            payload_fields_to_index=self.payload_fields_to_index,
-        )
 
         if len(documents) == 0:
             logger.warning("Calling QdrantDocumentStore.write_documents() with empty list")
@@ -766,6 +755,7 @@ class QdrantVectorStore:
             )
             # Create Payload index if payload_fields_to_index is provided
             self._create_payload_index(collection_name, payload_fields_to_index)
+            logger.debug(f"Index {self.index_name} does not exist. Creating a new index.")
             return
 
         collection_info = self.client.get_collection(collection_name)
