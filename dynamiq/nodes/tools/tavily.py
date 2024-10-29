@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.connections import Tavily
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.basetool import ToolMixin
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -15,7 +15,7 @@ class TavilyInputSchema(BaseModel):
     query: str = Field(default={}, description="Parameter to provide the query to search")
 
 
-class TavilyTool(ToolMixin, ConnectionNode):
+class TavilyTool(BaseTool, ConnectionNode):
     """
     TavilyTool is a ConnectionNode that interfaces with the Tavily search service.
 

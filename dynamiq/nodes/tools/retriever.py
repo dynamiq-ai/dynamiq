@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node
 from dynamiq.nodes.node import ConnectionNode, NodeGroup
-from dynamiq.nodes.tools.basetool import ToolMixin
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -14,7 +14,7 @@ class RetrievalInputSchema(BaseModel):
     query: str = Field(default={}, description="Parameter to provide query to retrive relevant documents")
 
 
-class RetrievalTool(ToolMixin, Node):
+class RetrievalTool(BaseTool, Node):
     """Tool for retrieving relevant documents based on a query.
 
     Attributes:

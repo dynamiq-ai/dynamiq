@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.connections import ScaleSerp
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.basetool import ToolMixin
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -17,7 +17,7 @@ class ScaleSerpInputSchema(BaseModel):
     limit: str = Field(default={}, description="Parameter to specify the number of results to return, default is 10")
 
 
-class ScaleSerpTool(ToolMixin, ConnectionNode):
+class ScaleSerpTool(BaseTool, ConnectionNode):
     """
     A tool for performing web searches using the Scale SERP API.
 

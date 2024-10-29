@@ -17,6 +17,7 @@ from dynamiq.nodes.agents.exceptions import (
     ToolExecutionException,
 )
 from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig
@@ -57,7 +58,7 @@ class Agent(Node):
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     streaming: StreamingConfig = StreamingConfig()
-    tools: list[Node] = []
+    tools: list[BaseTool] = []
     name: str = "AI Agent"
     role: str | None = None
     max_loops: int = 1

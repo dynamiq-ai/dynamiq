@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.basetool import ToolMixin
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -35,7 +35,7 @@ class FirecrawlInputSchema(BaseModel):
     url: str = Field(default="", description="Parameter to provide url of the page to scrape.")
 
 
-class FirecrawlTool(ToolMixin, ConnectionNode):
+class FirecrawlTool(BaseTool, ConnectionNode):
     """A tool for scraping web pages using the Firecrawl service."""
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "firecrawl-tool"

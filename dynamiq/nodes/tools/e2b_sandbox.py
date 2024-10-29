@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.basetool import ToolMixin
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -48,7 +48,7 @@ class E2BInterpreterInputSchema(BaseModel):
     )
 
 
-class E2BInterpreterTool(ToolMixin, ConnectionNode):
+class E2BInterpreterTool(BaseTool, ConnectionNode):
     """
     A tool to interact with an E2B sandbox, allowing for file upload/download,
     Python code execution, and shell command execution.
@@ -64,7 +64,7 @@ class E2BInterpreterTool(ToolMixin, ConnectionNode):
         _sandbox (Optional[Sandbox]): Persistent sandbox instance (if enabled).
     """
 
-    name: str = "code-interpreter-e2b"
+    name: str = "Code Interpreter E2B"
     description: str = DESCRIPTION
     connection: E2BConnection
     installed_packages: list = []

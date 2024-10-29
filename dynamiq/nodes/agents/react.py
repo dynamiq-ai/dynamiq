@@ -7,7 +7,7 @@ from pydantic import Field
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import ActionParsingException, MaxLoopsExceededException, RecoverableAgentException
 from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.tools.basetool import ToolMixin
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -36,9 +36,8 @@ Here is how you will think about the user's request
 </output>
 
 REMEMBER:
-* Inside 'action' provide just name of one tool from this list: [{tools_name}]
+* Inside 'action' provide just name of one tool from this list: [{tools_name}]. Don't wrap it wit <>.
 * Each 'action' has its own input format strictly adhere to it.
-
 Input formats for tools:
 {input_formats}
 
@@ -194,23 +193,24 @@ Your response should be clear, concise, and professional.
 
 
 final_answer_function_schema = {
-        "type": "function",
-        "function": {
-            "name": "provide_final_answer",
-            "description": "Function should be called when if you can answer the initial request",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "thought": {
-                        "type": "string",
-                        "description": "Your reasoning about why you can answer original question.",
-                    },
-                    "answer": {"type": "string", "description": "Answer on initial request."},
+    "type": "function",
+    "strict": True,
+    "function": {
+        "name": "provide_final_answer",
+        "description": "Function should be called when if you can answer the initial request",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "thought": {
+                    "type": "string",
+                    "description": "Your reasoning about why you can answer original question.",
                 },
-                "required": ["thought", "answer"],
+                "answer": {"type": "string", "description": "Answer on initial request."},
             },
+            "required": ["thought", "answer"],
         },
-    }
+    },
+}
 
 
 class ReActAgent(Agent):
@@ -223,7 +223,7 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
-    format_shema: list = []
+    format_schema: list = []
 
     def parse_xml_content(self, text: str, tag: str) -> str:
         """Extract content from XML-like tags."""
@@ -314,11 +314,9 @@ class ReActAgent(Agent):
                 llm_result = self.llm.run(
                     input_data={},
                     config=config,
-                    prompt=Prompt(
-                        messages=[Message(role="user", content=formatted_prompt)]
-                    ),
+                    prompt=Prompt(messages=[Message(role="user", content=formatted_prompt)]),
                     run_depends=self._run_depends,
-                    schema=self.format_shema,
+                    schema=self.format_schema,
                     inference_mode=self.inference_mode,
                     **kwargs,
                 )
@@ -458,13 +456,13 @@ class ReActAgent(Agent):
         logger.info(f"Agent {self.name} - {self.id}: Final answer found: {final_answer['answer']}")
         return final_answer["answer"]
 
-    def generate_input_formats(self, tools: list[ToolMixin]) -> str:
+    def generate_input_formats(self, tools: list[BaseTool]) -> str:
         input_formats = []
         for tool in tools:
             params = [
                 " ".join(param[:-1]) for param in tool.input_params if param[-1].get("is_accessible_to_agent", True)
             ]
-            input_formats.append(f" - {tool.name}\n" f"\t* {"\n\t* ".join(params)}")
+            input_formats.append(f" - {tool.name}\n \t* " + "\n\t* ".join(params))
         return "\n".join(input_formats)
 
     def generate_structured_output_schemas(self):
@@ -473,6 +471,7 @@ class ReActAgent(Agent):
             "type": "json_schema",
             "json_schema": {
                 "name": "plan_next_action",
+                "strict": True,
                 "schema": {
                     "type": "object",
                     "required": ["thought", "action", "action_input"],
@@ -491,11 +490,11 @@ class ReActAgent(Agent):
                         },
                     },
                     "additionalProperties": False,
-                    },
+                },
             },
         }
 
-        self.format_shema = schema
+        self.format_schema = schema
 
     @staticmethod
     def filter_format_type(param_type: str) -> str:
@@ -510,26 +509,19 @@ class ReActAgent(Agent):
         return "string"
 
     def generate_function_calling_schemas(self):
-        def form_function_name(input_string):
-            "Converts tool name to proper function schema name"
-            return re.sub(r"[^a-zA-Z0-9_-]", "", input_string)
-
-        self.format_shema.append(final_answer_function_schema)
+        self.format_schema.append(final_answer_function_schema)
         for tool in self.tools:
             properties = {}
             for name, param_type, description, tags in tool.input_params:
                 param_type = self.filter_format_type(param_type)
                 if tags.get("is_accessible_to_agent", True):
-                    properties[name] = {
-                                "type": param_type,
-                                "description": description
-                            }
+                    properties[name] = {"type": param_type, "description": description}
 
             schema = {
                 "type": "function",
                 "strict": True,
                 "function": {
-                    "name": form_function_name(tool.name),
+                    "name": tool.name,
                     "description": tool.description[:1024],  # Expected a string with maximum length 1024
                     "parameters": {
                         "type": "object",
@@ -547,10 +539,9 @@ class ReActAgent(Agent):
                         "required": ["thought", "action_input"],
                     },
                 },
-
             }
 
-            self.format_shema.append(schema)
+            self.format_schema.append(schema)
 
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""

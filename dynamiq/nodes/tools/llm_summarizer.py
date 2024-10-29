@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.nodes.tools.basetool import ToolMixin
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
@@ -53,7 +53,7 @@ class SummarizerInputSchema(BaseModel):
     input: str = Field(default={}, description="Parameter to provide input text to summarize")
 
 
-class SummarizerTool(ToolMixin, Node):
+class SummarizerTool(BaseTool, Node):
     """
     A tool for summarizing and cleaning up text extracted from HTML.
 
@@ -155,7 +155,7 @@ class SummarizerTool(ToolMixin, Node):
             raise ValueError("LLM execution failed")
         return result.output["content"]
 
-    def execute(
+    def run_tool(
         self, input_data: SummarizerInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """

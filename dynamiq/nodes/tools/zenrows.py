@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.connections import ZenRows
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.basetool import ToolMixin
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -14,12 +14,11 @@ class ZenRowsInputSchema(BaseModel):
     url: str = Field(default={}, description="Parameter to the URL of the page to scrape")
 
 
-class ZenRowsTool(ToolMixin, ConnectionNode):
+class ZenRowsTool(BaseTool, ConnectionNode):
     """
     A tool for scraping web pages, powered by ZenRows.
 
     This class is responsible for scraping the content of a web page using ZenRows.
-    The input should be a dictionary containing the key 'input', which includes the URL of the page to scrape.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -27,7 +26,6 @@ class ZenRowsTool(ToolMixin, ConnectionNode):
     description: str = (
         "A tool for scraping web pages, powered by ZenRows. "
         "You can use this tool to scrape the content of a web page."
-        "Input should be a dictionary with a key 'input' containing the URL of the page to scrape."
     )
     connection: ZenRows
     url: str | None = None

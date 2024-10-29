@@ -195,6 +195,7 @@ class Node(BaseModel, Runnable, ABC):
         metadata (NodeMetadata | None): Optional metadata for the node.
         is_postponed_component_init (bool): Whether component initialization is postponed.
         is_optimized_for_agents (bool): Whether to optimize output for agents. By default is set to False.
+        input_schema (BaseModel): Input format as Pydantic class.
     """
     id: str = Field(default_factory=generate_uuid)
     name: str | None = None
@@ -215,6 +216,7 @@ class Node(BaseModel, Runnable, ABC):
     _output_references: NodeOutputReferences = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_schema: type[BaseModel] = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -487,7 +489,6 @@ class Node(BaseModel, Runnable, ABC):
 
         try:
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
-
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
             cache = cache_wf_entity(
                 entity_id=self.id,

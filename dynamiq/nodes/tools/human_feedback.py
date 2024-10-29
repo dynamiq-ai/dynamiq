@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
-from dynamiq.nodes.tools.basetool import ToolMixin
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingEventMessage
 from dynamiq.utils.logger import logger
@@ -56,10 +56,10 @@ class InputMethodCallable(ABC):
 
 
 class HumanFeedbackInputSchema(BaseModel):
-    input: str = Field(default="", description="Parameter to provide request to the user")
+    question: str = Field(default="", description="Parameter to provide a question to the user")
 
 
-class HumanFeedbackTool(ToolMixin, Node):
+class HumanFeedbackTool(BaseTool, Node):
     """
     A tool for gathering user information through human feedback.
 
@@ -77,7 +77,6 @@ class HumanFeedbackTool(ToolMixin, Node):
     name: str = "human-feedback-tool"
     description: str = (
         "Tool to gather user information. Use it to check actual information or get additional input. "
-        "Input should be a dictionary with a key 'input' containing the request to human."
     )
     input_method: InputMethod | InputMethodCallable = InputMethod.console
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -147,7 +146,7 @@ class HumanFeedbackTool(ToolMixin, Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        input_text = input_data.input
+        input_text = input_data.question
         if isinstance(self.input_method, InputMethod):
             if self.input_method == InputMethod.console:
                 result = self.input_method_console(input_text)

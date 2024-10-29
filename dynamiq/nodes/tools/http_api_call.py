@@ -9,7 +9,7 @@ from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.basetool import ToolMixin
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 
 
@@ -20,7 +20,7 @@ class ResponseType(str, enum.Enum):
 
 
 class HttpApiCallInputSchema(BaseModel):
-    data: dict = Field(default={}, description="Parameter to provide payload data")
+    data: dict = Field(default={}, description="Parameter to provide main json payload")
     url_path: str = Field(default="", description="Parameter to path to endpoint")
     headers: dict = Field(default={}, description="Parameter to provide headers to request")
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL")
@@ -38,7 +38,7 @@ class HttpApiCallInputSchema(BaseModel):
             raise ActionParsingException(f"Expected a dictionary or a JSON string for '{field}'.")
 
 
-class HttpApiCall(ToolMixin, ConnectionNode):
+class HttpApiCall(BaseTool, ConnectionNode):
     """
     A component for sending API requests using requests library.
 

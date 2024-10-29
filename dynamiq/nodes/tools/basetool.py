@@ -1,26 +1,22 @@
 from abc import ABC, abstractmethod
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field
 
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ActionParsingException
 from dynamiq.runnables import RunnableConfig
 
 
-class DefaultInputSchema(BaseModel, ABC):
+class DefaultInputSchema(BaseModel):
     input: str
 
 
-class ToolMixin:
+class BaseTool(BaseModel, ABC):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "base_tool"
-    description: str = "base tool"
+    name: str = "Base Tool"
+    description: str = "Base tool description"
     input_schema: type[BaseModel] = Field(default=DefaultInputSchema)
-
-    @field_validator("input_schema")
-    def passwords_match(cls, v: BaseModel, info: ValidationInfo) -> BaseModel:
-        # Check if input_schema is correct
-        return v
 
     @abstractmethod
     def run_tool(self):
@@ -42,4 +38,7 @@ class ToolMixin:
 
     def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """Executes the requested action based on the input data."""
-        return self.run_tool(self.input_schema(**input_data), config=config, **kwargs)
+        try:
+            return self.run_tool(self.input_schema(**input_data), config=config, **kwargs)
+        except Exception as e:
+            raise ActionParsingException(f"Error: Invalid format for input data: {e}")

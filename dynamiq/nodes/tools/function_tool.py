@@ -5,14 +5,14 @@ from pydantic import BaseModel, Field, create_model
 
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
-from dynamiq.nodes.tools.basetool import ToolMixin
+from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
 T = TypeVar("T")
 
 
-class FunctionTool(ToolMixin, Node, Generic[T]):
+class FunctionTool(BaseTool, Node, Generic[T]):
     """
     A tool node for executing a specified function with the given input data.
     """
