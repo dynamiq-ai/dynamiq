@@ -123,9 +123,9 @@ class Pinecone(MemoryBackend):
                 dummy_vector = [0.0] * self.embedder.dimensions
                 documents = self.vector_store._embedding_retrieval(
                     query_embedding=dummy_vector,
-                    namespace=self.namespace,  # Add namespace
+                    namespace=self.namespace,
                     filters=normalized_filters,
-                    top_k=limit or 10,
+                    top_k=limit,
                     exclude_document_embeddings=True,
                 )
             else:

@@ -55,16 +55,6 @@ class Qdrant(MemoryBackend):
             self.client = self.vector_store._client
             if not self.client:
                 raise QdrantError("Failed to initialize Qdrant client")
-            self.vector_store._set_up_collection(
-                collection_name=index_name,
-                embedding_dim=embedder.dimensions,
-                create_if_not_exist=True,
-                recreate_collection=False,
-                similarity=metric,
-                use_sparse_embeddings=False,
-                sparse_idf=False,
-                on_disk=on_disk,
-            )
         except Exception as e:
             raise QdrantError(f"Failed to connect to Qdrant: {e}") from e
 
@@ -119,7 +109,7 @@ class Qdrant(MemoryBackend):
         except Exception as e:
             raise QdrantError(f"Failed to retrieve messages from Qdrant: {e}") from e
 
-    def search(self, query: str = None, limit: int = None, filters: dict = None) -> list[Message]:
+    def search(self, query: str = None, limit: int = 10, filters: dict = None) -> list[Message]:
         """Searches for messages in Qdrant.
 
         Args:
@@ -131,14 +121,13 @@ class Qdrant(MemoryBackend):
             List of matching messages
         """
         try:
-            # Convert simple filters to Qdrant filter format
             qdrant_filters = self._prepare_filters(filters)
             if query:
                 embedding_result = self.embedder.embed_text(query)
                 documents = self.vector_store._query_by_embedding(
                     query_embedding=embedding_result["embedding"],
                     filters=qdrant_filters,
-                    top_k=limit or 10,
+                    top_k=limit,
                     return_embedding=False,
                 )
             elif filters:

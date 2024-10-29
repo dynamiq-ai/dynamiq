@@ -83,7 +83,7 @@ class InMemory(MemoryBackend):
                 filtered_messages = [msg for msg in filtered_messages if value == msg.metadata.get(key)]
         return filtered_messages
 
-    def search(self, query: str = None, limit: int = None, filters: dict = None) -> list[Message]:
+    def search(self, query: str = None, limit: int = 10, filters: dict = None) -> list[Message]:
         """Searches for messages using BM25 scoring, with optional filters."""
         if not query and not filters:
             return self.get_all()[:limit]
