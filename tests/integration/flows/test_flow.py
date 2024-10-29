@@ -244,6 +244,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
         anthropic_node_with_dependency.id: expected_result_anthropic.to_dict(skip_format_types={BytesIO}),
         output_node.id: expected_result_output_node.to_dict(skip_format_types={BytesIO}),
     }
+    expected_openai_messages = openai_node.prompt.format_messages(**expected_input_openai)
 
     assert response == RunnableResult(
         status=RunnableStatus.SUCCESS, input=input_data, output=expected_output
@@ -254,7 +255,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
             tools=None,
             tool_choice=None,
             model=openai_node.model,
-            messages=openai_node.prompt.format_messages(**expected_input_openai),
+            messages=expected_openai_messages,
             stream=False,
             temperature=openai_node.temperature,
             client=ANY,
@@ -284,7 +285,9 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     assert flow_run.status == RunStatus.SUCCEEDED
     assert flow_run.tags == []
     openai_run = tracing_runs[2]
-    assert openai_run.metadata["node"] == openai_node.to_dict()
+    openai_node = openai_node.to_dict()
+    openai_node["prompt"]["messages"] = expected_openai_messages
+    assert openai_run.metadata["node"] == openai_node
     assert openai_run.metadata["host"]
     assert openai_run.metadata.get("usage") is None
     assert openai_run.parent_run_id == flow_run.id
