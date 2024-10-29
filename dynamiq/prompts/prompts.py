@@ -192,7 +192,7 @@ class Prompt(BasePrompt):
                     Message(
                         role=msg.role,
                         content=self._Template(msg.content).render(**kwargs),
-                    ).model_dump()
+                    ).model_dump(exclude={"metadata"})
                 )
             elif isinstance(msg, VisionMessage):
                 out_msg_content = []
