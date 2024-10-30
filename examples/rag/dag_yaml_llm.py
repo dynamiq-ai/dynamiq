@@ -2,6 +2,8 @@ import json
 import logging
 import os
 
+from dotenv import find_dotenv, load_dotenv
+
 from dynamiq import Workflow, runnables
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections.managers import ConnectionManager, get_connection_manager
@@ -9,6 +11,7 @@ from dynamiq.loaders.yaml import WorkflowYAMLLoader
 from dynamiq.utils import JsonWorkflowEncoder
 
 logger = logging.getLogger(__name__)
+load_dotenv(find_dotenv())
 
 
 def retrieval_flow(yaml_file_path: str, cm: ConnectionManager):

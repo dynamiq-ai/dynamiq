@@ -148,7 +148,7 @@ class SQLite(MemoryBackend):
         except sqlite3.Error as e:
             raise SQLiteError(f"Error clearing database: {e}") from e
 
-    def search(self, query: str = None, limit: int = None, filters: dict = None) -> list[Message]:
+    def search(self, query: str = None, limit: int = 10, filters: dict = None) -> list[Message]:
         """Searches for messages in SQLite based on the query and/or filters."""
         limit = limit or self.config.search_limit  # Use default if not provided
         try:

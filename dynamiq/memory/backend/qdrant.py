@@ -1,13 +1,14 @@
 import uuid
 
-from qdrant_client.http import models as qdrant_models
-from qdrant_client.http.exceptions import ApiException, UnexpectedResponse
-from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue, Range
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Qdrant as QdrantConnection
 from dynamiq.memory.backend.base import MemoryBackend
 from dynamiq.prompts import Message
+from dynamiq.storages.vector.policies import DuplicatePolicy
+from dynamiq.storages.vector.qdrant import QdrantVectorStore
+from dynamiq.types import Document
 
 
 class QdrantError(Exception):
@@ -21,122 +22,156 @@ class Qdrant(MemoryBackend):
 
     name = "Qdrant"
 
-    def __init__(self, connection: QdrantConnection, embedder: BaseEmbedder, index_name: str = "conversations"):
-        """Initializes the Qdrant memory storage."""
+    def __init__(
+        self,
+        connection: QdrantConnection,
+        embedder: BaseEmbedder,
+        index_name: str = "conversations",
+        metric: str = "cosine",
+        on_disk: bool = False,
+        create_if_not_exist: bool = True,
+    ):
+        """Initializes the Qdrant memory storage.
+
+        Args:
+            connection: QdrantConnection instance for connecting to Qdrant
+            embedder: Embedder instance for creating embeddings
+            index_name: Name of the collection to store messages
+        """
         self.connection = connection
         self.index_name = index_name
         self.embedder = embedder
 
         try:
-            self.client = self.connection.connect()
+            self.vector_store = QdrantVectorStore(
+                connection=connection,
+                index_name=index_name,
+                dimension=embedder.dimensions,
+                create_if_not_exist=create_if_not_exist,
+                metric=metric,
+                on_disk=on_disk,
+                recreate_index=False,
+            )
+            self.client = self.vector_store._client
+            if not self.client:
+                raise QdrantError("Failed to initialize Qdrant client")
         except Exception as e:
             raise QdrantError(f"Failed to connect to Qdrant: {e}") from e
 
-        # Check if the collection exists, create it if not
-        if not self.client.collection_exists(collection_name=self.index_name):
-            self._create_collection()
+    def _message_to_document(self, message: Message) -> Document:
+        """Converts a Message object to a Document object."""
+        return Document(
+            id=str(uuid.uuid4()),
+            content=message.content,
+            metadata={"role": message.role.value, **(message.metadata or {})},
+            embedding=None,  # Will be populated during write
+        )
 
-    def _create_collection(self):
-        """Creates the Qdrant collection."""
-        try:
-            self.client.create_collection(
-                collection_name=self.index_name,
-                vectors_config=qdrant_models.VectorParams(
-                    size=self.embedder.dimensions, distance=qdrant_models.Distance.COSINE
-                ),
-            )
-        except ApiException as e:
-            raise QdrantError(f"Failed to create collection '{self.index_name}': {e}") from e
+    def _document_to_message(self, document: Document) -> Message:
+        """Converts a Document object to a Message object."""
+        metadata = dict(document.metadata)
+        role = metadata.pop("role")
+        return Message(content=document.content, role=role, metadata=metadata, score=document.score)
 
     def add(self, message: Message):
-        """Stores a message in Qdrant."""
+        """Stores a message in Qdrant.
+
+        Args:
+            message: Message to store
+
+        Raises:
+            QdrantError: If failed to add message
+        """
         try:
-            embedding_result = self.embedder.embed_text(message.content)
-            embedding = embedding_result["embedding"]
-            message_id = str(uuid.uuid4())
-            self.client.upsert(
-                collection_name=self.index_name,
-                points=[
-                    qdrant_models.PointStruct(
-                        id=message_id,
-                        vector=embedding,
-                        payload=message.model_dump(),
-                    )
-                ],
+            document = self._message_to_document(message)
+            embedding_result = self.embedder.embed_text(document.content)
+            document.embedding = embedding_result["embedding"]
+
+            self.vector_store.write_documents(
+                documents=[document], policy=DuplicatePolicy.SKIP  # Changed from OVERWRITE to prevent recreation
             )
         except Exception as e:
             raise QdrantError(f"Failed to add message to Qdrant: {e}") from e
 
     def get_all(self, limit: int = None) -> list[Message]:
-        """Retrieves all messages from Qdrant."""
+        """Retrieves all messages from Qdrant.
+
+        Args:
+            limit: Maximum number of messages to retrieve
+
+        Returns:
+            List of messages sorted by timestamp
+        """
         try:
-            search_result = self.client.scroll(
-                collection_name=self.index_name,
-                scroll_filter=None,
-                with_payload=True,
-                limit=limit,
-            )
-            messages = [Message(**point.payload) for point in search_result[0]]
+            documents = self.vector_store.list_documents(include_embeddings=False)
+            messages = [self._document_to_message(doc) for doc in documents]
             return sorted(messages, key=lambda msg: msg.metadata.get("timestamp", 0))
         except Exception as e:
             raise QdrantError(f"Failed to retrieve messages from Qdrant: {e}") from e
 
-    def search(self, query: str = None, limit: int = None, filters: dict = None) -> list[Message]:
-        """Handles all search scenarios correctly."""
+    def search(self, query: str = None, limit: int = 10, filters: dict = None) -> list[Message]:
+        """Searches for messages in Qdrant.
 
-        limit = limit or self.config.search_limit
+        Args:
+            query: Text query to search for
+            limit: Maximum number of results to return
+            filters: Metadata filters to apply
+
+        Returns:
+            List of matching messages
+        """
         try:
+            qdrant_filters = self._prepare_filters(filters)
             if query:
                 embedding_result = self.embedder.embed_text(query)
-                embedding = embedding_result["embedding"]
-                search_result = self.client.search(
-                    collection_name=self.index_name,
-                    query_vector=embedding,
-                    query_filter=self._create_filter(filters) if filters else None,
-                    limit=limit,
-                    with_payload=True,
+                documents = self.vector_store._query_by_embedding(
+                    query_embedding=embedding_result["embedding"],
+                    filters=qdrant_filters,
+                    top_k=limit,
+                    return_embedding=False,
                 )
-                return [Message(**hit.payload) for hit in search_result]
             elif filters:
-                qdrant_filter = self._create_filter(filters)
-                scroll_result = self.client.scroll(
-                    collection_name=self.index_name,
-                    scroll_filter=qdrant_filter,
-                    limit=limit,
-                    with_payload=True,
-                )[0]
-                return [Message(**hit.payload) for hit in scroll_result]
+                documents = self.vector_store.filter_documents(filters=qdrant_filters)
+                if limit:
+                    documents = documents[:limit]
             else:
                 return []
+
+            return [self._document_to_message(doc) for doc in documents]
         except Exception as e:
             raise QdrantError(f"Error searching in Qdrant: {e}") from e
 
-    def _create_filter(self, filters: dict) -> Filter:
-        """Creates filter with 'metadata.' prefix for keys."""
+    def _prepare_filters(self, filters: dict | None = None) -> dict | None:
+        """Prepares simple filters for Qdrant vector store format."""
+        if not filters:
+            return None
+
         conditions = []
         for key, value in filters.items():
-            if isinstance(value, dict) and "gte" in value and "lte" in value:
-                condition = FieldCondition(key=f"metadata.{key}", range=Range(**value))
+            if isinstance(value, (str, int, float, bool)):
+                condition = {"operator": "==", "field": key, "value": value}
             elif isinstance(value, list):
-                condition = FieldCondition(key=f"metadata.{key}", match=MatchAny(any=value))
+                condition = {"operator": "in", "field": key, "value": value}
+            elif isinstance(value, dict) and any(k in value for k in ["gte", "lte", "gt", "lt"]):
+                condition = {"operator": "range", "field": key, **value}
             else:
-                condition = FieldCondition(key=f"metadata.{key}", match=MatchValue(value=value))
+                raise QdrantError(f"Unsupported filter value type for key '{key}': {type(value)}")
+
             conditions.append(condition)
-        return Filter(must=conditions)
+        return {"operator": "AND", "conditions": conditions} if conditions else None
 
     def is_empty(self) -> bool:
-        """Checks if the Qdrant collection is empty or doesn't exist."""
+        """Checks if the Qdrant collection is empty."""
         try:
-            collection_info = self.client.get_collection(collection_name=self.index_name)
-            return collection_info.points_count == 0
+            return self.vector_store.count_documents() == 0
         except UnexpectedResponse as e:
             if e.status_code == 404:  # Collection doesn't exist
                 return True
-            raise QdrantError(f"Failed to check if Qdrant collection is empty: {e}") from e  # Re-raise
+            raise QdrantError(f"Failed to check if Qdrant collection is empty: {e}") from e
 
     def clear(self):
         """Clears the Qdrant collection."""
         try:
-            self.client.delete_collection(collection_name=self.index_name)
+            self.vector_store.delete_documents(delete_all=True)
         except Exception as e:
             raise QdrantError(f"Failed to clear Qdrant collection: {e}") from e

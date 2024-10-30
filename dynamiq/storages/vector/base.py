@@ -16,4 +16,5 @@ class BaseWriterVectorStoreParams(BaseVectorStoreParams):
     Attributes:
         create_if_not_exist (bool): Flag to create index if it does not exist. Defaults to True.
     """
-    create_if_not_exist: bool = True
+
+    create_if_not_exist: bool = False

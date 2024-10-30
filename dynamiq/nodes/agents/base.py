@@ -1,3 +1,4 @@
+import io
 import json
 import re
 import textwrap
@@ -54,11 +55,12 @@ class Agent(Node):
     )
     DEFAULT_DATE: ClassVar[str] = datetime.now().strftime("%d %B %Y")
 
-    llm: Node = Field(..., description="Language Model (LLM) used by the agent.")
+    llm: Node = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     streaming: StreamingConfig = StreamingConfig()
     tools: list[BaseTool] = []
+    files: list[io.BytesIO | bytes] | None = None
     name: str = "AI Agent"
     role: str | None = None
     max_loops: int = 1
@@ -78,13 +80,15 @@ class Agent(Node):
 
     @property
     def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"llm": True, "tools": True, "memory": True}
+        return super().to_dict_exclude_params | {"llm": True, "tools": True, "memory": True, "files": True}
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
         data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools]
+        if self.files:
+            data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         return data
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
@@ -105,6 +109,7 @@ class Agent(Node):
             "role": self.role or "",
             "date": self.DEFAULT_DATE,
             "tools": "{tool_description}",
+            "files": "{file_description}",
             "instructions": "",
             "output_format": "",
             "relevant_information": "{relevant_memory}",
@@ -113,6 +118,7 @@ class Agent(Node):
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
+            "file_description": self.file_description,
             "user_input": "",
             "context": "",
             "relevant_memory": "",
@@ -146,6 +152,11 @@ class Agent(Node):
         if self.memory:
             self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
             self._retrieve_memory(input_data)
+
+        files = input_data.get("files", [])
+        if files:
+            self.files = files
+            self._prompt_variables["file_description"] = self.file_description
 
         self._prompt_variables.update(input_data)
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
@@ -274,6 +285,9 @@ class Agent(Node):
     def _run_tool(self, tool: Node, tool_input: str, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
         logger.debug(f"Agent {self.name} - {self.id}: Running tool '{tool.name}'")
+        if self.files:
+            if tool.is_files_allowed is True:
+                tool_input["files"] = self.files
 
         tool_result = tool.run(
             input_data=tool_input,
@@ -300,6 +314,18 @@ class Agent(Node):
             if self.tools
             else ""
         )
+
+    @property
+    def file_description(self) -> str:
+        """Returns a description of the files available to the agent."""
+        if self.files:
+            file_description = "You can work with the following files:\n"
+            for file in self.files:
+                name = getattr(file, "name", "Unnamed file")
+                description = getattr(file, "description", "No description")
+                file_description += f"<file>: {name} - {description} <\\file>\n"
+            return file_description
+        return ""
 
     @property
     def tool_names(self) -> str:
@@ -376,7 +402,7 @@ class AgentManager(Agent):
         action = input_data.get("action")
         if not action or action not in self._actions:
             raise InvalidActionException(
-                f"Invalid or missing action: {action}. Please select an action from {self._actions}."  # nosec B608
+                f"Invalid or missing action: {action}. Please select an action from {self._actions}."  # nosec: B608
             )
 
         self._prompt_variables.update(input_data)

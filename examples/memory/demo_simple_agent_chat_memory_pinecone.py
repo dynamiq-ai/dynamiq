@@ -12,7 +12,10 @@ def setup_agent():
     embedder = OpenAIEmbedder(dimensions=1536)
 
     # Create a memory instance with Pinecone storage
-    backend = Pinecone(connection=pinecone_connection, embedder=embedder)
+    backend = Pinecone(
+        connection=pinecone_connection,
+        embedder=embedder,
+    )
 
     memory_pinecone = Memory(backend=backend)
 

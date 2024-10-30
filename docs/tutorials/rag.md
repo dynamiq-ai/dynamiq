@@ -71,7 +71,7 @@ rag_wf.flow.add_nodes(embedder)
 
 **Pinecone Vector Storage**
 
-Store the vector embeddings in the Pinecone vector database.
+Store the vector embeddings in the Pinecone vector database. If you already have a created index for your database, you can simply connect to it.
 
 ```python
 vector_store = PineconeDocumentWriter(
@@ -85,6 +85,47 @@ vector_store = PineconeDocumentWriter(
     ),
 ).depends_on(embedder)
 rag_wf.flow.add_nodes(vector_store)
+```
+
+If you don't have an index in the database and want to create it programmatically, you need to specify the parameter `create_if_not_exist=True` and, depending on your deployment type, specify the additional parameters needed for index creation.
+
+If you have a `serverless` Pinecone deployment, your vector store initialization might look like this:
+
+```python
+# Pinecone vector storage
+vector_store = (
+    PineconeDocumentWriter(
+        connection=PineconeConnection(),
+        index_name="quickstart",  # your new index
+        dimension=1536,
+        create_if_not_exist=True,
+        index_type="serverless",
+        cloud="aws",
+        region="us-east-1"
+    )
+    .inputs(documents=embedder.outputs.documents)
+    .depends_on(embedder)
+)
+```
+
+If you have a pod-based deployment, your vector store initialization could look like this:
+
+```python
+# Pinecone vector storage
+vector_store = (
+    PineconeDocumentWriter(
+        connection=PineconeConnection(),
+        index_name="quickstart",  # your new index
+        dimension=1536,
+        create_if_not_exist=True,
+        index_type="pod",
+        environment="us-west1-gcp",
+        pod_type="p1.x1",
+        pods=1
+    )
+    .inputs(documents=embedder.outputs.documents)
+    .depends_on(embedder)
+)
 ```
 
 **Prepare Input PDF Files**
@@ -210,7 +251,7 @@ answer_generator = OpenAI(
             "query": f"${[embedder.id]}.output.query",
         },  # Take documents from the vector store node and query from the embedder
     ),
-).depends_on(document_retriever)
+).depends_on([embedder, document_retriever])
 retrieval_wf.flow.add_nodes(answer_generator)
 ```
 

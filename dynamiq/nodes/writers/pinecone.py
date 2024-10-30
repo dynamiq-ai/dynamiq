@@ -1,10 +1,12 @@
 from typing import Any, Literal
 
+from pydantic import model_validator
+
 from dynamiq.connections import Pinecone
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PineconeVectorStore
-from dynamiq.storages.vector.pinecone.pinecone import PineconeWriterVectorStoreParams
+from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType, PineconeWriterVectorStoreParams
 from dynamiq.utils.logger import logger
 
 
@@ -38,6 +40,26 @@ class PineconeDocumentWriter(VectorStoreNode, PineconeWriterVectorStoreParams):
         if kwargs.get("vector_store") is None and kwargs.get("connection") is None:
             kwargs["connection"] = Pinecone()
         super().__init__(**kwargs)
+
+    @model_validator(mode="after")
+    def check_required_params(self) -> "PineconeDocumentWriter":
+        """
+        Validate required parameters
+
+        Returns:
+            self: The updated instance.
+        """
+        if self.vector_store is None:
+            if self.create_if_not_exist and self.index_type is None:
+                raise ValueError("Index type 'pod' or 'serverless' must be specified when creating an index")
+
+            if self.index_type == PineconeIndexType.POD and self.environment is None and self.pod_type is None:
+                raise ValueError("'environment' and 'pod_type' must be specified for 'pod' index")
+
+            if self.index_type == PineconeIndexType.SERVERLESS and self.cloud is None and self.region is None:
+                raise ValueError("'cloud' and 'region' must be specified for 'serverless' index")
+
+        return self
 
     @property
     def vector_store_cls(self):

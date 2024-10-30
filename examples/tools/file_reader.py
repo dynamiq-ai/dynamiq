@@ -1,74 +1,114 @@
+import io
 from typing import Any, Literal
 
 from pydantic import ConfigDict
 
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.agents.exceptions import ToolExecutionException
+
+DESCRIPTION = """
+<tool_description>
+This tool reads content from multiple byte streams.
+Features:
+- Supports both bytes and BytesIO as input
+- Handles multiple files in a single operation
+Input format:
+- List of files with byte content (bytes or BytesIO) with filename and description attributes.
+</tool_description>
+"""
 
 
-class FileReadTool(Node):
+class FileReaderTool(Node):
     """
-    A tool to read the content of a file.
+    A tool to read the content of one or more files from byte streams.
 
     Attributes:
         name (str): The name of the tool.
         description (str): The description of the tool.
-        file_path (str): The file path to read.
+        files (list[bytes | io.BytesIO] | None): List of files to read content from.
+        is_files_allowed (bool): Indicates if the tool supports file operations.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Read a file's content"
-    description: str = "A tool that can be used to read a file's content from local storage."
-    file_path: str
+    name: str = "file-reader-tool"
+    description: str = DESCRIPTION
+    files: list[bytes | io.BytesIO] | None = None
+    is_files_allowed: bool = True
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def _read_file_content(self, file_path: str) -> Any:
+    def _load_file_content(self, file: bytes | io.BytesIO) -> str:
         """
-        Read the content of the file at the given path.
+        Load the content of a file from bytes or a byte stream.
 
         Args:
-            file_path (str): The path to the file.
+            file (Union[bytes, io.BytesIO]): The byte content or stream of the file.
 
         Returns:
-            Any: The content of the file.
+            str: The loaded content as string.
+
+        Raises:
+            ToolExecutionException: If file reading fails or input type is invalid.
         """
         try:
-            with open(file_path) as file:
-                return file.read()
-        except Exception as e:
-            logger.error(
-                f"Tool {self.name} - {self.id}: failed to to read the file {file_path}. Error: {e}"
-            )
-            raise ToolExecutionException(
-                f"Failed to to read the file {file_path}. Error: {e}", recoverable=True
-            )
+            file_description = getattr(file, "description", "Unnamed file")
+            logger.debug(f"Reading file: {file_description}")
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ) -> dict[str, Any]:
+            if isinstance(file, bytes):
+                content = file
+            elif isinstance(file, io.BytesIO):
+                file.seek(0)
+                content = file.read()
+            else:
+                raise ToolExecutionException(
+                    f"Invalid input type. Expected bytes or BytesIO, got {type(file)}", recoverable=False
+                )
+
+            try:
+                return content.decode("utf-8", errors="ignore")
+            except UnicodeDecodeError:
+                return content.hex()
+
+        except Exception as e:
+            logger.error(f"Failed to read file: {file_description}. Error: {e}")
+            raise ToolExecutionException(f"Failed to read the file: {file_description}. Error: {e}", recoverable=True)
+
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Execute the tool with the provided input data and configuration.
 
         Args:
-            input_data (dict[str, Any]): The input data containing the file path.
-            config (RunnableConfig, optional): The configuration for the runnable. Defaults to None.
+            input_data (dict[str, Any]): The input data containing:
+                - files: List of byte streams to process
+            config (RunnableConfig, optional): The configuration for the runnable.
+            **kwargs: Additional keyword arguments.
 
         Returns:
-            dict[str, Any]: The content of the file or an error message if reading fails.
+            dict[str, Any]: Dictionary containing processed file contents.
+
+        Raises:
+            ToolExecutionException: If no files are provided or processing fails.
         """
-        logger.debug(
-            f"Tool {self.name} - {self.id}: started with input data {input_data}"
-        )
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        file_path = input_data.get("file_path", self.file_path)
-        result = self._read_file_content(file_path)
+        files = input_data.get("files", self.files)
 
-        logger.debug(f"Tool {self.name} - {self.id}: finished with result {result}")
-        return {"content": result}
+        if not files:
+            raise ToolExecutionException(
+                "Error: No files provided for reading. Please provide 'files' input.", recoverable=False
+            )
+
+        results = {}
+        for idx, file in enumerate(files):
+            file_description = getattr(file, "description", f"File {idx + 1}")
+            content = self._load_file_content(file)
+            results[file_description] = content
+
+        logger.debug(f"Tool {self.name} - {self.id}: finished processing files.")
+        return {"content": results}

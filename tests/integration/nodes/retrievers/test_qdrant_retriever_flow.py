@@ -41,7 +41,9 @@ def mock_query_by_embedding(mock_documents):
 
 @patch("dynamiq.callbacks.TracingCallbackHandler.on_flow_start")
 @patch("dynamiq.callbacks.TracingCallbackHandler.on_flow_end")
+@patch("dynamiq.storages.vector.qdrant.qdrant.QdrantVectorStore._set_up_collection")
 def test_retrieve_workflow(
+    mock_set_up_collection,
     mock_on_flow_end,
     mock_on_flow_start,
     mock_documents,
@@ -94,10 +96,11 @@ def test_retrieve_workflow(
 
     mock_on_flow_start.assert_called_once()
     mock_on_flow_end.assert_called_once()
-
     mock_query_by_embedding.assert_called_once_with(
         query_embedding=input_data["embedding"],
         filters=mock_filters,
         top_k=input_data["top_k"],
         return_embedding=False,
     )
+
+    mock_set_up_collection.assert_not_called()

@@ -227,7 +227,8 @@ print(result.output.get("content"))
 ```
 
 ### RAG - document indexing flow
-Workflow that takes input PDF files, pre-processes them, converts to vector embeddings and stores in Pinecone vector database.
+This workflow takes input PDF files, pre-processes them, converts them to vector embeddings, and stores them in the Pinecone vector database.
+The example provided is for an existing index in Pinecone. You can find examples for index creation on the `docs/tutorials/rag` page.
 
 ```python
 from io import BytesIO
@@ -359,7 +360,7 @@ answer_generator = (
         documents=document_retriever.outputs.documents,
         query=embedder.outputs.query,
     )  # take documents from the vector store node and query from the embedder
-    .depends_on(document_retriever)
+    .depends_on([document_retriever, embedder])
 )
 retrieval_wf.flow.add_nodes(answer_generator)
 
@@ -369,6 +370,49 @@ result = retrieval_wf.run(input_data={"query": question})
 
 answer = result.output.get(answer_generator.id).get("output", {}).get("content")
 print(answer)
+```
+
+### Simple Chatbot with Memory
+A simple chatbot that uses the `Memory` module to store and retrieve conversation history.
+
+```python
+from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.memory import Memory
+from dynamiq.memory.backend.in_memory import InMemory
+from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.llms import OpenAI
+
+AGENT_ROLE = "helpful assistant, goal is to provide useful information and answer questions"
+llm = OpenAI(
+    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+    model="gpt-4o",
+    temperature=0.1,
+)
+
+memory = Memory(backend=InMemory())
+agent = SimpleAgent(
+    name="Agent",
+    llm=llm,
+    role=AGENT_ROLE,
+    id="agent",
+    memory=memory,
+)
+
+
+def main():
+    print("Welcome to the AI Chat! (Type 'exit' to end)")
+    while True:
+        user_input = input("You: ")
+        if user_input.lower() == "exit":
+            break
+
+        response = agent.run({"input": user_input})
+        response_content = response.output.get("content")
+        print(f"AI: {response_content}")
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 ## Contributing
