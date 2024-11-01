@@ -1,20 +1,19 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import ZenRows
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
 
 class ZenRowsInputSchema(BaseModel):
-    url: str = Field(default={}, description="Parameter to the URL of the page to scrape")
+    url: str = Field(..., description="Parameter to provide a url of the page to scrape.")
 
 
-class ZenRowsTool(BaseTool, ConnectionNode):
+class ZenRowsTool(ConnectionNode):
     """
     A tool for scraping web pages, powered by ZenRows.
 
@@ -36,11 +35,9 @@ class ZenRowsTool(BaseTool, ConnectionNode):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    _input_schema: type[ZenRowsInputSchema] = ZenRowsInputSchema
+    _input_schema: ClassVar[type[ZenRowsInputSchema]] = ZenRowsInputSchema
 
-    def run_tool(
-        self, input_data: ZenRowsInputSchema, config: RunnableConfig = None, **kwargs
-    ) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Executes the web scraping process.
 

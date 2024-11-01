@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -6,16 +6,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.connections import Tavily
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
 
 class TavilyInputSchema(BaseModel):
-    query: str = Field(default={}, description="Parameter to provide the query to search")
+    query: str = Field(..., description="Parameter to provide a search query.")
 
 
-class TavilyTool(BaseTool, ConnectionNode):
+class TavilyTool(ConnectionNode):
     """
     TavilyTool is a ConnectionNode that interfaces with the Tavily search service.
 
@@ -69,7 +68,7 @@ class TavilyTool(BaseTool, ConnectionNode):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    _input_schema: type[TavilyInputSchema] = TavilyInputSchema
+    _input_schema: ClassVar[type[TavilyInputSchema]] = TavilyInputSchema
 
     def _format_search_results(self, results: dict[str, Any]) -> str:
         """
@@ -93,9 +92,7 @@ class TavilyTool(BaseTool, ConnectionNode):
 
         return "\n".join(formatted_results).strip()
 
-    def run_tool(
-        self, input_data: TavilyInputSchema, config: RunnableConfig | None = None, **kwargs
-    ) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
         Executes the search operation using the provided input data.
 
@@ -114,7 +111,7 @@ class TavilyTool(BaseTool, ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        query = input_data.query
+        query = input_data.get("query")
         search_data = {
             "query": query,
             "search_depth": self.search_depth,

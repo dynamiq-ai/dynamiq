@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
-from typing import Any, Callable, Union
+from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
@@ -217,6 +217,7 @@ class Node(BaseModel, Runnable, ABC):
     _output_references: NodeOutputReferences = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    _input_schema: ClassVar[type[BaseModel] | None] = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -256,9 +257,15 @@ class Node(BaseModel, Runnable, ABC):
             )
 
         if dep_result.status == RunnableStatus.SKIP:
-            raise NodeSkippedException(
-                failed_depend=depend, message=f"Dependency {depend.node.id}: skipped"
-            )
+            raise NodeSkippedException(failed_depend=depend, message=f"Dependency {depend.node.id}: skipped")
+
+    @property
+    def input_schema(self) -> BaseModel | None:
+        return self._input_schema
+
+    @classmethod
+    def get_input_schema(cls) -> BaseModel | None:
+        return cls._input_schema
 
     @staticmethod
     def _validate_dependency_condition(depend: NodeDependency, depends_result: dict[str, RunnableResult]):
@@ -329,6 +336,40 @@ class Node(BaseModel, Runnable, ABC):
                     depend=dep, depends_result=depends_result
                 )
 
+    @property
+    def input_params(self) -> list[tuple]:
+        """
+        Return list of input parameters along with their type and description.
+        """
+        params = []
+        for name, field in self.input_schema.model_fields.items():
+            tags = {}
+            if field.json_schema_extra:
+                tags = field.json_schema_extra
+            description = field.description or "No description"
+            field_type: str = field.annotation.__name__
+
+            params.append((name, field_type, description, tags))
+        return params
+
+    def validate_input_schema(self, input_data: Any):
+        """
+        Validate input data against the input schema.
+
+        Args:
+            input_data (Any): Input data to validate.
+
+        Raises:
+            NodeException: If input data does not match the input schema.
+        """
+        if self.input_schema:
+            try:
+                return self.input_schema(**input_data).model_dump()
+            except Exception as e:
+                raise NodeException(message=f"Input data validation failed: {e}")
+
+        return input_data
+
     def transform_input(self, input_data: dict, depends_result: dict[Any, RunnableResult]) -> dict:
         """
         Transform input data for the node.
@@ -368,6 +409,8 @@ class Node(BaseModel, Runnable, ABC):
                     raise NodeException(message=f"Input mapping {key}: failed.")
             else:
                 inputs[key] = value
+
+        inputs = self.validate_input_schema(inputs)
 
         return inputs
 
@@ -489,6 +532,7 @@ class Node(BaseModel, Runnable, ABC):
 
         try:
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
+
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
             cache = cache_wf_entity(
                 entity_id=self.id,

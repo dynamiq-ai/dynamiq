@@ -1,6 +1,6 @@
 import importlib
 import io
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel
 from RestrictedPython import compile_restricted, safe_builtins, utility_builtins
@@ -10,7 +10,6 @@ from RestrictedPython.Guards import guarded_unpack_sequence
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
-from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -49,7 +48,7 @@ class PythonInputSchema(BaseModel):
         extra = "allow"
 
 
-class Python(BaseTool, Node):
+class Python(Node):
     """
     Node for executing Python code in a secure sandbox.
 
@@ -66,9 +65,9 @@ class Python(BaseTool, Node):
         "All arguments are passed as a dictionary to the 'run' main function."
     )
     code: str
-    _input_schema: type[PythonInputSchema] = PythonInputSchema
+    _input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
 
-    def run_tool(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> Any:
         """Execute the Python code.
 
         Args:
@@ -156,7 +155,7 @@ class Python(BaseTool, Node):
             if "run" not in restricted_globals:
                 raise ValueError("The 'run' function is not defined in the provided code.")
 
-            result = restricted_globals["run"](input_data.model_dump())
+            result = restricted_globals["run"](input_data)
             if self.is_optimized_for_agents:
                 result = str(result)
         except Exception as e:

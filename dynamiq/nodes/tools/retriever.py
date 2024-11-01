@@ -1,20 +1,19 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node
 from dynamiq.nodes.node import ConnectionNode, NodeGroup
-from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
 class RetrievalInputSchema(BaseModel):
-    query: str = Field(default={}, description="Parameter to provide query to retrive relevant documents")
+    query: str = Field(..., description="Parameter to provide a query to retrieve documents.")
 
 
-class RetrievalTool(BaseTool, Node):
+class RetrievalTool(Node):
     """Tool for retrieving relevant documents based on a query.
 
     Attributes:
@@ -33,7 +32,7 @@ class RetrievalTool(BaseTool, Node):
     connection_manager: ConnectionManager | None = None
     text_embedder: ConnectionNode | None = None
     document_retriever: ConnectionNode | None = None
-    _input_schema: type[RetrievalInputSchema] = RetrievalInputSchema
+    _input_schema: ClassVar[type[RetrievalInputSchema]] = RetrievalInputSchema
 
     def __init__(
         self,
@@ -94,7 +93,7 @@ class RetrievalTool(BaseTool, Node):
             formatted_docs.append(formatted_doc)
         return "\n\n".join(formatted_docs)
 
-    def run_tool(self, input_data: RetrievalInputSchema, **_) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], **_) -> dict[str, Any]:
         """Execute the retrieval tool.
 
         Args:
@@ -105,7 +104,8 @@ class RetrievalTool(BaseTool, Node):
             dict[str, Any]: Result of the retrieval.
         """
 
-        logger.debug(f"Tool {self.name} - {self.id}: started with query '{input_data.query}'")
+        query = input_data.get("query")
+        logger.debug(f"Tool {self.name} - {self.id}: started with query '{query}'")
 
         if not self.text_embedder:
             raise ValueError(f"{self.name}: Text embedder is not initialized.")
@@ -113,7 +113,7 @@ class RetrievalTool(BaseTool, Node):
             raise ValueError(f"{self.name}: Document retriever is not initialized.")
 
         try:
-            text_embedder_output = self.text_embedder.run(input_data={"query": input_data.query})
+            text_embedder_output = self.text_embedder.run(input_data={"query": query})
             embedding = text_embedder_output.output.get("embedding")
 
             document_retriever_output = self.document_retriever.run(input_data={"embedding": embedding})

@@ -1,11 +1,10 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
@@ -50,10 +49,10 @@ Ensure that only the relevant, informative content remains, and that it is prese
 
 
 class SummarizerInputSchema(BaseModel):
-    input: str = Field(default={}, description="Parameter to provide input text to summarize")
+    input: str = Field(..., description="Parameter to provide text to summarize and clean.")
 
 
-class SummarizerTool(BaseTool, Node):
+class SummarizerTool(Node):
     """
     A tool for summarizing and cleaning up text extracted from HTML.
 
@@ -84,7 +83,7 @@ class SummarizerTool(BaseTool, Node):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    _input_schema: type[SummarizerInputSchema] = SummarizerInputSchema
+    _input_schema: ClassVar[type[SummarizerInputSchema]] = SummarizerInputSchema
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
         """
@@ -154,9 +153,7 @@ class SummarizerTool(BaseTool, Node):
             raise ValueError("LLM execution failed")
         return result.output["content"]
 
-    def run_tool(
-        self, input_data: SummarizerInputSchema, config: RunnableConfig | None = None, **kwargs
-    ) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
         Execute the summarization tool on the input data.
 
@@ -178,7 +175,7 @@ class SummarizerTool(BaseTool, Node):
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        input_text = input_data.input
+        input_text = input_data.get("input")
         logger.debug(
             f"Tool {self.name} - {self.id}: started with input text length: {len(input_text)}, "
             f"word count: {len(input_text.split())}"

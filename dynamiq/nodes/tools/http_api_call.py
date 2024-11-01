@@ -1,6 +1,6 @@
 import enum
 import json
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from urllib.parse import urljoin
 
 from pydantic import BaseModel, Field, field_validator
@@ -9,7 +9,6 @@ from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 
 
@@ -20,10 +19,10 @@ class ResponseType(str, enum.Enum):
 
 
 class HttpApiCallInputSchema(BaseModel):
-    data: dict = Field(default={}, description="Parameter to provide main json payload")
-    url_path: str = Field(default="", description="Parameter to path to endpoint")
-    headers: dict = Field(default={}, description="Parameter to provide headers to request")
-    params: dict = Field(default={}, description="Parameter to provide GET parameters in URL")
+    data: dict = Field(default={}, description="Parameter to provide main json payload.")
+    url_path: str = Field(default="", description="Parameter to provide for path to the endpoint.")
+    headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
+    params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
 
     @field_validator("data", "headers", "params", mode="before")
     def validate_dict_fields(cls, value: Any, field: str) -> Any:
@@ -38,7 +37,7 @@ class HttpApiCallInputSchema(BaseModel):
             raise ActionParsingException(f"Expected a dictionary or a JSON string for '{field}'.")
 
 
-class HttpApiCall(BaseTool, ConnectionNode):
+class HttpApiCall(ConnectionNode):
     """
     A component for sending API requests using requests library.
 
@@ -64,11 +63,9 @@ class HttpApiCall(BaseTool, ConnectionNode):
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     response_type: ResponseType | str | None = ResponseType.RAW
-    _input_schema: type[HttpApiCallInputSchema] = HttpApiCallInputSchema
+    _input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
-    def run_tool(
-        self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs
-    ):
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
         """Execute the API call.
 
         This method takes input data and returns content of API call response.
@@ -86,13 +83,18 @@ class HttpApiCall(BaseTool, ConnectionNode):
         """
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        data = input_data.data
+        data = input_data.get("data")
 
         url = self.connection.url
-        if url_path := input_data.url_path:
+        if url_path := input_data.get("url_path"):
             url = urljoin(url, url_path)
-        headers = input_data.headers
-        params = input_data.params
+        headers = input_data.get("headers")
+        params = input_data.get("params")
+
+        print("here --------------------------")
+        print(headers)
+        print("here --------------------------")
+        print(params)
 
         response = self.client.request(
             method=self.connection.method,

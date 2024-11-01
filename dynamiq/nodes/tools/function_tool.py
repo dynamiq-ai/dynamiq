@@ -1,18 +1,17 @@
 import inspect
-from typing import Any, Callable, Generic, Literal, TypeVar
+from typing import Any, Callable, ClassVar, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field, create_model
 
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
-from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
 T = TypeVar("T")
 
 
-class FunctionTool(BaseTool, Node, Generic[T]):
+class FunctionTool(Node, Generic[T]):
     """
     A tool node for executing a specified function with the given input data.
     """
@@ -37,7 +36,7 @@ class FunctionTool(BaseTool, Node, Generic[T]):
         """
         raise NotImplementedError("run_func must be implemented by subclasses")
 
-    def run_tool(self, input_data: BaseModel, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Execute the tool with the provided input data and configuration.
 
@@ -112,10 +111,10 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
             or f"A tool for executing the {func.__name__} function."
         )
         _original_func = staticmethod(func)
-        _input_schema: type[BaseModel] = create_input_schema(func)
+        _input_schema: ClassVar[type[BaseModel]] = create_input_schema(func)
 
-        def run_func(self, input_data: BaseModel, **_) -> T:
-            return func(**input_data.model_dump())
+        def run_func(self, input_data: dict[str, Any], **_) -> T:
+            return func(**input_data)
 
     FunctionToolFromDecorator.__name__ = func.__name__
     FunctionToolFromDecorator.__qualname__ = (

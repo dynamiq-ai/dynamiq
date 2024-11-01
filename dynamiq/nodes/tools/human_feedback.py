@@ -1,12 +1,11 @@
 import enum
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
-from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingEventMessage
 from dynamiq.utils.logger import logger
@@ -56,10 +55,10 @@ class InputMethodCallable(ABC):
 
 
 class HumanFeedbackInputSchema(BaseModel):
-    question: str = Field(default="", description="Parameter to provide a question to the user")
+    question: str = Field(..., description="Parameter to provide a question to the user.")
 
 
-class HumanFeedbackTool(BaseTool, Node):
+class HumanFeedbackTool(Node):
     """
     A tool for gathering user information through human feedback.
 
@@ -80,7 +79,7 @@ class HumanFeedbackTool(BaseTool, Node):
     )
     input_method: InputMethod | InputMethodCallable = InputMethod.console
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    _input_schema: type[HumanFeedbackInputSchema] = HumanFeedbackInputSchema
+    _input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
 
     def input_method_console(self, prompt: str) -> str:
         """
@@ -123,9 +122,7 @@ class HumanFeedbackTool(BaseTool, Node):
 
         return event.data.content
 
-    def run_tool(
-        self, input_data: HumanFeedbackInputSchema, config: RunnableConfig | None = None, **kwargs
-    ) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
         Execute the tool with the provided input data and configuration.
 
@@ -146,7 +143,7 @@ class HumanFeedbackTool(BaseTool, Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        input_text = input_data.question
+        input_text = input_data.get("question")
         if isinstance(self.input_method, InputMethod):
             if self.input_method == InputMethod.console:
                 result = self.input_method_console(input_text)

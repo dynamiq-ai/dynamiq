@@ -6,8 +6,7 @@ from pydantic import Field
 
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import ActionParsingException, MaxLoopsExceededException, RecoverableAgentException
-from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.tools.basetool import BaseTool
+from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -456,7 +455,7 @@ class ReActAgent(Agent):
         logger.info(f"Agent {self.name} - {self.id}: Final answer found: {final_answer['answer']}")
         return final_answer["answer"]
 
-    def generate_input_formats(self, tools: list[BaseTool]) -> str:
+    def generate_input_formats(self, tools: list[Node]) -> str:
         input_formats = []
         for tool in tools:
             params = [

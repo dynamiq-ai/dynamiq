@@ -1,11 +1,10 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -32,10 +31,10 @@ class ExtractorOptions(BaseModel):
 
 
 class FirecrawlInputSchema(BaseModel):
-    url: str = Field(default="", description="Parameter to provide url of the page to scrape.")
+    url: str = Field(..., description="Parameter to specify the url of the page to be scraped.")
 
 
-class FirecrawlTool(BaseTool, ConnectionNode):
+class FirecrawlTool(ConnectionNode):
     """A tool for scraping web pages using the Firecrawl service."""
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "firecrawl-tool"
@@ -45,7 +44,7 @@ class FirecrawlTool(BaseTool, ConnectionNode):
     )
     connection: Firecrawl
     url: str | None = None
-    _input_schema: type[FirecrawlInputSchema] = FirecrawlInputSchema
+    _input_schema: ClassVar[type[FirecrawlInputSchema]] = FirecrawlInputSchema
 
     # Default parameters
     page_options: PageOptions = Field(
@@ -80,9 +79,7 @@ class FirecrawlTool(BaseTool, ConnectionNode):
         else:
             return data
 
-    def run_tool(
-        self, input_data: FirecrawlInputSchema, config: RunnableConfig | None = None, **kwargs
-    ) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """Execute the scraping tool with the provided input data."""
         logger.debug(
             f"Tool {self.name} - {self.id}: started with input data {input_data}"
@@ -91,7 +88,7 @@ class FirecrawlTool(BaseTool, ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        url = input_data.url or self.url
+        url = input_data.get("url") or self.url
         if not url:
             logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
             raise ValueError("URL is required for scraping")

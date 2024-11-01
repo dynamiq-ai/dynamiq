@@ -1,15 +1,14 @@
 import io
 from hashlib import sha256
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from e2b import Sandbox
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.tools.basetool import BaseTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -70,15 +69,24 @@ def generate_file_description(file: bytes | io.BytesIO, length: int = 20) -> str
 
 
 class E2BInterpreterInputSchema(BaseModel):
-    packages: str = Field(default="", description="Parameter to provide packages to install")
-    shell_command: str = Field(default="", description="Parameter to provide shell command to execute")
-    python: str = Field(default="", description="Parameter to provide python code to execute")
+    packages: str = Field(default="", description="Parameter to provide packages to install.")
+    shell_command: str = Field(default="", description="Parameter to provide shell command to execute.")
+    python: str = Field(default="", description="Parameter to provide python code to execute.")
     files: Any = Field(
-        default=None, description="Parameter to provide files to upload to sendbox", is_accessible_to_agent=False
+        default=None,
+        description="Parameter to provide files for uploading to the sandbox.",
+        is_accessible_to_agent=False,
     )
 
+    @model_validator(mode="after")
+    def validate_execution_commands(self):
+        """Validate that either shell command or python code is specified"""
+        if not self.shell_command and not self.python:
+            raise ValueError("shell_command or python code has to be specified.")
+        return self
 
-class E2BInterpreterTool(BaseTool, ConnectionNode):
+
+class E2BInterpreterTool(ConnectionNode):
     """
     A tool for executing code and managing files in an E2B sandbox environment.
 
@@ -106,7 +114,7 @@ class E2BInterpreterTool(BaseTool, ConnectionNode):
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
     is_files_allowed: bool = True
-    _input_schema: type[E2BInterpreterInputSchema] = E2BInterpreterInputSchema
+    _input_schema: ClassVar[type[E2BInterpreterInputSchema]] = E2BInterpreterInputSchema
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -250,9 +258,7 @@ class E2BInterpreterTool(BaseTool, ConnectionNode):
             raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
         return output.stdout
 
-    def run_tool(
-        self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **_
-    ) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **_) -> dict[str, Any]:
         """Executes the requested action based on the input data."""
         config = ensure_config(config)
 
@@ -267,16 +273,14 @@ class E2BInterpreterTool(BaseTool, ConnectionNode):
                 self._update_description()
         try:
             content = {}
-            if files := input_data.files:
+            if files := input_data.get("files"):
                 content["files_installation"] = self._upload_files(files=files, sandbox=sandbox)
-            if packages := input_data.packages:
+            if packages := input_data.get("packages"):
                 self._install_packages(sandbox=sandbox, packages=packages)
-                content["packages_installation"] = f"Installed packages: {input_data.packages}"
-            if files := input_data.files:
-                content["files_installation"] = self._upload_file(file_data=files, sandbox=sandbox)
-            if shell_command := input_data.shell_command:
+                content["packages_installation"] = f"Installed packages: {input_data.get("packages")}"
+            if shell_command := input_data.get("shell_command"):
                 content["shell_command_execution"] = self._execute_shell_command(shell_command, sandbox=sandbox)
-            if python := input_data.python:
+            if python := input_data.get("python"):
                 content["code_execution"] = self._execute_python_code(python, sandbox=sandbox)
             if not (packages or files or shell_command or python):
                 raise ToolExecutionException(
