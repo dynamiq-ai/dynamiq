@@ -19,19 +19,19 @@ class BaseTool(BaseModel, ABC):
     _input_schema: type[BaseModel] = DefaultInputSchema
 
     @property
-    def input_schema(self) -> str:
+    def input_schema(self) -> type[BaseModel]:
         return self._input_schema
 
     @classmethod
-    def get_input_schema(cls) -> str:
+    def get_input_schema(cls) -> type[BaseModel]:
         return cls._input_schema
 
     @abstractmethod
-    def run_tool(self):
+    def run_tool(self) -> dict[str, Any]:
         pass
 
     @property
-    def input_params(self) -> str:
+    def input_params(self) -> list[tuple]:
         """Return list of input parameters along with their type and description."""
         params = []
         for name, field in self.input_schema.model_fields.items():
