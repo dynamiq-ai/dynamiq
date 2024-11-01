@@ -337,7 +337,7 @@ class Node(BaseModel, Runnable, ABC):
                 )
 
     @property
-    def input_params(self) -> list[tuple]:
+    def input_schema_params(self) -> list[tuple]:
         """
         Return list of input parameters along with their type and description.
         """

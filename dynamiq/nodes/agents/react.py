@@ -459,7 +459,9 @@ class ReActAgent(Agent):
         input_formats = []
         for tool in tools:
             params = [
-                " ".join(param[:-1]) for param in tool.input_params if param[-1].get("is_accessible_to_agent", True)
+                " ".join(param[:-1])
+                for param in tool.input_schema_params
+                if param[-1].get("is_accessible_to_agent", True)
             ]
             input_formats.append(f" - {tool.name}\n \t* " + "\n\t* ".join(params))
         return "\n".join(input_formats)
@@ -511,7 +513,7 @@ class ReActAgent(Agent):
         self.format_schema.append(final_answer_function_schema)
         for tool in self.tools:
             properties = {}
-            for name, param_type, description, tags in tool.input_params:
+            for name, param_type, description, tags in tool.input_schema_params:
                 param_type = self.filter_format_type(param_type)
                 if tags.get("is_accessible_to_agent", True):
                     properties[name] = {"type": param_type, "description": description}
