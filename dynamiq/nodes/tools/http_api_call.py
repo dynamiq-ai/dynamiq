@@ -91,11 +91,6 @@ class HttpApiCall(ConnectionNode):
         headers = input_data.get("headers")
         params = input_data.get("params")
 
-        print("here --------------------------")
-        print(headers)
-        print("here --------------------------")
-        print(params)
-
         response = self.client.request(
             method=self.connection.method,
             url=url,
