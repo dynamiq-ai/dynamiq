@@ -352,9 +352,9 @@ class Node(BaseModel, Runnable, ABC):
             params.append((name, field_type, description, tags))
         return params
 
-    def validate_input_schema(self, input_data: Any):
+    def validate_input_schema(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """
-        Validate input data against the input schema.
+        Validate input data against the input schema. Returns validated dictionary if schema is provided.
 
         Args:
             input_data (Any): Input data to validate.
