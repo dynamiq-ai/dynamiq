@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.agents.exceptions import ActionParsingException
+from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 
@@ -53,7 +53,7 @@ class HttpApiCall(ConnectionNode):
         response_type(ResponseType|str): The type of response content.
     """
 
-    name: str = "Api Call Tool"
+    name: str = "Api call tool"
     description: str = "The description of the API call tool"
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     connection: HttpConnection
@@ -101,7 +101,7 @@ class HttpApiCall(ConnectionNode):
         )
 
         if response.status_code not in self.success_codes:
-            raise ValueError(
+            raise ToolExecutionException(
                 f"Request failed with unexpected status code: {response.status_code} and response: {response.text}"
             )
 

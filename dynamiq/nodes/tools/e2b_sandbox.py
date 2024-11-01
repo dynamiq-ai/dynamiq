@@ -277,7 +277,7 @@ class E2BInterpreterTool(ConnectionNode):
                 content["files_installation"] = self._upload_files(files=files, sandbox=sandbox)
             if packages := input_data.get("packages"):
                 self._install_packages(sandbox=sandbox, packages=packages)
-                content["packages_installation"] = f"Installed packages: {input_data.get("packages")}"
+                content["packages_installation"] = f"Installed packages: {input_data.get('packages')}"
             if shell_command := input_data.get("shell_command"):
                 content["shell_command_execution"] = self._execute_shell_command(shell_command, sandbox=sandbox)
             if python := input_data.get("python"):
