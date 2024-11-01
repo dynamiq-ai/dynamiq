@@ -47,7 +47,7 @@ class ScaleSerpTool(BaseTool, ConnectionNode):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    input_schema: type[ScaleSerpInputSchema] = ScaleSerpInputSchema
+    _input_schema: type[ScaleSerpInputSchema] = ScaleSerpInputSchema
 
     def _format_search_results(self, results: dict[str, Any]) -> str:
         """

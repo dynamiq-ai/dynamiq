@@ -106,7 +106,7 @@ class E2BInterpreterTool(BaseTool, ConnectionNode):
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
     is_files_allowed: bool = True
-    input_schema: type[E2BInterpreterInputSchema] = E2BInterpreterInputSchema
+    _input_schema: type[E2BInterpreterInputSchema] = E2BInterpreterInputSchema
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

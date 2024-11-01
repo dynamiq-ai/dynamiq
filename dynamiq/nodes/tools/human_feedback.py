@@ -80,7 +80,7 @@ class HumanFeedbackTool(BaseTool, Node):
     )
     input_method: InputMethod | InputMethodCallable = InputMethod.console
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    input_schema: type[HumanFeedbackInputSchema] = HumanFeedbackInputSchema
+    _input_schema: type[HumanFeedbackInputSchema] = HumanFeedbackInputSchema
 
     def input_method_console(self, prompt: str) -> str:
         """

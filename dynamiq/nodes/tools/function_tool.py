@@ -112,7 +112,7 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
             or f"A tool for executing the {func.__name__} function."
         )
         _original_func = staticmethod(func)
-        input_schema: type[BaseModel] = create_input_schema(func)
+        _input_schema: type[BaseModel] = create_input_schema(func)
 
         def run_func(self, input_data: BaseModel, **_) -> T:
             return func(**input_data.model_dump())

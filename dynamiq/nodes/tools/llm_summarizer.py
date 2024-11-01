@@ -74,7 +74,6 @@ class SummarizerTool(BaseTool, Node):
     name: str = "summarizer-tool"
     description: str = (
         "A tool for summarizing and cleaning up text extracted from HTML. "
-        "Input should be a dictionary with a key 'input' containing the text to summarize."
     )
     llm: Node
     chunk_size: int = Field(default=4000, description="The maximum number of words in each chunk")
@@ -85,7 +84,7 @@ class SummarizerTool(BaseTool, Node):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    input_schema: type[SummarizerInputSchema] = SummarizerInputSchema
+    _input_schema: type[SummarizerInputSchema] = SummarizerInputSchema
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
         """

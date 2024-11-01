@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ActionParsingException
@@ -16,7 +16,15 @@ class BaseTool(BaseModel, ABC):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Base Tool"
     description: str = "Base tool description"
-    input_schema: type[BaseModel] = Field(default=DefaultInputSchema)
+    _input_schema: type[BaseModel] = DefaultInputSchema
+
+    @property
+    def input_schema(self) -> str:
+        return self._input_schema
+
+    @classmethod
+    def get_input_schema(cls) -> str:
+        return cls._input_schema
 
     @abstractmethod
     def run_tool(self):

@@ -64,7 +64,7 @@ class HttpApiCall(BaseTool, ConnectionNode):
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     response_type: ResponseType | str | None = ResponseType.RAW
-    input_schema: type[HttpApiCallInputSchema] = HttpApiCallInputSchema
+    _input_schema: type[HttpApiCallInputSchema] = HttpApiCallInputSchema
 
     def run_tool(
         self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs

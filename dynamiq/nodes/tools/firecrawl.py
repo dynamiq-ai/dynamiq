@@ -45,7 +45,7 @@ class FirecrawlTool(BaseTool, ConnectionNode):
     )
     connection: Firecrawl
     url: str | None = None
-    input_schema: type[FirecrawlInputSchema] = FirecrawlInputSchema
+    _input_schema: type[FirecrawlInputSchema] = FirecrawlInputSchema
 
     # Default parameters
     page_options: PageOptions = Field(

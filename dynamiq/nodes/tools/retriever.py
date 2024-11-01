@@ -33,7 +33,7 @@ class RetrievalTool(BaseTool, Node):
     connection_manager: ConnectionManager | None = None
     text_embedder: ConnectionNode | None = None
     document_retriever: ConnectionNode | None = None
-    input_schema: type[RetrievalInputSchema] = RetrievalInputSchema
+    _input_schema: type[RetrievalInputSchema] = RetrievalInputSchema
 
     def __init__(
         self,

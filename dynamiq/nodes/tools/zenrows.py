@@ -36,7 +36,7 @@ class ZenRowsTool(BaseTool, ConnectionNode):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    input_schema: type[ZenRowsInputSchema] = ZenRowsInputSchema
+    _input_schema: type[ZenRowsInputSchema] = ZenRowsInputSchema
 
     def run_tool(
         self, input_data: ZenRowsInputSchema, config: RunnableConfig = None, **kwargs
