@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutionException
+from dynamiq.nodes.agents.exceptions import ActionParsingException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 
