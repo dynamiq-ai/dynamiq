@@ -55,7 +55,7 @@ class InputMethodCallable(ABC):
 
 
 class HumanFeedbackInputSchema(BaseModel):
-    question: str = Field(..., description="Parameter to provide a question to the user.")
+    input: str = Field(..., description="Parameter to provide a question to the user.")
 
 
 class HumanFeedbackTool(Node):
@@ -74,9 +74,7 @@ class HumanFeedbackTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "human-feedback-tool"
-    description: str = (
-        "Tool to gather user information. Use it to check actual information or get additional input. "
-    )
+    description: str = "Tool to gather user information. Use it to check actual information or get additional input."
     input_method: InputMethod | InputMethodCallable = InputMethod.console
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
@@ -145,7 +143,7 @@ class HumanFeedbackTool(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        input_text = input_data.question
+        input_text = input_data.input
         if isinstance(self.input_method, InputMethod):
             if self.input_method == InputMethod.console:
                 result = self.input_method_console(input_text)

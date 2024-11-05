@@ -346,12 +346,12 @@ class Node(BaseModel, Runnable, ABC):
         Raises:
             NodeException: If input data does not match the input schema.
         """
-
+        from dynamiq.nodes.agents.exceptions import RecoverableAgentException
         if self.input_schema:
             try:
                 return self.input_schema(**input_data)
             except Exception as e:
-                raise NodeException(message=f"Input data validation failed: {e}")
+                raise RecoverableAgentException(message=f"Input data validation failed: {e}")
 
         return input_data
 
@@ -394,6 +394,8 @@ class Node(BaseModel, Runnable, ABC):
                     raise NodeException(message=f"Input mapping {key}: failed.")
             else:
                 inputs[key] = value
+
+        inputs = self.validate_input_schema(inputs)
 
         return inputs
 
@@ -516,13 +518,6 @@ class Node(BaseModel, Runnable, ABC):
         try:
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
 
-            try:
-                transformed_input = self.validate_input_schema(transformed_input)
-            except NodeException as e:
-                raise RecoverableAgentException(f"Error occurred while parsing input: {e}.")
-
-            if isinstance(transformed_input, BaseModel):
-                self.run_on_node_start(config.callbacks, transformed_input.model_dump(), **merged_kwargs)
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
 
             cache = cache_wf_entity(
@@ -583,9 +578,6 @@ class Node(BaseModel, Runnable, ABC):
         n_attempt = self.error_handling.max_retries + 1
         for attempt in range(n_attempt):
             merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
-
-            if isinstance(input_data, BaseModel):
-                self.run_on_node_execute_start(config.callbacks, input_data.model_dump(), **merged_kwargs)
 
             self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
 
@@ -697,7 +689,7 @@ class Node(BaseModel, Runnable, ABC):
     def run_on_node_start(
         self,
         callbacks: list[BaseCallbackHandler],
-        input_data: dict[str, Any],
+        input_data: dict[str, Any] | BaseModel,
         **kwargs,
     ):
         """
@@ -708,6 +700,10 @@ class Node(BaseModel, Runnable, ABC):
             input_data (dict[str, Any]): Input data for the node.
             **kwargs: Additional keyword arguments.
         """
+
+        if isinstance(input_data, BaseModel):
+            input_data = input_data.model_dump()
+
         for callback in callbacks:
             callback.on_node_start(self.to_dict(), input_data, **kwargs)
 
@@ -767,7 +763,7 @@ class Node(BaseModel, Runnable, ABC):
     def run_on_node_execute_start(
         self,
         callbacks: list[BaseCallbackHandler],
-        input_data: dict[str, Any],
+        input_data: dict[str, Any] | BaseModel,
         **kwargs,
     ):
         """
@@ -778,6 +774,9 @@ class Node(BaseModel, Runnable, ABC):
             input_data (dict[str, Any]): Input data for the node.
             **kwargs: Additional keyword arguments.
         """
+        if isinstance(input_data, BaseModel):
+            input_data = input_data.model_dump()
+
         for callback in callbacks:
             callback.on_node_execute_start(self.to_dict(), input_data, **kwargs)
 

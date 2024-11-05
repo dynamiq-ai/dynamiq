@@ -72,7 +72,7 @@ class E2BInterpreterInputSchema(BaseModel):
     packages: str = Field(default="", description="Parameter to provide packages to install.")
     shell_command: str = Field(default="", description="Parameter to provide shell command to execute.")
     python: str = Field(default="", description="Parameter to provide python code to execute.")
-    files: Any = Field(
+    files: list[io.BytesIO | bytes] = Field(
         default=None,
         description="Parameter to provide files for uploading to the sandbox.",
         is_accessible_to_agent=False,

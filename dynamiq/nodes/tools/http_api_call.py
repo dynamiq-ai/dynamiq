@@ -53,7 +53,7 @@ class HttpApiCall(ConnectionNode):
         response_type(ResponseType|str): The type of response content.
     """
 
-    name: str = "Api call tool"
+    name: str = "api-call-tool"
     description: str = "The description of the API call tool"
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     connection: HttpConnection
