@@ -10,6 +10,7 @@ from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from dynamiq.utils.logger import logger
 
 REACT_BLOCK_TOOLS = (
@@ -261,6 +262,9 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
+    streaming_mode: StreamingMode = Field(
+        default=StreamingMode.NONE, description="Controls what content should be streamed during execution"
+    )
 
     def parse_xml_content(self, text: str, tag: str) -> str:
         """Extract content from XML-like tags."""
@@ -295,6 +299,66 @@ class ReActAgent(Agent):
         logger.debug(f"Extracted answer: {answer}")
 
         return {"output": output, "answer": answer}
+
+    def _run_llm(self, prompt: str, config: RunnableConfig | None = None, **kwargs) -> str:
+        """Runs the LLM with a given prompt and returns the result."""
+        logger.debug(f"Agent {self.name} - {self.id}: Running LLM with prompt:\n{prompt}")
+        try:
+            # Set streaming configuration based on mode
+            if self.streaming.enabled and self.streaming_mode == StreamingMode.ALL:
+                self.llm.streaming = self.streaming
+            else:
+                self.llm.streaming = StreamingConfig(enabled=False)
+
+            llm_result = self.llm.run(
+                input_data={},
+                config=config,
+                prompt=Prompt(messages=[Message(role="user", content=prompt)]),
+                run_depends=self._run_depends,
+                **kwargs,
+            )
+
+            self._run_depends = [NodeDependency(node=self.llm).to_dict()]
+
+            # Handle streaming response
+            if self.streaming.enabled and hasattr(llm_result.output, "content_generator"):
+                accumulated_content = ""
+                for chunk in llm_result.output["content_generator"]:
+                    accumulated_content += chunk
+                    # Stream the chunk only in ALL mode
+                    if self.streaming_mode == StreamingMode.ALL:
+                        self.stream_chunk(chunk_type="llm_response", content=chunk, config=config, **kwargs)
+                return accumulated_content
+
+            if llm_result.status != RunnableStatus.SUCCESS:
+                raise ValueError("LLM execution failed")
+
+            return llm_result.output["content"]
+
+        except Exception as e:
+            logger.error(f"Agent {self.name} - {self.id}: LLM execution failed: {str(e)}")
+            raise
+
+    def stream_chunk(self, chunk_type: str, content: Any, config: RunnableConfig, **kwargs):
+        """Stream content with unified format."""
+        if not self.streaming.enabled:
+            return
+
+        # Handle different streaming modes
+        if self.streaming_mode == StreamingMode.NONE:
+            return
+
+        if self.streaming_mode == StreamingMode.FINAL:
+            if chunk_type != "final_answer":
+                return
+
+        if self.streaming_mode == StreamingMode.ALL:
+            # Stream everything
+            pass
+
+        chunk = {"type": chunk_type, "content": content, **kwargs.get("additional_data", {})}
+
+        self.run_on_node_execute_stream(callbacks=config.callbacks, chunk={"content": chunk}, **kwargs)
 
     def tracing_final(self, loop_num, final_answer, config, kwargs):
         self._intermediate_steps[loop_num]["final_answer"] = final_answer
@@ -348,6 +412,10 @@ class ReActAgent(Agent):
                     case InferenceMode.STRUCTURED_OUTPUT:
                         schema = structured_output_schema(self.tool_names.split(","))
 
+                self.llm.streaming = StreamingConfig(
+                    enabled=self.streaming.enabled and self.streaming_mode == StreamingMode.ALL
+                )
+
                 # Execute the prompt using the LLM
                 llm_result = self.llm.run(
                     input_data={},
@@ -362,6 +430,13 @@ class ReActAgent(Agent):
                 )
 
                 self._run_depends = [NodeDependency(node=self.llm).to_dict()]
+                if self.streaming.enabled and self.streaming_mode == StreamingMode.ALL:
+                    self.stream_chunk(
+                        chunk_type="intermediate",
+                        content={"loop": loop_num, "llm_output": llm_result.output["content"]},
+                        config=config,
+                        **kwargs,
+                    )
 
                 if llm_result.status != RunnableStatus.SUCCESS:
                     logger.error(
@@ -382,7 +457,7 @@ class ReActAgent(Agent):
                         )
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if "Answer:" in llm_generated_output:
-                            final_answer = self._extract_final_answer(llm_generated_output)
+                            final_answer = self._extract_final_answer(llm_generated_output, config=config, **kwargs)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             return final_answer
 
@@ -438,6 +513,18 @@ class ReActAgent(Agent):
                         try:
                             tool = self._get_tool(action)
                             tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                            if self.streaming.enabled and self.streaming_mode == StreamingMode.ALL:
+                                self.stream_chunk(
+                                    chunk_type="tool_execution",
+                                    content={
+                                        "loop": loop_num,
+                                        "tool": action,
+                                        "input": action_input,
+                                        "output": tool_result,
+                                    },
+                                    config=config,
+                                    **kwargs,
+                                )
 
                             logger.debug(
                                 f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Tool Result:\n{tool_result}"
@@ -489,8 +576,24 @@ class ReActAgent(Agent):
         llm_final_attempt = self._run_llm(final_attempt_prompt, config=config, **kwargs)
         self._run_depends = [NodeDependency(node=self.llm).to_dict()]
         final_answer = self.parse_xml_content(llm_final_attempt, "answer")
+        if self.streaming.enabled and self.streaming_mode in [StreamingMode.ALL, StreamingMode.FINAL]:
+            self.stream_chunk(
+                chunk_type="final_answer",
+                content=f"Max loops reached but here's my final attempt:\n{final_answer}",
+                config=config,
+                **kwargs,
+            )
 
         return f"Max loops reached but here's my final attempt:\n{final_answer}"
+
+    def _extract_final_answer(self, output: str, config: RunnableConfig, **kwargs) -> str:
+        """Extract and stream final answer."""
+        final_answer = super()._extract_final_answer(output)
+
+        if self.streaming.enabled and self.streaming_mode in [StreamingMode.ALL, StreamingMode.FINAL]:
+            self.stream_chunk(chunk_type="final_answer", content=final_answer, config=config, **kwargs)
+
+        return final_answer
 
     def _extract_final_answer_xml(self, llm_output: str) -> str:
         """Extract the final answer from the LLM output."""

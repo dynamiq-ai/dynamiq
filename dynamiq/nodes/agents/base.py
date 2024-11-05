@@ -205,6 +205,10 @@ class Agent(Node):
             f"Agent {self.name} - {self.id}: Running LLM with prompt:\n{prompt}"
         )
         try:
+            # Set streaming configuration
+            if self.streaming.enabled:
+                self.llm.streaming = self.streaming
+
             llm_result = self.llm.run(
                 input_data={},
                 config=config,
@@ -212,13 +216,30 @@ class Agent(Node):
                 run_depends=self._run_depends,
                 **kwargs,
             )
+
             self._run_depends = [NodeDependency(node=self.llm).to_dict()]
+
+            # Handle streaming response
+            if self.streaming.enabled and hasattr(llm_result.output, "content_generator"):
+                accumulated_content = ""
+                for chunk in llm_result.output["content_generator"]:
+                    accumulated_content += chunk
+                    # Stream the chunk
+                    if config and config.callbacks:
+                        self.run_on_node_execute_stream(
+                            callbacks=config.callbacks, chunk={"content": chunk, "type": "llm_response"}, **kwargs
+                        )
+                return accumulated_content
+
             logger.debug(
                 f"Agent {self.name} - {self.id}: RAW LLM result:\n{llm_result.output['content']}"
             )
+
             if llm_result.status != RunnableStatus.SUCCESS:
                 raise ValueError("LLM execution failed")
+
             return llm_result.output["content"]
+
         except Exception as e:
             logger.error(
                 f"Agent {self.name} - {self.id}: LLM execution failed: {str(e)}"
