@@ -59,33 +59,33 @@ def create_workflow() -> Workflow:
     @function_tool
     def udpate_flight_tool(*args, **kwargs):
         return ""
-        
+
     primary_assistant = ReActAgent(
-            name="Primary assistant",
-            llm=llm,
-            role=(
-                "You are a helpful customer support assistant for Swiss Airlines. "
-                "Your primary role is to search for flight information and company policies to answer customer queries. "
-                "If a customer requests to update or cancel a flight, book a car rental, book a hotel, or get trip recommendations, "
-                "delegate the task to the appropriate specialized assistant by invoking the corresponding tool. You are not able to make these types of changes yourself."
-                " Only the specialized assistants are given permission to do this for the user."
-                "The user is not aware of the different specialized assistants, so do not mention them; just quietly delegate through function calls. "
-                "Provide detailed information to the customer, and always double-check the database before concluding that information is unavailable. "
-                " When searching, be persistent. Expand your query bounds if the first search returns no results. "
-                " If a search comes up empty, expand your search before giving up."
-            )
-            tools=
-        )
-    
+        name="Primary assistant",
+        llm=llm,
+        role=(
+            "You are a helpful customer support assistant for Swiss Airlines. "
+            "Your primary role is to search for flight information and company policies to answer customer queries."
+            "If a customer requests to update or cancel a flight, book a car rental, book a hotel,"
+            " or get trip recommendations, delegate the task to the appropriate specialized assistant by"
+            " invoking the corresponding tool. You are not able to make these types of changes yourself."
+            " Only the specialized assistants are given permission to do this for the user."
+            "The user is not aware of the different specialized assistants, so do not mention them; just quietly"
+            "delegate through function calls. "
+            "Provide detailed information to the customer, and always double-check the database before concluding"
+            "that information is unavailable. "
+            " When searching, be persistent. Expand your query bounds if the first search returns no results. "
+            " If a search comes up empty, expand your search before giving up."
+        ),
+    )
+
     def primary_assistant_func(state: CustomerSupportContext):
         primary_assistant.run(
-                input_data={
-                    "input": 'Get stock price for nvidia.'
-            },
+            input_data={"input": "Get stock price for nvidia."},
         )
-        tracing = primary_assistant.tracing_final
-        return 
-        
+        # tracing = primary_assistant.tracing_final
+        return
+
     primary_assistant.tools = []
     update_flight_assistant = ReActAgent(
         name="Primary assistant",
@@ -95,7 +95,8 @@ def create_workflow() -> Workflow:
             "The primary assistant delegates work to you whenever the user needs help updating their bookings. "
             "Confirm the updated flight details with the customer and inform them of any additional fees. "
             " When searching, be persistent. Expand your query bounds if the first search returns no results. "
-            "If you need more information or the customer changes their mind, escalate the task back to the main assistant."
+            "If you need more information or the customer changes their mind, escalate the task back to the main"
+            " assistant."
             "Remember that a booking isn't completed until after the relevant tool has successfully been used."
         ),
     )
@@ -104,10 +105,13 @@ def create_workflow() -> Workflow:
         def entry_node(state: CustomerSupportContext) -> dict:
             return {
                 "messages": (
-                    f"The assistant is now the {assistant_name}. Reflect on the above conversation between the host assistant and the user."
-                    f" The user's intent is unsatisfied. Use the provided tools to assist the user. Remember, you are {assistant_name},"
-                    " and the booking, update, other other action is not complete until after you have successfully invoked the appropriate tool."
-                    " If the user changes their mind or needs help for other tasks, call the CompleteOrEscalate function to let the primary host assistant take control."
+                    f"The assistant is now the {assistant_name}. Reflect on the above conversation between"
+                    "the host assistant and the user."
+                    f" The user's intent is unsatisfied. Use the provided tools to assist the user."
+                    "Remember, you are {assistant_name}, and the booking, update, other other action"
+                    " is not complete until after you have successfully invoked the appropriate tool."
+                    " If the user changes their mind or needs help for other tasks, call the CompleteOrEscalate"
+                    " function to let the primary host assistant take control."
                     " Do not mention who you are - just act as the proxy for the assistant."
                 )
             }
