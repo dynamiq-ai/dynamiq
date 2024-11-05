@@ -1,4 +1,5 @@
 import inspect
+import re
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
@@ -8,7 +9,7 @@ from queue import Empty
 from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, field_validator, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler
@@ -217,7 +218,7 @@ class Node(BaseModel, Runnable, ABC):
     _output_references: NodeOutputReferences = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    _input_schema: ClassVar[type[BaseModel] | None] = None
+    input_schema: ClassVar[type[BaseModel] | None] = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -225,6 +226,13 @@ class Node(BaseModel, Runnable, ABC):
             self.init_components()
 
         self._output_references = NodeOutputReferences(node=self)
+
+    @field_validator("name")
+    def sanitize_name(s: str):
+        """Sanitize Node name to follow [^a-zA-Z0-9_-]."""
+        s = s.lower().replace(" ", "-")
+        sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", s)
+        return sanitized
 
     @computed_field
     @cached_property
@@ -258,14 +266,6 @@ class Node(BaseModel, Runnable, ABC):
 
         if dep_result.status == RunnableStatus.SKIP:
             raise NodeSkippedException(failed_depend=depend, message=f"Dependency {depend.node.id}: skipped")
-
-    @property
-    def input_schema(self) -> BaseModel | None:
-        return self._input_schema
-
-    @classmethod
-    def get_input_schema(cls) -> BaseModel | None:
-        return cls._input_schema
 
     @staticmethod
     def _validate_dependency_condition(depend: NodeDependency, depends_result: dict[str, RunnableResult]):
@@ -336,25 +336,9 @@ class Node(BaseModel, Runnable, ABC):
                     depend=dep, depends_result=depends_result
                 )
 
-    @property
-    def input_schema_params(self) -> list[tuple]:
+    def validate_input_schema(self, input_data: dict[str, Any]) -> dict[str, Any] | BaseModel:
         """
-        Return list of input parameters along with their type and description.
-        """
-        params = []
-        for name, field in self.input_schema.model_fields.items():
-            tags = {}
-            if field.json_schema_extra:
-                tags = field.json_schema_extra
-            description = field.description or "No description"
-            field_type: str = field.annotation.__name__
-
-            params.append((name, field_type, description, tags))
-        return params
-
-    def validate_input_schema(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Validate input data against the input schema. Returns validated dictionary if schema is provided.
+        Validate input data against the input schema. Returns instance of input_schema if it is is provided.
 
         Args:
             input_data (Any): Input data to validate.
@@ -362,9 +346,10 @@ class Node(BaseModel, Runnable, ABC):
         Raises:
             NodeException: If input data does not match the input schema.
         """
+
         if self.input_schema:
             try:
-                return self.input_schema(**input_data).model_dump()
+                return self.input_schema(**input_data)
             except Exception as e:
                 raise NodeException(message=f"Input data validation failed: {e}")
 
@@ -409,8 +394,6 @@ class Node(BaseModel, Runnable, ABC):
                     raise NodeException(message=f"Input mapping {key}: failed.")
             else:
                 inputs[key] = value
-
-        inputs = self.validate_input_schema(inputs)
 
         return inputs
 
@@ -533,12 +516,21 @@ class Node(BaseModel, Runnable, ABC):
         try:
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
 
+            try:
+                transformed_input = self.validate_input_schema(transformed_input)
+            except NodeException as e:
+                raise RecoverableAgentException(f"Error occurred while parsing input: {e}.")
+
+            if isinstance(transformed_input, BaseModel):
+                self.run_on_node_start(config.callbacks, transformed_input.model_dump(), **merged_kwargs)
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
+
             cache = cache_wf_entity(
                 entity_id=self.id,
                 cache_enabled=self.caching.enabled,
                 cache_config=config.cache,
             )
+
             output, from_cache = cache(self.execute_with_retry)(
                 transformed_input, config, **merged_kwargs
             )
@@ -570,9 +562,7 @@ class Node(BaseModel, Runnable, ABC):
                 output=format_value(e, recoverable=recoverable),
             )
 
-    def execute_with_retry(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
+    def execute_with_retry(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs):
         """
         Execute the node with retry logic.
 
@@ -593,9 +583,11 @@ class Node(BaseModel, Runnable, ABC):
         n_attempt = self.error_handling.max_retries + 1
         for attempt in range(n_attempt):
             merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
-            self.run_on_node_execute_start(
-                config.callbacks, input_data, **merged_kwargs
-            )
+
+            if isinstance(input_data, BaseModel):
+                self.run_on_node_execute_start(config.callbacks, input_data.model_dump(), **merged_kwargs)
+
+            self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
 
             try:
                 output = self.execute_with_timeout(
@@ -634,7 +626,7 @@ class Node(BaseModel, Runnable, ABC):
     def execute_with_timeout(
         self,
         timeout: float | None,
-        input_data: dict[str, Any],
+        input_data: dict[str, Any] | BaseModel,
         config: RunnableConfig = None,
         **kwargs,
     ):
@@ -856,9 +848,7 @@ class Node(BaseModel, Runnable, ABC):
             callback.on_node_execute_stream(self.to_dict(), chunk, **kwargs)
 
     @abstractmethod
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ) -> Any:
+    def execute(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs) -> Any:
         """
         Execute the node with the given input.
 

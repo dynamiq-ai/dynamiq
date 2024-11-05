@@ -79,7 +79,7 @@ class HumanFeedbackTool(Node):
     )
     input_method: InputMethod | InputMethodCallable = InputMethod.console
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    _input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
+    input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
 
     def input_method_console(self, prompt: str) -> str:
         """
@@ -122,7 +122,9 @@ class HumanFeedbackTool(Node):
 
         return event.data.content
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self, input_data: HumanFeedbackInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
         """
         Execute the tool with the provided input data and configuration.
 
@@ -139,11 +141,11 @@ class HumanFeedbackTool(Node):
         Raises:
             ValueError: If the input_data does not contain an 'input' key.
         """
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data}")
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        input_text = input_data.get("question")
+        input_text = input_data.question
         if isinstance(self.input_method, InputMethod):
             if self.input_method == InputMethod.console:
                 result = self.input_method_console(input_text)

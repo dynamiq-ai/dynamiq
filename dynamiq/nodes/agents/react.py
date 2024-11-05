@@ -2,7 +2,7 @@ import json
 import re
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import ActionParsingException, MaxLoopsExceededException, RecoverableAgentException
@@ -223,6 +223,11 @@ class ReActAgent(Agent):
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
     format_schema: list = []
+
+    @model_validator(mode="after")
+    def validate_inference_mode(self):
+        """Validate whether specified model can be inferenced in provided mode."""
+        return self
 
     def parse_xml_content(self, text: str, tag: str) -> str:
         """Extract content from XML-like tags."""
@@ -459,10 +464,14 @@ class ReActAgent(Agent):
         input_formats = []
         for tool in tools:
             params = [
-                " ".join(param[:-1])
-                for param in tool.input_schema_params
-                if param[-1].get("is_accessible_to_agent", True)
+                f"{name} ({field.annotation.__name__}): {field.description or 'No description'}"
+                for name, field in tool.input_schema.model_fields.items()
+                if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True)
             ]
+
+            print(params)
+            print("-------------------------------------------------------------------")
+
             input_formats.append(f" - {tool.name}\n \t* " + "\n\t* ".join(params))
         return "\n".join(input_formats)
 
@@ -513,9 +522,10 @@ class ReActAgent(Agent):
         self.format_schema.append(final_answer_function_schema)
         for tool in self.tools:
             properties = {}
-            for name, param_type, description, tags in tool.input_schema_params:
-                param_type = self.filter_format_type(param_type)
-                if tags.get("is_accessible_to_agent", True):
+            for name, field in tool.input_schema.model_fields.items():
+                if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
+                    param_type = self.filter_format_type(field.annotation.__name__)
+                    description = field.description or "No description"
                     properties[name] = {"type": param_type, "description": description}
 
             schema = {

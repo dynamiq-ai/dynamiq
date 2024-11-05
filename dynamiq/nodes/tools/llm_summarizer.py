@@ -83,7 +83,7 @@ class SummarizerTool(Node):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    _input_schema: ClassVar[type[SummarizerInputSchema]] = SummarizerInputSchema
+    input_schema: ClassVar[type[SummarizerInputSchema]] = SummarizerInputSchema
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
         """
@@ -153,7 +153,9 @@ class SummarizerTool(Node):
             raise ValueError("LLM execution failed")
         return result.output["content"]
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self, input_data: SummarizerInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
         """
         Execute the summarization tool on the input data.
 
@@ -175,7 +177,7 @@ class SummarizerTool(Node):
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        input_text = input_data.get("input")
+        input_text = input_data.input
         logger.debug(
             f"Tool {self.name} - {self.id}: started with input text length: {len(input_text)}, "
             f"word count: {len(input_text.split())}"

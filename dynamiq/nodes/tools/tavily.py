@@ -68,7 +68,7 @@ class TavilyTool(ConnectionNode):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    _input_schema: ClassVar[type[TavilyInputSchema]] = TavilyInputSchema
+    input_schema: ClassVar[type[TavilyInputSchema]] = TavilyInputSchema
 
     def _format_search_results(self, results: dict[str, Any]) -> str:
         """
@@ -92,7 +92,7 @@ class TavilyTool(ConnectionNode):
 
         return "\n".join(formatted_results).strip()
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(self, input_data: TavilyInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
         Executes the search operation using the provided input data.
 
@@ -104,14 +104,12 @@ class TavilyTool(ConnectionNode):
         Returns:
             dict[str, Any]: The result of the search operation.
         """
-        logger.debug(
-            f"Tool {self.name} - {self.id}: started with input data {input_data}"
-        )
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        query = input_data.get("query")
+        query = input_data.query
         search_data = {
             "query": query,
             "search_depth": self.search_depth,

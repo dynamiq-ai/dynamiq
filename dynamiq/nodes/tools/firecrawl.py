@@ -44,7 +44,7 @@ class FirecrawlTool(ConnectionNode):
     )
     connection: Firecrawl
     url: str | None = None
-    _input_schema: ClassVar[type[FirecrawlInputSchema]] = FirecrawlInputSchema
+    input_schema: ClassVar[type[FirecrawlInputSchema]] = FirecrawlInputSchema
 
     # Default parameters
     page_options: PageOptions = Field(
@@ -79,16 +79,16 @@ class FirecrawlTool(ConnectionNode):
         else:
             return data
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self, input_data: FirecrawlInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
         """Execute the scraping tool with the provided input data."""
-        logger.debug(
-            f"Tool {self.name} - {self.id}: started with input data {input_data}"
-        )
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        url = input_data.get("url") or self.url
+        url = input_data.url or self.url
         if not url:
             logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
             raise ValueError("URL is required for scraping")

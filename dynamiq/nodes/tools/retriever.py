@@ -27,12 +27,12 @@ class RetrievalTool(Node):
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "retrieval-tool"
-    description: str = "A tool for retrieving relevant documents based on a query. Provide query with key 'input'."
+    description: str = "A tool for retrieving relevant documents based on a query."
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     connection_manager: ConnectionManager | None = None
     text_embedder: ConnectionNode | None = None
     document_retriever: ConnectionNode | None = None
-    _input_schema: ClassVar[type[RetrievalInputSchema]] = RetrievalInputSchema
+    input_schema: ClassVar[type[RetrievalInputSchema]] = RetrievalInputSchema
 
     def __init__(
         self,
@@ -93,7 +93,7 @@ class RetrievalTool(Node):
             formatted_docs.append(formatted_doc)
         return "\n\n".join(formatted_docs)
 
-    def execute(self, input_data: dict[str, Any], **_) -> dict[str, Any]:
+    def execute(self, input_data: RetrievalInputSchema, **_) -> dict[str, Any]:
         """Execute the retrieval tool.
 
         Args:
@@ -104,8 +104,7 @@ class RetrievalTool(Node):
             dict[str, Any]: Result of the retrieval.
         """
 
-        query = input_data.get("query")
-        logger.debug(f"Tool {self.name} - {self.id}: started with query '{query}'")
+        logger.debug(f"Tool {self.name} - {self.id}: started with query '{input_data.model_dump()}'")
 
         if not self.text_embedder:
             raise ValueError(f"{self.name}: Text embedder is not initialized.")
@@ -113,7 +112,7 @@ class RetrievalTool(Node):
             raise ValueError(f"{self.name}: Document retriever is not initialized.")
 
         try:
-            text_embedder_output = self.text_embedder.run(input_data={"query": query})
+            text_embedder_output = self.text_embedder.run(input_data={"query": input_data.query})
             embedding = text_embedder_output.output.get("embedding")
 
             document_retriever_output = self.document_retriever.run(input_data={"embedding": embedding})

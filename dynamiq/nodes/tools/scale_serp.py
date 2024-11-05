@@ -21,7 +21,7 @@ class ScaleSerpInputSchema(BaseModel):
     def validate_query_url(self):
         """Validate that either query or url is specified"""
         if not self.url and not self.query:
-            raise ValueError("Either query or url has to be specified.")
+            raise ValueError("Either 'query' or 'url' has to be specified.")
         return self
 
 
@@ -55,7 +55,7 @@ class ScaleSerpTool(ConnectionNode):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    _input_schema: ClassVar[type[ScaleSerpInputSchema]] = ScaleSerpInputSchema
+    input_schema: ClassVar[type[ScaleSerpInputSchema]] = ScaleSerpInputSchema
 
     def _format_search_results(self, results: dict[str, Any]) -> str:
         """
@@ -89,7 +89,9 @@ class ScaleSerpTool(ConnectionNode):
 
         return "\n".join(formatted_results).strip()
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
         """
         Executes the search using the Scale SERP API and returns the formatted results.
 
@@ -100,16 +102,14 @@ class ScaleSerpTool(ConnectionNode):
         Returns:
             dict[str, Any]: A dictionary containing the search results and metadata.
         """
-        logger.debug(
-            f"Tool {self.name} - {self.id}: started with input data {input_data}"
-        )
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        query: str | None = input_data.get("query")
-        url: str | None = input_data.get("url")
-        limit: int = input_data.get("limit") or self.limit
+        query: str | None = input_data.query
+        url: str | None = input_data.url
+        limit: int = input_data.limit or self.limit
 
         if not query and not url:
             return {

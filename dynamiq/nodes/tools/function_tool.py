@@ -111,10 +111,10 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
             or f"A tool for executing the {func.__name__} function."
         )
         _original_func = staticmethod(func)
-        _input_schema: ClassVar[type[BaseModel]] = create_input_schema(func)
+        input_schema: ClassVar[type[BaseModel]] = create_input_schema(func)
 
-        def run_func(self, input_data: dict[str, Any], **_) -> T:
-            return func(**input_data)
+        def run_func(self, input_data: BaseModel, **_) -> T:
+            return func(**input_data.model_dump())
 
     FunctionToolFromDecorator.__name__ = func.__name__
     FunctionToolFromDecorator.__qualname__ = (

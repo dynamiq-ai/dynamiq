@@ -19,7 +19,7 @@ class ResponseType(str, enum.Enum):
 
 
 class HttpApiCallInputSchema(BaseModel):
-    data: dict = Field(default={}, description="Parameter to provide main json payload.")
+    data: dict = Field(default={}, description="Parameter to provide payload.")
     url_path: str = Field(default="", description="Parameter to provide for path to the endpoint.")
     headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
@@ -28,7 +28,7 @@ class HttpApiCallInputSchema(BaseModel):
     def validate_dict_fields(cls, value: Any, field: str) -> Any:
         if isinstance(value, str):
             try:
-                return json.loads(value)
+                return json.loads(value or "{}")
             except json.JSONDecodeError as e:
                 raise ActionParsingException(f"Invalid JSON string provided for '{field}'. Error: {e}")
         elif isinstance(value, dict):
@@ -63,9 +63,9 @@ class HttpApiCall(ConnectionNode):
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     response_type: ResponseType | str | None = ResponseType.RAW
-    _input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
+    input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
+    def execute(self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs):
         """Execute the API call.
 
         This method takes input data and returns content of API call response.
@@ -83,13 +83,13 @@ class HttpApiCall(ConnectionNode):
         """
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        data = input_data.get("data")
+        data = input_data.data
 
         url = self.connection.url
-        if url_path := input_data.get("url_path"):
+        if url_path := input_data.url_path:
             url = urljoin(url, url_path)
-        headers = input_data.get("headers")
-        params = input_data.get("params")
+        headers = input_data.headers
+        params = input_data.params
 
         response = self.client.request(
             method=self.connection.method,

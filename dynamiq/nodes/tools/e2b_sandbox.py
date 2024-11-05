@@ -114,7 +114,7 @@ class E2BInterpreterTool(ConnectionNode):
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
     is_files_allowed: bool = True
-    _input_schema: ClassVar[type[E2BInterpreterInputSchema]] = E2BInterpreterInputSchema
+    input_schema: ClassVar[type[E2BInterpreterInputSchema]] = E2BInterpreterInputSchema
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -258,9 +258,12 @@ class E2BInterpreterTool(ConnectionNode):
             raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
         return output.stdout
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **_) -> dict[str, Any]:
+    def execute(
+        self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
         """Executes the requested action based on the input data."""
         config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         if self.persistent_sandbox:
             sandbox = self._sandbox
@@ -273,14 +276,14 @@ class E2BInterpreterTool(ConnectionNode):
                 self._update_description()
         try:
             content = {}
-            if files := input_data.get("files"):
+            if files := input_data.files:
                 content["files_installation"] = self._upload_files(files=files, sandbox=sandbox)
-            if packages := input_data.get("packages"):
+            if packages := input_data.packages:
                 self._install_packages(sandbox=sandbox, packages=packages)
-                content["packages_installation"] = f"Installed packages: {input_data.get('packages')}"
-            if shell_command := input_data.get("shell_command"):
+                content["packages_installation"] = f"Installed packages: {input_data.packages}"
+            if shell_command := input_data.shell_command:
                 content["shell_command_execution"] = self._execute_shell_command(shell_command, sandbox=sandbox)
-            if python := input_data.get("python"):
+            if python := input_data.python:
                 content["code_execution"] = self._execute_python_code(python, sandbox=sandbox)
             if not (packages or files or shell_command or python):
                 raise ToolExecutionException(
