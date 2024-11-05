@@ -230,7 +230,7 @@ class Node(BaseModel, Runnable, ABC):
     @field_validator("name")
     def sanitize_name(s: str):
         """Sanitize Node name to follow [^a-zA-Z0-9_-]."""
-        s = s.lower().replace(" ", "-")
+        s = s.replace(" ", "-")
         sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", s)
         return sanitized
 
