@@ -3,7 +3,7 @@ from hashlib import sha256
 from typing import Any, ClassVar, Literal
 
 from e2b import Sandbox
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes import NodeGroup
@@ -72,7 +72,8 @@ class E2BInterpreterInputSchema(BaseModel):
     packages: str = Field(default="", description="Parameter to provide packages to install.")
     shell_command: str = Field(default="", description="Parameter to provide shell command to execute.")
     python: str = Field(default="", description="Parameter to provide python code to execute.")
-    files: list[io.BytesIO | bytes] = Field(
+
+    files: list[bytes] = Field(
         default=None,
         description="Parameter to provide files for uploading to the sandbox.",
         is_accessible_to_agent=False,
@@ -84,6 +85,11 @@ class E2BInterpreterInputSchema(BaseModel):
         if not self.shell_command and not self.python:
             raise ValueError("shell_command or python code has to be specified.")
         return self
+
+    @field_validator("files")
+    def handle_bytesio(cls, files):
+        """Handles BytesIO objects passed."""
+        return [file.getvalue() if isinstance(file, io.BytesIO) else file for file in files]
 
 
 class E2BInterpreterTool(ConnectionNode):
@@ -169,7 +175,7 @@ class E2BInterpreterTool(ConnectionNode):
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
             sandbox.process.start_and_wait(f"pip install -qq {' '.join(packages.split(','))}")
 
-    def _upload_files(self, files: list[bytes | io.BytesIO], sandbox: Sandbox) -> str:
+    def _upload_files(self, files: list[bytes], sandbox: Sandbox) -> str:
         """Uploads multiple files to the sandbox and returns details for each file."""
         upload_details = []
         for file in files:

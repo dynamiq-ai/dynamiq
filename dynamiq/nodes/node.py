@@ -351,7 +351,7 @@ class Node(BaseModel, Runnable, ABC):
             try:
                 return self.input_schema(**input_data)
             except Exception as e:
-                raise RecoverableAgentException(message=f"Input data validation failed: {e}")
+                raise RecoverableAgentException(f"Input data validation failed: {e}")
 
         return input_data
 
