@@ -35,7 +35,7 @@ class TavilyTool(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "tavily-search-tool"
+    name: str = "Tavily Search Tool"
     description: str = (
         "A tool for searching the web, powered by Tavily. "
     )

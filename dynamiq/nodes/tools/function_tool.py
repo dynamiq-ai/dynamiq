@@ -17,7 +17,7 @@ class FunctionTool(Node, Generic[T]):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "function-tool"
+    name: str = "Function Tool"
     description: str = Field(
         default="A tool for executing a function with given input."
     )

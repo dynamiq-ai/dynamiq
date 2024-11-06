@@ -136,7 +136,7 @@ class E2BInterpreterTool(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "code-interpreter-e2b"
+    name: str = "E2b Code Interpreter Tool"
     description: str = DESCRIPTION
     connection: E2BConnection
     installed_packages: list = []

@@ -37,7 +37,7 @@ class FirecrawlInputSchema(BaseModel):
 class FirecrawlTool(ConnectionNode):
     """A tool for scraping web pages using the Firecrawl service."""
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "firecrawl-tool"
+    name: str = "Firecrawl Tool"
     description: str = (
         "A tool for scraping web pages, powered by Firecrawl."
         "You can use this tool to scrape the content of a web page."

@@ -70,7 +70,7 @@ class SummarizerTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "summarizer-tool"
+    name: str = "Summarizer Tool"
     description: str = (
         "A tool for summarizing and cleaning up text extracted from HTML. "
     )

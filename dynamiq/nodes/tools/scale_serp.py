@@ -41,7 +41,7 @@ class ScaleSerpTool(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "scale-serp-search-tool"
+    name: str = "Scale Serp Search Tool"
     description: str = (
         "A tool for searching the web, powered by Scale SERP. "
         "You can use this tool to search the web for information."

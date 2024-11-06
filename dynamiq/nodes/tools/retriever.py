@@ -26,7 +26,7 @@ class RetrievalTool(Node):
         document_retriever (ConnectionNode | None): Document retriever node.
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "retrieval-tool"
+    name: str = "Retrieval Tool"
     description: str = "A tool for retrieving relevant documents based on a query."
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     connection_manager: ConnectionManager | None = None

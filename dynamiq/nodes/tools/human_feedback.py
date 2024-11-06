@@ -73,7 +73,7 @@ class HumanFeedbackTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "human-feedback-tool"
+    name: str = "Human Feedback Tool"
     description: str = "Tool to gather user information. Use it to check actual information or get additional input."
     input_method: InputMethod | InputMethodCallable = InputMethod.console
     model_config = ConfigDict(arbitrary_types_allowed=True)

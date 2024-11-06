@@ -58,7 +58,7 @@ class Python(Node):
         code (str): Python code to execute.
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "python-code-executor"
+    name: str = "Python Code Executor Tool"
     description: str = (
         "The tool, that executes Python code in a secure sandbox environment."
         "All arguments are passed as a dictionary to the 'run' main function."

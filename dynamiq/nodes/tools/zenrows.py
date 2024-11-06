@@ -21,7 +21,7 @@ class ZenRowsTool(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "zenrows-scraper-tool"
+    name: str = "Zenrows Scraper Tool"
     description: str = (
         "A tool for scraping web pages, powered by ZenRows. "
         "You can use this tool to scrape the content of a web page."
