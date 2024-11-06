@@ -14,7 +14,7 @@ AGENT_ROLE = (
 )
 
 if __name__ == "__main__":
-    connection_e2b = E2B(api_key="e2b_47d80540e010455f3e1ab8a96e2f99447887ecf0")
+    connection_e2b = E2B()
 
     tool_code = E2BInterpreterTool(connection=connection_e2b)
 
@@ -26,7 +26,7 @@ if __name__ == "__main__":
         llm=llm,
         tools=[tool_code],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.STRUCTURED_OUTPUT,
+        inference_mode=InferenceMode.XML,
     )
 
     result = agent.run(input_data={"input": "What is the current price of Bitcoin?"})
