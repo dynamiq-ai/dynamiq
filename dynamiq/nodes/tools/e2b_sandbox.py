@@ -68,12 +68,18 @@ def generate_file_description(file: bytes | io.BytesIO, length: int = 20) -> str
     return f"File starting with: {file_content.hex()}"
 
 
+class FileData(BaseModel):
+    data: bytes
+    name: str
+    description: str
+
+
 class E2BInterpreterInputSchema(BaseModel):
     packages: str = Field(default="", description="Parameter to provide packages to install.")
     shell_command: str = Field(default="", description="Parameter to provide shell command to execute.")
     python: str = Field(default="", description="Parameter to provide python code to execute.")
 
-    files: list[bytes] = Field(
+    files: list[FileData] = Field(
         default=None,
         description="Parameter to provide files for uploading to the sandbox.",
         is_accessible_to_agent=False,
@@ -86,10 +92,28 @@ class E2BInterpreterInputSchema(BaseModel):
             raise ValueError("shell_command or python code has to be specified.")
         return self
 
-    @field_validator("files")
-    def handle_bytesio(cls, files):
-        """Handles BytesIO objects passed."""
-        return [file.getvalue() if isinstance(file, io.BytesIO) else file for file in files]
+    @field_validator("files", mode="before")
+    def handle_file_upload(
+        cls,
+        files,
+    ):
+        """Handles file uploading with additional metadata."""
+        files_data = []
+        for file in files:
+            if not isinstance(file, bytes | io.BytesIO):
+                raise ValueError(f"Error: Invalid file data type: {type(file)}. Expected bytes or BytesIO.")
+
+            file_name = getattr(file, "name", generate_fallback_filename(file))
+            description = getattr(file, "description", generate_file_description(file))
+            files_data.append(
+                FileData(
+                    data=file.getvalue() if isinstance(file, io.BytesIO) else file,
+                    name=file_name,
+                    description=description,
+                )
+            )
+
+        return files_data
 
 
 class E2BInterpreterTool(ConnectionNode):
@@ -175,47 +199,32 @@ class E2BInterpreterTool(ConnectionNode):
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
             sandbox.process.start_and_wait(f"pip install -qq {' '.join(packages.split(','))}")
 
-    def _upload_files(self, files: list[bytes], sandbox: Sandbox) -> str:
+    def _upload_files(self, files: list[FileData], sandbox: Sandbox) -> str:
         """Uploads multiple files to the sandbox and returns details for each file."""
         upload_details = []
         for file in files:
-            if isinstance(file, bytes):
-                file = io.BytesIO(file)
 
-            file_name = getattr(file, "name", None) or generate_fallback_filename(file)
-            file.name = file_name
-
-            description = getattr(file, "description", generate_file_description(file))
-
-            uploaded_path = self._upload_file(file, file_name, sandbox)
+            uploaded_path = self._upload_file(file, sandbox)
             upload_details.append(
                 {
-                    "original_name": file_name,
-                    "description": description,
+                    "original_name": file.name,
+                    "description": file.description,
                     "uploaded_path": uploaded_path,
                 }
             )
-            logger.debug(f"Tool {self.name} - {self.id}: Uploaded file '{file_name}' to {uploaded_path}")
+            logger.debug(f"Tool {self.name} - {self.id}: Uploaded file '{file.name}' to {uploaded_path}")
 
         self._update_description_with_files(upload_details)
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
-    def _upload_file(self, file: bytes | io.BytesIO, file_name: str, sandbox: Sandbox | None = None) -> str:
+    def _upload_file(self, file: FileData, sandbox: Sandbox | None = None) -> str:
         """Uploads a single file to the specified sandbox and returns the uploaded path."""
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
         # Handle the file types (bytes or io.BytesIO)
-        if isinstance(file, bytes):
-            file_like_object = io.BytesIO(file)
-            file_like_object.name = file_name
-        elif isinstance(file, io.BytesIO):
-            file.name = file_name
-            file_like_object = file
-        else:
-            raise ToolExecutionException(
-                f"Error: Invalid file data type: {type(file)}. Expected bytes or BytesIO.", recoverable=False
-            )
+        file_like_object = io.BytesIO(file.data)
+        file_like_object.name = file.name
 
         # Upload the file to the sandbox
         uploaded_path = sandbox.upload_file(file=file_like_object)
