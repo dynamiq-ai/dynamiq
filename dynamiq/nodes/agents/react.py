@@ -469,14 +469,12 @@ class ReActAgent(Agent):
                 if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True)
             ]
 
-            print(params)
-            print("-------------------------------------------------------------------")
-
-            input_formats.append(f" - {tool.name}\n \t* " + "\n\t* ".join(params))
+            input_formats.append(f" - {self.sanitize_tool_name(tool.name)}\n \t* " + "\n\t* ".join(params))
         return "\n".join(input_formats)
 
     def generate_structured_output_schemas(self):
-        tool_names = [tool.name for tool in self.tools]
+        tool_names = [self.sanitize_tool_name(tool.name) for tool in self.tools]
+
         schema = {
             "type": "json_schema",
             "json_schema": {
@@ -532,7 +530,7 @@ class ReActAgent(Agent):
                 "type": "function",
                 "strict": True,
                 "function": {
-                    "name": tool.name,
+                    "name": self.sanitize_tool_name(tool.name),
                     "description": tool.description[:1024],  # Expected a string with maximum length 1024
                     "parameters": {
                         "type": "object",

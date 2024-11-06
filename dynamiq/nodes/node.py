@@ -1,5 +1,4 @@
 import inspect
-import re
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
@@ -9,7 +8,7 @@ from queue import Empty
 from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler
@@ -226,13 +225,6 @@ class Node(BaseModel, Runnable, ABC):
             self.init_components()
 
         self._output_references = NodeOutputReferences(node=self)
-
-    @field_validator("name")
-    def sanitize_name(s: str):
-        """Sanitize Node name to follow [^a-zA-Z0-9_-]."""
-        s = s.replace(" ", "-")
-        sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", s)
-        return sanitized
 
     @computed_field
     @cached_property
