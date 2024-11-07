@@ -1,28 +1,25 @@
+x-base-app-test: &base-app-test
+  image: dynamiq-app:${IMAGE_TAG:-local}
+  build:
+    target: develop
+  volumes:
+    - ./:/app
+
 services:
   dynamiq-app:
-    image: dynamiq-app:${IMAGE_TAG:-local}
-    build:
-      target: develop
-    volumes:
-      - ./:/app
+    # Caching target to avoid cache duplication
+    <<: *base-app-test
 
-  dynamiq-app-test:
-    image: dynamiq-app:${IMAGE_TAG:-local}
-    build:
-      target: develop
+  dynamiq-app-test: &app-test
+    <<: *base-app-test
     entrypoint: ["make", "test"]
     env_file:
       - .env
-    volumes:
-      - ./:/app
 
   dynamiq-app-test-cov:
-    image: dynamiq-app:${IMAGE_TAG:-local}
-    build:
-      target: develop
+    <<: *app-test
     entrypoint: ["make", "test-cov"]
     env_file:
       - .env
     volumes:
-      - ./:/app
       - ./reports:/app/reports:wr
