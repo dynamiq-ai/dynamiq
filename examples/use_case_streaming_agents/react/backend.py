@@ -1,5 +1,3 @@
-import os
-
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import ScaleSerp
 from dynamiq.memory import Memory
