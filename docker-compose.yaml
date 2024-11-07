@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   dynamiq-app:
     image: dynamiq-app:${IMAGE_TAG:-local}
