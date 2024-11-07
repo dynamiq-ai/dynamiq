@@ -12,14 +12,14 @@ services:
     # Caching target to avoid cache duplication
     <<: *base-app-test
 
-  dynamiq-app-test:
+  dynamiq-app-test: &app-test
     <<: *base-app-test
     entrypoint: ["make", "test"]
     env_file:
       - .env
 
   dynamiq-app-test-cov:
-    <<: *base-app-test
+    <<: *app-test
     entrypoint: ["make", "test-cov"]
     env_file:
       - .env
