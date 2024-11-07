@@ -4,24 +4,6 @@ from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator, State
 
 
-class OrchestratorError(Exception):
-    """Base exception for AdaptiveOrchestrator errors."""
-
-    pass
-
-
-class ActionParseError(OrchestratorError):
-    """Raised when there's an error parsing the LLM action."""
-
-    pass
-
-
-class AgentNotFoundError(OrchestratorError):
-    """Raised when a specified agent is not found."""
-
-    pass
-
-
 class AdaptiveOrchestrator(GraphOrchestrator):
     """
     Orchestrates the execution of complex tasks using multiple specialized agents.
