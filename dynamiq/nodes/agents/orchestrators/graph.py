@@ -11,7 +11,6 @@ from dynamiq.utils.logger import logger
 
 class OrchestratorError(Exception):
     """Base exception for AdaptiveOrchestrator errors."""
-
     pass
 
 
@@ -158,7 +157,7 @@ class GraphOrchestrator(Node):
             run_depends=self._run_depends,
             **kwargs,
         )
-        # self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+        self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
             logger.error(f"GraphOrchestrator {self.id}: Error generating final answer")
@@ -225,7 +224,7 @@ class GraphOrchestrator(Node):
                     run_depends=self._run_depends,
                     **kwargs,
                 )
-                # self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+                self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
                 if manager_result.status != RunnableStatus.SUCCESS:
                     logger.error(f"GraphOrchestrator {self.id}: Error generating actions for state.")
@@ -289,11 +288,7 @@ class GraphOrchestrator(Node):
             action (Action): The action containing the delegation command and details.
         """
 
-        # with ThreadPoolExecutor() as executor:
-        #     futures = [executor.submit(do_something, i) for i in range(10)]
-
         for task in state.tasks:
-            # Create actions where manager will determine input for each agent/tool
             if isinstance(task, Agent):
 
                 manager_result = self.manager.run(
@@ -306,7 +301,7 @@ class GraphOrchestrator(Node):
                     run_depends=self._run_depends,
                     **kwargs,
                 )
-                # self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+                self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
                 if manager_result.status != RunnableStatus.SUCCESS:
                     logger.error(f"GraphOrchestrator {self.id}: Error generating actions for state.")
@@ -329,7 +324,7 @@ class GraphOrchestrator(Node):
                     )
 
                     output = result.output.get("content")
-                    # self._run_depends = [NodeDependency(node=agent).to_dict()]
+                    self._run_depends = [NodeDependency(node=task).to_dict()]
                     if result.status != RunnableStatus.SUCCESS:
                         logger.error(f"GraphOrchestrator {self.id}: Error executing Agent {task.name}")
                         raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {output}")

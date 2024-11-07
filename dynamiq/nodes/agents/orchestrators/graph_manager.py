@@ -9,11 +9,11 @@ Available states:
 
 Respond with a JSON object representing your next action. Use one of the following formats:
 
-For delegation:
-"command": "delegate", "state": "<state_name>", "task": "<task_description>"
+For choosing next state:
+"state": "<state_name>"
 
 Provide your response in JSON format only, without any additional text.
-For the final answe r this means providing the final answer as the value for the "answer" key. But text in answer keep as it is.
+For the final answer this means providing the final answer as the value for the "answer" key. But text in answer keep as it is.
 {chat_history}
 """  # noqa: E501
 
