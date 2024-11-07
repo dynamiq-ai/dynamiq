@@ -266,7 +266,8 @@ class LLMEvaluator:
         return (
             f"Instructions:\n"
             f"{self.instructions}\n\n"
-            f"Generate the response in JSON format with the following keys:\n"
+            f"Generate the response in JSON format omit extra keys and markdown syntax elements, "
+            f"and include the following keys:\n"
             f"{json.dumps(self.outputs)}\n"
             f"Consider the instructions and the examples below to determine those values.\n\n"
             f"Examples:\n"
