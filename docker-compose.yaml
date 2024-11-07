@@ -8,15 +8,15 @@ x-base-app-test: &base-app-test
     - ./:/app
 
 services:
-  dynamiq-app:
+  dynamiq-app: &dynamiq-app
     # Caching target to avoid cache duplication
     <<: *base-app-test
 
-#  dynamiq-app-test:
-#    <<: *base-app-test
-#    entrypoint: ["make", "test"]
-#    env_file:
-#      - .env
+  dynamiq-app-test:
+    <<: *dynamiq-app
+    entrypoint: ["make", "test"]
+    env_file:
+      - .env
 
 #  dynamiq-app-test-cov:
 #    <<: *app-test
