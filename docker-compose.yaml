@@ -1,26 +1,30 @@
 version: "3.8"
 
-x-base-app-test: &base-app-test
-  image: dynamiq-app:${IMAGE_TAG:-local}
-  build:
-    target: develop
-  volumes:
-    - ./:/app
-
 services:
   dynamiq-app:
-    <<: *base-app-test
+    image: dynamiq-app:${IMAGE_TAG:-local}
+    build:
+      target: develop
+    volumes:
+      - ./:/app
 
   dynamiq-app-test:
-    <<: *base-app-test
+    image: dynamiq-app:${IMAGE_TAG:-local}
+    build:
+      target: develop
     entrypoint: ["make", "test"]
     env_file:
       - .env
+    volumes:
+      - ./:/app
 
   dynamiq-app-test-cov:
-    <<: *base-app-test
+    image: dynamiq-app:${IMAGE_TAG:-local}
+    build:
+      target: develop
     entrypoint: ["make", "test-cov"]
     env_file:
       - .env
     volumes:
+      - ./:/app
       - ./reports:/app/reports:wr
