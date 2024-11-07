@@ -20,7 +20,7 @@ from dynamiq.nodes.agents.exceptions import (
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.types.streaming import StreamingConfig
+from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from dynamiq.utils.logger import logger
 
 
@@ -58,6 +58,9 @@ class Agent(Node):
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     streaming: StreamingConfig = StreamingConfig()
+    streaming_mode: StreamingMode = Field(
+        default=StreamingMode.NONE, description="Controls what content should be streamed during execution"
+    )
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
     name: str = "AI Agent"
@@ -201,9 +204,7 @@ class Agent(Node):
 
     def _run_llm(self, prompt: str, config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and returns the result."""
-        logger.debug(
-            f"Agent {self.name} - {self.id}: Running LLM with prompt:\n{prompt}"
-        )
+        logger.debug(f"Agent {self.name} - {self.id}: Running LLM with prompt:\n{prompt}")
         try:
             # Set streaming configuration
             if self.streaming.enabled:
@@ -219,21 +220,11 @@ class Agent(Node):
 
             self._run_depends = [NodeDependency(node=self.llm).to_dict()]
 
-            # Handle streaming response
             if self.streaming.enabled and hasattr(llm_result.output, "content_generator"):
-                accumulated_content = ""
-                for chunk in llm_result.output["content_generator"]:
-                    accumulated_content += chunk
-                    # Stream the chunk
-                    if config and config.callbacks:
-                        self.run_on_node_execute_stream(
-                            callbacks=config.callbacks, chunk={"content": chunk, "type": "llm_response"}, **kwargs
-                        )
-                return accumulated_content
+                # Stream response based on the mode
+                return self.stream_llm_response(llm_result.output, config, **kwargs)
 
-            logger.debug(
-                f"Agent {self.name} - {self.id}: RAW LLM result:\n{llm_result.output['content']}"
-            )
+            logger.debug(f"Agent {self.name} - {self.id}: RAW LLM result:\n{llm_result.output['content']}")
 
             if llm_result.status != RunnableStatus.SUCCESS:
                 raise ValueError("LLM execution failed")
@@ -241,10 +232,28 @@ class Agent(Node):
             return llm_result.output["content"]
 
         except Exception as e:
-            logger.error(
-                f"Agent {self.name} - {self.id}: LLM execution failed: {str(e)}"
-            )
+            logger.error(f"Agent {self.name} - {self.id}: LLM execution failed: {str(e)}")
             raise
+
+    def stream_llm_response(self, llm_output, config, **kwargs):
+        """
+        Stream LLM response based on streaming mode.
+        """
+        accumulated_content = ""
+
+        if self.streaming_mode == StreamingMode.ALL:
+            for chunk in llm_output["content_generator"]:
+                accumulated_content += chunk
+                if config and config.callbacks:
+                    self.run_on_node_execute_stream(
+                        callbacks=config.callbacks, chunk={"content": chunk, "type": "llm_response"}, **kwargs
+                    )
+            return accumulated_content
+
+        elif self.streaming_mode == StreamingMode.FINAL:
+            return "".join(llm_output["content_generator"])
+
+        return llm_output.get("content", "")
 
     def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the agent with the generated prompt and handles exceptions."""

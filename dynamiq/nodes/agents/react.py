@@ -304,12 +304,9 @@ class ReActAgent(Agent):
         """Runs the LLM with a given prompt and returns the result."""
         logger.debug(f"Agent {self.name} - {self.id}: Running LLM with prompt:\n{prompt}")
         try:
-            # Set streaming configuration based on mode
-            if self.streaming.enabled and self.streaming_mode == StreamingMode.ALL:
-                self.llm.streaming = self.streaming
-            else:
-                self.llm.streaming = StreamingConfig(enabled=False)
-
+            self.llm.streaming = StreamingConfig(
+                enabled=self.streaming.enabled and self.streaming_mode == StreamingMode.ALL
+            )
             llm_result = self.llm.run(
                 input_data={},
                 config=config,
@@ -317,17 +314,15 @@ class ReActAgent(Agent):
                 run_depends=self._run_depends,
                 **kwargs,
             )
-
             self._run_depends = [NodeDependency(node=self.llm).to_dict()]
 
-            # Handle streaming response
+            # Handle streaming if enabled and return accumulated content
             if self.streaming.enabled and hasattr(llm_result.output, "content_generator"):
                 accumulated_content = ""
                 for chunk in llm_result.output["content_generator"]:
                     accumulated_content += chunk
-                    # Stream the chunk only in ALL mode
                     if self.streaming_mode == StreamingMode.ALL:
-                        self.stream_chunk(chunk_type="llm_response", content=chunk, config=config, **kwargs)
+                        self.stream_chunk("llm_response", chunk, config, **kwargs)
                 return accumulated_content
 
             if llm_result.status != RunnableStatus.SUCCESS:
@@ -340,25 +335,10 @@ class ReActAgent(Agent):
             raise
 
     def stream_chunk(self, chunk_type: str, content: Any, config: RunnableConfig, **kwargs):
-        """Stream content with unified format."""
-        if not self.streaming.enabled:
-            return
-
-        # Handle different streaming modes
-        if self.streaming_mode == StreamingMode.NONE:
-            return
-
-        if self.streaming_mode == StreamingMode.FINAL:
-            if chunk_type != "final_answer":
-                return
-
-        if self.streaming_mode == StreamingMode.ALL:
-            # Stream everything
-            pass
-
-        chunk = {"type": chunk_type, "content": content, **kwargs.get("additional_data", {})}
-
-        self.run_on_node_execute_stream(callbacks=config.callbacks, chunk={"content": chunk}, **kwargs)
+        """Streams content with a unified format if streaming is enabled."""
+        if self.streaming.enabled and self.streaming_mode != StreamingMode.NONE:
+            chunk = {"type": chunk_type, "content": content, **kwargs.get("additional_data", {})}
+            self.run_on_node_execute_stream(callbacks=config.callbacks, chunk={"content": chunk}, **kwargs)
 
     def tracing_final(self, loop_num, final_answer, config, kwargs):
         self._intermediate_steps[loop_num]["final_answer"] = final_answer
@@ -420,9 +400,7 @@ class ReActAgent(Agent):
                 llm_result = self.llm.run(
                     input_data={},
                     config=config,
-                    prompt=Prompt(
-                        messages=[Message(role="user", content=formatted_prompt)]
-                    ),
+                    prompt=Prompt(messages=[Message(role="user", content=formatted_prompt)]),
                     run_depends=self._run_depends,
                     schema=schema,
                     inference_mode=self.inference_mode,

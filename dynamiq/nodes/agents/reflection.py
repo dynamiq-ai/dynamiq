@@ -13,7 +13,6 @@ REFLECTION_REFLECT_PROMPT: str = (
     "You only need to generate the minimum text that will help you generate the better output. "
     "Don't be verbose while thinking. Finally, you will generate an output based on the previous thinking. "
     "This is the format to follow:"
-    "```"
     "<thinking>"
     "Here you will think about the user's request"
     "<reflection>"
@@ -26,7 +25,6 @@ REFLECTION_REFLECT_PROMPT: str = (
     "<output>"
     "Here you will generate the output based on the thinking"
     "</output>"
-    "```"
     "Always use these tags in your responses. Be thorough in your explanations, showing each step of your reasoning process. "  # noqa: E501
     "Aim to be precise and logical in your approach, and don't hesitate to break down complex problems into simpler components. "  # noqa: E501
     "Your tone should be analytical and slightly formal, focusing on clear communication of your thought process. "
