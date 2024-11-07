@@ -106,7 +106,7 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
     class FunctionToolFromDecorator(FunctionTool[T]):
         name: str = Field(default=func.__name__)
         description: str = Field(
-            default=func.__doc__ + "\nFunction signature:" + str(inspect.signature(func))
+            default=(func.__doc__ or "") + "\nFunction signature:" + str(inspect.signature(func))
             or f"A tool for executing the {func.__name__} function with signature: {str(inspect.signature(func))}"
         )
         _original_func = staticmethod(func)

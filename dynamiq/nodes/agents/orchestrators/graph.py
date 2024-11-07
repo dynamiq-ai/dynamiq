@@ -25,7 +25,7 @@ class State(BaseModel):
     name: str
     description: str = ""
     connected: list["str"] = []
-    tasks: list[Node] = []
+    tasks: list[Node | Callable] = []
     branch: Callable = None
 
 
@@ -35,10 +35,6 @@ END = "END"
 
 START_STATE = State(name=START, description="Initial state")
 END_STATE = State(name=END, description="Final state")
-
-
-class BaseContext(BaseModel):
-    history: list = []
 
 
 class GraphOrchestrator(Node):
@@ -61,6 +57,7 @@ class GraphOrchestrator(Node):
     initial_state: str = START
     states: dict[str, State] = {START: START_STATE, END: END_STATE}
     context: dict[str, Any] = {"history": []}
+    objective: str | None = None
 
     def __init__(self, **kwargs):
         """
@@ -95,7 +92,7 @@ class GraphOrchestrator(Node):
                 raise ValueError(f"State with name {state_name} is not present")
 
     def add_conditional_edge(self, source: str, destinations: list[str], path_func: Callable) -> None:
-        self.validate_states(destinations + source)
+        self.validate_states(destinations + [source])
         self.states[source].connected = destinations
         self.states[source].branch = path_func
 
@@ -350,7 +347,7 @@ class GraphOrchestrator(Node):
                 }
             )
 
-    def execute(self, input_data: Any, config: RunnableConfig | None = None, **kwargs) -> dict:
+    def execute(self, input_data: dict[Any], config: RunnableConfig | None = None, **kwargs) -> dict:
         """
         Execute the orchestration process with the given input data and configuration.
 
@@ -365,6 +362,8 @@ class GraphOrchestrator(Node):
         Raises:
             OrchestratorError: If an error occurs during the orchestration process.
         """
+        self.context = self.context | input_data
+
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)

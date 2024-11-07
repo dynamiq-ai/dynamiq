@@ -163,7 +163,7 @@ REACT_BLOCK_REQUEST = "User request: {input}"
 REACT_BLOCK_CONTEXT = "Below is the conversation: {context}"
 
 
-def function_calling_schema(tool_names):
+def function_calling_schema(tool_names) -> list[dict]:
     return [
         {
             "type": "function",
@@ -212,7 +212,7 @@ def function_calling_schema(tool_names):
     ]
 
 
-def structured_output_schema(tool_names):
+def structured_output_schema(tool_names) -> dict:
     return {
         "type": "json_schema",
         "json_schema": {
