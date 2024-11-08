@@ -2,6 +2,7 @@ import re
 
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 REFLECTION_REFLECT_PROMPT: str = (
@@ -77,6 +78,16 @@ class ReflectionAgent(Agent):
             )
             result = self._run_llm(formatted_prompt, config=config, **kwargs)
             output_content = self.extract_output_content(result)
+            if self.streaming.enabled:
+                if self.streaming_mode == StreamingMode.FINAL:
+                    logger.debug("Streaming mode set to FINAL. Returning final output.")
+                    if not output_content:
+                        logger.warning("No output content extracted.")
+                        return ""
+                    return self.stream_chunk(output_content[-1], config=config, **kwargs)
+                elif self.streaming_mode == StreamingMode.ALL:
+                    logger.debug("Streaming mode set to ALL. Returning all output.")
+                    return self.stream_chunk(result, config=config, **kwargs)
 
             if not output_content:
                 logger.warning("No output content extracted.")

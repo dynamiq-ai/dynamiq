@@ -38,10 +38,10 @@ def generate_agent_response(agent: SimpleAgent, user_input: str):
         )
 
         for chunk in streaming_handler:
-            content = chunk.data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+            content = chunk.data
             if content:
-                response_text += content
-                yield content
+                response_text += " " + content
+                yield " " + content
     else:
         result = agent.run({"input": user_input})
         response_text = result.output.get("content", "")
