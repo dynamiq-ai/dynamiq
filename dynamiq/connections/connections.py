@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from chromadb import ClientAPI as ChromaClient
     from openai import OpenAI as OpenAIClient
     from pinecone import Pinecone as PineconeClient
+    from pymilvus import MilvusClient
     from qdrant_client import QdrantClient
     from weaviate import WeaviateClient
 
@@ -54,6 +55,7 @@ class ConnectionType(str, enum.Enum):
     AI21 = "AI21"
     Qdrant = "Qdrant"
     SambaNova = "SambaNova"
+    Milvus = "Milvus"
 
 
 class HTTPMethod(str, enum.Enum):
@@ -852,3 +854,33 @@ class SambaNova(BaseApiKeyConnection):
 
     def connect(self):
         pass
+
+
+class Milvus(BaseApiKeyConnection):
+    """
+    Represents a connection to the Milvus service.
+
+    Attributes:
+        type (Literal[ConnectionType.Milvus]): The type of connection, always 'Milvus'.
+        url (str): The URL of the Milvus service.
+            Defaults to the environment variable 'MILVUS_URL'.
+        api_key (str): The API key for the Qdrant service.
+            Defaults to the environment variable 'MILVUS_TOKEN'.
+    """
+
+    type: Literal[ConnectionType.Milvus] = ConnectionType.Milvus
+    url: str = Field(default_factory=partial(get_env_var, "MILVUS_URL"))
+    api_key: str = Field(default_factory=partial(get_env_var, "MILVUS_TOKEN"))
+    db_name: str = Field(default_factory=partial(get_env_var, "MILVUS_DATABASE"))
+
+    def connect(self) -> "MilvusClient":
+        from pymilvus import MilvusClient, connections
+
+        connections.connect(url=self.url, api_key=self.api_key, db_name=self.db_name)
+        milvus_client = MilvusClient(
+            uri=self.url,
+            token=self.api_key,
+            db_name=self.db_name,
+        )
+
+        return milvus_client
