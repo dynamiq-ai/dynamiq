@@ -2,6 +2,7 @@ import json
 import re
 from typing import Any
 
+from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
@@ -227,6 +228,16 @@ class ReActAgent(Agent):
     @model_validator(mode="after")
     def validate_inference_mode(self):
         """Validate whether specified model can be inferenced in provided mode."""
+        match self.inference_mode:
+            case InferenceMode.FUNCTION_CALLING:
+                if not supports_function_calling(model=self.llm.model):
+                    raise ValueError(f"Model {self.llm.model} does not support function calling")
+
+            case InferenceMode.STRUCTURED_OUTPUT:
+                params = get_supported_openai_params(model=self.llm.model)
+                if "response_format" not in params:
+                    raise ValueError(f"Model {self.llm.model} does not support structured output")
+
         return self
 
     def parse_xml_content(self, text: str, tag: str) -> str:
