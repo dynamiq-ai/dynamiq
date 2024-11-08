@@ -54,6 +54,7 @@ class ConnectionType(str, enum.Enum):
     AI21 = "AI21"
     Qdrant = "Qdrant"
     SambaNova = "SambaNova"
+    Perplexity = "Perplexity"
 
 
 class HTTPMethod(str, enum.Enum):
@@ -849,6 +850,14 @@ class AI21(BaseApiKeyConnection):
 class SambaNova(BaseApiKeyConnection):
     type: Literal[ConnectionType.SambaNova] = ConnectionType.SambaNova
     api_key: str = Field(default_factory=partial(get_env_var, "SAMBANOVA_API_KEY"))
+
+    def connect(self):
+        pass
+
+
+class Perplexity(BaseApiKeyConnection):
+    type: Literal[ConnectionType.Replicate] = ConnectionType.Replicate
+    api_key: str = Field(default_factory=partial(get_env_var, "PERPLEXITYAI_API_KEY"))
 
     def connect(self):
         pass
