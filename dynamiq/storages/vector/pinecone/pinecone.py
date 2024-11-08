@@ -230,7 +230,7 @@ class PineconeVectorStore:
             filters (dict[str, Any]): Filters to select documents to delete.
             top_k (int): Maximum number of documents to retrieve for deletion. Defaults to 1000.
         """
-        if self.index_type == PineconeIndexType.SERVERLESS:
+        if self.index_type is None or self.index_type == PineconeIndexType.SERVERLESS:
             """
             Serverless and Starter indexes do not support deleting with metadata filtering.
             """
