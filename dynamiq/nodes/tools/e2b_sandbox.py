@@ -68,6 +68,28 @@ def generate_file_description(file: bytes | io.BytesIO, length: int = 20) -> str
     return f"File starting with: {file_content.hex()}"
 
 
+def handle_file_upload(
+    files,
+):
+    """Handles file uploading with additional metadata."""
+    files_data = []
+    for file in files:
+        if not isinstance(file, bytes | io.BytesIO):
+            raise ValueError(f"Error: Invalid file data type: {type(file)}. Expected bytes or BytesIO.")
+
+        file_name = getattr(file, "name", generate_fallback_filename(file))
+        description = getattr(file, "description", generate_file_description(file))
+        files_data.append(
+            FileData(
+                data=file.getvalue() if isinstance(file, io.BytesIO) else file,
+                name=file_name,
+                description=description,
+            )
+        )
+
+    return files_data
+
+
 class FileData(BaseModel):
     data: bytes
     name: str
@@ -93,27 +115,11 @@ class E2BInterpreterInputSchema(BaseModel):
         return self
 
     @field_validator("files", mode="before")
-    def handle_file_upload(
+    def files_validator(
         cls,
         files,
     ):
-        """Handles file uploading with additional metadata."""
-        files_data = []
-        for file in files:
-            if not isinstance(file, bytes | io.BytesIO):
-                raise ValueError(f"Error: Invalid file data type: {type(file)}. Expected bytes or BytesIO.")
-
-            file_name = getattr(file, "name", generate_fallback_filename(file))
-            description = getattr(file, "description", generate_file_description(file))
-            files_data.append(
-                FileData(
-                    data=file.getvalue() if isinstance(file, io.BytesIO) else file,
-                    name=file_name,
-                    description=description,
-                )
-            )
-
-        return files_data
+        return handle_file_upload(files)
 
 
 class E2BInterpreterTool(ConnectionNode):
@@ -140,11 +146,18 @@ class E2BInterpreterTool(ConnectionNode):
     description: str = DESCRIPTION
     connection: E2BConnection
     installed_packages: list = []
-    files: list[io.BytesIO | bytes] | None = None
+    files: list[FileData] | None = None
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
     is_files_allowed: bool = True
     input_schema: ClassVar[type[E2BInterpreterInputSchema]] = E2BInterpreterInputSchema
+
+    @field_validator("files", mode="before")
+    def files_validator(
+        cls,
+        files,
+    ):
+        return handle_file_upload(files)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -185,7 +198,6 @@ class E2BInterpreterTool(ConnectionNode):
         self._install_default_packages(self._sandbox)
         if self.files:
             self._upload_files(files=self.files, sandbox=self._sandbox)
-            self._update_description()
 
     def _install_default_packages(self, sandbox: Sandbox) -> None:
         """Installs the default packages in the specified sandbox."""
@@ -203,7 +215,6 @@ class E2BInterpreterTool(ConnectionNode):
         """Uploads multiple files to the sandbox and returns details for each file."""
         upload_details = []
         for file in files:
-
             uploaded_path = self._upload_file(file, sandbox)
             upload_details.append(
                 {
@@ -288,7 +299,7 @@ class E2BInterpreterTool(ConnectionNode):
             self._install_default_packages(sandbox)
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
-                self._update_description()
+
         try:
             content = {}
             if files := input_data.files:

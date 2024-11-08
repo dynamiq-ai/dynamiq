@@ -335,12 +335,12 @@ class Agent(Node):
     @property
     def tool_names(self) -> str:
         """Returns a comma-separated list of tool names available to the agent."""
-        return ",".join([self.sanitize_tool_name(tool.name) for tool in self.tools]) if self.tools else ""
+        return ",".join([self.sanitize_tool_name(tool.name) for tool in self.tools])
 
     @property
     def tool_by_names(self) -> dict[str, Node]:
         """Returns a dictionary mapping tool names to their corresponding Node objects."""
-        return {self.sanitize_tool_name(tool.name): tool for tool in self.tools} if self.tools else {}
+        return {self.sanitize_tool_name(tool.name): tool for tool in self.tools}
 
     def reset_run_state(self):
         """Resets the agent's run state."""

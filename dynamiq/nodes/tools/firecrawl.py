@@ -31,7 +31,7 @@ class ExtractorOptions(BaseModel):
 
 
 class FirecrawlInputSchema(BaseModel):
-    url: str = Field(..., description="Parameter to specify the url of the page to be scraped.")
+    url: str = Field(default="", description="Parameter to specify the url of the page to be scraped.")
 
 
 class FirecrawlTool(ConnectionNode):

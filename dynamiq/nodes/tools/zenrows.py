@@ -10,7 +10,7 @@ from dynamiq.utils.logger import logger
 
 
 class ZenRowsInputSchema(BaseModel):
-    url: str = Field(..., description="Parameter to provide a url of the page to scrape.")
+    url: str = Field(default="", description="Parameter to provide a url of the page to scrape.")
 
 
 class ZenRowsTool(ConnectionNode):
@@ -27,6 +27,7 @@ class ZenRowsTool(ConnectionNode):
         "You can use this tool to scrape the content of a web page."
     )
     connection: ZenRows
+    url: str | None = None
     markdown_response: bool = Field(
         default=True,
         description="If True, the content will be parsed as Markdown instead of HTML.",
