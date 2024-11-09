@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from dynamiq.nodes.node import NodeDependency
@@ -9,14 +9,14 @@ class NodeException(Exception):
     Base exception class for node-related errors.
 
     Args:
-        failed_depend (NodeDependency): The dependency that caused the exception.
+        failed_depend (NodeDependency, optional): The dependency that caused the exception. Defaults to None.
         message (str, optional): Additional error message. Defaults to None.
 
     Attributes:
         failed_depend (NodeDependency): The dependency that caused the exception.
     """
 
-    def __init__(self, failed_depend: "NodeDependency", message=None):
+    def __init__(self, failed_depend: Optional["NodeDependency"] = None, message=None):
         super().__init__(message)
         self.failed_depend = failed_depend
 
@@ -44,6 +44,16 @@ class NodeSkippedException(NodeException):
 class NodeConditionFailedException(NodeException):
     """
     Exception raised when a node's condition fails to be met.
+
+    This exception is a subclass of NodeException and inherits its attributes and methods.
+    """
+
+    pass
+
+
+class NodeConditionSkippedException(NodeException):
+    """
+    Exception raised when a node's condition skipped.
 
     This exception is a subclass of NodeException and inherits its attributes and methods.
     """

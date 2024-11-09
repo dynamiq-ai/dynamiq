@@ -1,6 +1,6 @@
 connections:
   openai-conn:  # id
-    type: OpenAI
+    type: dynamiq.connections.OpenAI
     api_key: ${oc.env:OPENAI_API_KEY}
 
 prompt_template: |

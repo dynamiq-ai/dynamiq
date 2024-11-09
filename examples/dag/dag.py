@@ -110,7 +110,7 @@ ANTHROPIC_2_NODE = Anthropic(
     connection=ANTHROPIC_CONNECTION,
     input_transformer=InputTransformer(
         selector={
-            "ai": f"${[OPENAI_NODE.id]}.content",
+            "ai": f"$.{[OPENAI_NODE.id]}.content",
             "ds": f"$.{[OPENAI_2_NODE.id]}.content",
             "llm": f"$.{[ANTHROPIC_NODE.id]}.content",
         },
@@ -120,7 +120,7 @@ ANTHROPIC_2_NODE = Anthropic(
             prompts.Message(
                 role="user",
                 content=(
-                    "Please simplify that information for 10 years kids:\n"
+                    "Please simplify that information for 10 years old kids:\n"
                     "- {{ds}}\n\n"
                     "- {{llm}}\n\n"
                     "- {{ai}}\n\n"

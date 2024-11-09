@@ -1,13 +1,14 @@
+import inspect
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
-from typing import Any, Union
+from typing import Any, Callable, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler
@@ -15,6 +16,7 @@ from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.exceptions import (
     NodeConditionFailedException,
+    NodeConditionSkippedException,
     NodeException,
     NodeFailedException,
     NodeSkippedException,
@@ -148,6 +150,34 @@ class NodeMetadata(BaseModel):
     label: str | None = None
 
 
+class NodeOutputReference(BaseModel):
+    """
+    Represents a reference to a node output.
+
+    Attributes:
+        node (Node): The node to reference.
+        output_key (str): Key for the output.
+    """
+
+    node: "Node"
+    output_key: str
+
+
+class NodeOutputReferences:
+    """
+    Provides output references for a node.
+
+    Attributes:
+        node (Node): The node to provide output references for.
+    """
+
+    def __init__(self, node: "Node"):
+        self.node = node
+
+    def __getattr__(self, key: Any):
+        return NodeOutputReference(node=self.node, output_key=key)
+
+
 class Node(BaseModel, Runnable, ABC):
     """
     Abstract base class for all nodes in the workflow.
@@ -165,6 +195,7 @@ class Node(BaseModel, Runnable, ABC):
         metadata (NodeMetadata | None): Optional metadata for the node.
         is_postponed_component_init (bool): Whether component initialization is postponed.
         is_optimized_for_agents (bool): Whether to optimize output for agents. By default is set to False.
+        supports_files (bool): Whether the node has access to files. By default is set to False.
     """
     id: str = Field(default_factory=generate_uuid)
     name: str | None = None
@@ -172,6 +203,7 @@ class Node(BaseModel, Runnable, ABC):
     group: NodeGroup
     error_handling: ErrorHandling = ErrorHandling()
     input_transformer: InputTransformer = InputTransformer()
+    input_mapping: dict[str, Any] = {}
     output_transformer: OutputTransformer = OutputTransformer()
     caching: CachingConfig = CachingConfig()
     streaming: StreamingConfig = StreamingConfig()
@@ -180,6 +212,9 @@ class Node(BaseModel, Runnable, ABC):
 
     is_postponed_component_init: bool = False
     is_optimized_for_agents: bool = False
+    is_files_allowed: bool = False
+
+    _output_references: NodeOutputReferences = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -188,14 +223,15 @@ class Node(BaseModel, Runnable, ABC):
         if not self.is_postponed_component_init:
             self.init_components()
 
+        self._output_references = NodeOutputReferences(node=self)
+
     @computed_field
     @cached_property
     def type(self) -> str:
         return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
-    def _validate_dependency_status(
-        self, depend: NodeDependency, depends_result: dict[str, RunnableResult]
-    ):
+    @staticmethod
+    def _validate_dependency_status(depend: NodeDependency, depends_result: dict[str, RunnableResult]):
         """
         Validate the status of a dependency.
 
@@ -224,9 +260,8 @@ class Node(BaseModel, Runnable, ABC):
                 failed_depend=depend, message=f"Dependency {depend.node.id}: skipped"
             )
 
-    def _validate_dependency_condition(
-        self, depend: NodeDependency, depends_result: dict[str, RunnableResult]
-    ):
+    @staticmethod
+    def _validate_dependency_condition(depend: NodeDependency, depends_result: dict[str, RunnableResult]):
         """
         Validate the condition of a dependency.
 
@@ -236,17 +271,46 @@ class Node(BaseModel, Runnable, ABC):
 
         Raises:
             NodeConditionFailedException: If the dependency condition is not met.
+            NodeConditionSkippedException: If the dependency condition is skipped.
         """
-        if (dep_output_data := depends_result.get(depend.node.id)) and isinstance(
-            dep_output_data.output, dict
+        if (
+            (dep_output_data := depends_result.get(depend.node.id))
+            and (isinstance(dep_output_data.output, dict))
+            and (dep_condition_result := dep_output_data.output.get(depend.option))
         ):
-            if (
-                dep_condition_data := dep_output_data.output.get(depend.option)
-            ) and dep_condition_data.status == RunnableStatus.FAILURE:
+            if dep_condition_result.status == RunnableStatus.FAILURE:
                 raise NodeConditionFailedException(
                     failed_depend=depend,
                     message=f"Dependency {depend.node.id} condition {depend.option}: result is false",
                 )
+            if dep_condition_result.status == RunnableStatus.SKIP:
+                raise NodeConditionSkippedException(
+                    failed_depend=depend,
+                    message=f"Dependency {depend.node.id} condition {depend.option}: skipped",
+                )
+
+    @staticmethod
+    def _validate_input_mapping_value_func(func: Callable):
+        """
+        Validate input mapping value function.
+
+        Args:
+            func (Callable): Input mapping value function.
+
+        Raises:
+            ValueError: If the function does not accept 'inputs' and 'outputs' or **kwargs.
+        """
+        params = inspect.signature(func).parameters
+
+        # Check if the function accepts the at least 'inputs' and 'outputs' parameters
+        if len(params) >= 2:
+            return
+
+        # Check if the function accepts **kwargs
+        elif params and list(params.values())[0].kind == inspect.Parameter.VAR_KEYWORD:
+            return
+
+        raise ValueError(f"Input function '{func.__name__}' must accept parameters 'inputs' and 'outputs' or **kwargs.")
 
     def validate_depends(self, depends_result):
         """
@@ -264,6 +328,48 @@ class Node(BaseModel, Runnable, ABC):
                 self._validate_dependency_condition(
                     depend=dep, depends_result=depends_result
                 )
+
+    def transform_input(self, input_data: dict, depends_result: dict[Any, RunnableResult]) -> dict:
+        """
+        Transform input data for the node.
+
+        Args:
+            input_data (dict): Input data for the node.
+            depends_result (dict): Results of dependent nodes.
+
+        Raises:
+            NodeException: If a dependency result is missing or input mapping fails.
+
+        Returns:
+            dict: Transformed input data.
+        """
+        # Apply input transformer
+        if self.input_transformer.path or self.input_transformer.selector:
+            depends_result_as_dict = {k: result.to_depend_dict() for k, result in depends_result.items()}
+            inputs = self.transform(input_data | depends_result_as_dict, self.input_transformer, self.id)
+        else:
+            inputs = input_data | {k: result.to_tracing_depend_dict() for k, result in depends_result.items()}
+
+        # Apply input bindings
+        for key, value in self.input_mapping.items():
+            if isinstance(value, NodeOutputReference):
+                depend_result = depends_result.get(value.node.id)
+                if not depend_result:
+                    raise NodeException(message=f"Dependency {value.node.id}: result not found.")
+                if value.output_key not in depend_result.output:
+                    raise NodeException(message=f"Dependency {value.node.id} output {value.output_key}: not found.")
+
+                inputs[key] = depend_result.output[value.output_key]
+
+            elif callable(value):
+                try:
+                    inputs[key] = value(inputs, {d_id: result.output for d_id, result in depends_result.items()})
+                except Exception:
+                    raise NodeException(message=f"Input mapping {key}: failed.")
+            else:
+                inputs[key] = value
+
+        return inputs
 
     def init_components(
         self, connection_manager: ConnectionManager = ConnectionManager()
@@ -294,18 +400,6 @@ class Node(BaseModel, Runnable, ABC):
         output = jsonpath_mapper(output, transformer.selector, node_id)
         return output
 
-    def transform_input(self, input_data: Any) -> Any:
-        """
-        Transform input data for the node.
-
-        Args:
-            input_data (Any): Input data to transform.
-
-        Returns:
-            Any: Transformed input data.
-        """
-        return self.transform(input_data, self.input_transformer, self.id)
-
     def transform_output(self, output_data: Any) -> Any:
         """
         Transform output data from the node.
@@ -325,6 +419,7 @@ class Node(BaseModel, Runnable, ABC):
             "vector_store": True,
             "connection": {"api_key": True},
             "depends": True,
+            "input_mapping": True,
         }
 
     def to_dict(self, **kwargs) -> dict:
@@ -339,6 +434,7 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs,
         )
         data["depends"] = [depend.to_dict(**kwargs) for depend in self.depends]
+        data["input_mapping"] = format_value(self.input_mapping)
         return data
 
     def run(
@@ -371,11 +467,12 @@ class Node(BaseModel, Runnable, ABC):
         if depends_result is None:
             depends_result = {}
 
-        transformed_input = input_data | {k: result.to_tracing_depend_dict() for k, result in depends_result.items()}
-
         try:
             self.validate_depends(depends_result)
         except NodeException as e:
+            transformed_input = input_data | {
+                k: result.to_tracing_depend_dict() for k, result in depends_result.items()
+            }
             skip_data = {"failed_dependency": e.failed_depend.to_dict()}
             self.run_on_node_skip(
                 callbacks=config.callbacks,
@@ -391,10 +488,7 @@ class Node(BaseModel, Runnable, ABC):
             )
 
         try:
-            if self.input_transformer.path or self.input_transformer.selector:
-                depends_result_as_dict = {k: result.to_depend_dict() for k, result in depends_result.items()}
-
-                transformed_input = self.transform_input(input_data | depends_result_as_dict)
+            transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
 
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
             cache = cache_wf_entity(
@@ -784,6 +878,65 @@ class Node(BaseModel, Runnable, ABC):
         self.streaming.event = event
         return self
 
+    @property
+    def outputs(self):
+        """
+        Provide the output references for the node.
+        """
+        return self._output_references
+
+    def inputs(self, **kwargs):
+        """
+        Add input mappings for the node.
+
+        Returns:
+            self: Enables method chaining.
+
+        Examples:
+            from dynamiq.nodes.llms import OpenAI
+
+            openai_1_node = OpenAI(...)
+            openai_2_node = OpenAI(...)
+            openai_3_node = OpenAI(...)
+
+            def merge_and_short_content(inputs: dict, outputs: dict[str, dict]):
+                return (
+                    f"- {outputs[openai_1_node.id]['content'][:200]} \n - {outputs[openai_2_node.id]['content'][:200]}"
+                )
+
+            openai_4_node = (
+                OpenAI(
+                    ...
+                    prompt=prompts.Prompt(
+                        messages=[
+                            prompts.Message(
+                                role="user",
+                                content=(
+                                    "Please simplify that information for {{purpose}}:\n"
+                                    "{{extra_instructions}}\n"
+                                    "{{content}}\n"
+                                    "{{extra_content}}"
+                                ),
+                            )
+                        ],
+                    ),
+                )
+                .inputs(
+                    purpose="10 years old kids",
+                    extra_instructions="Please return information in readable format.",
+                    content=merge_and_short_content,
+                    extra_content=openai_3_node.outputs.content,
+                )
+                .depends_on([openai_1_node, openai_2_node, openai_3_node])
+            )
+        """
+        for key, value in kwargs.items():
+            if callable(value):
+                self._validate_input_mapping_value_func(value)
+
+            self.input_mapping[key] = value
+        return self
+
 
 class ConnectionNode(Node, ABC):
     """
@@ -827,6 +980,7 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
     def validate_connection_client(self):
         if not self.vector_store and not self.connection:
             raise ValueError("'connection' or 'vector_store' should be specified")
+        return self
 
     @property
     @abstractmethod
@@ -836,7 +990,8 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
     @property
     def vector_store_params(self):
         return self.model_dump(include=set(BaseVectorStoreParams.model_fields)) | {
-            "client": self.client
+            "connection": self.connection,
+            "client": self.client,
         }
 
     def connect_to_vector_store(self):

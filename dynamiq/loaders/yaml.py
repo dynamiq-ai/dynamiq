@@ -119,6 +119,25 @@ class WorkflowYAMLLoader:
         return connections
 
     @classmethod
+    def init_prompt(cls, prompt_init_data: dict) -> Prompt:
+        """
+        Initialize a prompt from the provided data.
+
+        Args:
+            prompt_init_data (dict): The data for the prompt.
+
+        Returns:
+            Prompt: The initialized prompt.
+
+        Raises:
+            WorkflowYAMLLoaderException: If the specified prompt is not found.
+        """
+        try:
+            return Prompt(**prompt_init_data)
+        except Exception as e:
+            raise WorkflowYAMLLoaderException(f"Prompt data is invalid. Data: {prompt_init_data}. " f"Error: {e}")
+
+    @classmethod
     def get_prompts(cls, data: dict[str, dict]) -> dict[str, Prompt]:
         """
         Get prompts from the provided data.
@@ -138,17 +157,7 @@ class WorkflowYAMLLoader:
                 raise WorkflowYAMLLoaderException(
                     f"Prompt '{prompt_id}' already exists"
                 )
-
-            prompt_init_data = prompt_data | {"id": prompt_id}
-            try:
-                prompt = Prompt(**prompt_init_data)
-            except Exception as e:
-                raise WorkflowYAMLLoaderException(
-                    f"Prompt data '{prompt_id}' is invalid. Data: {prompt_data}. "
-                    f"Error: {e}"
-                )
-
-            prompts[prompt_id] = prompt
+            prompts[prompt_id] = cls.init_prompt(prompt_data | {"id": prompt_id})
 
         return prompts
 
@@ -473,9 +482,11 @@ class WorkflowYAMLLoader:
                 node_init_data["connection"] = get_node_conn(
                     node_id=node_id, node_data=node_data, connections=connections
                 )
-            if "prompt" in node_init_data:
-                node_init_data["prompt"] = cls.get_node_prompt(
-                    node_id=node_id, node_data=node_data, prompts=prompts
+            if prompt_data := node_init_data.get("prompt"):
+                node_init_data["prompt"] = (
+                    cls.get_node_prompt(node_id=node_id, node_data=node_data, prompts=prompts)
+                    if isinstance(prompt_data, str)
+                    else cls.init_prompt(prompt_data)
                 )
             if "flow" in node_init_data:
                 node_init_data["flow"] = cls.get_node_flow(

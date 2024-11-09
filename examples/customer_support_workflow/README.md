@@ -1,63 +1,39 @@
-# Customer Support Workflow
+# Customer Support Workflow Example
 
-This project demonstrates a customer support workflow using AI agents and simulated banking tools. It showcases the use of Retrieval-Augmented Generation (RAG) and API simulation for handling customer inquiries in a banking context.
-
-## Project Structure
-
-```
-customer_support_workflow/
-    bank_rag_tool.py
-    __init__.py
-    bank_api_sim.py
-    main.py
-```
+This directory contains an example of a bank customer support workflow built using Dynamiq agents and tools. The workflow demonstrates how to integrate LLM Agents with RAG to handle different types of customer requests by accessing internal bank API and its documentation.
 
 ## Components
 
-### 1. Bank RAG Tool (bank_rag_tool.py)
+### `bank_api.py`
 
-This module implements a Retrieval-Augmented Generation (RAG) tool for accessing and querying internal bank documents and policies. It uses the following components:
+- Simple API with single endpoint
+- Responds to queries in JSON format.
 
-- PineconeVectorStore for document storage
-- OpenAITextEmbedder for text embedding
-- PineconeDocumentRetriever for document retrieval
-- OpenAI GPT-4 for answer generation
+### `main.py`
 
-The BankRagSim class provides a method to query the bank's internal documents and generate responses based on the retrieved information.
+- Defines the main workflow logic.
+- Creates workflow with instances of `ReActAgent` for handling API and documentation queries.
+- Executes the workflow with a sample input.
 
-### 2. Bank API Simulator (bank_api_sim.py)
+## Workflow Logic
 
-This module simulates an internal bank API. It uses OpenAI's GPT-4 model to generate responses that mimic a real bank system API. The BankApiSim class can handle various types of requests related to clients, customers, transactions, and accounts.
+1. The user provides a query (e.g., "fast block my card").
+2. `RAG Agent` is invoked to find relevant documentation on how to proceed with request.
+3. `API Agent` starts with documentation provided by `RAG Agent`. It will gather required informatiom from user and execute operation with API.
+4. Upon completion of the operation, a concise summary of the request and its status will be provided.
 
-### 3. Main Workflow (main.py)
+## Usage
 
-The main script orchestrates the customer support workflow using the following components:
+1. **Set up environment variables:**
+   - `OPENAI_API_KEY`: Your OpenAI API key.
+   - `PINECONE_API_KEY`: Your Pinecone API key.
+   - `PINECONE_ENVIRONMENT`: Your Pinecone environment.
 
-- ManagerAgent: Oversees the workflow and delegates tasks to specialized agents
-- ReActAgent: Implements agents for bank support and documentation queries
-- LinearOrchestrator: Manages the workflow execution
-- OpenAI and Anthropic language models
+2. **Run the workflow:** `python main.py`
 
-## Setup and Usage
+## Key Concepts
 
-1. Install the required dependencies (dynamiq and its components).
-2. Set up API keys for OpenAI and Anthropic as environment variables.
-3. Configure Pinecone for document storage (for the RAG tool).
-4. Run the main script: `python customer_support_workflow/main.py`
-
-## Workflow Overview
-
-1. The main script initializes two specialized agents:
-   - Bank Support Agent: Handles queries using the simulated bank API
-   - Bank Documentation Agent: Handles queries using the RAG tool for internal documents
-2. A ManagerAgent oversees the workflow and delegates tasks to the appropriate agent.
-3. The LinearOrchestrator manages the execution of the workflow, passing the customer query through the agents.
-4. The system generates a response based on the combined knowledge from the bank API and internal documentation.
-
-## Customization
-
-You can modify the `main.py` script to change the language model provider (OpenAI or Anthropic) and adjust the agent configurations as needed.
-
-## Note
-
-This project is for demonstration purposes and showcases how AI agents can be used to create a customer support workflow in a banking context. The bank API and document retrieval are simulated, but the structure can be adapted for use with real banking systems and document repositories.
+- **Workflows:** Creating flow of multiple agents to solve complex tasks.
+- **Retrieval-Augmented Generation (RAG):** Combining information retrieval with language model generation to provide more accurate and comprehensive answers.
+- **Tool Usage:** Leveraging specialized tools to extend the capabilities of agents.
+- **Human Feedback:** Integrating human feedback to improve the accuracy and reliability of agents.

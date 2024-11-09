@@ -75,7 +75,7 @@ class ReflectionAgent(Agent):
     def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
         try:
             formatted_prompt = self.generate_prompt(
-                block_names=["introduction", "role", "goal", "date", "instructions", "request"]
+                block_names=["introduction", "role", "date", "instructions", "request"]
             )
             result = self._run_llm(formatted_prompt, config=config, **kwargs)
             output_content = self.extract_output_content(result)

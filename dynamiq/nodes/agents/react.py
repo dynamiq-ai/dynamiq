@@ -5,21 +5,20 @@ from typing import Any
 from pydantic import Field
 
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
-from dynamiq.nodes.agents.exceptions import ActionParsingException, AgentMaxLoopsReached, RecoverableAgentException
+from dynamiq.nodes.agents.exceptions import ActionParsingException, MaxLoopsExceededException, RecoverableAgentException
 from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.types import InferenceMode
+from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
-REACT_BLOCK_TOOLS = """
-You have access to a variety of tools, and you are responsible for using them in any order you choose to complete the task:
-{tools_desc}
-"""  # noqa: E501
+REACT_BLOCK_TOOLS = (
+    "You have access to a variety of tools,"
+    "and you are responsible for using them in any order you choose to complete the task:"
+    "{tools_desc}"
+)
 
-REACT_BLOCK_NO_TOOLS = """
-You do not have access to any tools.
-"""  # noqa: E501
+REACT_BLOCK_NO_TOOLS = "You do not have access to any tools."
 
 REACT_BLOCK_XML_INSTRUCTIONS = """
 Here is how you will think about the user's request
@@ -68,39 +67,32 @@ If you cannot answer the request:
 """  # noqa: E501
 
 
-REACT_BLOCK_INSTRUCTIONS = """
-Always structure your responses in the following format:
-
-Thought: [Your reasoning about the next step]
-Action: [The tool you choose to use, if any from ONLY [{tools_name}]]
+REACT_BLOCK_INSTRUCTIONS = """Always structure your responses in the following format:
+Thought: [Your reasoning for the next step]
+Action: [The tool you choose to use, if any, from ONLY [{tools_name}]]
 Action Input: [The input you provide to the tool]
 Remember:
-- Avoid using triple quotes (multi-line strings, docstrings) when providing multi line code.
-- You have to provide all nessesary information in 'Action Input' for successfull next step.
-- Provide Action Input in JSON format.
-- MUST Begin each response with a "Thought" explaining your reasoning.
-- If you need to use a tool, follow the thought with an "Action" (choosing from the available tools) and an "Action Input".
-- After each action, the user will provide an "Observation" with the result.
+- Avoid using triple quotes (multi-line strings, docstrings) when providing multi-line code.
+- Provide all necessary information in 'Action Input' for the next step to succeed.
+- Action Input must be in JSON format.
+- Always begin each response with a 'Thought' explaining your reasoning.
+- If you use a tool, follow the 'Thought' with an 'Action' (chosen from the available tools) and an 'Action Input'.
+- After each action, the user will provide an 'Observation' with the result.
 - Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
-
 When you have sufficient information, provide your final answer in one of these two formats:
-
 If you can answer the request:
-
 Thought: I can answer without using any tools
 Answer: [Your answer here]
 If you cannot answer the request:
-
 Thought: I cannot answer with the tools I have
 Answer: [Explanation of why you cannot answer]
 Remember:
 - Always start with a Thought.
-- Never use markdown code markers around your response.
+- Never use markdown code markers in your response.
 """  # noqa: E501
 
 
-REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """
-If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
+REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
 If you can answer on request:
 {{thought: [Why you can provide final answer],
 action: finish
@@ -120,47 +112,90 @@ action_input: [The input you provide to the tool]}}
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
 You have to call appropriate functions.
-
 Function descriptions
 plan_next_action - function that should be called to use tools [{tools_name}]].
 provide_final_answer - function that should be called when answer on initial request can be provided
-
 """  # noqa: E501
 
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
 Always structure your responses in the following format:
-
-Thought: [Your reasoning why you can not answer on initial question fully]
-Observation: [Answer on initial question or part of it]
-- Do not add information that is not connected to main request.
-- MUST Begin each response with a "Thought" explaining your reasoning.
-- After each action, the user will provide an "Observation" with the result.
-- Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
-
-When you have sufficient information, provide your final answer in one of these two formats:
-
+Thought: [Your reasoning for why you cannot fully answer the initial question]
+Observation: [Answer to the initial question or part of it]
+- Only include information relevant to the main request.
+- Always start each response with a 'Thought' explaining your reasoning.
+- After each action, the user will provide an 'Observation' with the result.
+- Continue this Thought/Action/Action Input/Observation sequence until you have enough information to fully answer the request.
+When you have sufficient information, provide your final answer in one of these formats:
 If you can answer the request:
-
 Thought: I can answer without using any tools
 Answer: [Your answer here]
 If you cannot answer the request:
-
 Thought: I cannot answer with the tools I have
 Answer: [Explanation of why you cannot answer]
 Remember:
-- Always start with a Thought.
-- Never use markdown code markers around your response.
+- Always begin with a Thought.
+- Do not use markdown code markers in your response."
 """  # noqa: E501
 
 
-REACT_BLOCK_OUTPUT_FORMAT = """
-In your final answer do not use wording like `based on the information gathered or provided`.
-Just provide a clear and concise answer.
-"""  # noqa: E501
+REACT_BLOCK_OUTPUT_FORMAT = (
+    "In your final answer, avoid phrases like 'based on the information gathered or provided.'"
+    "Simply give a clear and concise answer."
+)
 
 REACT_BLOCK_REQUEST = "User request: {input}"
 REACT_BLOCK_CONTEXT = "Below is the conversation: {context}"
+
+
+REACT_MAX_LOOPS_PROMPT = """
+You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
+Your goal is to analyze the given context and formulate a clear, concise response.
+First, carefully review the following context, which contains thoughts and information gathered during the process:
+<context>
+{context}
+</context>
+Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
+Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
+1. Fully supported by the information found in the context
+2. Clear and concise
+3. Directly addressing the original question or task, if possible
+If you cannot provide a full answer based on the given context, explain that due to limitations in the number of steps or potential issues with the tools used, you are unable to fully answer the question. In this case, suggest one or more of the following:
+1. Increasing the maximum number of loops for the agent setup
+2. Reviewing the tools settings
+3. Revising the input task description
+Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
+Provide your final answer or explanation within <answer> tags.
+Your response should be clear, concise, and professional.
+<answer>
+[Your final answer or explanation goes here]
+</answer>
+"""  # noqa: E501
+
+
+REACT_MAX_LOOPS_PROMPT = """
+You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
+Your goal is to analyze the given context and formulate a clear, concise response.
+First, carefully review the following context, which contains thoughts and information gathered during the process:
+<context>
+{context}
+</context>
+Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
+Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
+1. Fully supported by the information found in the context
+2. Clear and concise
+3. Directly addressing the original question or task, if possible
+If you cannot provide a full answer based on the given context, explain that due to limitations in the number of steps or potential issues with the tools used, you are unable to fully answer the question. In this case, suggest one or more of the following:
+1. Increasing the maximum number of loops for the agent setup
+2. Reviewing the tools settings
+3. Revising the input task description
+Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
+Provide your final answer or explanation within <answer> tags.
+Your response should be clear, concise, and professional.
+<answer>
+[Your final answer or explanation goes here]
+</answer>
+"""  # noqa: E501
 
 
 def function_calling_schema(tool_names) -> list[dict]:
@@ -245,8 +280,12 @@ class ReActAgent(Agent):
     """Agent that uses the ReAct strategy for processing tasks by interacting with tools in a loop."""
 
     name: str = "React"
-    max_loops: int = Field(default=15, ge=1)
+    max_loops: int = Field(default=15, ge=2)
     inference_mode: InferenceMode = InferenceMode.DEFAULT
+    behaviour_on_max_loops: Behavior = Field(
+        default=Behavior.RAISE,
+        description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
+    )
 
     def parse_xml_content(self, text: str, tag: str) -> str:
         """Extract content from XML-like tags."""
@@ -264,8 +303,8 @@ class ReActAgent(Agent):
         except json.JSONDecodeError:
             raise ActionParsingException(
                 (
-                    "Error: Could not parse action and action input."
-                    "Please rewrite in the appropriate XML format with action_input as a valid dictionary."
+                    "Error: Unable to parse action and action input. "
+                    "Please rewrite in the correct XML format with action_input as a valid dictionary."
                 ),
                 recoverable=True,
             )
@@ -455,8 +494,28 @@ class ReActAgent(Agent):
                 logger.error(f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. failed with error: {str(e)}")
                 previous_responses.append(f"{type(e).__name__}: {e}")
                 continue
-        logger.error(f"Agent {self.name} - {self.id}: Maximum number of loops reached.")
-        raise AgentMaxLoopsReached(f"Agent {self.name} - {self.id}: Maximum number of loops reached.")
+        logger.warning(f"Agent {self.name} - {self.id}: Maximum number of loops reached.")
+        if self.behaviour_on_max_loops == Behavior.RAISE:
+            error_message = (
+                f"Agent {self.name} (ID: {self.id}) has reached the maximum loop limit of {self.max_loops} without finding a final answer. "  # noqa: E501
+                f"Consider increasing the maximum number of loops or reviewing the task complexity to ensure completion."  # noqa: E501
+            )
+            raise MaxLoopsExceededException(message=error_message)
+        else:
+            return self._handle_max_loops_exceeded(previous_responses, config, kwargs)
+
+    def _handle_max_loops_exceeded(
+        self, previous_responses: list, config: RunnableConfig | None = None, **kwargs
+    ) -> str:
+        """
+        Handle the case where max loops are exceeded by crafting a thoughtful response.
+        """
+        final_attempt_prompt = REACT_MAX_LOOPS_PROMPT.format(context="\n".join(previous_responses))
+        llm_final_attempt = self._run_llm(final_attempt_prompt, config=config, **kwargs)
+        self._run_depends = [NodeDependency(node=self.llm).to_dict()]
+        final_answer = self.parse_xml_content(llm_final_attempt, "answer")
+
+        return f"Max loops reached but here's my final attempt:\n{final_answer}"
 
     def _extract_final_answer_xml(self, llm_output: str) -> str:
         """Extract the final answer from the LLM output."""
@@ -472,8 +531,8 @@ class ReActAgent(Agent):
             "tools": REACT_BLOCK_TOOLS if self.tools else REACT_BLOCK_NO_TOOLS,
             "instructions": REACT_BLOCK_INSTRUCTIONS if self.tools else REACT_BLOCK_INSTRUCTIONS_NO_TOOLS,
             "output_format": REACT_BLOCK_OUTPUT_FORMAT,
-            "request": REACT_BLOCK_REQUEST,
             "context": REACT_BLOCK_CONTEXT,
+            "request": REACT_BLOCK_REQUEST,
         }
 
         match self.inference_mode:

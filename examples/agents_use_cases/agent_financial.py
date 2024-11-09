@@ -5,16 +5,19 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
-AGENT_ROLE = "A helpful and general-purpose AI assistant that has strong language skills, Python skills, and Linux command line skills."  # noqa: E501
-AGENT_GOAL = """is to provide concise answer to user,
-              also try to generate code for solve task, then run it accurately
-              before answering try to create plan for solving task
-              you can search any api, and then use any of free open-source APi that dont require authorization
-              """  # noqa: E501
+AGENT_ROLE = (
+    "A helpful and general-purpose AI assistant with strong language, Python, "
+    "and Linux command-line skills. The goal is to provide concise answers to the user. "
+    "Additionally, try to generate code to solve tasks, then run it accurately. "
+    "Before answering, create a plan for solving the task. You can search for any API, "
+    "and use any free, open-source API that doesn't require authorization."
+)
+
 if __name__ == "__main__":
     connection_e2b = E2B()
 
     tool_code = E2BInterpreterTool(connection=connection_e2b)
+
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0)
 
     agent = ReActAgent(
@@ -23,8 +26,6 @@ if __name__ == "__main__":
         llm=llm,
         tools=[tool_code],
         role=AGENT_ROLE,
-        goal=AGENT_GOAL,
-        max_loops=10,
         inference_mode=InferenceMode.XML,
     )
 

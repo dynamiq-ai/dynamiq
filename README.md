@@ -128,7 +128,6 @@ agent = ReActAgent(
     llm=llm,
     tools=[e2b_tool],
     role="Senior Data Scientist",
-    goal="Provide well-explained final answers to analytical questions",
     max_loops=10,
 )
 
@@ -176,24 +175,27 @@ coding_agent = ReActAgent(
     name="coding-agent",
     llm=llm,
     tools=[python_tool],
-    role="Expert agent with coding skills.",
-    goal="Provide the solution to the input task using Python software engineering skills.",
+    role=("Expert agent with coding skills."
+          "Goal is to provide the solution to the input task"
+          "using Python software engineering skills."),
     max_loops=15,
 )
 
 planner_agent = ReflectionAgent(
     name="planner-agent",
     llm=llm,
-    role="Expert agent with planning skills.",
-    goal="Analyze complex requests and provide detailed action plan.",
+    role=("Expert agent with planning skills."
+          "Goal is to analyze complex requests"
+          "and provide a detailed action plan."),
 )
 
 search_agent = ReActAgent(
     name="search-agent",
     llm=llm,
     tools=[search_tool],
-    role="Expert agent with web search skills.",
-    goal="Provide the best information available using web browsing and searching skills.",
+    role=("Expert agent with web search skills."
+          "Goal is to provide the solution to the input task"
+          "using web search and summarization skills."),
     max_loops=10,
 )
 
@@ -225,13 +227,13 @@ print(result.output.get("content"))
 ```
 
 ### RAG - document indexing flow
-Workflow that takes input PDF files, pre-processes them, converts to vector embeddings and stores in Pinecone vector database.
+This workflow takes input PDF files, pre-processes them, converts them to vector embeddings, and stores them in the Pinecone vector database.
+The example provided is for an existing index in Pinecone. You can find examples for index creation on the `docs/tutorials/rag` page.
 
 ```python
 from io import BytesIO
 
 from dynamiq import Workflow
-from dynamiq.nodes import InputTransformer
 from dynamiq.connections import OpenAI as OpenAIConnection, Pinecone as PineconeConnection
 from dynamiq.nodes.converters import PyPDFConverter
 from dynamiq.nodes.splitters.document import DocumentSplitter
@@ -245,41 +247,38 @@ converter = PyPDFConverter(document_creation_mode="one-doc-per-page")
 rag_wf.flow.add_nodes(converter)  # add node to the DAG
 
 # Document splitter
-document_splitter = DocumentSplitter(
-    split_by="sentence",
-    split_length=10,
-    split_overlap=1,
-    input_transformer=InputTransformer(
-        selector={
-            "documents": f"${[converter.id]}.output.documents",
-        },  # map output of the previous node to the expected input of the current node
-    ),
-).depends_on(converter)
+document_splitter = (
+    DocumentSplitter(
+        split_by="sentence",
+        split_length=10,
+        split_overlap=1,
+    )
+    .inputs(documents=converter.outputs.documents)  # map converter node output to the expected input of the current node
+    .depends_on(converter)
+)
 rag_wf.flow.add_nodes(document_splitter)
 
 # OpenAI vector embeddings
-embedder = OpenAIDocumentEmbedder(
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
-    model="text-embedding-3-small",
-    input_transformer=InputTransformer(
-        selector={
-            "documents": f"${[document_splitter.id]}.output.documents",
-        },
-    ),
-).depends_on(document_splitter)
+embedder = (
+    OpenAIDocumentEmbedder(
+        connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+        model="text-embedding-3-small",
+    )
+    .inputs(documents=document_splitter.outputs.documents)
+    .depends_on(document_splitter)
+)
 rag_wf.flow.add_nodes(embedder)
 
 # Pinecone vector storage
-vector_store = PineconeDocumentWriter(
-    connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
-    index_name="default",
-    dimension=1536,
-    input_transformer=InputTransformer(
-        selector={
-            "documents": f"${[embedder.id]}.output.documents",
-        },
-    ),
-).depends_on(embedder)
+vector_store = (
+    PineconeDocumentWriter(
+        connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
+        index_name="default",
+        dimension=1536,
+    )
+    .inputs(documents=embedder.outputs.documents)
+    .depends_on(embedder)
+)
 rag_wf.flow.add_nodes(vector_store)
 
 # Prepare input PDF files
@@ -323,17 +322,16 @@ embedder = OpenAITextEmbedder(
 retrieval_wf.flow.add_nodes(embedder)
 
 # Pinecone document retriever
-document_retriever = PineconeDocumentRetriever(
-    connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
-    index_name="default",
-    dimension=1536,
-    top_k=5,
-    input_transformer=InputTransformer(
-        selector={
-            "embedding": f"${[embedder.id]}.output.embedding",
-        },
-    ),
-).depends_on(embedder)
+document_retriever = (
+    PineconeDocumentRetriever(
+        connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
+        index_name="default",
+        dimension=1536,
+        top_k=5,
+    )
+    .inputs(embedding=embedder.outputs.embedding)
+    .depends_on(embedder)
+)
 retrieval_wf.flow.add_nodes(document_retriever)
 
 # Define the prompt template
@@ -352,17 +350,18 @@ Context:
 # OpenAI LLM for answer generation
 prompt = Prompt(messages=[Message(content=prompt_template, role="user")])
 
-answer_generator = OpenAI(
-    connection=openai_connection,
-    model="gpt-4o",
-    prompt=prompt,
-    input_transformer=InputTransformer(
-        selector={
-            "documents": f"${[document_retriever.id]}.output.documents",
-            "query": f"${[embedder.id]}.output.query",
-        },  # take documents from the vector store node and query from the embedder
-    ),
-).depends_on(document_retriever)
+answer_generator = (
+    OpenAI(
+        connection=openai_connection,
+        model="gpt-4o",
+        prompt=prompt,
+    )
+    .inputs(
+        documents=document_retriever.outputs.documents,
+        query=embedder.outputs.query,
+    )  # take documents from the vector store node and query from the embedder
+    .depends_on([document_retriever, embedder])
+)
 retrieval_wf.flow.add_nodes(answer_generator)
 
 # Run the RAG retrieval flow
@@ -371,6 +370,49 @@ result = retrieval_wf.run(input_data={"query": question})
 
 answer = result.output.get(answer_generator.id).get("output", {}).get("content")
 print(answer)
+```
+
+### Simple Chatbot with Memory
+A simple chatbot that uses the `Memory` module to store and retrieve conversation history.
+
+```python
+from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.memory import Memory
+from dynamiq.memory.backend.in_memory import InMemory
+from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.llms import OpenAI
+
+AGENT_ROLE = "helpful assistant, goal is to provide useful information and answer questions"
+llm = OpenAI(
+    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+    model="gpt-4o",
+    temperature=0.1,
+)
+
+memory = Memory(backend=InMemory())
+agent = SimpleAgent(
+    name="Agent",
+    llm=llm,
+    role=AGENT_ROLE,
+    id="agent",
+    memory=memory,
+)
+
+
+def main():
+    print("Welcome to the AI Chat! (Type 'exit' to end)")
+    while True:
+        user_input = input("You: ")
+        if user_input.lower() == "exit":
+            break
+
+        response = agent.run({"input": user_input})
+        response_content = response.output.get("content")
+        print(f"AI: {response_content}")
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 ## Contributing

@@ -9,12 +9,12 @@ from dynamiq.nodes.splitters.document import DocumentSplitter
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.writers import PineconeDocumentWriter
-from dynamiq.storages.vector import PineconeVectorStore
+from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 
 app = typer.Typer()
 
 python_code = """
-def run(input_data):
+def run(inputs):
     from dynamiq.types import Document
 
     raw_content = input_data.get('content')
@@ -28,8 +28,6 @@ def run(input_data):
 
 
 def create_indexing_flow(index_name="default"):
-    vector_store = PineconeVectorStore(index_name=index_name, dimension=1536)
-
     web_scraper_tool = FirecrawlTool(connection=FirecrawlConnection())
 
     python_node = Python(
@@ -66,7 +64,8 @@ def create_indexing_flow(index_name="default"):
         ),
     )
     document_writer_node = PineconeDocumentWriter(
-        vector_store=vector_store,
+        index_name=index_name,
+        index_type=PineconeIndexType.SERVERLESS,
         depends=[
             NodeDependency(document_embedder_node),
         ],

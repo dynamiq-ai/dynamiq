@@ -20,11 +20,10 @@ from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
 
 # Constants
-AGENT_ROLE = "teacher for children"
-AGENT_GOAL = (
-    "is to craft a well-structured and simple final answer, with a lot of emojis to empathize with the children."
+AGENT_ROLE = (
+    "teacher for children, goal is to craft a well-structured and simple final answer"
+    "with a lot of emojis to empathize with the children."
 )
-
 QUERY = "Who won the Euro 2024?"
 QUERY_FOR_CODING_SIMPLE = "Add the first 10 numbers and tell if the result is prime"
 QUERY_FOR_CODING_COMPLEX = (
@@ -32,6 +31,12 @@ QUERY_FOR_CODING_COMPLEX = (
 )
 QUERY_FOR_PYTHON_TOOL = "Show me content of example.com"
 QUERY_FOR_HTTP_TOOL = "Show me some random fact about cat"
+PYTHON_TOOL_CODE = """
+def run(inputs):
+    import requests
+    response = requests.get("https://example.com")
+    return {"content": response.text}
+"""
 
 
 def setup_react_agent() -> ReActAgent:
@@ -52,7 +57,6 @@ def setup_react_agent() -> ReActAgent:
         llm=llm,
         tools=[tool_search],
         role=AGENT_ROLE,
-        goal=AGENT_GOAL,
     )
 
 
@@ -77,7 +81,6 @@ def setup_react_agent_coding() -> ReActAgent:
         llm=llm,
         tools=[tool],
         role=AGENT_ROLE,
-        goal=AGENT_GOAL,
     )
 
 
@@ -94,12 +97,7 @@ def setup_react_agent_http_python() -> ReActAgent:
     web_request_tool = Python(
         name="WebRequestTool",
         description="Makes a GET request to example.com and returns the response text",
-        code="""
-    def run(input_data):
-        import requests
-        response = requests.get("https://example.com")
-        return {"content": response.text}
-    """,
+        code=PYTHON_TOOL_CODE,
     )
 
     connection = HttpConnection(
@@ -124,7 +122,6 @@ def setup_react_agent_http_python() -> ReActAgent:
         llm=llm,
         tools=[web_request_tool, api_call],
         role="is to help user with various tasks",
-        goal="to provide best of possible answers to user queries",
     )
     return agent
 
@@ -154,8 +151,7 @@ def setup_react_agent_rag() -> ReActAgent:
         name="React Agent",
         llm=llm,
         tools=[tool_retrieval_rta, tool_retrieval_sports],
-        role="AI assistant with knowledge about Dubai city",  # noqa: E501
-        goal="provide well explained final answers, you can tune user search to be more accurate with RAG search",
+        role="AI assistant with knowledge about Dubai city, goal is provide well explained final answers, you can tune user search to be more accurate with RAG search",  # noqa: E501
         max_loops=7,
     )
     return agent

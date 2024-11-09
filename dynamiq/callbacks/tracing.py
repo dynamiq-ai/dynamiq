@@ -157,7 +157,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             "installed_pkgs": [
                 {"name": dist.metadata["Name"], "version": dist.version}
                 for dist in distributions()
-                if dist.metadata["Name"] in self.installed_pkgs
+                if dist.metadata.get("Name") in self.installed_pkgs
             ],
         }
 

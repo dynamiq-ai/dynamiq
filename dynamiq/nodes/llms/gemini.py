@@ -1,5 +1,3 @@
-from typing import Self
-
 from pydantic import model_validator
 
 from dynamiq.connections import Gemini as GeminiConnection
@@ -21,11 +19,11 @@ class Gemini(BaseLLM):
     connection: GeminiConnection | GeminiVertexAI
 
     @model_validator(mode="after")
-    def check_model(self) -> Self:
+    def check_model(self) -> "Gemini":
         """Validate and set the model prefix based on the connection type.
 
         Returns:
-            Self: The updated instance.
+            self: The updated instance.
         """
         connection = self.connection
         value = self.model

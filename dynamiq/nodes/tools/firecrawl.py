@@ -147,6 +147,6 @@ class FirecrawlTool(ConnectionNode):
                 "warning": scrape_result.get("data", {}).get("warning"),
             }
 
-        logger.debug(f"Tool {self.name} - {self.id}: finished with result {str(result[:200])}...")
+        logger.debug(f"Tool {self.name} - {self.id}: finished with result {str(result)[:200]}...")
 
         return {"content": result}

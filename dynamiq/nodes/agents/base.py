@@ -1,3 +1,4 @@
+import io
 import json
 import re
 import textwrap
@@ -8,6 +9,7 @@ from typing import Any, Callable, ClassVar
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections.managers import ConnectionManager
+from dynamiq.memory import Memory
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -16,7 +18,7 @@ from dynamiq.nodes.agents.exceptions import (
     ToolExecutionException,
 )
 from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.prompts import Message, Prompt
+from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils.logger import logger
@@ -47,19 +49,22 @@ class Agent(Node):
     """Base class for an AI Agent that interacts with a Language Model and tools."""
 
     DEFAULT_INTRODUCTION: ClassVar[str] = (
-        "You are a helpful AI assistant designed to help with various tasks."
+        "You are a helpful AI assistant designed to assist users with various tasks and queries."
+        "Your goal is to provide accurate, helpful, and friendly responses to the best of your abilities."
     )
     DEFAULT_DATE: ClassVar[str] = datetime.now().strftime("%d %B %Y")
 
-    llm: Node = Field(..., description="Language Model (LLM) used by the agent.")
+    llm: Node = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     streaming: StreamingConfig = StreamingConfig()
     tools: list[Node] = []
+    files: list[io.BytesIO | bytes] | None = None
     name: str = "AI Agent"
     role: str | None = None
-    goal: str | None = None
     max_loops: int = 1
+    memory: Memory | None = Field(None, description="Memory node for the agent.")
+    memory_retrieval_strategy: str = "all"  # all, relevant, both
 
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -74,13 +79,15 @@ class Agent(Node):
 
     @property
     def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"llm": True, "tools": True}
+        return super().to_dict_exclude_params | {"llm": True, "tools": True, "memory": True, "files": True}
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
         data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools]
+        if self.files:
+            data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         return data
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
@@ -99,17 +106,21 @@ class Agent(Node):
         self._prompt_blocks = {
             "introduction": self.DEFAULT_INTRODUCTION,
             "role": self.role or "",
-            "goal": self.goal or "",
             "date": self.DEFAULT_DATE,
             "tools": "{tool_description}",
+            "files": "{file_description}",
             "instructions": "",
-            "output_format": "Provide your answer in a clear and concise manner.",
+            "output_format": "",
+            "relevant_information": "{relevant_memory}",
+            "conversation_history": "{context}",
             "request": "User request: {input}",
-            "context": "",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
+            "file_description": self.file_description,
             "user_input": "",
+            "context": "",
+            "relevant_memory": "",
         }
 
     def add_block(self, block_name: str, content: str):
@@ -131,11 +142,28 @@ class Agent(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
+        user_id = input_data.get("user_id", None)
+        session_id = input_data.get("session_id", None)
+        custom_metadata = input_data.get("metadata", {}).copy()
+        custom_metadata.update({k: v for k, v in input_data.items() if k not in ["user_id", "session_id", "input"]})
+        metadata = {**custom_metadata, "user_id": user_id, "session_id": session_id}
+
+        if self.memory:
+            self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
+            self._retrieve_memory(input_data)
+
+        files = input_data.get("files", [])
+        if files:
+            self.files = files
+            self._prompt_variables["file_description"] = self.file_description
+
         self._prompt_variables.update(input_data)
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
         result = self._run_agent(config=config, **kwargs)
+        if self.memory:
+            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=metadata)
 
         execution_result = {
             "content": result,
@@ -149,6 +177,27 @@ class Agent(Node):
 
         logger.debug(f"Agent {self.name} - {self.id}: finished with result {result}")
         return execution_result
+
+    def _retrieve_memory(self, input_data):
+        """
+        Retrieves memory based on the selected strategy: 'relevant', 'all', or 'both'.
+        """
+        user_id = input_data.get("user_id", None)
+        filters = {"user_id": user_id} if user_id else None
+
+        if self.memory_retrieval_strategy == "relevant":
+            relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
+            self._prompt_variables["relevant_memory"] = relevant_memory
+
+        elif self.memory_retrieval_strategy == "all":
+            context = self.memory.get_all_messages_as_string()
+            self._prompt_variables["context"] = context
+
+        elif self.memory_retrieval_strategy == "both":
+            relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
+            context = self.memory.get_all_messages_as_string()
+            self._prompt_variables["relevant_memory"] = relevant_memory
+            self._prompt_variables["context"] = context
 
     def _run_llm(self, prompt: str, config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and returns the result."""
@@ -207,10 +256,10 @@ class Agent(Node):
             logger.error(f"Error parsing action: {e}")
             raise ActionParsingException(
                 (
-                    "Error: Could not parse action and action input. "
-                    "Please rewrite in the appropriate Action/Action Input "
-                    "format with action input as a valid dictionary "
-                    "Make sure all quotes are present."
+                    "Error: Unable to parse action and action input."
+                    "Please rewrite using the correct Action/Action Input format"
+                    "with action input as a valid dictionary."
+                    "Ensure all quotes are included."
                 ),
                 recoverable=True,
             )
@@ -225,15 +274,19 @@ class Agent(Node):
         tool = self.tool_by_names.get(action)
         if not tool:
             raise AgentUnknownToolException(
-                f"Unknown tool: {action} Use only available tools and provide only its name in action field.\
-                 Do not provide any aditional reasoning in action field.\
-                  Reiterate and provide proper value for action field or say that you cannot answer the question."
+                f"Unknown tool: {action}."
+                "Use only available tools and provide only the tool's name in the action field."
+                "Do not include any additional reasoning."
+                "Please correct the action field or state that you cannot answer the question."
             )
         return tool
 
     def _run_tool(self, tool: Node, tool_input: str, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
         logger.debug(f"Agent {self.name} - {self.id}: Running tool '{tool.name}'")
+        if self.files:
+            if tool.is_files_allowed is True:
+                tool_input["files"] = self.files
 
         tool_result = tool.run(
             input_data=tool_input,
@@ -262,6 +315,18 @@ class Agent(Node):
         )
 
     @property
+    def file_description(self) -> str:
+        """Returns a description of the files available to the agent."""
+        if self.files:
+            file_description = "You can work with the following files:\n"
+            for file in self.files:
+                name = getattr(file, "name", "Unnamed file")
+                description = getattr(file, "description", "No description")
+                file_description += f"<file>: {name} - {description} <\\file>\n"
+            return file_description
+        return ""
+
+    @property
     def tool_names(self) -> str:
         """Returns a comma-separated list of tool names available to the agent."""
         return ",".join([tool.name for tool in self.tools]) if self.tools else ""
@@ -288,13 +353,9 @@ class Agent(Node):
                     prompt += f"{block.upper()}:\n{formatted_content}\n\n"
 
         prompt = textwrap.dedent(prompt)
-        # Split into lines, strip each line, and then join with a single newline
         lines = prompt.splitlines()
-        stripped_lines = [
-            line.strip() for line in lines if line.strip()
-        ]  # Remove empty lines if you want to avoid multiple newlines
+        stripped_lines = [line.strip() for line in lines if line.strip()]
         prompt = "\n".join(stripped_lines)
-        # Remove redundant spaces between words in each line
         prompt = "\n".join(" ".join(line.split()) for line in prompt.split("\n"))
         return prompt
 
@@ -340,7 +401,7 @@ class AgentManager(Agent):
         action = input_data.get("action")
         if not action or action not in self._actions:
             raise InvalidActionException(
-                f"Invalid or missing action: {action}. Please choose action from {self._actions}"
+                f"Invalid or missing action: {action}. Please select an action from {self._actions}."  # nosec: B608
             )
 
         self._prompt_variables.update(input_data)

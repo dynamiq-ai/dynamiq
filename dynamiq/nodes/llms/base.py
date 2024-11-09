@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
-from pydantic import BaseModel, PrivateAttr, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
@@ -51,6 +51,11 @@ class BaseLLM(ConnectionNode):
         presence_penalty (float | None): Penalize new tokens based on their existence in the text.
         frequency_penalty (float | None): Penalize new tokens based on their frequency in the text.
         tool_choice (str | None): Value to control which function is called by the model.
+        inference_mode (InferenceMode): Determines how the model handles inference tasks and formats outputs.
+        - InferenceMode.DEFAULT: Generates unstructured, free-form natural language text.
+        - InferenceMode.STRUCTURED_OUTPUT: Produces structured JSON output.
+        - InferenceMode.FUNCTION_CALLING: Structured output for tools (functions) to be called.
+        dict[str, Any] | type[BaseModel] | None: schema_ for structured output. Defaults to empty dict.
     """
 
     MODEL_PREFIX: ClassVar[str | None] = None
@@ -68,6 +73,10 @@ class BaseLLM(ConnectionNode):
     presence_penalty: float | None = None
     frequency_penalty: float | None = None
     tool_choice: str | None = None
+    inference_mode: InferenceMode = InferenceMode.DEFAULT
+    schema_: dict[str, Any] | type[BaseModel] | None = Field(
+        None, description="Schema for structured output or function calling.", alias="schema"
+    )
 
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
@@ -199,13 +208,43 @@ class BaseLLM(ConnectionNode):
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
 
+    def _get_response_format_and_tools(
+        self, inference_mode: InferenceMode, schema: dict[str, Any] | type[BaseModel] | None
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Get response format and tools based on inference mode and schema.
+
+        Args:
+            inference_mode (InferenceMode): The inference mode to use.
+            schema (dict[str, Any] | type[BaseModel] | None): The schema to use.
+
+        Returns:
+            tuple[dict[str, Any] | None, dict[str, Any] | None]: Response format and tools.
+
+        Raises:
+            ValueError: If schema is None when using STRUCTURED_OUTPUT or FUNCTION_CALLING modes.
+        """
+        response_format = None
+        tools = None
+
+        match inference_mode:
+            case InferenceMode.STRUCTURED_OUTPUT:
+                if schema is None:
+                    raise ValueError("Schema must be provided when using STRUCTURED_OUTPUT inference mode")
+                response_format = schema
+            case InferenceMode.FUNCTION_CALLING:
+                if schema is None:
+                    raise ValueError("Schema must be provided when using FUNCTION_CALLING inference mode")
+                tools = schema
+
+        return response_format, tools
+
     def execute(
         self,
         input_data: dict[str, Any],
         config: RunnableConfig = None,
         prompt: Prompt | None = None,
-        schema: dict = {},
-        inference_mode: InferenceMode = InferenceMode.DEFAULT,
+        schema: dict | None = None,
+        inference_mode: InferenceMode | None = None,
         **kwargs,
     ):
         """Execute the LLM node.
@@ -217,6 +256,10 @@ class BaseLLM(ConnectionNode):
             input_data (dict[str, Any]): The input data for the LLM.
             config (RunnableConfig, optional): The configuration for the execution. Defaults to None.
             prompt (Prompt, optional): The prompt to use for this execution. Defaults to None.
+            schema (Dict[str, Any], optional): schema_ for structured output or function calling.
+                Overrides instance schema_ if provided.
+            inference_mode (InferenceMode, optional): Mode of inference.
+                Overrides instance inference_mode if provided.
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -225,7 +268,7 @@ class BaseLLM(ConnectionNode):
         config = ensure_config(config)
         prompt = prompt or self.prompt or Prompt(messages=[], tools=None)
         messages = prompt.format_messages(**input_data)
-        tools = prompt.format_tools(**input_data)
+        base_tools = prompt.format_tools(**input_data)
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
 
         # Use initialized client if it possible
@@ -233,12 +276,12 @@ class BaseLLM(ConnectionNode):
         if self.client and not isinstance(self.connection, HttpApiKey):
             params = {"client": self.client}
 
-        response_format = None
-        match inference_mode:
-            case InferenceMode.STRUCTURED_OUTPUT:
-                response_format = schema
-            case InferenceMode.FUNCTION_CALLING:
-                tools = schema
+        current_inference_mode = inference_mode or self.inference_mode
+        current_schema = schema or self.schema_
+        response_format, tools = self._get_response_format_and_tools(
+            inference_mode=current_inference_mode, schema=current_schema
+        )
+        tools = tools or base_tools
 
         response = self._completion(
             model=self.model,
