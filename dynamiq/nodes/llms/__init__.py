@@ -13,6 +13,7 @@ from .groq import Groq
 from .huggingface import HuggingFace
 from .mistral import Mistral
 from .openai import OpenAI
+from .perplexity import Perplexity
 from .replicate import Replicate
 from .sambanova import SambaNova
 from .togetherai import TogetherAI

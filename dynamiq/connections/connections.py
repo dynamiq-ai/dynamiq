@@ -55,6 +55,7 @@ class ConnectionType(str, enum.Enum):
     Qdrant = "Qdrant"
     SambaNova = "SambaNova"
     Milvus = "Milvus"
+    Perplexity = "Perplexity"
 
 
 class HTTPMethod(str, enum.Enum):
@@ -908,3 +909,11 @@ class Milvus(BaseConnection):
             raise ValueError("Invalid deployment type for Milvus connection.")
 
         return milvus_client
+
+
+class Perplexity(BaseApiKeyConnection):
+    type: Literal[ConnectionType.Replicate] = ConnectionType.Replicate
+    api_key: str = Field(default_factory=partial(get_env_var, "PERPLEXITYAI_API_KEY"))
+
+    def connect(self):
+        pass
