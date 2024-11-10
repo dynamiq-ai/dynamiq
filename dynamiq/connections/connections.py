@@ -54,6 +54,7 @@ class ConnectionType(str, enum.Enum):
     AI21 = "AI21"
     Qdrant = "Qdrant"
     SambaNova = "SambaNova"
+    Milvus = "Milvus"
 
 
 class HTTPMethod(str, enum.Enum):
@@ -852,3 +853,58 @@ class SambaNova(BaseApiKeyConnection):
 
     def connect(self):
         pass
+
+
+class MilvusDeploymentType(str, enum.Enum):
+    """
+    Defines various deployment types for different Milvus deployments.
+
+    Attributes:
+        LOCAL_FILE (str): Represents a local file-based deployment.
+        DOCKER (str): Represents a Docker-based deployment on localhost.
+        ZILLIZ_CLOUD (str): Represents a cloud deployment on Zilliz Cloud.
+    """
+
+    LOCAL_FILE = "local_file"
+    DOCKER = "docker"
+    ZILLIZ_CLOUD = "zilliz_cloud"
+
+
+class Milvus(BaseConnection):
+    """
+    Represents a connection to the Milvus service.
+
+    Attributes:
+        type (Literal[ConnectionType.Milvus]): The type of connection, always 'Milvus'.
+        deployment_type (MilvusDeploymentType): The deployment type of the Milvus service
+        api_key (Optional[str]): The API key for Milvus on Zilliz Cloud, required only for cloud deployment.
+        uri (str): The URI for the Milvus instance (file path, Docker URL, or cloud URL).
+    """
+
+    type: Literal[ConnectionType.Milvus] = ConnectionType.Milvus
+    deployment_type: MilvusDeploymentType = MilvusDeploymentType.LOCAL_FILE
+    uri: str = Field(default_factory=partial(get_env_var, "MILVUS_URI", "http://localhost:19530"))
+    api_key: str | None = Field(default_factory=partial(get_env_var, "MILVUS_API_TOKEN", None))
+
+    def connect(self):
+        from pymilvus import MilvusClient
+
+        if self.deployment_type == MilvusDeploymentType.LOCAL_FILE:
+            if not self.uri.endswith(".db"):
+                raise ValueError("For local file deployment, URI should point to a local file ending with '.db'.")
+            milvus_client = MilvusClient(uri=self.uri)
+
+        elif self.deployment_type == MilvusDeploymentType.DOCKER:
+            if not self.uri.startswith("http"):
+                raise ValueError("For Docker deployment, URI should start with 'http'.")
+            milvus_client = MilvusClient(uri=self.uri)
+
+        elif self.deployment_type == MilvusDeploymentType.ZILLIZ_CLOUD:
+            if not self.api_key:
+                raise ValueError("API key is required for Zilliz Cloud deployment.")
+            milvus_client = MilvusClient(uri=self.uri, token=self.api_key)
+
+        else:
+            raise ValueError("Invalid deployment type for Milvus connection.")
+
+        return milvus_client
