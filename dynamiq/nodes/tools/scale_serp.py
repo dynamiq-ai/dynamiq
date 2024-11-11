@@ -1,13 +1,28 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from urllib.parse import urljoin
 
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.connections import ScaleSerp
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
+
+
+class ScaleSerpInputSchema(BaseModel):
+    query: str = Field(default="", description="Parameter to provide a search query.")
+    url: str = Field(default="", description="Parameter to provide a search url.")
+    limit: str = Field(
+        default="", description="Parameter to specify the number of results to return, by default is set to 10."
+    )
+
+    @model_validator(mode="after")
+    def validate_query_url(self):
+        """Validate that either query or url is specified"""
+        if not self.url and not self.query:
+            raise ValueError("Either 'query' or 'url' has to be specified.")
+        return self
 
 
 class ScaleSerpTool(ConnectionNode):
@@ -26,12 +41,10 @@ class ScaleSerpTool(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Scale SERP Search Tool"
+    name: str = "Scale Serp Search Tool"
     description: str = (
         "A tool for searching the web, powered by Scale SERP. "
         "You can use this tool to search the web for information."
-        "Input should be a dictionary with a key 'input' containing the query to search."
-        "Also there can be a key 'limit' to specify the number of results to return, default is 10."
     )
     connection: ScaleSerp
     limit: int = Field(
@@ -42,6 +55,7 @@ class ScaleSerpTool(ConnectionNode):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_schema: ClassVar[type[ScaleSerpInputSchema]] = ScaleSerpInputSchema
 
     def _format_search_results(self, results: dict[str, Any]) -> str:
         """
@@ -76,7 +90,7 @@ class ScaleSerpTool(ConnectionNode):
         return "\n".join(formatted_results).strip()
 
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs
+        self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """
         Executes the search using the Scale SERP API and returns the formatted results.
@@ -88,16 +102,14 @@ class ScaleSerpTool(ConnectionNode):
         Returns:
             dict[str, Any]: A dictionary containing the search results and metadata.
         """
-        logger.debug(
-            f"Tool {self.name} - {self.id}: started with input data {input_data}"
-        )
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        query: str | None = input_data.get("input") or input_data.get("query")
-        url: str | None = input_data.get("url")
-        limit: int = input_data.get("limit", self.limit)
+        query: str | None = input_data.query
+        url: str | None = input_data.url
+        limit: int = input_data.limit or self.limit
 
         if not query and not url:
             return {

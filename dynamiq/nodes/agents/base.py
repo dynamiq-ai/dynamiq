@@ -101,6 +101,12 @@ class Agent(Node):
                 tool.init_components(connection_manager)
             tool.is_optimized_for_agents = True
 
+    def sanitize_tool_name(self, s: str):
+        """Sanitize tool name to follow [^a-zA-Z0-9_-]."""
+        s = s.replace(" ", "-")
+        sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", s)
+        return sanitized
+
     def _init_prompt_blocks(self):
         """Initializes default prompt blocks and variables."""
         self._prompt_blocks = {
@@ -275,8 +281,8 @@ class Agent(Node):
         if not tool:
             raise AgentUnknownToolException(
                 f"Unknown tool: {action}."
-                "Use only available tools and provide only the tool's name in the action field."
-                "Do not include any additional reasoning."
+                "Use only available tools and provide only the tool's name in the action field. "
+                "Do not include any additional reasoning. "
                 "Please correct the action field or state that you cannot answer the question."
             )
         return tool
@@ -329,12 +335,12 @@ class Agent(Node):
     @property
     def tool_names(self) -> str:
         """Returns a comma-separated list of tool names available to the agent."""
-        return ",".join([tool.name for tool in self.tools]) if self.tools else ""
+        return ",".join([self.sanitize_tool_name(tool.name) for tool in self.tools])
 
     @property
     def tool_by_names(self) -> dict[str, Node]:
         """Returns a dictionary mapping tool names to their corresponding Node objects."""
-        return {tool.name: tool for tool in self.tools} if self.tools else {}
+        return {self.sanitize_tool_name(tool.name): tool for tool in self.tools}
 
     def reset_run_state(self):
         """Resets the agent's run state."""

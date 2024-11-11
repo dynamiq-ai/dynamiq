@@ -1,13 +1,17 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from urllib.parse import urljoin
 
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import Tavily
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
+
+
+class TavilyInputSchema(BaseModel):
+    query: str = Field(..., description="Parameter to provide a search query.")
 
 
 class TavilyTool(ConnectionNode):
@@ -34,7 +38,6 @@ class TavilyTool(ConnectionNode):
     name: str = "Tavily Search Tool"
     description: str = (
         "A tool for searching the web, powered by Tavily. "
-        "Input should be a dictionary with a key 'input' containing the query to search."
     )
     connection: Tavily
 
@@ -65,6 +68,8 @@ class TavilyTool(ConnectionNode):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    input_schema: ClassVar[type[TavilyInputSchema]] = TavilyInputSchema
+
     def _format_search_results(self, results: dict[str, Any]) -> str:
         """
         Formats the search results into a readable string format.
@@ -87,9 +92,7 @@ class TavilyTool(ConnectionNode):
 
         return "\n".join(formatted_results).strip()
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs
-    ) -> dict[str, Any]:
+    def execute(self, input_data: TavilyInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
         Executes the search operation using the provided input data.
 
@@ -101,14 +104,12 @@ class TavilyTool(ConnectionNode):
         Returns:
             dict[str, Any]: The result of the search operation.
         """
-        logger.debug(
-            f"Tool {self.name} - {self.id}: started with input data {input_data}"
-        )
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        query = input_data.get("input", "") or input_data.get("query", "")
+        query = input_data.query
         search_data = {
             "query": query,
             "search_depth": self.search_depth,

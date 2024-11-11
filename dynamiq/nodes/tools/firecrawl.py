@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,17 +30,21 @@ class ExtractorOptions(BaseModel):
     extraction_schema: dict | None = None
 
 
+class FirecrawlInputSchema(BaseModel):
+    url: str = Field(default="", description="Parameter to specify the url of the page to be scraped.")
+
+
 class FirecrawlTool(ConnectionNode):
     """A tool for scraping web pages using the Firecrawl service."""
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Firecrawl Scrape Tool"
+    name: str = "Firecrawl Tool"
     description: str = (
         "A tool for scraping web pages, powered by Firecrawl."
         "You can use this tool to scrape the content of a web page."
-        "Input should be a dictionary with a key 'input' containing the URL of the page to scrape."
     )
     connection: Firecrawl
     url: str | None = None
+    input_schema: ClassVar[type[FirecrawlInputSchema]] = FirecrawlInputSchema
 
     # Default parameters
     page_options: PageOptions = Field(
@@ -76,17 +80,15 @@ class FirecrawlTool(ConnectionNode):
             return data
 
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs
+        self, input_data: FirecrawlInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Execute the scraping tool with the provided input data."""
-        logger.debug(
-            f"Tool {self.name} - {self.id}: started with input data {input_data}"
-        )
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        url = input_data.get("url") or input_data.get("input") or self.url
+        url = input_data.url or self.url
         if not url:
             logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
             raise ValueError("URL is required for scraping")
@@ -129,7 +131,7 @@ class FirecrawlTool(ConnectionNode):
             if scrape_result.get("data", {}).get("content", "") != "":
                 result += f"\n\n<Scraped result>\n{scrape_result.get('data', {}).get('content')}\n<\\Scraped result>"
             if scrape_result.get("data", {}).get("markdown", "") != "":
-                result += f"\n\n<Markdown>\n{scrape_result.get.get('data', {}).get('markdown')}\n<\\Markdown>"
+                result += f"\n\n<Markdown>\n{scrape_result.get('data', {}).get('markdown')}\n<\\Markdown>"
             if scrape_result.get("data", {}).get("llm_extraction", "") != "":
                 result += (
                     f"\n\n<LLM Extraction>\n{scrape_result.get('data', {}).get('llm_extraction')}\n<\\LLM Extraction>"
