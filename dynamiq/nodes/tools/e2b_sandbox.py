@@ -1,8 +1,9 @@
 import io
 from hashlib import sha256
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from e2b import Sandbox
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes import NodeGroup
@@ -12,17 +13,16 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
 DESCRIPTION = """
-<tool_description>
 This tool enables interaction with an E2B sandbox environment,
-providing capabilities for Python code execution and shell command execution.
+providing capabilities for Python code and shell command execution.
 It offers internet access, API request functionality, and filesystem operations.
-Key Features:
+Features:
 1. Python Code Execution
 2. Shell Command Execution
 3. Internet Access
 4. API Request Capability
 5. Filesystem Access (Read/Write)
-Usage Instructions:
+Instructions:
 1. Shell Command Execution:
    - Provide the command in the 'shell_command' field.
 2. Python Code Execution:
@@ -31,22 +31,9 @@ Usage Instructions:
    - The code will be executed in a clean environment with default packages installed.
    - IMPORTANT: Always write the whole code from beginning to end, including imports.
    - IMPORTANT: Always print the final result when executing Python code.
+   - IMPORTANT: Always provide packages, which are used in the code
 Notes:
-- For API requests, use either shell commands or Python code.
-- Filesystem operations can be performed using appropriate Python libraries or shell commands.
-Example:
-# Python code execution
-python = '''
-import requests
-
-response = requests.get('https://api.example.com/data')
-print(response.json())
-'''
-# Shell command execution
-shell_command = 'ls -la /path/to/directory'
-# Package installation (optional)
-packages = 'requests,pandas'
-</tool_description>
+- For API requests or Filesystem operations, use either shell commands or Python code
 """  # noqa: E501
 
 
@@ -81,6 +68,60 @@ def generate_file_description(file: bytes | io.BytesIO, length: int = 20) -> str
     return f"File starting with: {file_content.hex()}"
 
 
+def handle_file_upload(
+    files,
+):
+    """Handles file uploading with additional metadata."""
+    files_data = []
+    for file in files:
+        if not isinstance(file, bytes | io.BytesIO):
+            raise ValueError(f"Error: Invalid file data type: {type(file)}. Expected bytes or BytesIO.")
+
+        file_name = getattr(file, "name", generate_fallback_filename(file))
+        description = getattr(file, "description", generate_file_description(file))
+        files_data.append(
+            FileData(
+                data=file.getvalue() if isinstance(file, io.BytesIO) else file,
+                name=file_name,
+                description=description,
+            )
+        )
+
+    return files_data
+
+
+class FileData(BaseModel):
+    data: bytes
+    name: str
+    description: str
+
+
+class E2BInterpreterInputSchema(BaseModel):
+    packages: str = Field(default="", description="Parameter to provide packages to install.")
+    shell_command: str = Field(default="", description="Parameter to provide shell command to execute.")
+    python: str = Field(default="", description="Parameter to provide python code to execute.")
+
+    files: list[FileData] = Field(
+        default=None,
+        description="Parameter to provide files for uploading to the sandbox.",
+        is_accessible_to_agent=False,
+    )
+
+    @model_validator(mode="after")
+    def validate_execution_commands(self):
+        """Validate that either shell command or python code is specified"""
+        if not self.shell_command and not self.python:
+            raise ValueError("shell_command or python code has to be specified.")
+        return self
+
+    @field_validator("files", mode="before")
+    def files_validator(
+        cls,
+        files,
+    ):
+        return handle_file_upload(files)
+
+
 class E2BInterpreterTool(ConnectionNode):
     """
     A tool for executing code and managing files in an E2B sandbox environment.
@@ -99,15 +140,24 @@ class E2BInterpreterTool(ConnectionNode):
         is_files_allowed (bool): Whether file uploads are permitted.
         _sandbox (Optional[Sandbox]): Internal sandbox instance for persistent mode.
     """
+
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "code-interpreter_e2b"
+    name: str = "E2b Code Interpreter Tool"
     description: str = DESCRIPTION
     connection: E2BConnection
     installed_packages: list = []
-    files: list[io.BytesIO | bytes] | None = None
+    files: list[FileData] | None = None
     persistent_sandbox: bool = True
     _sandbox: Sandbox | None = None
     is_files_allowed: bool = True
+    input_schema: ClassVar[type[E2BInterpreterInputSchema]] = E2BInterpreterInputSchema
+
+    @field_validator("files", mode="before")
+    def files_validator(
+        cls,
+        files,
+    ):
+        return handle_file_upload(files)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -148,7 +198,6 @@ class E2BInterpreterTool(ConnectionNode):
         self._install_default_packages(self._sandbox)
         if self.files:
             self._upload_files(files=self.files, sandbox=self._sandbox)
-            self._update_description()
 
     def _install_default_packages(self, sandbox: Sandbox) -> None:
         """Installs the default packages in the specified sandbox."""
@@ -162,47 +211,31 @@ class E2BInterpreterTool(ConnectionNode):
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
             sandbox.process.start_and_wait(f"pip install -qq {' '.join(packages.split(','))}")
 
-    def _upload_files(self, files: list[bytes | io.BytesIO], sandbox: Sandbox) -> str:
+    def _upload_files(self, files: list[FileData], sandbox: Sandbox) -> str:
         """Uploads multiple files to the sandbox and returns details for each file."""
         upload_details = []
         for file in files:
-            if isinstance(file, bytes):
-                file = io.BytesIO(file)
-
-            file_name = getattr(file, "name", None) or generate_fallback_filename(file)
-            file.name = file_name
-
-            description = getattr(file, "description", generate_file_description(file))
-
-            uploaded_path = self._upload_file(file, file_name, sandbox)
+            uploaded_path = self._upload_file(file, sandbox)
             upload_details.append(
                 {
-                    "original_name": file_name,
-                    "description": description,
+                    "original_name": file.name,
+                    "description": file.description,
                     "uploaded_path": uploaded_path,
                 }
             )
-            logger.debug(f"Tool {self.name} - {self.id}: Uploaded file '{file_name}' to {uploaded_path}")
+            logger.debug(f"Tool {self.name} - {self.id}: Uploaded file '{file.name}' to {uploaded_path}")
 
         self._update_description_with_files(upload_details)
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
-    def _upload_file(self, file: bytes | io.BytesIO, file_name: str, sandbox: Sandbox | None = None) -> str:
+    def _upload_file(self, file: FileData, sandbox: Sandbox | None = None) -> str:
         """Uploads a single file to the specified sandbox and returns the uploaded path."""
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
         # Handle the file types (bytes or io.BytesIO)
-        if isinstance(file, bytes):
-            file_like_object = io.BytesIO(file)
-            file_like_object.name = file_name
-        elif isinstance(file, io.BytesIO):
-            file.name = file_name
-            file_like_object = file
-        else:
-            raise ToolExecutionException(
-                f"Error: Invalid file data type: {type(file)}. Expected bytes or BytesIO.", recoverable=False
-            )
+        file_like_object = io.BytesIO(file.data)
+        file_like_object.name = file.name
 
         # Upload the file to the sandbox
         uploaded_path = sandbox.upload_file(file=file_like_object)
@@ -251,10 +284,10 @@ class E2BInterpreterTool(ConnectionNode):
             raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
         return output.stdout
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
         """Executes the requested action based on the input data."""
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data}")
-
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -266,17 +299,17 @@ class E2BInterpreterTool(ConnectionNode):
             self._install_default_packages(sandbox)
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
-                self._update_description()
+
         try:
             content = {}
-            if files := input_data.get("files"):
+            if files := input_data.files:
                 content["files_installation"] = self._upload_files(files=files, sandbox=sandbox)
-            if packages := input_data.get("packages"):
+            if packages := input_data.packages:
                 self._install_packages(sandbox=sandbox, packages=packages)
-                content["packages_installation"] = f"Installed packages: {input_data['packages']}"
-            if shell_command := input_data.get("shell_command"):
+                content["packages_installation"] = f"Installed packages: {input_data.packages}"
+            if shell_command := input_data.shell_command:
                 content["shell_command_execution"] = self._execute_shell_command(shell_command, sandbox=sandbox)
-            if python := input_data.get("python"):
+            if python := input_data.python:
                 content["code_execution"] = self._execute_python_code(python, sandbox=sandbox)
             if not (packages or files or shell_command or python):
                 raise ToolExecutionException(
