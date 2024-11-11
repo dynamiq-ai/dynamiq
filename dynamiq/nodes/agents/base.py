@@ -137,6 +137,10 @@ class Agent(Node):
         """Sets or updates a prompt variable."""
         self._prompt_variables[variable_name] = value
 
+    def _retrieve_chat_history(self, messages: list[Message]) -> str:
+        """Converts a list of messages to a formatted string."""
+        return "\n".join([f"**{msg.role.value}:** {msg.content}" for msg in messages])
+
     def execute(
         self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -153,6 +157,12 @@ class Agent(Node):
         custom_metadata = input_data.get("metadata", {}).copy()
         custom_metadata.update({k: v for k, v in input_data.items() if k not in ["user_id", "session_id", "input"]})
         metadata = {**custom_metadata, "user_id": user_id, "session_id": session_id}
+        chat_history = input_data.get("chat_history", None)
+        if chat_history:
+            logger.debug(f"Agent {self.name} - {self.id}: Chat history provided")
+            chat_history = self._retrieve_chat_history(chat_history)
+            logger.debug(f"Agent {self.name} - {self.id}: Chat history: {len(chat_history)}")
+            self._prompt_variables["context"] = chat_history
 
         if self.memory:
             self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
