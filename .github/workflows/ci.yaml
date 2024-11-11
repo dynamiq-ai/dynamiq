@@ -28,7 +28,7 @@ jobs:
           envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
 
       - name: Build
-        uses: docker/bake-action@v4
+        uses: docker/bake-action@v5
         with:
           set: |
             *.cache-from=type=gha
@@ -77,7 +77,7 @@ jobs:
           envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
 
       - name: Load Image
-        uses: docker/bake-action@v4
+        uses: docker/bake-action@v5
         with:
           load: true
           set: |
