@@ -1,3 +1,4 @@
+from enum import Enum
 from functools import cached_property
 from queue import Queue
 from threading import Event
@@ -6,6 +7,14 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dynamiq.utils import generate_uuid
+
+
+class StreamingMode(Enum):
+    """Enumeration for streaming modes."""
+
+    FINAL = "final"  # Only final output
+    ALL = "all"  # All intermediate steps and final output
+
 
 STREAMING_EVENT = "streaming"
 
@@ -65,14 +74,14 @@ class StreamingConfig(BaseModel):
         timeout (float | None): Timeout for streaming. Defaults to None.
         input_queue (Queue | None): Input queue for streaming. Defaults to None.
         input_queue_done_event (Event | None): Event to signal input queue completion. Defaults to None.
-        is_final (bool): Whether the streaming is final. Defaults to False.
+        mode (StreamingMode): Streaming mode. Defaults to StreamingMode.FINAL.
     """
     enabled: bool = False
     event: str = STREAMING_EVENT
     timeout: float | None = None
     input_queue: Queue | None = None
     input_queue_done_event: Event | None = None
-    is_final: bool = False
+    mode: StreamingMode = StreamingMode.FINAL
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

@@ -20,6 +20,7 @@ from dynamiq.nodes.agents.exceptions import (
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 
@@ -240,11 +241,11 @@ class Agent(Node):
         """Streams the input chunk to the callbacks."""
         final_response = []
         for chunk in input_chunk.split(" "):
-            logger.debug(f"Agent {self.name} - {self.id}: Streaming chunk: {chunk}")
+            logger.debug(f"Agent {self.name} - {self.id}: Streaming chunk: {chunk}, type is {self.name}")
             final_response.append(chunk)
             self.run_on_node_execute_stream(
-                config.callbacks,
-                chunk=chunk,
+                callbacks=config.callbacks,
+                chunk={"content": chunk, "type": self.name},
                 **kwargs,
             )
         return " ".join(final_response)
@@ -453,14 +454,23 @@ class AgentManager(Agent):
     def _plan(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'plan' action."""
         prompt = self.generate_prompt(block_names=["plan"])
-        return self._run_llm(prompt, config, **kwargs)
+        llm_result = self._run_llm(prompt, config, **kwargs)
+        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            return self.stream_chunk(input_chunk="\n\n" + llm_result + "\n\n", config=config, **kwargs)
+        return llm_result
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'assign' action."""
         prompt = self.generate_prompt(block_names=["assign"])
-        return self._run_llm(prompt, config, **kwargs)
+        llm_result = self._run_llm(prompt, config, **kwargs)
+        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            return self.stream_chunk(input_chunk="\n\n" + llm_result + "\n\n", config=config, **kwargs)
+        return llm_result
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'final' action."""
         prompt = self.generate_prompt(block_names=["final"])
-        return self._run_llm(prompt, config, **kwargs)
+        llm_result = self._run_llm(prompt, config, **kwargs)
+        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            return self.stream_chunk(input_chunk="\n\n" + llm_result + "\n\n", config=config, **kwargs)
+        return llm_result
