@@ -7,13 +7,11 @@ from dynamiq.storages.vector.milvus.milvus import MilvusVectorStore
 from dynamiq.types import Document
 
 
-# Fixture: 模拟 Milvus 客户端
 @pytest.fixture
 def mock_milvus_client():
     return MagicMock()
 
 
-# Fixture: 创建 MilvusVectorStore 实例，使用模拟的客户端
 @pytest.fixture
 def milvus_vector_store(mock_milvus_client):
     return MilvusVectorStore(client=mock_milvus_client, index_name="test_collection")

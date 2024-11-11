@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from pymilvus import DataType
 
-from dynamiq.connections import Milvus, MilvusDeploymentType
+from dynamiq.connections import Milvus
 from dynamiq.storages.vector.milvus.filter import Filter
 from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
@@ -64,7 +64,6 @@ class MilvusVectorStore:
         else:
             logger.info(f"Collection {self.index_name} already exists. Skipping creation.")
 
-        # Load the collection into memory
         self.client.load_collection(self.index_name)
 
     def count_documents(self) -> int:
@@ -150,7 +149,6 @@ class MilvusVectorStore:
 
         filter_expression = Filter(filters).build_filter_expression()
 
-        # Perform delete operation
         delete_result = self.client.delete(collection_name=self.index_name, filter=filter_expression)
 
         logger.info(f"Deleted {len(delete_result)} entities from collection {self.index_name} based on filters.")
@@ -210,7 +208,7 @@ class MilvusVectorStore:
             data=query_embeddings,
             limit=top_k,
             filter=filter_expression,
-            output_fields=["id", "content", "vector", "metadata"],
+            output_fields=["*"],
             search_params=search_params,
         )
 
@@ -230,9 +228,10 @@ class MilvusVectorStore:
         documents = []
 
         for hit in result:
-            content = hit.get("entity", {}).get("content", "")
-            embedding = hit.get("entity", {}).get("vector", [])
-            metadata = {k: v for k, v in hit.get("entity", {}).items() if k not in {"content", "vector"}}
+            entity = hit.get("entity", {})
+            content = entity.get("content", "")
+            embedding = entity.get("vector", [])
+            metadata = {k: v for k, v in entity.items() if k not in {"content", "vector"}}
 
             doc = Document(
                 id=str(hit.get("id", "")),
@@ -266,7 +265,7 @@ class MilvusVectorStore:
         result = self.client.query(
             collection_name=self.index_name,
             filter=filter_expression,
-            output_fields=["id", "content", "vector", "metadata"],
+            output_fields=["*"],
         )
 
         return self._get_result_to_documents(result)
@@ -274,7 +273,7 @@ class MilvusVectorStore:
     @staticmethod
     def _get_result_to_documents(result: list[dict[str, Any]]) -> list[Document]:
         """
-        Convert Milvus query result into Dynamiq Documents.
+        Convert Milvus query result into Documents.
 
         Args:
             result (List[Dict[str, Any]]): The result from a Milvus query operation.
@@ -291,7 +290,8 @@ class MilvusVectorStore:
                 "embedding": entry.get("vector", []),
             }
 
-            metadata = entry.get("metadata", {})
+            metadata = {k: v for k, v in entry.items() if k not in {"id", "content", "vector"}}
+
             if metadata:
                 document_dict["metadata"] = metadata
 
@@ -301,52 +301,3 @@ class MilvusVectorStore:
                 logger.error(f"Error creating Document: {e}, data: {document_dict}")
 
         return documents
-
-
-def main():
-    connection = Milvus(deployment_type=MilvusDeploymentType.DOCKER, uri="http://10.100.30.11:19530")
-
-    milvus_store = MilvusVectorStore(
-        connection=connection, index_name="test_collection", dimension=128, create_if_not_exist=True
-    )
-
-    documents = [
-        Document(
-            id="1", content="Document 1 content", embedding=[0.1] * 128, metadata={"category": "A", "type": "test"}
-        ),
-        Document(
-            id="2", content="Document 2 content", embedding=[0.2] * 128, metadata={"category": "B", "type": "test"}
-        ),
-        Document(
-            id="3", content="Document 3 content", embedding=[0.3] * 128, metadata={"category": "A", "type": "train"}
-        ),
-    ]
-
-    milvus_store.write_documents(documents)
-
-    filter_conditions = {
-        "operator": "AND",
-        "conditions": [
-            {"field": "type", "operator": "==", "value": "test"},
-            {"field": "category", "operator": "==", "value": "A"},
-        ],
-    }
-
-    filtered_documents = milvus_store.filter_documents(filters=filter_conditions)
-
-    for doc in filtered_documents:
-        print(f"ID: {doc.id}, Content: {doc.content}, Metadata: {doc.metadata}")
-
-    query_embedding = [[0.1] * 128]
-    top_k = 2
-
-    search_results = milvus_store.search_embeddings(
-        query_embeddings=query_embedding, top_k=top_k, filters=filter_conditions
-    )
-
-    for doc in search_results:
-        print(f"ID: {doc.id}, Content: {doc.content}, Score: {doc.score}, Metadata: {doc.metadata}")
-
-
-if __name__ == "__main__":
-    main()
