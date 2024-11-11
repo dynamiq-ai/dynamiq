@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory
@@ -158,11 +158,17 @@ class Agent(Node):
         custom_metadata.update({k: v for k, v in input_data.items() if k not in ["user_id", "session_id", "input"]})
         metadata = {**custom_metadata, "user_id": user_id, "session_id": session_id}
         chat_history = input_data.get("chat_history", None)
+
         if chat_history:
-            logger.debug(f"Agent {self.name} - {self.id}: Chat history provided")
-            chat_history = self._retrieve_chat_history(chat_history)
-            logger.debug(f"Agent {self.name} - {self.id}: Chat history: {len(chat_history)}")
-            self._prompt_variables["context"] = chat_history
+            try:
+                logger.debug(f"Agent {self.name} - {self.id}: Chat history provided")
+                chat_history = TypeAdapter(list[Message]).validate_python(chat_history)
+                chat_history = self._retrieve_chat_history(chat_history)
+                logger.debug(f"Agent {self.name} - {self.id}: Chat history: {len(chat_history)}")
+                self._prompt_variables["context"] = chat_history
+
+            except ValidationError as e:
+                raise TypeError(f"Invalid chat history: {e}")
 
         if self.memory:
             self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
