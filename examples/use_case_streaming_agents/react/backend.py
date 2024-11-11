@@ -6,7 +6,7 @@ from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
-from dynamiq.types.streaming import StreamingConfig, StreamingMode
+from dynamiq.types.streaming import StreamingConfig
 from examples.llm_setup import setup_llm
 
 
@@ -16,9 +16,9 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -
     """
     llm = setup_llm()
     memory = Memory(backend=InMemory())
-    mode_mapping = {"Final": StreamingMode.FINAL, "All": StreamingMode.ALL}
-    selected_mode = mode_mapping.get(streaming_mode, StreamingMode.FINAL)
-    streaming_config = StreamingConfig(enabled=streaming_enabled)
+    mode_mapping = {"Final": True, "All": False}
+    final_streaming = mode_mapping.get(streaming_mode, True)
+    streaming_config = StreamingConfig(enabled=streaming_enabled, is_final=final_streaming)
     tool_search = ScaleSerpTool(connection=ScaleSerp())
     tool_code = E2BInterpreterTool(connection=E2B())
     agent = ReActAgent(
@@ -29,7 +29,6 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -
         memory=memory,
         tools=[tool_code, tool_search],
         streaming=streaming_config,
-        streaming_mode=selected_mode,
     )
     return agent
 

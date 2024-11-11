@@ -10,7 +10,6 @@ from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 REACT_BLOCK_TOOLS = (
@@ -262,9 +261,6 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
-    streaming_mode: StreamingMode = Field(
-        default=StreamingMode.NONE, description="Controls what content should be streamed during execution"
-    )
 
     def parse_xml_content(self, text: str, tag: str) -> str:
         """Extract content from XML-like tags."""
@@ -376,7 +372,7 @@ class ReActAgent(Agent):
                             f"RAW LLM output:n{llm_generated_output}"
                         )
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
-                        if self.streaming.enabled and self.streaming_mode == StreamingMode.ALL:
+                        if self.streaming.enabled and not self.streaming.is_final:
                             self.stream_chunk(
                                 input_chunk="\n\n" + llm_generated_output,
                                 config=config,
@@ -385,7 +381,7 @@ class ReActAgent(Agent):
                         if "Answer:" in llm_generated_output:
                             final_answer = self._extract_final_answer(llm_generated_output)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled and self.streaming_mode == StreamingMode.FINAL:
+                            if self.streaming.enabled and self.streaming.is_final:
                                 self.stream_chunk(
                                     input_chunk="\n\n" + final_answer,
                                     config=config,
@@ -431,7 +427,7 @@ class ReActAgent(Agent):
                     case InferenceMode.XML:
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
-                        if self.streaming.enabled and self.streaming_mode == StreamingMode.ALL:
+                        if self.streaming.enabled and not self.streaming.is_final:
                             self.stream_chunk(
                                 input_chunk=llm_generated_output,
                                 config=config,
@@ -440,7 +436,7 @@ class ReActAgent(Agent):
                         if "<answer>" in llm_generated_output:
                             final_answer = self._extract_final_answer_xml(llm_generated_output)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled and self.streaming_mode == StreamingMode.FINAL:
+                            if self.streaming.enabled and self.streaming.is_final:
                                 self.stream_chunk(
                                     input_chunk="\n\n" + final_answer,
                                     config=config,
@@ -466,7 +462,7 @@ class ReActAgent(Agent):
                             tool_result = f"{type(e).__name__}: {e}"
 
                         llm_generated_output += f"\nObservation: {tool_result}\n"
-                        if self.streaming.enabled and self.streaming_mode == StreamingMode.ALL:
+                        if self.streaming.enabled and not self.streaming.is_final:
                             self.stream_chunk(
                                 input_chunk="\n" + llm_generated_output,
                                 config=config,

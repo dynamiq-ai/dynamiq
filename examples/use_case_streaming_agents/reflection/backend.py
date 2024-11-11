@@ -5,7 +5,7 @@ from dynamiq.memory import Memory
 from dynamiq.memory.backend.in_memory import InMemory
 from dynamiq.nodes.agents.reflection import ReflectionAgent
 from dynamiq.runnables import RunnableConfig
-from dynamiq.types.streaming import StreamingConfig, StreamingMode
+from dynamiq.types.streaming import StreamingConfig
 from examples.llm_setup import setup_llm
 
 
@@ -18,10 +18,10 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -
     memory = Memory(backend=InMemory())
 
     # Map the mode string to the StreamingMode enum
-    mode_mapping = {"Final": StreamingMode.FINAL, "All": StreamingMode.ALL}
-    selected_mode = mode_mapping.get(streaming_mode, StreamingMode.FINAL)
+    mode_mapping = {"Final": True, "All": False}
+    final_streaming = mode_mapping.get(streaming_mode, True)
 
-    streaming_config = StreamingConfig(enabled=streaming_enabled)
+    streaming_config = StreamingConfig(enabled=streaming_enabled, is_final=final_streaming)
 
     agent = ReflectionAgent(
         name="Agent",
@@ -30,7 +30,6 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -
         id="agent",
         memory=memory,
         streaming=streaming_config,
-        streaming_mode=selected_mode,
     )
     return agent
 

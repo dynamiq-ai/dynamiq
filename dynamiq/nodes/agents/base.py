@@ -20,7 +20,6 @@ from dynamiq.nodes.agents.exceptions import (
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 
@@ -57,9 +56,6 @@ class Agent(Node):
     llm: Node = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
-    streaming_mode: StreamingMode = Field(
-        default=StreamingMode.ALL, description="Controls what content should be streamed during execution"
-    )
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
     name: str = "AI Agent"
@@ -222,7 +218,7 @@ class Agent(Node):
         """Streams the input chunk to the callbacks."""
         final_response = []
         for chunk in input_chunk.split(" "):
-            logger.info(f"Streaming chunk: {chunk}")
+            logger.debug(f"Agent {self.name} - {self.id}: Streaming chunk: {chunk}")
             final_response.append(chunk)
             self.run_on_node_execute_stream(
                 config.callbacks,
@@ -426,14 +422,6 @@ class AgentManager(Agent):
             "content": result,
             "intermediate_steps": self._intermediate_steps,
         }
-
-        # if self.streaming.enabled:
-        #   self.run_on_node_execute_stream(
-        #       callbacks=config.callbacks,
-        #        chunk=execution_result,
-        #       wf_run_id=config.run_id,
-        #        **kwargs,
-        #   )
 
         logger.debug(
             f"AgentManager {self.name} - {self.id}: finished with result {result}"

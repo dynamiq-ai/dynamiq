@@ -1,4 +1,3 @@
-from enum import Enum
 from functools import cached_property
 from queue import Queue
 from threading import Event
@@ -9,14 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from dynamiq.utils import generate_uuid
 
 STREAMING_EVENT = "streaming"
-
-
-class StreamingMode(Enum):
-    """Controls what content should be streamed during agent execution."""
-
-    NONE = "none"
-    FINAL = "final"  # Stream only final answer
-    ALL = "all"  # Stream all steps including intermediate thoughts and actions
 
 
 class StreamingEventMessage(BaseModel):
@@ -74,12 +65,14 @@ class StreamingConfig(BaseModel):
         timeout (float | None): Timeout for streaming. Defaults to None.
         input_queue (Queue | None): Input queue for streaming. Defaults to None.
         input_queue_done_event (Event | None): Event to signal input queue completion. Defaults to None.
+        is_final (bool): Whether the streaming is final. Defaults to False.
     """
     enabled: bool = False
     event: str = STREAMING_EVENT
     timeout: float | None = None
     input_queue: Queue | None = None
     input_queue_done_event: Event | None = None
+    is_final: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
