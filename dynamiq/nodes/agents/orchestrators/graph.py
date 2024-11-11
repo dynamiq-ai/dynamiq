@@ -1,16 +1,20 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
-from pydantic import BaseModel
+
+from pydantic import BaseModel, field_validator
+
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.tools.function_tool import FunctionTool, function_tool
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
 
 class OrchestratorError(Exception):
-    """Base exception for AdaptiveOrchestrator errors."""
+    """Base exception for GraphOrchestrator errors."""
     pass
 
 
@@ -23,9 +27,33 @@ class StateNotFoundError(OrchestratorError):
 class State(BaseModel):
     name: str
     description: str = ""
-    connected: list["str"] = []
-    tasks: list[Node | Callable] = []
-    branch: Callable = None
+    connected: list[str] = []
+    tasks: list[Agent | FunctionTool] = []
+    branch: FunctionTool = None
+
+    @field_validator("tasks", mode="before")
+    def process_callable_tasks(cls, tasks: Any):
+
+        tasks_new = []
+
+        for task in tasks:
+            if isinstance(task, Callable):
+                tasks_new.append(function_tool(task)())
+            elif isinstance(task, FunctionTool | Agent):
+                tasks_new.append(task)
+            else:
+                raise ValueError("Task has to be whether an Agent or a FunctionTool or a Callable.")
+
+        return tasks_new
+
+    @field_validator("branch")
+    def process_condition(cls, task: Any):
+        if isinstance(task, Callable):
+            tool = function_tool(task)()
+            return tool
+        elif isinstance(task, FunctionTool):
+            return task
+        raise ValueError("Condition function has to be whether a Callable or a FunctionTool.")
 
 
 START = "START"
@@ -93,7 +121,7 @@ class GraphOrchestrator(Node):
     def add_conditional_edge(self, source: str, destinations: list[str], path_func: Callable) -> None:
         self.validate_states(destinations + [source])
         self.states[source].connected = destinations
-        self.states[source].branch = path_func
+        self.states[source].branch = function_tool(path_func)()
 
     def get_final_result(
         self,
@@ -194,7 +222,12 @@ class GraphOrchestrator(Node):
 
         if len(state.connected) > 1:
             if state.branch:
-                next_state_name = state.branch(self.context)
+                next_state_name = state.branch.run(
+                    input_data={"context": self.context},
+                    config=config,
+                    run_depends=self._run_depends,
+                ).output.get("content")
+
                 return self.states[next_state_name]
             return self.states[self.get_next_action(state, config)]
         else:
@@ -203,70 +236,27 @@ class GraphOrchestrator(Node):
     def task_description(self, task: Agent):
         return ("Name:", task.name, "Role:", task.role)
 
-    def get_actions(self, state: State, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
-        """
-        Determine actions for current state.
-
-        Returns:
-            Action: The next action to be taken for current state.
-        """
-
-        actions = {}
-        for agent in state.tasks:
-            if isinstance(agent, Agent):
-                manager_result = self.manager.run(
-                    input_data={
-                        "action": "assign",
-                        "task": self.task_description(agent),
-                        "chat_history": self.context["history"],
-                    },
-                    config=config,
-                    run_depends=self._run_depends,
-                    **kwargs,
-                )
-                self._run_depends = [NodeDependency(node=self.manager).to_dict()]
-
-                if manager_result.status != RunnableStatus.SUCCESS:
-                    logger.error(f"GraphOrchestrator {self.id}: Error generating actions for state.")
-                    raise OrchestratorError("Error generating actions for state.")
-
-                try:
-                    agent_input = json.loads(
-                        manager_result.output.get("content")
-                        .get("result")
-                        .replace("json", "")
-                        .replace("```", "")
-                        .strip()
-                    )["input"]
-
-                    actions[agent.name] = agent_input
-
-                except Exception as e:
-                    logger.error("GraphOrchestrator: Error when parsing response about next state.")
-                    raise OrchestratorError(f"Error when parsing response about next state {e}")
-
-        return actions
-
     def states_descriptions(self, states: list[State]) -> str:
         """Get a formatted string of state descriptions."""
         return "\n".join([f"'{self.states[state].name}': {self.states[state].description}" for state in states])
 
-    def run_task(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
+    def run_flow(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
         """
-        Process the given task using the manager agent logic.
+        Process the graph workflow.
 
         Args:
-            task (str): The task to be processed.xxfx
+            task (str): The task to be processed.
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
             str: The final answer generated after processing the task.
         """
         self.context["history"].append({"role": "user", "content": task})
-
         state = self.states[self.initial_state]
+
         while True:
-            logger.debug(f"GraphOrchestrator {self.id}: Next action: {state.model_dump()}")
+            logger.info(f"GraphOrchestrator {self.id}: Next action: {state.name}")
+
             if state.name == END:
                 return self.get_final_result(
                     input_task=task,
@@ -280,6 +270,59 @@ class GraphOrchestrator(Node):
 
             state = self.get_next_state(state, config=config, **kwargs)
 
+    def _submit_task(self, task, config, **kwargs) -> str:
+        """Executes task
+        Args:
+            task (Agent | FunctionTool): Task to be executed.
+            config (Optional[RunnableConfig]): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
+        """
+        if isinstance(task, Agent):
+
+            thread_run_depends = self._run_depends
+            manager_result = self.manager.run(
+                input_data={
+                    "action": "assign",
+                    "task": self.task_description(task),
+                    "chat_history": self.context["history"],
+                },
+                config=config,
+                run_depends=thread_run_depends,
+                **kwargs,
+            )
+
+            thread_run_depends = [NodeDependency(node=self.manager).to_dict()]
+
+            if manager_result.status != RunnableStatus.SUCCESS:
+                raise OrchestratorError("Error generating actions for state.")
+
+            try:
+                agent_input = json.loads(
+                    manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
+                )["input"]
+
+                result = task.run(
+                    input_data={"input": agent_input},
+                    config=config,
+                    run_depends=thread_run_depends,
+                    **kwargs,
+                )
+
+                output = result.output.get("content")
+
+                if result.status != RunnableStatus.SUCCESS:
+                    raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {output}")
+
+                return output
+
+            except Exception as e:
+                raise OrchestratorError(f"Error when parsing response about next state {e}")
+
+        elif isinstance(task, FunctionTool):
+            return task.run(
+                input_data={"context": self.context}, config=config, run_depends=self._run_depends
+            ).output.get("content")
+
     def _handle_state_execution(self, state: State, config: RunnableConfig = None, **kwargs) -> None:
         """
         Handle state execution.
@@ -287,53 +330,12 @@ class GraphOrchestrator(Node):
         Args:
             action (Action): The action containing the delegation command and details.
         """
-
-        for task in state.tasks:
-            if isinstance(task, Agent):
-
-                manager_result = self.manager.run(
-                    input_data={
-                        "action": "assign",
-                        "task": self.task_description(task),
-                        "chat_history": self.context["history"],
-                    },
-                    config=config,
-                    run_depends=self._run_depends,
-                    **kwargs,
-                )
-                self._run_depends = [NodeDependency(node=self.manager).to_dict()]
-
-                if manager_result.status != RunnableStatus.SUCCESS:
-                    logger.error(f"GraphOrchestrator {self.id}: Error generating actions for state.")
-                    raise OrchestratorError("Error generating actions for state.")
-
-                try:
-                    agent_input = json.loads(
-                        manager_result.output.get("content")
-                        .get("result")
-                        .replace("json", "")
-                        .replace("```", "")
-                        .strip()
-                    )["input"]
-
-                    result = task.run(
-                        input_data={"input": agent_input},
-                        config=config,
-                        run_depends=self._run_depends,
-                        **kwargs,
-                    )
-
-                    output = result.output.get("content")
-                    self._run_depends = [NodeDependency(node=task).to_dict()]
-                    if result.status != RunnableStatus.SUCCESS:
-                        logger.error(f"GraphOrchestrator {self.id}: Error executing Agent {task.name}")
-                        raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {output}")
-                except Exception as e:
-                    logger.error("GraphOrchestrator: Error when parsing response about next state.")
-                    raise OrchestratorError(f"Error when parsing response about next state {e}")
-
-            elif isinstance(task, Callable):
-                output = task(self.context, config=config)
+        if len(state.tasks) == 1:
+            try:
+                output = self._submit_task(state.tasks[0], config=config, **kwargs)
+            except OrchestratorError as e:
+                logger.error(f"GraphOrchestrator {self.id}: {e}")
+                raise e
 
             self.context["history"].append(
                 {
@@ -341,6 +343,27 @@ class GraphOrchestrator(Node):
                     "content": f"Result: {output}",
                 }
             )
+
+        elif len(state.tasks) > 1:
+            with ThreadPoolExecutor() as executor:
+
+                futures = [executor.submit(self._submit_task, task, config=config, **kwargs) for task in state.tasks]
+
+                for future in futures:
+                    try:
+                        output = future.result()
+                    except OrchestratorError as e:
+                        logger.error(f"GraphOrchestrator {self.id}: {e}")
+                        raise e
+
+                    self.context["history"].append(
+                        {
+                            "role": "system",
+                            "content": f"Result: {output}",
+                        }
+                    )
+
+        self._run_depends = [NodeDependency(node=task).to_dict() for task in state.tasks]
 
     def execute(self, input_data: dict[Any], config: RunnableConfig | None = None, **kwargs) -> dict:
         """
@@ -369,7 +392,7 @@ class GraphOrchestrator(Node):
         run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         run_kwargs.pop("run_depends", None)
 
-        result = self.run_task(
+        result = self.run_flow(
             task=objective,
             config=config,
             **run_kwargs,
