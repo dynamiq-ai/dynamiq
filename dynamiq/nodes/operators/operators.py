@@ -5,7 +5,6 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 import dynamiq.utils.jsonpath as jsonpath
-from dynamiq.flows import Flow
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -197,7 +196,7 @@ class Map(Node):
     """Represents a map node in a flow."""
 
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
-    flow: Flow
+    node: Node
 
     def execute(
         self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
@@ -217,7 +216,7 @@ class Map(Node):
             Exception: If the input is not a list or if any flow execution fails.
         """
         if isinstance(input_data, dict):
-            input_data = [{k: v} for k, v in input_data.items()]
+            input_data = input_data["inputs"]
 
         if not isinstance(input_data, list):
             logger.error(f"Map operator {self.id} input is not a list.")
@@ -231,13 +230,11 @@ class Map(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         for data in input_data:
-            result = self.flow.run(data, config, **merged_kwargs)
-            if result.status == RunnableStatus.SUCCESS:
-                output.append(result.output)
-            else:
-                raise Exception(
-                    f"Map operator {self.id} flow {self.flow.id} execution failed."
-                )
+            try:
+                result = self.node.execute(data, config, **merged_kwargs)
+                output.append(result)
+            except Exception as e:
+                raise Exception(f"Map operator {self.id} flow {self.flow.id} execution failed. Error details: {e}")
 
         return output
 
