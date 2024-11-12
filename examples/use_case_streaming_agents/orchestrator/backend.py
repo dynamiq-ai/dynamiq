@@ -1,5 +1,5 @@
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
-from dynamiq.connections import E2B
+from dynamiq.connections import E2B, ScaleSerp
 from dynamiq.memory import Memory
 from dynamiq.memory.backend.in_memory import InMemory
 from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
@@ -7,12 +7,27 @@ from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentMan
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
+from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from examples.llm_setup import setup_llm
 
+AGENT_ROLE_CODING = (
+    "An Expert Agent with high programming skills, he can solve any problem using coding skills."
+    "Goal is to provide the best solution for request,"
+    "using all his algorithmic knowledge and coding skills"
+)
 
-def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -> ReActAgent:
+AGENT_ROLE_SEARCH = "An Expert Agent with search skills, he can find any information using search skills."
+AGENT_ROLE_WRITER = (
+    "An Expert Agent with high writing skills, he can write any report or summary."
+    "Goal is to provide the best solution for request, using markdown language."
+    "He can write reports, summaries, and other text-based content."
+    "Keep friendly and professional tone with citations of sources."
+)
+
+
+def setup_agent(streaming_enabled: bool, streaming_mode: str) -> ReActAgent:
     """
     Initializes an AI agent with a specified role and streaming configuration.
     """
@@ -23,12 +38,23 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -
     streaming_config = StreamingConfig(enabled=streaming_enabled, mode=mode)
     tool_code = E2BInterpreterTool(connection=E2B())
 
+    tool_search = ScaleSerpTool(connection=ScaleSerp())
+
     agent_coding = ReActAgent(
         name="Coding Agent",
         id="agent",
         llm=llm,
         tools=[tool_code],
-        role=agent_role,
+        role=AGENT_ROLE_CODING,
+        memory=memory,
+    )
+
+    agent_search = ReActAgent(
+        name="Search Agent",
+        id="agent",
+        llm=llm,
+        tools=[tool_search],
+        role=AGENT_ROLE_SEARCH,
         memory=memory,
     )
 
@@ -36,8 +62,8 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -
         name="Writer Agent",
         id="writer",
         llm=llm,
-        role="An agent that can write reports and summaries.",
         memory=memory,
+        role=AGENT_ROLE_WRITER,
     )
 
     agent_manager = AdaptiveAgentManager(
@@ -47,7 +73,7 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -
 
     orchestrator = AdaptiveOrchestrator(
         name="Adaptive Orchestrator",
-        agents=[agent_coding, agent_writer],
+        agents=[agent_coding, agent_writer, agent_search],
         manager=agent_manager,
         streaming=streaming_config,
     )

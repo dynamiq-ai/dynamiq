@@ -5,12 +5,11 @@ import streamlit as st
 from backend import generate_agent_response, setup_agent
 
 st.sidebar.title("Agent Configuration")
-agent_role = st.sidebar.text_input("Agent Role", "helpful assistant")
 streaming_enabled = st.sidebar.checkbox("Enable Streaming", value=False)
 
 streaming_mode = st.sidebar.radio("Streaming Mode", options=["Final", "All"], index=0)
 if "agent" not in st.session_state or st.sidebar.button("Apply Changes"):
-    st.session_state.agent = setup_agent(agent_role, streaming_enabled, streaming_mode)
+    st.session_state.agent = setup_agent(streaming_enabled, streaming_mode)
     st.session_state.messages = []
     st.session_state.chunk_color_map = {}
     st.session_state.color_palette = [

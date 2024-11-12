@@ -471,6 +471,6 @@ class AgentManager(Agent):
         """Executes the 'final' action."""
         prompt = self.generate_prompt(block_names=["final"])
         llm_result = self._run_llm(prompt, config, **kwargs)
-        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+        if self.streaming.enabled:
             return self.stream_chunk(input_chunk="\n\n" + llm_result + "\n\n", config=config, **kwargs)
         return llm_result
