@@ -5,7 +5,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 import dynamiq.utils.jsonpath as jsonpath
-from dynamiq.nodes import Node, NodeGroup
+from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils import generate_uuid
@@ -197,6 +197,7 @@ class Map(Node):
 
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
     node: Node
+    behavior: Behavior | None = Behavior.RETURN
 
     def execute(
         self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
@@ -232,6 +233,8 @@ class Map(Node):
         for index, data in enumerate(input_data, start=1):
             result = self.node.run(data, config, **merged_kwargs)
             if result.status != RunnableStatus.SUCCESS:
+                if self.behavior == Behavior.RAISE:
+                    raise ValueError(f"Map node failed to execute: node under iteration index {index} has failed.")
                 logger.error(f"Node under iteration index {index} has failed.")
             output.append(result.output)
 
