@@ -220,7 +220,7 @@ class Map(Node):
 
         if not isinstance(input_data, list):
             logger.error(f"Map operator {self.id} input is not a list.")
-            raise Exception(f"Map operator {self.id} input is not a list.")
+            raise ValueError(f"Map operator {self.id} input is not a list.")
 
         output = []
         run_id = kwargs.get("run_id", uuid4())
@@ -229,12 +229,11 @@ class Map(Node):
 
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        for data in input_data:
-            try:
-                result = self.node.execute(data, config, **merged_kwargs)
-                output.append(result)
-            except Exception as e:
-                raise Exception(f"Map operator {self.id} flow {self.flow.id} execution failed. Error details: {e}")
+        for index, data in enumerate(input_data, start=1):
+            result = self.node.run(data, config, **merged_kwargs)
+            if result.status != RunnableStatus.SUCCESS:
+                logger.error(f"Node under iteration index {index} has failed.")
+            output.append(result.output)
 
         return output
 
