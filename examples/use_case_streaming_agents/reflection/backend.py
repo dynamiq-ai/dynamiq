@@ -45,7 +45,7 @@ def generate_agent_response(agent: ReflectionAgent, user_input: str):
         )
 
         for chunk in streaming_handler:
-            content = chunk.data.get("content", " ")
+            content = chunk.data.get("choices", [{}])[0].get("delta", {}).get("content", "")
             if content:
                 response_text += " " + content
                 yield " " + content
