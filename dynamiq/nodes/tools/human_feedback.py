@@ -1,11 +1,10 @@
 import enum
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingEventMessage
@@ -55,6 +54,10 @@ class InputMethodCallable(ABC):
         pass
 
 
+class HumanFeedbackInputSchema(BaseModel):
+    input: str = Field(..., description="Parameter to provide a question to the user.")
+
+
 class HumanFeedbackTool(Node):
     """
     A tool for gathering user information through human feedback.
@@ -70,14 +73,11 @@ class HumanFeedbackTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Human Feedback"
-    description: str = (
-        "Tool to gather user information. Use it to check actual information or get additional input. "
-        "Input should be a dictionary with a key 'input' containing the request to human."
-    )
+    name: str = "Human Feedback Tool"
+    description: str = "Tool to gather user information. Use it to check actual information or get additional input."
     input_method: InputMethod | InputMethodCallable = InputMethod.console
-
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
 
     def input_method_console(self, prompt: str) -> str:
         """
@@ -120,7 +120,9 @@ class HumanFeedbackTool(Node):
 
         return event.data.content
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self, input_data: HumanFeedbackInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
         """
         Execute the tool with the provided input data and configuration.
 
@@ -137,16 +139,11 @@ class HumanFeedbackTool(Node):
         Raises:
             ValueError: If the input_data does not contain an 'input' key.
         """
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data}")
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        if "input" not in input_data:
-            raise ToolExecutionException(
-                "Input data must contain an 'input' key with the prompt for the user.", recoverable=True
-            )
-
-        input_text = input_data["input"]
+        input_text = input_data.input
         if isinstance(self.input_method, InputMethod):
             if self.input_method == InputMethod.console:
                 result = self.input_method_console(input_text)

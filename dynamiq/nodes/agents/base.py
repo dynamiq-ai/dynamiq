@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory
@@ -20,7 +20,7 @@ from dynamiq.nodes.agents.exceptions import (
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.types.streaming import StreamingConfig
+from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 
@@ -57,7 +57,6 @@ class Agent(Node):
     llm: Node = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
-    streaming: StreamingConfig = StreamingConfig()
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
     name: str = "AI Agent"
@@ -101,6 +100,12 @@ class Agent(Node):
                 tool.init_components(connection_manager)
             tool.is_optimized_for_agents = True
 
+    def sanitize_tool_name(self, s: str):
+        """Sanitize tool name to follow [^a-zA-Z0-9_-]."""
+        s = s.replace(" ", "-")
+        sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", s)
+        return sanitized
+
     def _init_prompt_blocks(self):
         """Initializes default prompt blocks and variables."""
         self._prompt_blocks = {
@@ -131,6 +136,10 @@ class Agent(Node):
         """Sets or updates a prompt variable."""
         self._prompt_variables[variable_name] = value
 
+    def _retrieve_chat_history(self, messages: list[Message]) -> str:
+        """Converts a list of messages to a formatted string."""
+        return "\n".join([f"**{msg.role.value}:** {msg.content}" for msg in messages])
+
     def execute(
         self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -147,6 +156,18 @@ class Agent(Node):
         custom_metadata = input_data.get("metadata", {}).copy()
         custom_metadata.update({k: v for k, v in input_data.items() if k not in ["user_id", "session_id", "input"]})
         metadata = {**custom_metadata, "user_id": user_id, "session_id": session_id}
+        chat_history = input_data.get("chat_history", None)
+
+        if chat_history:
+            try:
+                logger.debug(f"Agent {self.name} - {self.id}: Chat history provided")
+                chat_history = TypeAdapter(list[Message]).validate_python(chat_history)
+                chat_history = self._retrieve_chat_history(chat_history)
+                logger.debug(f"Agent {self.name} - {self.id}: Chat history: {len(chat_history)}")
+                self._prompt_variables["context"] = chat_history
+
+            except ValidationError as e:
+                raise TypeError(f"Invalid chat history: {e}")
 
         if self.memory:
             self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
@@ -169,11 +190,6 @@ class Agent(Node):
             "content": result,
             "intermediate_steps": self._intermediate_steps,
         }
-
-        if self.streaming.enabled:
-            self.run_on_node_execute_stream(
-                config.callbacks, execution_result, **kwargs
-            )
 
         logger.debug(f"Agent {self.name} - {self.id}: finished with result {result}")
         return execution_result
@@ -200,10 +216,8 @@ class Agent(Node):
             self._prompt_variables["context"] = context
 
     def _run_llm(self, prompt: str, config: RunnableConfig | None = None, **kwargs) -> str:
-        """Runs the LLM with a given prompt and returns the result."""
-        logger.debug(
-            f"Agent {self.name} - {self.id}: Running LLM with prompt:\n{prompt}"
-        )
+        """Runs the LLM with a given prompt and handles streaming or full responses."""
+        logger.debug(f"Agent {self.name} - {self.id}: Running LLM with prompt:\n{prompt}")
         try:
             llm_result = self.llm.run(
                 input_data={},
@@ -213,23 +227,38 @@ class Agent(Node):
                 **kwargs,
             )
             self._run_depends = [NodeDependency(node=self.llm).to_dict()]
-            logger.debug(
-                f"Agent {self.name} - {self.id}: RAW LLM result:\n{llm_result.output['content']}"
-            )
+            logger.debug(f"Agent {self.name} - {self.id}: RAW LLM result:\n{llm_result.output['content']}")
             if llm_result.status != RunnableStatus.SUCCESS:
                 raise ValueError("LLM execution failed")
+
             return llm_result.output["content"]
+
         except Exception as e:
-            logger.error(
-                f"Agent {self.name} - {self.id}: LLM execution failed: {str(e)}"
-            )
+            logger.error(f"Agent {self.name} - {self.id}: LLM execution failed: {str(e)}")
             raise
+
+    def stream_chunk(self, input_chunk: str, config: RunnableConfig | None = None, **kwargs):
+        """Streams the input chunk to the callbacks."""
+        final_response = []
+        for chunk in input_chunk.split(" "):
+            logger.debug(f"Agent {self.name} - {self.id}: Streaming chunk: {chunk}, type is {self.name}")
+            final_response.append(chunk)
+            self.run_on_node_execute_stream(
+                callbacks=config.callbacks,
+                chunk={"content": chunk, "type": self.name},
+                **kwargs,
+            )
+        return " ".join(final_response)
 
     def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the agent with the generated prompt and handles exceptions."""
         formatted_prompt = self.generate_prompt()
         try:
-            return self._run_llm(formatted_prompt, config=config, **kwargs)
+            llm_result = self._run_llm(formatted_prompt, config=config, **kwargs)
+            if self.streaming.enabled:
+                return self.stream_chunk(llm_result, config=config, **kwargs)
+            return llm_result
+
         except Exception as e:
             logger.error(f"Agent {self.name} - {self.id}: failed with error: {str(e)}")
             raise e
@@ -275,8 +304,8 @@ class Agent(Node):
         if not tool:
             raise AgentUnknownToolException(
                 f"Unknown tool: {action}."
-                "Use only available tools and provide only the tool's name in the action field."
-                "Do not include any additional reasoning."
+                "Use only available tools and provide only the tool's name in the action field. "
+                "Do not include any additional reasoning. "
                 "Please correct the action field or state that you cannot answer the question."
             )
         return tool
@@ -329,12 +358,12 @@ class Agent(Node):
     @property
     def tool_names(self) -> str:
         """Returns a comma-separated list of tool names available to the agent."""
-        return ",".join([tool.name for tool in self.tools]) if self.tools else ""
+        return ",".join([self.sanitize_tool_name(tool.name) for tool in self.tools])
 
     @property
     def tool_by_names(self) -> dict[str, Node]:
         """Returns a dictionary mapping tool names to their corresponding Node objects."""
-        return {tool.name: tool for tool in self.tools} if self.tools else {}
+        return {self.sanitize_tool_name(tool.name): tool for tool in self.tools}
 
     def reset_run_state(self):
         """Resets the agent's run state."""
@@ -417,14 +446,6 @@ class AgentManager(Agent):
             "intermediate_steps": self._intermediate_steps,
         }
 
-        if self.streaming.enabled:
-            self.run_on_node_execute_stream(
-                callbacks=config.callbacks,
-                chunk=execution_result,
-                wf_run_id=config.run_id,
-                **kwargs,
-            )
-
         logger.debug(
             f"AgentManager {self.name} - {self.id}: finished with result {result}"
         )
@@ -433,14 +454,23 @@ class AgentManager(Agent):
     def _plan(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'plan' action."""
         prompt = self.generate_prompt(block_names=["plan"])
-        return self._run_llm(prompt, config, **kwargs)
+        llm_result = self._run_llm(prompt, config, **kwargs)
+        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            return self.stream_chunk(input_chunk="\n\n" + llm_result + "\n\n", config=config, **kwargs)
+        return llm_result
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'assign' action."""
         prompt = self.generate_prompt(block_names=["assign"])
-        return self._run_llm(prompt, config, **kwargs)
+        llm_result = self._run_llm(prompt, config, **kwargs)
+        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            return self.stream_chunk(input_chunk="\n\n" + llm_result + "\n\n", config=config, **kwargs)
+        return llm_result
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'final' action."""
         prompt = self.generate_prompt(block_names=["final"])
-        return self._run_llm(prompt, config, **kwargs)
+        llm_result = self._run_llm(prompt, config, **kwargs)
+        if self.streaming.enabled:
+            return self.stream_chunk(input_chunk="\n\n" + llm_result + "\n\n", config=config, **kwargs)
+        return llm_result

@@ -314,6 +314,10 @@ class LinearOrchestrator(Node):
         logger.debug(f"LinearOrchestrator {self.id}: starting the flow with input_task:\n```{self.input_task}```")
         run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         run_kwargs.pop("run_depends", None)
+        if self.streaming.enabled:
+            self.manager.streaming = self.streaming
+            for agent in self.agents:
+                agent.streaming = self.streaming
 
         tasks = self.get_tasks(config=config, **run_kwargs)
         logger.debug(f"LinearOrchestrator {self.id}: tasks initialized:\n '{tasks}'")

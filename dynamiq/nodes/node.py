@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
-from typing import Any, Callable, Union
+from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
@@ -217,6 +217,7 @@ class Node(BaseModel, Runnable, ABC):
     _output_references: NodeOutputReferences = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_schema: ClassVar[type[BaseModel] | None] = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -256,9 +257,7 @@ class Node(BaseModel, Runnable, ABC):
             )
 
         if dep_result.status == RunnableStatus.SKIP:
-            raise NodeSkippedException(
-                failed_depend=depend, message=f"Dependency {depend.node.id}: skipped"
-            )
+            raise NodeSkippedException(failed_depend=depend, message=f"Dependency {depend.node.id}: skipped")
 
     @staticmethod
     def _validate_dependency_condition(depend: NodeDependency, depends_result: dict[str, RunnableResult]):
@@ -329,6 +328,26 @@ class Node(BaseModel, Runnable, ABC):
                     depend=dep, depends_result=depends_result
                 )
 
+    def validate_input_schema(self, input_data: dict[str, Any]) -> dict[str, Any] | BaseModel:
+        """
+        Validate input data against the input schema. Returns instance of input_schema if it is is provided.
+
+        Args:
+            input_data (Any): Input data to validate.
+
+        Raises:
+            NodeException: If input data does not match the input schema.
+        """
+        from dynamiq.nodes.agents.exceptions import RecoverableAgentException
+
+        if self.input_schema:
+            try:
+                return self.input_schema(**input_data)
+            except Exception as e:
+                raise RecoverableAgentException(f"Input data validation failed: {e}")
+
+        return input_data
+
     def transform_input(self, input_data: dict, depends_result: dict[Any, RunnableResult]) -> dict:
         """
         Transform input data for the node.
@@ -368,6 +387,8 @@ class Node(BaseModel, Runnable, ABC):
                     raise NodeException(message=f"Input mapping {key}: failed.")
             else:
                 inputs[key] = value
+
+        inputs = self.validate_input_schema(inputs)
 
         return inputs
 
@@ -491,11 +512,13 @@ class Node(BaseModel, Runnable, ABC):
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
 
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
+
             cache = cache_wf_entity(
                 entity_id=self.id,
                 cache_enabled=self.caching.enabled,
                 cache_config=config.cache,
             )
+
             output, from_cache = cache(self.execute_with_retry)(
                 transformed_input, config, **merged_kwargs
             )
@@ -527,9 +550,7 @@ class Node(BaseModel, Runnable, ABC):
                 output=format_value(e, recoverable=recoverable),
             )
 
-    def execute_with_retry(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
+    def execute_with_retry(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs):
         """
         Execute the node with retry logic.
 
@@ -550,9 +571,8 @@ class Node(BaseModel, Runnable, ABC):
         n_attempt = self.error_handling.max_retries + 1
         for attempt in range(n_attempt):
             merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
-            self.run_on_node_execute_start(
-                config.callbacks, input_data, **merged_kwargs
-            )
+
+            self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
 
             try:
                 output = self.execute_with_timeout(
@@ -591,7 +611,7 @@ class Node(BaseModel, Runnable, ABC):
     def execute_with_timeout(
         self,
         timeout: float | None,
-        input_data: dict[str, Any],
+        input_data: dict[str, Any] | BaseModel,
         config: RunnableConfig = None,
         **kwargs,
     ):
@@ -662,7 +682,7 @@ class Node(BaseModel, Runnable, ABC):
     def run_on_node_start(
         self,
         callbacks: list[BaseCallbackHandler],
-        input_data: dict[str, Any],
+        input_data: dict[str, Any] | BaseModel,
         **kwargs,
     ):
         """
@@ -673,6 +693,10 @@ class Node(BaseModel, Runnable, ABC):
             input_data (dict[str, Any]): Input data for the node.
             **kwargs: Additional keyword arguments.
         """
+
+        if isinstance(input_data, BaseModel):
+            input_data = input_data.model_dump()
+
         for callback in callbacks:
             callback.on_node_start(self.to_dict(), input_data, **kwargs)
 
@@ -732,7 +756,7 @@ class Node(BaseModel, Runnable, ABC):
     def run_on_node_execute_start(
         self,
         callbacks: list[BaseCallbackHandler],
-        input_data: dict[str, Any],
+        input_data: dict[str, Any] | BaseModel,
         **kwargs,
     ):
         """
@@ -743,6 +767,9 @@ class Node(BaseModel, Runnable, ABC):
             input_data (dict[str, Any]): Input data for the node.
             **kwargs: Additional keyword arguments.
         """
+        if isinstance(input_data, BaseModel):
+            input_data = input_data.model_dump()
+
         for callback in callbacks:
             callback.on_node_execute_start(self.to_dict(), input_data, **kwargs)
 
@@ -813,9 +840,7 @@ class Node(BaseModel, Runnable, ABC):
             callback.on_node_execute_stream(self.to_dict(), chunk, **kwargs)
 
     @abstractmethod
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ) -> Any:
+    def execute(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs) -> Any:
         """
         Execute the node with the given input.
 

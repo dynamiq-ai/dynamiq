@@ -2,14 +2,16 @@ import json
 import re
 from typing import Any
 
-from pydantic import Field
+from litellm import get_supported_openai_params, supports_function_calling
+from pydantic import Field, model_validator
 
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import ActionParsingException, MaxLoopsExceededException, RecoverableAgentException
-from dynamiq.nodes.node import NodeDependency
+from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 REACT_BLOCK_TOOLS = (
@@ -35,12 +37,16 @@ Here is how you will think about the user's request
 </output>
 
 REMEMBER:
-* Inside 'action' provide just name of one tool from this list: [{tools_name}]
+* Inside 'action' provide just name of one tool from this list: [{tools_name}]. Don't wrap it wit <>.
+* Each 'action' has its own input format strictly adhere to it.
+Input formats for tools:
+{input_formats}
 
 After each action, the user will provide an "Observation" with the result.
 Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
 
 When you have sufficient information, provide your final answer in one of these two formats:
+
 If you can answer the request:
 <output>
     <thought>
@@ -52,8 +58,6 @@ If you can answer the request:
 </output>
 
 If you cannot answer the request:
-
-
 <output>
     <thought>
         I cannot answer with the tools I have
@@ -62,8 +66,6 @@ If you cannot answer the request:
         Explanation of why you cannot answer
     </answer>
 </output>
-
-
 """  # noqa: E501
 
 
@@ -72,6 +74,7 @@ Thought: [Your reasoning for the next step]
 Action: [The tool you choose to use, if any, from ONLY [{tools_name}]]
 Action Input: [The input you provide to the tool]
 Remember:
+- Each tool has its specific input format you have strickly adhere to it.
 - Avoid using triple quotes (multi-line strings, docstrings) when providing multi-line code.
 - Provide all necessary information in 'Action Input' for the next step to succeed.
 - Action Input must be in JSON format.
@@ -79,13 +82,19 @@ Remember:
 - If you use a tool, follow the 'Thought' with an 'Action' (chosen from the available tools) and an 'Action Input'.
 - After each action, the user will provide an 'Observation' with the result.
 - Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
+
+Input formats for tools:
+{input_formats}
+
 When you have sufficient information, provide your final answer in one of these two formats:
 If you can answer the request:
 Thought: I can answer without using any tools
 Answer: [Your answer here]
+
 If you cannot answer the request:
 Thought: I cannot answer with the tools I have
 Answer: [Explanation of why you cannot answer]
+
 Remember:
 - Always start with a Thought.
 - Never use markdown code markers in your response.
@@ -106,13 +115,22 @@ answer: [Response for request]}}
 Structure you responses in JSON format.
 {{thought: [Your reasoning about the next step],
 action: [The tool you choose to use, if any from ONLY [{tools_name}]],
-action_input: [The input you provide to the tool]}}
+action_input: [JSON input in correct format you provide to the tool]}}
+
+Remember:
+- Each tool has is specific input format you have strickly adhere to it.
+- In action_input you have to provide input in JSON format.
+- Avoid using extra backslashes
+
+Input formats for tools:
+{input_formats}
 """  # noqa: E501
 
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
 You have to call appropriate functions.
-Function descriptions
+
+Function descriptions:
 plan_next_action - function that should be called to use tools [{tools_name}]].
 provide_final_answer - function that should be called when answer on initial request can be provided
 """  # noqa: E501
@@ -126,6 +144,7 @@ Observation: [Answer to the initial question or part of it]
 - Always start each response with a 'Thought' explaining your reasoning.
 - After each action, the user will provide an 'Observation' with the result.
 - Continue this Thought/Action/Action Input/Observation sequence until you have enough information to fully answer the request.
+
 When you have sufficient information, provide your final answer in one of these formats:
 If you can answer the request:
 Thought: I can answer without using any tools
@@ -133,6 +152,7 @@ Answer: [Your answer here]
 If you cannot answer the request:
 Thought: I cannot answer with the tools I have
 Answer: [Explanation of why you cannot answer]
+
 Remember:
 - Always begin with a Thought.
 - Do not use markdown code markers in your response."
@@ -173,107 +193,25 @@ Your response should be clear, concise, and professional.
 """  # noqa: E501
 
 
-REACT_MAX_LOOPS_PROMPT = """
-You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
-Your goal is to analyze the given context and formulate a clear, concise response.
-First, carefully review the following context, which contains thoughts and information gathered during the process:
-<context>
-{context}
-</context>
-Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
-Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
-1. Fully supported by the information found in the context
-2. Clear and concise
-3. Directly addressing the original question or task, if possible
-If you cannot provide a full answer based on the given context, explain that due to limitations in the number of steps or potential issues with the tools used, you are unable to fully answer the question. In this case, suggest one or more of the following:
-1. Increasing the maximum number of loops for the agent setup
-2. Reviewing the tools settings
-3. Revising the input task description
-Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
-Provide your final answer or explanation within <answer> tags.
-Your response should be clear, concise, and professional.
-<answer>
-[Your final answer or explanation goes here]
-</answer>
-"""  # noqa: E501
-
-
-def function_calling_schema(tool_names) -> list[dict]:
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": "plan_next_action",
-                "description": "Provide next action and action input",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "thought": {
-                            "type": "string",
-                            "description": "Your reasoning about the next step.",
-                        },
-                        "action": {
-                            "type": "string",
-                            "enum": tool_names,
-                            "description": "Next action to make.",
-                        },
-                        "action_input": {
-                            "type": "string",
-                            "description": "Input for chosen action.",
-                        },
-                    },
-                    "required": ["thought", "action", "action_input"],
+final_answer_function_schema = {
+    "type": "function",
+    "strict": True,
+    "function": {
+        "name": "provide_final_answer",
+        "description": "Function should be called when if you can answer the initial request",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "thought": {
+                    "type": "string",
+                    "description": "Your reasoning about why you can answer original question.",
                 },
+                "answer": {"type": "string", "description": "Answer on initial request."},
             },
+            "required": ["thought", "answer"],
         },
-        {
-            "type": "function",
-            "function": {
-                "name": "provide_final_answer",
-                "description": "Function should be called when if you can answer the initial request",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "thought": {
-                            "type": "string",
-                            "description": "Your reasoning about why you can answer original question.",
-                        },
-                        "answer": {"type": "string", "description": "Answer on initial request."},
-                    },
-                    "required": ["thought", "answer"],
-                },
-            },
-        },
-    ]
-
-
-def structured_output_schema(tool_names) -> dict:
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "strict": True,
-            "name": "plan_next_action",
-            "schema": {
-                "type": "object",
-                "required": ["thought", "action", "action_input"],
-                "properties": {
-                    "thought": {
-                        "type": "string",
-                        "description": "Your reasoning about the next step.",
-                    },
-                    "action": {
-                        "type": "string",
-                        "description": f"Next action to make (choose from [{tool_names}, finish]).",
-                    },
-                    "action_input": {
-                        "type": "string",
-                        "description": "Input for chosen action.",
-                    },
-                },
-                "additionalProperties": False,
-            },
-        },
-    }
+    },
+}
 
 
 class ReActAgent(Agent):
@@ -286,6 +224,22 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
+    format_schema: list = []
+
+    @model_validator(mode="after")
+    def validate_inference_mode(self):
+        """Validate whether specified model can be inferenced in provided mode."""
+        match self.inference_mode:
+            case InferenceMode.FUNCTION_CALLING:
+                if not supports_function_calling(model=self.llm.model):
+                    raise ValueError(f"Model {self.llm.model} does not support function calling")
+
+            case InferenceMode.STRUCTURED_OUTPUT:
+                params = get_supported_openai_params(model=self.llm.model)
+                if "response_format" not in params:
+                    raise ValueError(f"Model {self.llm.model} does not support structured output")
+
+        return self
 
     def parse_xml_content(self, text: str, tag: str) -> str:
         """Extract content from XML-like tags."""
@@ -323,12 +277,6 @@ class ReActAgent(Agent):
 
     def tracing_final(self, loop_num, final_answer, config, kwargs):
         self._intermediate_steps[loop_num]["final_answer"] = final_answer
-        if self.streaming.enabled:
-            self.run_on_node_execute_stream(
-                config.callbacks,
-                self._intermediate_steps[loop_num],
-                **kwargs,
-            )
 
     def tracing_intermediate(self, loop_num, formatted_prompt, llm_generated_output):
         self._intermediate_steps[loop_num] = AgentIntermediateStep(
@@ -337,6 +285,10 @@ class ReActAgent(Agent):
                 initial=llm_generated_output,
             ),
         ).model_dump()
+
+    def convert_string_to_dict(string: str) -> dict:
+        string = re.sub(r"\\+", r"\\", string)
+        return json.loads(string)
 
     def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """
@@ -360,32 +312,23 @@ class ReActAgent(Agent):
                 tools_desc=self.tool_description,
                 tools_name=self.tool_names,
                 context="\n".join(previous_responses),
+                input_formats=self.generate_input_formats(self.tools),
             )
             logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1} started.")
 
             logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}. Prompt:\n{formatted_prompt}")
 
             try:
-                schema = {}
-                match self.inference_mode:
-                    case InferenceMode.FUNCTION_CALLING:
-                        schema = function_calling_schema(self.tool_names.split(","))
-                    case InferenceMode.STRUCTURED_OUTPUT:
-                        schema = structured_output_schema(self.tool_names.split(","))
 
-                # Execute the prompt using the LLM
                 llm_result = self.llm.run(
                     input_data={},
                     config=config,
-                    prompt=Prompt(
-                        messages=[Message(role="user", content=formatted_prompt)]
-                    ),
+                    prompt=Prompt(messages=[Message(role="user", content=formatted_prompt)]),
                     run_depends=self._run_depends,
-                    schema=schema,
+                    schema=self.format_schema,
                     inference_mode=self.inference_mode,
                     **kwargs,
                 )
-
                 self._run_depends = [NodeDependency(node=self.llm).to_dict()]
 
                 if llm_result.status != RunnableStatus.SUCCESS:
@@ -406,52 +349,99 @@ class ReActAgent(Agent):
                             f"RAW LLM output:n{llm_generated_output}"
                         )
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
+                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                            self.stream_chunk(
+                                input_chunk="\n\n" + llm_generated_output + "\n\n",
+                                config=config,
+                                **kwargs,
+                            )
                         if "Answer:" in llm_generated_output:
                             final_answer = self._extract_final_answer(llm_generated_output)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
+                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
+                                self.stream_chunk(
+                                    input_chunk="\n\n" + final_answer,
+                                    config=config,
+                                    **kwargs,
+                                )
                             return final_answer
 
                         action, action_input = self._parse_action(llm_generated_output)
 
                     case InferenceMode.FUNCTION_CALLING:
-                        function_name = llm_result.output["tool_calls"][0]["function"]["name"].strip()
+                        action = llm_result.output["tool_calls"][0]["function"]["name"].strip()
                         llm_generated_output_json = json.loads(
                             llm_result.output["tool_calls"][0]["function"]["arguments"]
                         )
                         llm_generated_output = json.dumps(llm_generated_output_json)
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
+                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                            self.stream_chunk(
+                                input_chunk="\n\n" + llm_generated_output + "\n\n",
+                                config=config,
+                                **kwargs,
+                            )
 
-                        if function_name == "provide_final_answer":
+                        if action == "provide_final_answer":
                             final_answer = llm_generated_output_json["answer"]
                             self.tracing_final(loop_num, final_answer, config, kwargs)
+                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
+                                self.stream_chunk(
+                                    input_chunk="\n\n" + final_answer,
+                                    config=config,
+                                    **kwargs,
+                                )
                             return final_answer
 
-                        action, action_input = llm_generated_output_json["action"], {
-                            "input": llm_generated_output_json["action_input"]
-                        }
+                        action_input = llm_generated_output_json["action_input"]
                         logger.debug(
                             f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. "
                             f"RAW LLM output:n{llm_generated_output}"
                         )
                     case InferenceMode.STRUCTURED_OUTPUT:
                         llm_generated_output_json = json.loads(llm_result.output["content"])
-                        action, action_input = llm_generated_output_json["action"], {
-                            "input": llm_generated_output_json["action_input"]
-                        }
-                        llm_generated_output = json.dumps(llm_generated_output_json)
+                        action = llm_generated_output_json["action"]
+
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
+                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                            self.stream_chunk(
+                                input_chunk="\n\n" + llm_generated_output + "\n\n",
+                                config=config,
+                                **kwargs,
+                            )
 
                         if action == "finish":
                             final_answer = llm_generated_output_json["action_input"]
                             self.tracing_final(loop_num, final_answer, config, kwargs)
+                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
+                                self.stream_chunk(
+                                    input_chunk="\n\n" + final_answer,
+                                    config=config,
+                                    **kwargs,
+                                )
                             return final_answer
+
+                        action_input = json.loads(llm_generated_output_json["action_input"])
+                        llm_generated_output = json.dumps(llm_generated_output_json)
 
                     case InferenceMode.XML:
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
+                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                            self.stream_chunk(
+                                input_chunk="\n\n" + llm_generated_output + "\n\n",
+                                config=config,
+                                **kwargs,
+                            )
                         if "<answer>" in llm_generated_output:
                             final_answer = self._extract_final_answer_xml(llm_generated_output)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
+                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
+                                self.stream_chunk(
+                                    input_chunk="\n\n" + final_answer,
+                                    config=config,
+                                    **kwargs,
+                                )
                             return final_answer
                         action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
 
@@ -471,7 +461,14 @@ class ReActAgent(Agent):
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
 
-                        llm_generated_output += f"\nObservation: {tool_result}\n"
+                        observation = f"\nObservation: {tool_result}\n"
+                        llm_generated_output += observation
+                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                            self.stream_chunk(
+                                input_chunk="\n\n" + observation + "\n\n",
+                                config=config,
+                                **kwargs,
+                            )
 
                         self._intermediate_steps[loop_num]["model_observation"].update(
                             AgentIntermediateStepModelObservation(
@@ -482,12 +479,6 @@ class ReActAgent(Agent):
                             ).model_dump()
                         )
 
-                        if self.streaming.enabled:
-                            self.run_on_node_execute_stream(
-                                config.callbacks,
-                                self._intermediate_steps[loop_num],
-                                **kwargs,
-                            )
                 previous_responses.append(llm_generated_output)
 
             except ActionParsingException as e:
@@ -502,7 +493,14 @@ class ReActAgent(Agent):
             )
             raise MaxLoopsExceededException(message=error_message)
         else:
-            return self._handle_max_loops_exceeded(previous_responses, config, kwargs)
+            max_loop_final_answer = self._handle_max_loops_exceeded(previous_responses, config, kwargs)
+            if self.streaming.enabled:
+                self.stream_chunk(
+                    input_chunk="\n\n" + max_loop_final_answer + "\n\n",
+                    config=config,
+                    **kwargs,
+                )
+            return max_loop_final_answer
 
     def _handle_max_loops_exceeded(
         self, previous_responses: list, config: RunnableConfig | None = None, **kwargs
@@ -515,13 +513,105 @@ class ReActAgent(Agent):
         self._run_depends = [NodeDependency(node=self.llm).to_dict()]
         final_answer = self.parse_xml_content(llm_final_attempt, "answer")
 
-        return f"Max loops reached but here's my final attempt:\n{final_answer}"
+        return f"{final_answer}"
 
     def _extract_final_answer_xml(self, llm_output: str) -> str:
         """Extract the final answer from the LLM output."""
         final_answer = self.extract_output_and_answer_xml(llm_output)
         logger.info(f"Agent {self.name} - {self.id}: Final answer found: {final_answer['answer']}")
         return final_answer["answer"]
+
+    def generate_input_formats(self, tools: list[Node]) -> str:
+        input_formats = []
+        for tool in tools:
+            params = [
+                f"{name} ({field.annotation.__name__}): {field.description or 'No description'}"
+                for name, field in tool.input_schema.model_fields.items()
+                if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True)
+            ]
+
+            input_formats.append(f" - {self.sanitize_tool_name(tool.name)}\n \t* " + "\n\t* ".join(params))
+        return "\n".join(input_formats)
+
+    def generate_structured_output_schemas(self):
+        tool_names = [self.sanitize_tool_name(tool.name) for tool in self.tools]
+
+        schema = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "plan_next_action",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "required": ["thought", "action", "action_input"],
+                    "properties": {
+                        "thought": {
+                            "type": "string",
+                            "description": "Your reasoning about the next step.",
+                        },
+                        "action": {
+                            "type": "string",
+                            "description": f"Next action to make (choose from [{tool_names}, finish]).",
+                        },
+                        "action_input": {
+                            "type": "string",
+                            "description": "Input for chosen action.",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        }
+
+        self.format_schema = schema
+
+    @staticmethod
+    def filter_format_type(param_type: str) -> str:
+        "Filters proper type for an function calling schema"
+        match param_type:
+            case "bool":
+                return "boolean"
+            case "int":
+                return "integer"
+            case "float":
+                return "float"
+        return "string"
+
+    def generate_function_calling_schemas(self):
+        self.format_schema.append(final_answer_function_schema)
+        for tool in self.tools:
+            properties = {}
+            for name, field in tool.input_schema.model_fields.items():
+                if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
+                    param_type = self.filter_format_type(field.annotation.__name__)
+                    description = field.description or "No description"
+                    properties[name] = {"type": param_type, "description": description}
+
+            schema = {
+                "type": "function",
+                "strict": True,
+                "function": {
+                    "name": self.sanitize_tool_name(tool.name),
+                    "description": tool.description[:1024],  # Expected a string with maximum length 1024
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "thought": {
+                                "type": "string",
+                                "description": "Your reasoning about why you can answer original question.",
+                            },
+                            "action_input": {
+                                "type": "object",
+                                "description": "Input for chosen action.",
+                                "properties": properties,
+                            },
+                        },
+                        "required": ["thought", "action_input"],
+                    },
+                },
+            }
+
+            self.format_schema.append(schema)
 
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
@@ -537,8 +627,10 @@ class ReActAgent(Agent):
 
         match self.inference_mode:
             case InferenceMode.FUNCTION_CALLING:
+                self.generate_function_calling_schemas()
                 prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING
             case InferenceMode.STRUCTURED_OUTPUT:
+                self.generate_structured_output_schemas()
                 prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT
             case InferenceMode.DEFAULT:
                 if not self.tools:

@@ -2,6 +2,7 @@ import re
 
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 REFLECTION_REFLECT_PROMPT: str = (
@@ -13,7 +14,6 @@ REFLECTION_REFLECT_PROMPT: str = (
     "You only need to generate the minimum text that will help you generate the better output. "
     "Don't be verbose while thinking. Finally, you will generate an output based on the previous thinking. "
     "This is the format to follow:"
-    "```"
     "<thinking>"
     "Here you will think about the user's request"
     "<reflection>"
@@ -26,7 +26,6 @@ REFLECTION_REFLECT_PROMPT: str = (
     "<output>"
     "Here you will generate the output based on the thinking"
     "</output>"
-    "```"
     "Always use these tags in your responses. Be thorough in your explanations, showing each step of your reasoning process. "  # noqa: E501
     "Aim to be precise and logical in your approach, and don't hesitate to break down complex problems into simpler components. "  # noqa: E501
     "Your tone should be analytical and slightly formal, focusing on clear communication of your thought process. "
@@ -79,6 +78,16 @@ class ReflectionAgent(Agent):
             )
             result = self._run_llm(formatted_prompt, config=config, **kwargs)
             output_content = self.extract_output_content(result)
+            if self.streaming.enabled:
+                if self.streaming.mode == StreamingMode.FINAL:
+                    logger.debug("Streaming mode set to FINAL. Returning final output.")
+                    if not output_content:
+                        logger.warning("No output content extracted.")
+                        return ""
+                    return self.stream_chunk(output_content[-1], config=config, **kwargs)
+                elif self.streaming.mode == StreamingMode.ALL:
+                    logger.debug("Streaming mode set to ALL. Returning all output.")
+                    return self.stream_chunk(result, config=config, **kwargs)
 
             if not output_content:
                 logger.warning("No output content extracted.")
