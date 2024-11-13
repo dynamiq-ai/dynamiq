@@ -20,6 +20,7 @@ ALLOWED_MODULES = [
     "cmath",
     "csv",
     "datetime",
+    "dynamiq",
     "functools",
     "itertools",
     "json",
