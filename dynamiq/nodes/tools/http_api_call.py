@@ -1,11 +1,13 @@
 import enum
-from typing import Any, Literal
+import json
+from typing import Any, ClassVar, Literal
 from urllib.parse import urljoin
 
-from pydantic import Field
+from pydantic import BaseModel, Field, field_validator
 
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 
@@ -14,6 +16,25 @@ class ResponseType(str, enum.Enum):
     TEXT = "text"
     RAW = "raw"
     JSON = "json"
+
+
+class HttpApiCallInputSchema(BaseModel):
+    data: dict = Field(default={}, description="Parameter to provide payload.")
+    url_path: str = Field(default="", description="Parameter to provide for path to the endpoint.")
+    headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
+    params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
+
+    @field_validator("data", "headers", "params", mode="before")
+    def validate_dict_fields(cls, value: Any, field: str) -> Any:
+        if isinstance(value, str):
+            try:
+                return json.loads(value or "{}")
+            except json.JSONDecodeError as e:
+                raise ActionParsingException(f"Invalid JSON string provided for '{field}'. Error: {e}")
+        elif isinstance(value, dict):
+            return value
+        else:
+            raise ActionParsingException(f"Expected a dictionary or a JSON string for '{field}'.")
 
 
 class HttpApiCall(ConnectionNode):
@@ -32,7 +53,7 @@ class HttpApiCall(ConnectionNode):
         response_type(ResponseType|str): The type of response content.
     """
 
-    name: str = "The name of the API call tool"
+    name: str = "Api Call Tool"
     description: str = "The description of the API call tool"
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     connection: HttpConnection
@@ -42,10 +63,9 @@ class HttpApiCall(ConnectionNode):
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     response_type: ResponseType | str | None = ResponseType.RAW
+    input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
+    def execute(self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs):
         """Execute the API call.
 
         This method takes input data and returns content of API call response.
@@ -63,12 +83,14 @@ class HttpApiCall(ConnectionNode):
         """
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        data = input_data.get("data", {})
+        data = input_data.data
+
         url = self.connection.url
-        if url_path := input_data.get("url_path", ""):
+        if url_path := input_data.url_path:
             url = urljoin(url, url_path)
-        headers = input_data.get("headers", {})
-        params = input_data.get("params", {})
+        headers = input_data.headers
+        params = input_data.params
+
         response = self.client.request(
             method=self.connection.method,
             url=url,
@@ -77,8 +99,9 @@ class HttpApiCall(ConnectionNode):
             data=self.connection.data | self.data | data,
             timeout=self.timeout,
         )
+
         if response.status_code not in self.success_codes:
-            raise ValueError(
+            raise ToolExecutionException(
                 f"Request failed with unexpected status code: {response.status_code} and response: {response.text}"
             )
 

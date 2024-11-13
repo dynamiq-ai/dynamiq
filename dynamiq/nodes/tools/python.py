@@ -1,7 +1,8 @@
 import importlib
 import io
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
+from pydantic import BaseModel, ConfigDict
 from RestrictedPython import compile_restricted, safe_builtins, utility_builtins
 from RestrictedPython.Eval import default_guarded_getattr, default_guarded_getitem, default_guarded_getiter
 from RestrictedPython.Guards import guarded_unpack_sequence
@@ -19,6 +20,7 @@ ALLOWED_MODULES = [
     "cmath",
     "csv",
     "datetime",
+    "dynamiq",
     "functools",
     "itertools",
     "json",
@@ -42,6 +44,10 @@ def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
     return importlib.import_module(name)
 
 
+class PythonInputSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
 class Python(Node):
     """
     Node for executing Python code in a secure sandbox.
@@ -53,14 +59,15 @@ class Python(Node):
         code (str): Python code to execute.
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Python Code Executor"
+    name: str = "Python Code Executor Tool"
     description: str = (
         "The tool, that executes Python code in a secure sandbox environment."
         "All arguments are passed as a dictionary to the 'run' main function."
     )
     code: str
+    input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> Any:
+    def execute(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
         """Execute the Python code.
 
         Args:
@@ -71,7 +78,7 @@ class Python(Node):
         Returns:
             Any: Result of the code execution.
         """
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data}")
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -148,7 +155,7 @@ class Python(Node):
             if "run" not in restricted_globals:
                 raise ValueError("The 'run' function is not defined in the provided code.")
 
-            result = restricted_globals["run"](input_data)
+            result = restricted_globals["run"](input_data.model_dump())
             if self.is_optimized_for_agents:
                 result = str(result)
         except Exception as e:
