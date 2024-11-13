@@ -1,7 +1,11 @@
 import json
+import logging
 
 from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
 from dynamiq.nodes.llms import BaseLLM, OpenAI
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class AnswerCorrectnessEvaluator:
@@ -14,14 +18,14 @@ class AnswerCorrectnessEvaluator:
         # Initialize the LLMEvaluators and store them as class attributes
 
         # Extract Statements Evaluator
-        extract_statements_instructions = """
-        For each input text, extract the key statements.
-        - Keep statements concise and focused.
-        - Return the statements as a JSON array of strings.
-        - Ensure that your response is valid JSON, using double quotes for all strings.
-        """
+        extract_instructions = (
+            "For each input text, extract the key statements.\n"
+            "- Keep statements concise and focused.\n"
+            "- Return the statements as a JSON array of strings.\n"
+            "- Ensure that your response is valid JSON, using double quotes for all strings."
+        )
         self.statement_extractor = LLMEvaluator(
-            instructions=extract_statements_instructions.strip(),
+            instructions=extract_instructions.strip(),
             inputs=[("texts", list[str])],
             outputs=["statements"],
             examples=[
@@ -36,17 +40,19 @@ class AnswerCorrectnessEvaluator:
         )
 
         # Classify Statements Evaluator
-        classify_statements_instructions = """
-        Given a "Question", "Answer Statements", and "Ground Truth Statements", classify the statements:
-        - "TP" (True Positive): Statements present in both Answer and Ground Truth.
-        - "FP" (False Positive): Statements present in Answer but not in Ground Truth.
-        - "FN" (False Negative): Statements present in Ground Truth but not in Answer.
-        Each statement should only belong to one category.
-        Provide the classifications as a JSON object with keys "TP", "FP", "FN", and values as lists of statements.
-        Ensure that your response is valid JSON, using double quotes for all strings.
-        """
+        classify_instructions = (
+            'Given a "Question", "Answer Statements", and "Ground Truth Statements", '
+            "classify the statements:\n"
+            '- "TP" (True Positive): Statements present in both Answer and Ground Truth.\n'
+            '- "FP" (False Positive): Statements in Answer but not in Ground Truth.\n'
+            '- "FN" (False Negative): Statements in Ground Truth but not in Answer.\n'
+            "Each statement should only belong to one category.\n"
+            'Provide the classifications as a JSON object with keys "TP", "FP", "FN", '
+            "and values as lists of statements.\n"
+            "Ensure that your response is valid JSON, using double quotes for all strings."
+        )
         self.statement_classifier = LLMEvaluator(
-            instructions=classify_statements_instructions.strip(),
+            instructions=classify_instructions.strip(),
             inputs=[
                 ("question", list[str]),
                 ("answer_statements", list[list[str]]),
@@ -60,23 +66,23 @@ class AnswerCorrectnessEvaluator:
                         "answer_statements": [
                             [
                                 "The sun is powered by nuclear fission.",
-                                "The sun's primary function is to provide light to the solar system.",
+                                "The sun's primary function is to provide light to " "the solar system.",
                             ]
                         ],
                         "ground_truth_statements": [
                             [
                                 "The sun is powered by nuclear fusion.",
-                                "The sun provides heat and light essential for life on Earth.",
+                                "The sun provides heat and light essential for life " "on Earth.",
                             ]
                         ],
                     },
                     "outputs": {
                         "classifications": {
-                            "TP": ["The sun's primary function is to provide light to the solar system."],
+                            "TP": ["The sun's primary function is to provide light " "to the solar system."],
                             "FP": ["The sun is powered by nuclear fission."],
                             "FN": [
                                 "The sun is powered by nuclear fusion.",
-                                "The sun provides heat and light essential for life on Earth.",
+                                "The sun provides heat and light essential for " "life on Earth.",
                             ],
                         }
                     },
@@ -86,16 +92,16 @@ class AnswerCorrectnessEvaluator:
         )
 
         # Compute Similarity Evaluator
-        compute_similarity_instructions = """
-        For each pair of "Answer" and "Ground Truth", evaluate their semantic similarity.
-        - Score the similarity from 0 to 1.
-        - Use 1 if the Answer is semantically identical to the Ground Truth.
-        - Use 0 if the Answer is completely dissimilar to the Ground Truth.
-        - Provide the similarity score as a single number between 0 and 1.
-        Ensure that your response is valid JSON, using double quotes for all strings.
-        """
+        similarity_instructions = (
+            'For each pair of "Answer" and "Ground Truth", evaluate their semantic similarity.\n'
+            "- Score the similarity from 0 to 1.\n"
+            "- Use 1 if the Answer is semantically identical to the Ground Truth.\n"
+            "- Use 0 if the Answer is completely dissimilar to the Ground Truth.\n"
+            "- Provide the similarity score as a single number between 0 and 1.\n"
+            "Ensure that your response is valid JSON, using double quotes for all strings."
+        )
         self.similarity_evaluator = LLMEvaluator(
-            instructions=compute_similarity_instructions.strip(),
+            instructions=similarity_instructions.strip(),
             inputs=[("answers", list[str]), ("ground_truths", list[str])],
             outputs=["similarity_score"],
             examples=[
@@ -148,11 +154,13 @@ class AnswerCorrectnessEvaluator:
         fn = len(classifications.get("FN", []))
         if tp == 0 and (fp > 0 or fn > 0):
             return 0.0
-        elif tp == 0 and fp == 0 and fn == 0:
+        if tp == 0 and fp == 0 and fn == 0:
             return 1.0  # No statements to compare.
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 1.0
-        if (precision + recall) == 0:
+        precision_denom = tp + fp
+        recall_denom = tp + fn
+        precision = tp / precision_denom if precision_denom > 0 else 1.0
+        recall = tp / recall_denom if recall_denom > 0 else 1.0
+        if (precision + recall) == 0.0:
             return 0.0
         f1 = 2 * (precision * recall) / (precision + recall)
         return f1
@@ -184,28 +192,36 @@ class AnswerCorrectnessEvaluator:
         final_scores = []
         for i in range(len(questions)):
             f1_score = f1_scores[i]
-            similarity_score = similarity_scores[i]
-            final_score = self.weights[0] * f1_score + self.weights[1] * similarity_score
+            sim_score = similarity_scores[i]
+            final_score = self.weights[0] * f1_score + self.weights[1] * sim_score
             final_scores.append(final_score)
 
             if verbose:
-                print(f"Question: {questions[i]}")
-                print(f"Answer: {answers[i]}")
-                print(f"Ground Truth: {ground_truths[i]}")
-                print("Classifications:")
-                print(json.dumps(classifications_list[i], indent=2))
-                print(f"F1 Score: {f1_score}")
-                print(f"Similarity Score: {similarity_score}")
-                print(f"Final Score: {final_score}")
-                print("-" * 50)
+                logger.debug(f"Question: {questions[i]}")
+                logger.debug(f"Answer: {answers[i]}")
+                logger.debug(f"Ground Truth: {ground_truths[i]}")
+                logger.debug("Classifications:")
+                logger.debug(json.dumps(classifications_list[i], indent=2))
+                logger.debug(f"F1 Score: {f1_score}")
+                logger.debug(f"Similarity Score: {sim_score}")
+                logger.debug(f"Final Score: {final_score}")
+                logger.debug("-" * 50)
         return final_scores
 
 
 # Example usage
 if __name__ == "__main__":
+    import sys
+
     from dotenv import find_dotenv, load_dotenv
 
+    # Load environment variables for OpenAI API
     load_dotenv(find_dotenv())
+
+    # Configure logging level (set to DEBUG to see verbose output)
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+    # Uncomment the following line to enable verbose logging
+    # logging.getLogger().setLevel(logging.DEBUG)
 
     # Initialize the LLM (replace 'gpt-4' with your available model)
     llm = OpenAI(model="gpt-4")
@@ -225,17 +241,27 @@ if __name__ == "__main__":
     ground_truths = [
         (
             "The sun is powered by nuclear fusion, where hydrogen atoms fuse to form helium."
-            " This fusion process releases a tremendous amount of energy. The sun provides heat and light,"
-            " which are essential for life on Earth."
+            " This fusion process releases a tremendous amount of energy. The sun provides"
+            " heat and light, which are essential for life on Earth."
         ),
         (
-            "The boiling point of water is 100 degrees Celsius (212 degrees Fahrenheit) at sea level."
-            " The boiling point can change with altitude."
+            "The boiling point of water is 100 degrees Celsius (212 degrees Fahrenheit) at"
+            " sea level. The boiling point can change with altitude."
         ),
     ]
 
     # Initialize evaluator and evaluate
     evaluator = AnswerCorrectnessEvaluator(llm)
-    correctness_scores = evaluator.evaluate(questions, answers, ground_truths, verbose=True)
+    # Set verbose=True to enable detailed logging
+    correctness_scores = evaluator.evaluate(
+        questions, answers, ground_truths, verbose=False  # Set verbose=True to enable logging
+    )
+
+    # Print the results
+    for idx, score in enumerate(correctness_scores):
+        print(f"Question: {questions[idx]}")
+        print(f"Answer Correctness Score: {score}")
+        print("-" * 50)
+
     print("Answer Correctness Scores:")
     print(correctness_scores)
