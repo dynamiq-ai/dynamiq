@@ -20,7 +20,6 @@ class OrchestratorError(Exception):
 
 class StateNotFoundError(OrchestratorError):
     """Raised when proposed next state was not found."""
-
     pass
 
 
@@ -97,28 +96,62 @@ class GraphOrchestrator(Node):
         self._run_depends = []
 
     def add_node(self, name: str, tasks: list[Agent | Callable]) -> None:
+        """
+        Adds state with specified tasks to the graph.
+
+        Args:
+            name (str): Name of state.
+            tasks (list[Agent | Callable]): List of tasks that have to be executed when running this state.
+
+        Raises:
+            ValueError: If state with specified name already exists.
+        """
         if name in self.states:
             raise ValueError(f"Error: State with name {name} already exists.")
 
         state = State(name=name, tasks=tasks)
         self.states[name] = state
 
-    def add_edge(self, source: list[str], destination: str) -> None:
+    def add_edge(self, source: str, destination: str) -> None:
+        """
+        Adds edge to the graph.
+
+        Args:
+            source (str): Name of source state.
+            destination (str): Name of destinations state.
+
+        Raises:
+            ValueError: If state with specified name is not present.
+        """
         self.validate_states([source, destination])
         self.states[source].connected.append(destination)
 
-    def validate_states(self, names: list[str]):
+    def validate_states(self, names: list[str]) -> None:
         """
         Check if the provided state names is valid (exists in the list of valid states).
 
         Args:
             names (list[str]): names of states to validate.
+
+        Raises:
+            ValueError: If state with specified name is not present.
         """
         for state_name in names:
             if state_name not in self.states:
                 raise ValueError(f"State with name {state_name} is not present")
 
     def add_conditional_edge(self, source: str, destinations: list[str], path_func: Callable) -> None:
+        """
+        Adds conditional edge to the graph.
+
+        Args:
+            source (str): Name of source state.
+            destinations (list[str]): Name of destinations states.
+            path_func (Callable): Function that will determine next state.
+
+        Raises:
+            ValueError: If state with specified name is not present.
+        """
         self.validate_states(destinations + [source])
         self.states[source].connected = destinations
         self.states[source].branch = function_tool(path_func)()
@@ -126,7 +159,6 @@ class GraphOrchestrator(Node):
     def get_final_result(
         self,
         input_task: str,
-        preliminary_answer: str,
         config: RunnableConfig = None,
         **kwargs,
     ) -> str:
@@ -135,8 +167,8 @@ class GraphOrchestrator(Node):
 
         Args:
             input_task (str): The original task given.
-            preliminary_answer (str): The preliminary answer generated.
             config (RunnableConfig): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
 
         Returns:
             str: The final comprehensive result.
@@ -146,12 +178,7 @@ class GraphOrchestrator(Node):
         """
 
         manager_result = self.manager.run(
-            input_data={
-                "action": "final",
-                "input_task": input_task,
-                "chat_history": self.context["history"],
-                "preliminary_answer": preliminary_answer,
-            },
+            input_data={"action": "final", "input_task": input_task, "chat_history": self.context["history"]},
             config=config,
             run_depends=self._run_depends,
             **kwargs,
@@ -159,17 +186,22 @@ class GraphOrchestrator(Node):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            logger.error(f"AdaptiveOrchestrator {self.id}: Error generating final answer")
+            logger.error(f"GraphOrchestrator {self.id}: Error generating final answer")
             raise OrchestratorError("Failed to generate final answer")
 
         return manager_result.output.get("content").get("result")
 
-    def get_next_action(self, state: State, config: RunnableConfig, **kwargs):
+    def get_next_state(self, state: State, config: RunnableConfig, **kwargs) -> State:
         """
-        Determine the next action based on the current state and LLM output.
+        Determine the next state based on the current state and history.
+
+        Args:
+            state (State): Current state.
+            config (Optional[RunnableConfig]): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
 
         Returns:
-            str: name of next state
+            State: Next state.
 
         Raises:
             OrchestratorError: If there is an error parsing the action from the LLM response.
@@ -200,7 +232,7 @@ class GraphOrchestrator(Node):
             raise OrchestratorError(f"Error when parsing response about next state {e}")
 
         if next_state in list(self.states.keys()):
-            return next_state
+            return self.states[next_state]
         else:
             logger.error(f"GraphOrchestrator: State with name {next_state} was not found.")
             raise StateNotFoundError(f"State with name {next_state} was not found.")
@@ -209,12 +241,13 @@ class GraphOrchestrator(Node):
         self._run_depends = []
         self.context["history"] = []
 
-    def get_next_state(self, state: State, config: RunnableConfig = None, **kwargs) -> str:
+    def _get_next_state(self, state: State, config: RunnableConfig = None, **kwargs) -> str:
         """
         Determine the next state based on the current state and chat history.
 
         Returns:
-            state: Next state.
+            state (State): Current state.
+
         """
         prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self.context["history"]])
 
@@ -229,7 +262,7 @@ class GraphOrchestrator(Node):
                 ).output.get("content")
 
                 return self.states[next_state_name]
-            return self.states[self.get_next_action(state, config)]
+            return self.get_next_state(state, config)
         else:
             return self.states[state.connected[0]]
 
@@ -260,7 +293,6 @@ class GraphOrchestrator(Node):
             if state.name == END:
                 return self.get_final_result(
                     input_task=task,
-                    preliminary_answer="",
                     config=config,
                     **kwargs,
                 )
@@ -268,14 +300,22 @@ class GraphOrchestrator(Node):
             elif state.name != START:
                 self._handle_state_execution(state, config=config, **kwargs)
 
-            state = self.get_next_state(state, config=config, **kwargs)
+            state = self._get_next_state(state, config=config, **kwargs)
 
     def _submit_task(self, task, config, **kwargs) -> str:
         """Executes task
+
         Args:
             task (Agent | FunctionTool): Task to be executed.
             config (Optional[RunnableConfig]): Configuration for the runnable.
             **kwargs: Additional keyword arguments.
+
+        Returns:
+            str: The result of the task execution.
+
+        Raises:
+            OrchestratorError: If an error occurs during the execution process.
+
         """
         if isinstance(task, Agent):
 
@@ -329,6 +369,8 @@ class GraphOrchestrator(Node):
 
         Args:
             action (Action): The action containing the delegation command and details.
+            config (Optional[RunnableConfig]): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
         """
         if len(state.tasks) == 1:
             try:
@@ -387,7 +429,7 @@ class GraphOrchestrator(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         objective = input_data.get("input") or self.objective
-        logger.debug(f"AdaptiveOrchestrator {self.id}: Starting the flow with objective:\n```{objective}```")
+        logger.debug(f"GraphOrchestrator {self.id}: Starting the flow with objective:\n```{objective}```")
 
         run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         run_kwargs.pop("run_depends", None)
