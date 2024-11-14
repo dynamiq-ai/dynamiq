@@ -86,7 +86,7 @@ def create_workflow() -> Workflow:
             input_data={"input": "Get stock price for nvidia."},
         )
 
-        return result.output.get("content")
+        return {"result": result.output.get("content"), **context}
 
     # Auth Agent
     def authentificate(context: dict[str, Any]):
@@ -130,7 +130,7 @@ def create_workflow() -> Workflow:
             input_data={"input": ""},
         )
 
-        return result.output.get("content")
+        return {"result": result.output.get("content"), **context}
 
     def account_balance(context: dict[str, Any]):
         @function_tool
@@ -181,7 +181,7 @@ def create_workflow() -> Workflow:
             input_data={"input": "Get account balance."},
         )
 
-        return result.output.get("content")
+        return {"result": result.output.get("content"), **context}
 
     # Transfer Money Agent
     def transfer_money(context: dict[str, Any]):
@@ -230,13 +230,13 @@ def create_workflow() -> Workflow:
             input_data={"input": "Transfer 100$ from account 71829301827 to 81092837881."},
         )
 
-        return result.output.get("content")
+        return {"result": result.output.get("content"), **context}
 
     human_feedback_tool = HumanFeedbackTool()
 
-    def concierge(context: dict[str, Any], **kwargs):
+    def concierge(context: dict[str, Any]):
         if current_task := context.get("current_task"):
-            return f"Proceed with task {current_task}"
+            return {"result": f"Proceed with task {current_task}"}
 
         else:
 
@@ -244,12 +244,12 @@ def create_workflow() -> Workflow:
                 input_text = f"{task_result}." " Anything else I can help with?"
             else:
                 input_text = (
-                    "Welcome to financial system! How do you want to continue:"
-                    "* looking up a stock price"
-                    "* authenticating the user"
-                    "* checking an account balance (requires authentication first)"
-                    "* transferring money between accounts (requires authentication"
-                    "and checking an account balance first)"
+                    "Welcome to financial system! How do you want to continue:\n"
+                    "* looking up a stock price\n"
+                    "* authenticating the user\n"
+                    "* checking an account balance (requires authentication first)\n"
+                    "* transferring money between accounts (requires authentication\n"
+                    "and checking an account balance first)\n"
                 )
 
             result = human_feedback_tool.run(
@@ -258,7 +258,8 @@ def create_workflow() -> Workflow:
 
             output = result.output.get("content")
             context["current_task"] = output
-            return output
+
+            return {"result": output, **context}
 
     llm = llm
     agent_manager = GraphAgentManager(llm=llm)
@@ -287,7 +288,10 @@ def create_workflow() -> Workflow:
             Conversation history:
             {context.get("history")}
             """
-        result = llm.run(input_data={}, prompt=Prompt(messages=[Message(role="user", content=formatted_prompt)]))
+        result = llm.run(
+            input_data={"input": "Assist user."},
+            prompt=Prompt(messages=[Message(role="user", content=formatted_prompt)]),
+        )
 
         pattern = r"\b(stock_lookup|transfer_money|authenticate|account_balance|END)\b"
         match = re.search(pattern, result.output["content"])

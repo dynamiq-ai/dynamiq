@@ -1,10 +1,44 @@
-from pydantic import model_validator
+from enum import Enum
 
+from pydantic import BaseModel, ValidationError
+
+from dynamiq.connections.managers import ConnectionManager
+from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.base import Agent
-from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator, State
+from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
+from dynamiq.nodes.agents.orchestrators.orchestrator import Orchestrator, OrchestratorError
+from dynamiq.nodes.node import NodeDependency
+from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.utils.logger import logger
 
 
-class AdaptiveOrchestrator(GraphOrchestrator):
+class ActionParseError(OrchestratorError):
+    """Raised when there's an error parsing the LLM action."""
+
+    pass
+
+
+class AgentNotFoundError(OrchestratorError):
+    """Raised when a specified agent is not found."""
+
+    pass
+
+
+class ActionCommand(Enum):
+    DELEGATE = "delegate"
+    CLARIFY = "clarify"
+    FINAL_ANSWER = "final_answer"
+
+
+class Action(BaseModel):
+    command: ActionCommand
+    agent: str | None = None
+    task: str | None = None
+    question: str | None = None
+    answer: str | None = None
+
+
+class AdaptiveOrchestrator(Orchestrator):
     """
     Orchestrates the execution of complex tasks using multiple specialized agents.
 
@@ -15,19 +49,176 @@ class AdaptiveOrchestrator(GraphOrchestrator):
     Attributes:
         manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
         agents (List[BaseAgent]): List of specialized agents available for task execution.
-        objective (Optional[str]): The main objective of the orchestration.
+        input_tasks (Optional[str]): The main objective of the orchestration.
     """
 
-    agents: list[Agent]
+    name: str | None = "AdaptiveOrchestrator"
+    group: NodeGroup = NodeGroup.AGENTS
+    manager: AdaptiveAgentManager
+    agents: list[Agent] = []
 
-    @model_validator(mode="after")
-    def process_agents(self):
-        state_names = [agent.name for agent in self.agents]
-        states: dict[str, State] = {}
+    @property
+    def to_dict_exclude_params(self):
+        return super().to_dict_exclude_params | {"manager": True, "agents": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the instance.
+        """
+        data = super().to_dict(**kwargs)
+        data["manager"] = self.manager.to_dict(**kwargs)
+        data["agents"] = [agent.to_dict(**kwargs) for agent in self.agents]
+        return data
+
+    def reset_run_state(self):
+        self._chat_history = []
+        self._run_depends = []
+
+    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
+        """
+        Initialize components of the orchestrator.
+
+        Args:
+            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
+        """
+        super().init_components(connection_manager)
+        if self.manager.is_postponed_component_init:
+            self.manager.init_components(connection_manager)
+
         for agent in self.agents:
-            states[agent.name] = State(name=agent.name, connected=state_names + [END], tasks=[agent])
+            if agent.is_postponed_component_init:
+                agent.init_components(connection_manager)
 
-        states[START] = State(name=START, connected=state_names, description="Initial state")
-        states[END] = State(name=END, description="Final state")
+    @property
+    def agents_descriptions(self) -> str:
+        """Get a formatted string of agent descriptions."""
+        return "\n".join([f"{i}. {agent.name}" for i, agent in enumerate(self.agents)]) if self.agents else ""
 
-        self.states = states
+    def get_next_action(self, config: RunnableConfig = None, **kwargs) -> Action:
+        """
+        Determine the next action based on the current state and LLM output.
+
+        Returns:
+            Action: The next action to be taken.
+
+        Raises:
+            ActionParseError: If there is an error parsing the action from the LLM response.
+        """
+        prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self._chat_history])
+
+        logger.debug(f"AdaptiveOrchestrator {self.id}: PROMPT {prompt}")
+
+        manager_result = self.manager.run(
+            input_data={
+                "action": "plan",
+                "agents": self.agents_descriptions,
+                "chat_history": prompt,
+            },
+            config=config,
+            run_depends=self._run_depends,
+            **kwargs,
+        )
+        self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+
+        logger.debug(f"AdaptiveOrchestrator {self.id}: LLM response: {manager_result.output.get('content')}")
+
+        if manager_result.status != RunnableStatus.SUCCESS:
+            logger.error(f"AdaptiveOrchestrator {self.id}: Error getting next action from Manager")
+            raise ActionParseError("Unable to retrieve the next action from Manager.")
+
+        manager_result = (
+            manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
+        )
+        try:
+            return Action.model_validate_json(manager_result)
+        except ValidationError as e:
+            logger.error(
+                f"AdaptiveOrchestrator {self.id}: Error creation Agent based on LLM output. "
+                f"Raw LLM output: {manager_result}. Error: {e}"
+            )
+            raise ActionParseError("Unable to create Action from LLM output.")
+
+    def run_task(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
+        """
+        Process the given task using the manager agent logic.
+
+        Args:
+            task (str): The task to be processed.
+            config (RunnableConfig): Configuration for the runnable.
+
+        Returns:
+            str: The final answer generated after processing the task.
+        """
+        self._chat_history.append({"role": "user", "content": task})
+
+        while True:
+            action = self.get_next_action(config=config, **kwargs)
+            logger.debug(f"AdaptiveOrchestrator {self.id}: chat history: {self._chat_history}")
+            logger.debug(f"AdaptiveOrchestrator {self.id}: Next action: {action.model_dump()}")
+
+            if action.command == ActionCommand.DELEGATE:
+                self._handle_delegation(action=action, config=config, **kwargs)
+            elif action.command == ActionCommand.FINAL_ANSWER:
+                return self.get_final_result(
+                    {
+                        "input_task": task,
+                        "chat_history": self._chat_history,
+                        "preliminary_answer": action.answer,
+                    },
+                    config=config,
+                    **kwargs,
+                )
+
+    def _handle_delegation(self, action: Action, config: RunnableConfig = None, **kwargs) -> None:
+        """
+        Handle task delegation to a specialized agent.
+
+        Args:
+            action (Action): The action containing the delegation command and details.
+        """
+        agent = next((a for a in self.agents if a.name == action.agent), None)
+        if agent:
+            result = agent.run(
+                input_data={"input": action.task},
+                config=config,
+                run_depends=self._run_depends,
+                **kwargs,
+            )
+            self._run_depends = [NodeDependency(node=agent).to_dict()]
+            if result.status != RunnableStatus.SUCCESS:
+                logger.error(f"AdaptiveOrchestrator {self.id}: Error executing Agent {agent.name}")
+                raise OrchestratorError(
+                    f"Failed to execute Agent {agent.name} with Error: {result.output.get('content')}"
+                )
+
+            self._chat_history.append(
+                {
+                    "role": "system",
+                    "content": f"Agent {action.agent} result: {result.output.get('content')}",
+                }
+            )
+        else:
+            logger.warning(f"AdaptiveOrchestrator {self.id}: Agent {action.agent} not found. Using LLM.")
+            result = self.manager.run(
+                input_data={"action": "run", "simple_prompt": action.task},
+                config=config,
+                run_depends=self._run_depends,
+                **kwargs,
+            )
+            self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+            if result.status != RunnableStatus.SUCCESS:
+                logger.error(f"AdaptiveOrchestrator {self.id}: Error executing LLM: {result.output.get('content')}")
+
+            self._chat_history.append(
+                {
+                    "role": "system",
+                    "content": f"LLM result: {result.output.get('content')}",
+                }
+            )
+
+    def enable_orchestrator_streaming(self) -> None:
+        self.manager.streaming = self.streaming
+        for agent in self.agents:
+            agent.streaming = self.streaming

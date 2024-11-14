@@ -81,13 +81,14 @@ def create_orchestrator() -> GraphOrchestrator:
         ]
 
         context["iterations_num"] += 1
-        return code_solution
+
+        return {"result": code_solution, **context}
 
     def reflect(context: dict[str, Any]):
         print("#####REFLECTING ON ERRORS#####")
         reflections = code_llm(messages=context.get("messages"))
         context["messages"] += [Message(role="assistant", content=f"Here are reflections on the error: {reflections}")]
-        return reflections
+        return {"result": reflections, **context}
 
     def validate_code(context: dict[str, Any], **_):
         """
@@ -125,12 +126,11 @@ def create_orchestrator() -> GraphOrchestrator:
             context["messages"] += error_message
             context["reiterate"] = True
 
-        return result.output.get("content")
+        return {"result": result.output.get("content"), **context}
 
     orchestrator = GraphOrchestrator(
         name="Graph orchestrator",
         manager=GraphAgentManager(llm=llm),
-        objective="Provide final code that succeed and reflection.",
     )
 
     orchestrator.add_node("generate_code", [generate_code_solution])
@@ -141,21 +141,24 @@ def create_orchestrator() -> GraphOrchestrator:
     orchestrator.add_edge("generate_code", "validate_code")
     orchestrator.add_edge("reflect", "generate_code")
 
-    orchestrator.add_conditional_edge(
-        "validate_code", ["generate_code", END], lambda context: "reflect" if context["reiterate"] else END
-    )
+    def orchestrate(context: dict[str, Any]) -> str:
+        return "reflect" if context["reiterate"] else END
+
+    orchestrator.add_conditional_edge("validate_code", ["generate_code", END], orchestrate)
     return orchestrator
 
 
 def run_orchestrator() -> RunnableResult:
     """Runs orchestrator"""
     orchestrator = create_orchestrator()
+    orchestrator.context = {
+        "messages": [Message(role="user", content="Make 100 lines of code")],
+        "iterations_num": 0,
+        "reiterate": False,
+    }
+
     result = orchestrator.run(
-        input_data={
-            "messages": [Message(role="user", content="Make 100 lines of code")],
-            "iterations_num": 0,
-            "reiterate": False,
-        },
+        input_data={"input": "Provide final code that succeed and reflection on coding process."},
         config=None,
     )
     return result

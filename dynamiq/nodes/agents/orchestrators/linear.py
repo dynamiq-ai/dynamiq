@@ -5,10 +5,11 @@ from typing import Any
 from pydantic import BaseModel, TypeAdapter
 
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes import Node, NodeGroup
+from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.agents.orchestrators.orchestrator import Orchestrator
+from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
@@ -32,7 +33,7 @@ class Task(BaseModel):
     output: dict[str, Any] | str
 
 
-class LinearOrchestrator(Node):
+class LinearOrchestrator(Orchestrator):
     """
     Manages the execution of tasks by coordinating multiple agents and leveraging LLM (Large Language Model).
 
@@ -50,7 +51,6 @@ class LinearOrchestrator(Node):
     group: NodeGroup = NodeGroup.AGENTS
     manager: LinearAgentManager
     agents: list[Agent] = []
-    input_task: str | None = None
     use_summarizer: bool = True
     summarize_all_answers: bool = True
 
@@ -93,12 +93,12 @@ class LinearOrchestrator(Node):
         """Generate a string description of all agents."""
         return "\n".join([f"{i}. {_agent.name}" for i, _agent in enumerate(self.agents)]) if self.agents else ""
 
-    def get_tasks(self, config: RunnableConfig = None, **kwargs) -> list[Task]:
+    def get_tasks(self, input_task: str, config: RunnableConfig = None, **kwargs) -> list[Task]:
         """Generate tasks using the manager agent."""
         manager_result = self.manager.run(
             input_data={
                 "action": "plan",
-                "input_task": self.input_task,
+                "input_task": input_task,
                 "agents": self.agents_descriptions,
             },
             config=config,
@@ -153,44 +153,6 @@ class LinearOrchestrator(Node):
                 dependencies_formatted += f"**Task:** {task_name}\n**Result:** {task_result}\n\n"
 
         return dependencies_formatted.strip()
-
-    def get_final_result(self, config: RunnableConfig = None, **kwargs) -> str:
-        """Generate the final result."""
-        final_task_output = "\n\n".join(
-            f"**Task:** {result['name']}\n**Result:** {result['result']}" for result in self._results.values() if result
-        )
-
-        if self.use_summarizer:
-            if not self.summarize_all_answers:
-                final_task_id = max(self._results.keys(), default=None)
-                logger.debug(f"LinearOrchestrator {self.id}: Final task id: {final_task_id}")
-
-                if final_task_id is not None:
-                    final_task_output = self._results[final_task_id].get("result", "")
-
-                logger.debug(f"LinearOrchestrator {self.id}: Final task output: {final_task_output}")
-
-            logger.debug(f"LinearOrchestrator {self.id}: Running final summarizer")
-            manager_result = self.manager.run(
-                input_data={
-                    "action": "final",
-                    "input_task": self.input_task,
-                    "tasks_outputs": final_task_output,
-                },
-                config=config,
-                run_depends=self._run_depends,
-                **kwargs,
-            )
-            self._run_depends = [NodeDependency(node=self.manager).to_dict()]
-            if manager_result.status != RunnableStatus.SUCCESS:
-                raise ValueError("Agent LLM failed to generate final result")
-
-            result = manager_result.output.get("content")
-        else:
-            logger.debug(f"LinearOrchestrator {self.id}: Returning final task output")
-            result = final_task_output
-
-        return result
 
     def run_tasks(self, tasks: list[Task], config: RunnableConfig = None, **kwargs) -> None:
         """Execute the tasks using appropriate agents."""
@@ -293,37 +255,58 @@ class LinearOrchestrator(Node):
             else:
                 raise ValueError(f"Failed to assign task {task.id}.{task.name} by Manager Agent")
 
-    def execute(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> dict:
+    def generate_final_answer(self, task: str, config: RunnableConfig, **kwargs) -> str:
         """
-        Execute the LinearOrchestrator flow.
+        Generates final answer using the manager agent logic.
 
         Args:
-            input_data (Any): The input data containing the objective or additional context.
-            config (Optional[RunnableConfig]): Configuration for the runnable.
-            **kwargs: Additional keyword arguments.
+            task (str): The task to be processed.
+            config (RunnableConfig): Configuration for the runnable.
 
         Returns:
-            dict[str, Any]: The result of the orchestration process.
+            str: The final answer generated after processing the task.
         """
-        self.reset_run_state()
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
+        tasks_outputs = "\n\n".join(
+            f"**Task:** {result['name']}\n**Result:** {result['result']}" for result in self._results.values() if result
+        )
 
-        self.input_task = input_data.get("input") or self.input_task
+        if self.use_summarizer:
+            if not self.summarize_all_answers:
+                final_task_id = max(self._results.keys(), default=None)
+                logger.debug(f"LinearOrchestrator {self.id}: Final task id: {final_task_id}")
 
-        logger.debug(f"LinearOrchestrator {self.id}: starting the flow with input_task:\n```{self.input_task}```")
-        run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
-        run_kwargs.pop("run_depends", None)
-        if self.streaming.enabled:
-            self.manager.streaming = self.streaming
-            for agent in self.agents:
-                agent.streaming = self.streaming
+                if final_task_id is not None:
+                    final_task_output = self._results[final_task_id].get("result", "")
 
-        tasks = self.get_tasks(config=config, **run_kwargs)
+                logger.debug(f"LinearOrchestrator {self.id}: Final task output: {final_task_output}")
+
+            self.get_final_result(
+                {"input_task": task, "chat_history": self._chat_history, "tasks_outputs": tasks_outputs},
+                config=config,
+                **kwargs,
+            )
+
+        logger.debug(f"LinearOrchestrator {self.id}: Returning final task output")
+        return tasks_outputs
+
+    def run_task(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
+        """
+        Process the given task using the manager agent logic.
+
+        Args:
+            task (str): The task to be processed.
+            config (RunnableConfig): Configuration for the runnable.
+
+        Returns:
+            str: The final answer generated after processing the task.
+        """
+        tasks = self.get_tasks(task, config=config, **kwargs)
         logger.debug(f"LinearOrchestrator {self.id}: tasks initialized:\n '{tasks}'")
-        self.run_tasks(tasks=tasks, config=config, **run_kwargs)
+        self.run_tasks(tasks=tasks, config=config, **kwargs)
         logger.debug(f"LinearOrchestrator {self.id}: tasks assigned and executed.")
-        result = self.get_final_result(config=config, **run_kwargs)
+        return self.generate_final_answer(task, config, **kwargs)
 
-        logger.debug(f"LinearOrchestrator {self.id}: output collected")
-        return {"content": result}
+    def enable_orchestrator_streaming(self) -> None:
+        self.manager.streaming = self.streaming
+        for agent in self.agents:
+            agent.streaming = self.streaming
