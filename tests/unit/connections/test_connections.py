@@ -50,17 +50,19 @@ def test_milvus_initialization_with_env_vars(mock_milvus_env_vars):
 
 
 def test_milvus_initialization_with_provided_values():
-    milvus = MilvusConnection(uri="http://custom_milvus_url", api_key="custom_api_key")
+    milvus = MilvusConnection(
+        deployment_type=MilvusDeploymentType.HOST, uri="http://custom_milvus_url", api_key="custom_api_key"
+    )
     assert milvus.uri == "http://custom_milvus_url"
     assert milvus.api_key == "custom_api_key"
 
 
 @patch("pymilvus.MilvusClient")
-def test_milvus_connect_local_file(mock_milvus_client_class):
+def test_milvus_connect_file(mock_milvus_client_class):
     mock_milvus_client_instance = MagicMock()
     mock_milvus_client_class.return_value = mock_milvus_client_instance
 
-    milvus = MilvusConnection(deployment_type=MilvusDeploymentType.LOCAL_FILE, uri="path/to/milvus.db")
+    milvus = MilvusConnection(deployment_type=MilvusDeploymentType.FILE, uri="path/to/milvus.db")
     client = milvus.connect()
 
     mock_milvus_client_class.assert_called_once_with(uri="path/to/milvus.db")
@@ -68,24 +70,12 @@ def test_milvus_connect_local_file(mock_milvus_client_class):
 
 
 @patch("pymilvus.MilvusClient")
-def test_milvus_connect_docker(mock_milvus_client_class):
-    mock_milvus_client_instance = MagicMock()
-    mock_milvus_client_class.return_value = mock_milvus_client_instance
-
-    milvus = MilvusConnection(deployment_type=MilvusDeploymentType.DOCKER, uri="http://localhost:19530")
-    client = milvus.connect()
-
-    mock_milvus_client_class.assert_called_once_with(uri="http://localhost:19530")
-    assert client == mock_milvus_client_instance
-
-
-@patch("pymilvus.MilvusClient")
-def test_milvus_connect_zilliz_cloud(mock_milvus_client_class, mock_milvus_env_vars):
+def test_milvus_connect_host_with_token(mock_milvus_client_class):
     mock_milvus_client_instance = MagicMock()
     mock_milvus_client_class.return_value = mock_milvus_client_instance
 
     milvus = MilvusConnection(
-        deployment_type=MilvusDeploymentType.ZILLIZ_CLOUD, uri="https://cloud.milvus.io", api_key="mocked_api_key"
+        deployment_type=MilvusDeploymentType.HOST, uri="https://cloud.milvus.io", api_key="mocked_api_key"
     )
     client = milvus.connect()
 
@@ -93,21 +83,23 @@ def test_milvus_connect_zilliz_cloud(mock_milvus_client_class, mock_milvus_env_v
     assert client == mock_milvus_client_instance
 
 
-def test_milvus_connect_docker_invalid_uri():
-    milvus = MilvusConnection(deployment_type=MilvusDeploymentType.DOCKER, uri="localhost:19530")
-    with pytest.raises(ValueError, match="For Docker deployment, URI should start with 'http'"):
-        milvus.connect()
+@patch("pymilvus.MilvusClient")
+def test_milvus_connect_host_without_token(mock_milvus_client_class):
+    mock_milvus_client_instance = MagicMock()
+    mock_milvus_client_class.return_value = mock_milvus_client_instance
+
+    milvus = MilvusConnection(deployment_type=MilvusDeploymentType.HOST, uri="http://localhost:19530")
+    client = milvus.connect()
+
+    mock_milvus_client_class.assert_called_once_with(uri="http://localhost:19530")
+    assert client == mock_milvus_client_instance
 
 
-def test_milvus_connect_local_file_invalid_uri():
-    milvus = MilvusConnection(deployment_type=MilvusDeploymentType.LOCAL_FILE, uri="not_a_db_path")
-    with pytest.raises(
-        ValueError, match="For local file deployment, URI should point to a local file ending with '.db'"
-    ):
-        milvus.connect()
+def test_milvus_connect_file_invalid_uri():
+    with pytest.raises(ValueError, match="For FILE deployment, URI should point to a file ending with '.db'"):
+        MilvusConnection(deployment_type=MilvusDeploymentType.FILE, uri="not_a_db_path")
 
 
-def test_milvus_connect_zilliz_cloud_missing_api_key():
-    milvus = MilvusConnection(deployment_type=MilvusDeploymentType.ZILLIZ_CLOUD, uri="https://cloud.milvus.io")
-    with pytest.raises(ValueError, match="API key is required for Zilliz Cloud deployment"):
-        milvus.connect()
+def test_milvus_connect_host_invalid_uri():
+    with pytest.raises(ValueError, match="For HOST deployment, URI should start with 'http' or 'https'"):
+        MilvusConnection(deployment_type=MilvusDeploymentType.HOST, uri="localhost:19530")

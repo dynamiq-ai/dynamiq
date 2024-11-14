@@ -231,7 +231,7 @@ class MilvusVectorStore:
             entity = hit.get("entity", {})
             content = entity.get("content", "")
             embedding = entity.get("vector", [])
-            metadata = {k: v for k, v in entity.items() if k not in {"content", "vector"}}
+            metadata = {k: v for k, v in entity.items() if k not in ("content", "vector")}
 
             doc = Document(
                 id=str(hit.get("id", "")),
@@ -289,8 +289,7 @@ class MilvusVectorStore:
                 "content": entry.get("content", ""),
                 "embedding": entry.get("vector", []),
             }
-
-            metadata = {k: v for k, v in entry.items() if k not in {"id", "content", "vector"}}
+            metadata = {k: v for k, v in entry.items() if k not in ("id", "content", "vector")}
 
             if metadata:
                 document_dict["metadata"] = metadata
