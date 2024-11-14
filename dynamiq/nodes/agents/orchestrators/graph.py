@@ -386,8 +386,8 @@ class GraphOrchestrator(Orchestrator):
 
         self._run_depends = [NodeDependency(node=task).to_dict() for task in state.tasks]
 
-    def enable_orchestrator_streaming(self) -> None:
-        """ """
+    def setup_streaming(self) -> None:
+        """Setups streaming for orchestrator."""
         self.manager.streaming = self.streaming
         for state in self.states:
             for task in state.tasks:

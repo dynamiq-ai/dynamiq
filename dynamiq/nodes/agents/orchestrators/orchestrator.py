@@ -89,10 +89,21 @@ class Orchestrator(Node, ABC):
 
     @abstractmethod
     def run_task(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
+        """
+        Process the given task.
+
+        Args:
+            task (str): The task to be processed.
+            config (RunnableConfig): Configuration for the runnable.
+
+        Returns:
+            str: The final answer generated after processing the task.
+        """
         pass
 
     @abstractmethod
-    def enable_orchestrator_streaming(self) -> None:
+    def setup_streaming(self) -> None:
+        """Setups streaming for orchestrator."""
         pass
 
     def execute(self, input_data: OrchestratorInputSchema, config: RunnableConfig = None, **kwargs) -> dict:
@@ -117,7 +128,7 @@ class Orchestrator(Node, ABC):
         run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         run_kwargs.pop("run_depends", None)
         if self.streaming.enabled:
-            self.enable_orchestrator_streaming()
+            self.setup_streaming()
 
         result = self.run_task(
             task=input_task,

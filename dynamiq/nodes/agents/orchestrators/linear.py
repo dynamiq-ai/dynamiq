@@ -306,7 +306,8 @@ class LinearOrchestrator(Orchestrator):
         logger.debug(f"LinearOrchestrator {self.id}: tasks assigned and executed.")
         return self.generate_final_answer(task, config, **kwargs)
 
-    def enable_orchestrator_streaming(self) -> None:
+    def setup_streaming(self) -> None:
+        """Setups streaming for orchestrator."""
         self.manager.streaming = self.streaming
         for agent in self.agents:
             agent.streaming = self.streaming

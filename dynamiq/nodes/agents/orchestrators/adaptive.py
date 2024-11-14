@@ -218,7 +218,8 @@ class AdaptiveOrchestrator(Orchestrator):
                 }
             )
 
-    def enable_orchestrator_streaming(self) -> None:
+    def setup_streaming(self) -> None:
+        """Setups streaming for orchestrator."""
         self.manager.streaming = self.streaming
         for agent in self.agents:
             agent.streaming = self.streaming
