@@ -24,6 +24,24 @@ from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 
+class StreamChunkChoiceDelta(BaseModel):
+    """Delta model for content chunks."""
+    content: str | dict
+    type: str
+
+
+class StreamChunkChoice(BaseModel):
+    """Stream chunk choice model."""
+
+    delta: StreamChunkChoiceDelta
+
+
+class StreamChunk(BaseModel):
+    """Model for streaming chunks with choices containing delta updates."""
+
+    choices: list[StreamChunkChoice]
+
+
 class AgentStatus(Enum):
     """Represents the status of an agent's execution."""
 
@@ -241,11 +259,14 @@ class Agent(Node):
         """Streams the input chunk to the callbacks."""
         final_response = []
         for chunk in input_chunk.split(" "):
-            logger.debug(f"Agent {self.name} - {self.id}: Streaming chunk: {chunk}, type is {self.name}")
             final_response.append(chunk)
+            chunk_for_stream = StreamChunk(
+                choices=[StreamChunkChoice(delta=StreamChunkChoiceDelta(content=chunk, type=self.name))]
+            )
+            logger.debug(f"Agent {self.name} - {self.id}: Streaming chunk: {chunk_for_stream}")
             self.run_on_node_execute_stream(
                 callbacks=config.callbacks,
-                chunk={"content": chunk, "type": self.name},
+                chunk=chunk_for_stream.model_dump(),
                 **kwargs,
             )
         return " ".join(final_response)
@@ -456,7 +477,7 @@ class AgentManager(Agent):
         prompt = self.generate_prompt(block_names=["plan"])
         llm_result = self._run_llm(prompt, config, **kwargs)
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            return self.stream_chunk(input_chunk="\n\n" + llm_result + "\n\n", config=config, **kwargs)
+            return self.stream_chunk(input_chunk=llm_result, config=config, **kwargs)
         return llm_result
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
@@ -464,7 +485,7 @@ class AgentManager(Agent):
         prompt = self.generate_prompt(block_names=["assign"])
         llm_result = self._run_llm(prompt, config, **kwargs)
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            return self.stream_chunk(input_chunk="\n\n" + llm_result + "\n\n", config=config, **kwargs)
+            return self.stream_chunk(input_chunk=llm_result, config=config, **kwargs)
         return llm_result
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
@@ -472,5 +493,5 @@ class AgentManager(Agent):
         prompt = self.generate_prompt(block_names=["final"])
         llm_result = self._run_llm(prompt, config, **kwargs)
         if self.streaming.enabled:
-            return self.stream_chunk(input_chunk="\n\n" + llm_result + "\n\n", config=config, **kwargs)
+            return self.stream_chunk(input_chunk=llm_result, config=config, **kwargs)
         return llm_result

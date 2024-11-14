@@ -65,8 +65,8 @@ if user_input := st.chat_input("You: "):
         st.session_state.messages.append({"role": "assistant", "content": ""})
 
         for chunk in generate_agent_response(st.session_state.agent, user_input):
-            chunk_content = chunk.get("content", "")
-            chunk_type = chunk.get("type", "default")
+            chunk_content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+            chunk_type = chunk.get("choices", [{}])[0].get("delta", {}).get("type", "default")
 
             colored_chunk = get_colored_chunk(chunk_content, chunk_type)
 
