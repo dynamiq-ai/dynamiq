@@ -1,10 +1,9 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -49,6 +48,10 @@ Ensure that only the relevant, informative content remains, and that it is prese
 """  # noqa E501
 
 
+class SummarizerInputSchema(BaseModel):
+    input: str = Field(..., description="Parameter to provide text to summarize and clean.")
+
+
 class SummarizerTool(Node):
     """
     A tool for summarizing and cleaning up text extracted from HTML.
@@ -67,10 +70,9 @@ class SummarizerTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Summarizer"
+    name: str = "Summarizer Tool"
     description: str = (
         "A tool for summarizing and cleaning up text extracted from HTML. "
-        "Input should be a dictionary with a key 'input' containing the text to summarize."
     )
     llm: Node
     chunk_size: int = Field(default=4000, description="The maximum number of words in each chunk")
@@ -81,6 +83,7 @@ class SummarizerTool(Node):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_schema: ClassVar[type[SummarizerInputSchema]] = SummarizerInputSchema
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
         """
@@ -150,7 +153,9 @@ class SummarizerTool(Node):
             raise ValueError("LLM execution failed")
         return result.output["content"]
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self, input_data: SummarizerInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
         """
         Execute the summarization tool on the input data.
 
@@ -172,12 +177,7 @@ class SummarizerTool(Node):
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        if "input" not in input_data:
-            raise ToolExecutionException(
-                "Input data must contain an 'input' key with the text to summarize.", recoverable=True
-            )
-
-        input_text = input_data["input"]
+        input_text = input_data.input
         logger.debug(
             f"Tool {self.name} - {self.id}: started with input text length: {len(input_text)}, "
             f"word count: {len(input_text.split())}"

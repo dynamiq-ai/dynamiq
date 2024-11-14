@@ -274,7 +274,6 @@ class AdaptiveOrchestrator(Node):
         Raises:
             OrchestratorError: If an error occurs while generating the final answer.
         """
-
         manager_result = self.manager.run(
             input_data={
                 "action": "final",
@@ -324,6 +323,11 @@ class AdaptiveOrchestrator(Node):
 
         run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         run_kwargs.pop("run_depends", None)
+
+        if self.streaming.enabled:
+            self.manager.streaming = self.streaming
+            for agent in self.agents:
+                agent.streaming = self.streaming
 
         result = self.run_task(
             task=objective,

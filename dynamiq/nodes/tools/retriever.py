@@ -1,11 +1,16 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
+
+from pydantic import BaseModel, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node
-from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
+
+
+class RetrievalInputSchema(BaseModel):
+    query: str = Field(..., description="Parameter to provide a query to retrieve documents.")
 
 
 class RetrievalTool(Node):
@@ -22,11 +27,12 @@ class RetrievalTool(Node):
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Retrieval Tool"
-    description: str = "A tool for retrieving relevant documents based on a query. Provide query with key 'input'."
+    description: str = "A tool for retrieving relevant documents based on a query."
     error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
     connection_manager: ConnectionManager | None = None
     text_embedder: ConnectionNode | None = None
     document_retriever: ConnectionNode | None = None
+    input_schema: ClassVar[type[RetrievalInputSchema]] = RetrievalInputSchema
 
     def __init__(
         self,
@@ -87,7 +93,7 @@ class RetrievalTool(Node):
             formatted_docs.append(formatted_doc)
         return "\n\n".join(formatted_docs)
 
-    def execute(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any]:
+    def execute(self, input_data: RetrievalInputSchema, **_) -> dict[str, Any]:
         """Execute the retrieval tool.
 
         Args:
@@ -97,30 +103,29 @@ class RetrievalTool(Node):
         Returns:
             dict[str, Any]: Result of the retrieval.
         """
-        if query := input_data.get("input", ""):
-            logger.debug(f"Tool {self.name} - {self.id}: started with query '{query}'")
 
-            if not self.text_embedder:
-                raise ValueError(f"{self.name}: Text embedder is not initialized.")
-            if not self.document_retriever:
-                raise ValueError(f"{self.name}: Document retriever is not initialized.")
+        logger.debug(f"Tool {self.name} - {self.id}: started with query '{input_data.model_dump()}'")
 
-            try:
-                text_embedder_output = self.text_embedder.run(input_data={"query": query})
-                embedding = text_embedder_output.output.get("embedding")
+        if not self.text_embedder:
+            raise ValueError(f"{self.name}: Text embedder is not initialized.")
+        if not self.document_retriever:
+            raise ValueError(f"{self.name}: Document retriever is not initialized.")
 
-                document_retriever_output = self.document_retriever.run(input_data={"embedding": embedding})
-                retrieved_documents = document_retriever_output.output.get("documents", [])
-                logger.info(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")
+        try:
+            text_embedder_output = self.text_embedder.run(input_data={"query": input_data.query})
+            embedding = text_embedder_output.output.get("embedding")
 
-                formatted_content = self.format_content(retrieved_documents)
-                logger.debug(f"Tool {self.name} - {self.id}: finished retrieval. Content: {formatted_content[:100]}...")
+            document_retriever_output = self.document_retriever.run(input_data={"embedding": embedding})
+            retrieved_documents = document_retriever_output.output.get("documents", [])
+            logger.info(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")
 
-                return {"content": formatted_content}
-            except Exception as e:
-                logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
-                raise
-        raise ToolExecutionException("Provide query with key 'input'.")
+            formatted_content = self.format_content(retrieved_documents)
+            logger.debug(f"Tool {self.name} - {self.id}: finished retrieval. Content: {formatted_content[:100]}...")
+
+            return {"content": formatted_content}
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
+            raise
 
     def to_dict(self, **kwargs) -> dict:
         """Convert the RetrievalTool object to a dictionary.

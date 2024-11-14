@@ -5,8 +5,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 import dynamiq.utils.jsonpath as jsonpath
-from dynamiq.flows import Flow
-from dynamiq.nodes import Node, NodeGroup
+from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils import generate_uuid
@@ -197,7 +196,8 @@ class Map(Node):
     """Represents a map node in a flow."""
 
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
-    flow: Flow
+    node: Node
+    behavior: Behavior | None = Behavior.RETURN
 
     def execute(
         self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
@@ -217,11 +217,11 @@ class Map(Node):
             Exception: If the input is not a list or if any flow execution fails.
         """
         if isinstance(input_data, dict):
-            input_data = [{k: v} for k, v in input_data.items()]
+            input_data = input_data["inputs"]
 
         if not isinstance(input_data, list):
             logger.error(f"Map operator {self.id} input is not a list.")
-            raise Exception(f"Map operator {self.id} input is not a list.")
+            raise ValueError(f"Map operator {self.id} input is not a list.")
 
         output = []
         run_id = kwargs.get("run_id", uuid4())
@@ -230,14 +230,13 @@ class Map(Node):
 
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        for data in input_data:
-            result = self.flow.run(data, config, **merged_kwargs)
-            if result.status == RunnableStatus.SUCCESS:
-                output.append(result.output)
-            else:
-                raise Exception(
-                    f"Map operator {self.id} flow {self.flow.id} execution failed."
-                )
+        for index, data in enumerate(input_data, start=1):
+            result = self.node.run(data, config, **merged_kwargs)
+            if result.status != RunnableStatus.SUCCESS:
+                if self.behavior == Behavior.RAISE:
+                    raise ValueError(f"Map node failed to execute: node under iteration index {index} has failed.")
+                logger.error(f"Node under iteration index {index} has failed.")
+            output.append(result.output)
 
         return output
 

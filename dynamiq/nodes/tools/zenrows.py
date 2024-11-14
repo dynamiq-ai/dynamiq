@@ -1,6 +1,6 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import ZenRows
 from dynamiq.nodes import NodeGroup
@@ -9,20 +9,22 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
 
+class ZenRowsInputSchema(BaseModel):
+    url: str = Field(default="", description="Parameter to provide a url of the page to scrape.")
+
+
 class ZenRowsTool(ConnectionNode):
     """
     A tool for scraping web pages, powered by ZenRows.
 
     This class is responsible for scraping the content of a web page using ZenRows.
-    The input should be a dictionary containing the key 'input', which includes the URL of the page to scrape.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Scraper-ZenRows"
+    name: str = "Zenrows Scraper Tool"
     description: str = (
         "A tool for scraping web pages, powered by ZenRows. "
         "You can use this tool to scrape the content of a web page."
-        "Input should be a dictionary with a key 'input' containing the URL of the page to scrape."
     )
     connection: ZenRows
     url: str | None = None
@@ -33,9 +35,9 @@ class ZenRowsTool(ConnectionNode):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ) -> dict[str, Any]:
+    input_schema: ClassVar[type[ZenRowsInputSchema]] = ZenRowsInputSchema
+
+    def execute(self, input_data: ZenRowsInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Executes the web scraping process.
 
@@ -47,20 +49,14 @@ class ZenRowsTool(ConnectionNode):
         Returns:
             dict[str, Any]: A dictionary containing the URL and the scraped content.
         """
-        logger.debug(
-            f"Tool {self.name} - {self.id}: started with input data {input_data}"
-        )
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
 
         # Ensure the config is set up correctly
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        url = input_data.get("input", "") or input_data.get("url", "") or self.url
-        if not url:
-            raise ValueError("The 'input' key must contain a valid URL.")
-
         params = {
-            "url": url,
+            "url": input_data.url,
             "markdown_response": str(self.markdown_response).lower(),
         }
 
@@ -74,15 +70,17 @@ class ZenRowsTool(ConnectionNode):
             response.raise_for_status()
             scrape_result = response.text
         except Exception as e:
-            logger.error(
-                f"Tool {self.name} - {self.id}: failed to get results. Error: {e}"
-            )
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {e}")
+
             raise
 
         if self.is_optimized_for_agents:
-            result = f"<Source URL>\n{url}\n<\\Source URL>\n\n<Scraped result>\n{scrape_result}\n<\\Scraped result>"
+            result = (
+                f"<Source URL>\n{input_data.url}\n<\\Source URL>"
+                f"\n<Scraped result>\n{scrape_result}\n<\\Scraped result>"
+            )
         else:
-            result = {"url": url, "content": scrape_result}
+            result = {"url": input_data.url, "content": scrape_result}
         logger.debug(f"Tool {self.name} - {self.id}: finished with result {str(result)[:200]}...")
 
         return {"content": result}
