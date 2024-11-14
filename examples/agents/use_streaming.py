@@ -32,9 +32,7 @@ def run_agent(event: str = "data") -> str:
 
     streaming_handler = StreamingIteratorCallbackHandler()
 
-    response = agent.run(
-        input_data={"input": INPUT_QUESTION}, config=RunnableConfig(callbacks=[streaming_handler], streaming=True)
-    )
+    response = agent.run(input_data={"input": INPUT_QUESTION}, config=RunnableConfig(callbacks=[streaming_handler]))
     print("Response:", response)
 
     print("Streaming Output:")

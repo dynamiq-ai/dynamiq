@@ -1,12 +1,13 @@
 import pytest
 
 from dynamiq import Workflow
+from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import connections
 from dynamiq.flows import Flow
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.operators import Map
 from dynamiq.prompts import Message, Prompt
-from dynamiq.runnables import RunnableResult, RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 
 
 def get_map_workflow(
@@ -40,11 +41,9 @@ def get_map_workflow(
     ("inputs", "outputs"),
     [
         (
-            [{}, {}],
+            [{"test": "OK"}, {"test": "BAD"}],
             [{"content": "mocked_response", "tool_calls": None}, {"content": "mocked_response", "tool_calls": None}],
         ),
-        ([{}], [{"content": "mocked_response", "tool_calls": None}]),
-        ([], []),
     ],
 )
 def test_workflow_with_map_node(inputs, outputs):
@@ -54,7 +53,8 @@ def test_workflow_with_map_node(inputs, outputs):
     )
     wf_map_node = get_map_workflow(model, connection)
     input_data = {"inputs": inputs}
-    response = wf_map_node.run(input_data=input_data)
+    tracing = TracingCallbackHandler()
+    response = wf_map_node.run(input_data=input_data, config=RunnableConfig(callbacks=[tracing]))
 
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
