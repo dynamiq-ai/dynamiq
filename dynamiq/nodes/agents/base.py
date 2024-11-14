@@ -24,22 +24,16 @@ from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 
-class DeltaContent(BaseModel):
-    content: str
-    type: str
-
-
 class Delta(BaseModel):
+    """Delta model for content chunks."""
     content: str | dict
     type: str
 
 
-class Choice(BaseModel):
-    delta: Delta
-
-
 class StreamChunk(BaseModel):
-    choices: list[dict[str, Any]]
+    """Model for streaming chunks with choices containing delta updates."""
+
+    choices: list[dict[str, Delta]]
 
 
 class AgentStatus(Enum):
@@ -260,7 +254,7 @@ class Agent(Node):
         final_response = []
         for chunk in input_chunk.split(" "):
             final_response.append(chunk)
-            chunk_for_stream = StreamChunk(choices=[{"delta": {"content": chunk, "type": self.name}}])
+            chunk_for_stream = StreamChunk(choices=[{"delta": Delta(content=chunk, type=self.name)}])
             logger.debug(f"Agent {self.name} - {self.id}: Streaming chunk: {chunk_for_stream}")
             self.run_on_node_execute_stream(
                 callbacks=config.callbacks,
