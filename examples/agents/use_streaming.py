@@ -44,7 +44,7 @@ def run_agent(event: str = "data") -> str:
         content = chunk_data.get("choices", [{}])[0].get("delta", {}).get("content")
         if content:
             full_content += content
-            print(content, end="")
+            print(content, end=" ")
     return full_content
 
 
