@@ -86,16 +86,14 @@ def generate_agent_response(orchestrator: AdaptiveOrchestrator, user_input: str)
     """
     if orchestrator.streaming.enabled:
         streaming_handler = StreamingIteratorCallbackHandler()
-        orchestrator.run(
-            input_data={"input": user_input}, config=RunnableConfig(callbacks=[streaming_handler], streaming=True)
-        )
+        orchestrator.run(input_data={"input": user_input}, config=RunnableConfig(callbacks=[streaming_handler]))
 
         response_text = ""
 
         for chunk in streaming_handler:
             content = chunk.data
             if content:
-                response_text += " " + content.get("content", "")
+                response_text += " " + content.get("choices", [{}])[0].get("delta", {}).get("content")
                 yield content
 
     else:
