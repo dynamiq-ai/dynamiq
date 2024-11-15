@@ -33,8 +33,6 @@ services:
     build:
       target: develop
     entrypoint: ["make", "test-cov-exclude-integration-with-creds"]
-    env_file:
-      - .env
     volumes:
       - ./:/app
       - ./reports:/app/reports:wr

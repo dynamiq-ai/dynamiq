@@ -67,15 +67,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Load Image
-        uses: docker/bake-action@v5
-        with:
-          load: true
-          set: |
-            *.cache-from=type=gha
-            *.cache-to=type=gha,mode=max
-          targets: dynamiq-app-test
-
       - name: Create .env file
         if: >
           github.event_name == 'push' ||
@@ -88,6 +79,15 @@ jobs:
           envkey_PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
           envkey_PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
           envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
+
+      - name: Load Image
+        uses: docker/bake-action@v5
+        with:
+          load: true
+          set: |
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
+          targets: dynamiq-app-test
 
       - name: Run tests on push or internal PR
         if: >
