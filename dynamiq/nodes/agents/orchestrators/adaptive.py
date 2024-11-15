@@ -140,18 +140,18 @@ class AdaptiveOrchestrator(Orchestrator):
             )
             raise ActionParseError("Unable to create Action from LLM output.")
 
-    def run_task(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
+    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
         """
         Process the given task using the manager agent logic.
 
         Args:
-            task (str): The task to be processed.
+            input_task (str): The task to be processed.
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
             str: The final answer generated after processing the task.
         """
-        self._chat_history.append({"role": "user", "content": task})
+        self._chat_history.append({"role": "user", "content": input_task})
 
         while True:
             action = self.get_next_action(config=config, **kwargs)
@@ -163,7 +163,7 @@ class AdaptiveOrchestrator(Orchestrator):
             elif action.command == ActionCommand.FINAL_ANSWER:
                 return self.get_final_result(
                     {
-                        "input_task": task,
+                        "input_task": input_task,
                         "chat_history": self._chat_history,
                         "preliminary_answer": action.answer,
                     },

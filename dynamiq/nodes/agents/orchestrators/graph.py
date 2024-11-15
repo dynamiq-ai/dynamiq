@@ -217,18 +217,18 @@ class GraphOrchestrator(Orchestrator):
         """Get a formatted string of state descriptions."""
         return "\n".join([f"'{self.states[state].name}': {self.states[state].description}" for state in states])
 
-    def run_task(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
+    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
         """
         Process the graph workflow.
 
         Args:
-            task (str): The task to be processed.
+            input_task (str): The task to be processed.
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
             str: The final answer generated after processing the task.
         """
-        self._chat_history.append({"role": "user", "content": task})
+        self._chat_history.append({"role": "user", "content": input_task})
         state = self.states[self.initial_state]
 
         while True:
@@ -237,7 +237,7 @@ class GraphOrchestrator(Orchestrator):
             if state.name == END:
                 return self.get_final_result(
                     {
-                        "input_task": task,
+                        "input_task": input_task,
                         "chat_history": self._chat_history,
                     },
                     config=config,
@@ -313,8 +313,12 @@ class GraphOrchestrator(Orchestrator):
                 input_data={"context": self.context}, config=config, run_depends=self._run_depends
             ).output.get("content")
 
+            if not isinstance(result, dict):
+                raise OrchestratorError("Error: Task returned invalid data format. Expected a dictionary.")
+
             if "result" not in result:
                 raise OrchestratorError("Error: Task returned dictionary with no 'result' key in it.")
+
             if "history" in result:
                 result.pop("history")
 
@@ -324,10 +328,10 @@ class GraphOrchestrator(Orchestrator):
 
     def merge_contexts(self, context_list: list[dict[str, Any]]) -> dict:
         """
-        Merges contexts, and raises an error when merging is not possible.
+        Merges contexts, and raises an error when lossless merging is not possible.
 
         Raises:
-            OrchestratorError: If multiple changes of the same variable is detected.
+            OrchestratorError: If multiple changes of the same variable are detected.
         """
         merged_dict = {}
 
@@ -335,7 +339,7 @@ class GraphOrchestrator(Orchestrator):
             for key, value in d.items():
                 if key in merged_dict:
                     if merged_dict[key] != value:
-                        raise OrchestratorError(f"Error: multiple changes of variable {key} detected.")
+                        raise OrchestratorError(f"Error: multiple changes of variable {key} are detected.")
                 merged_dict[key] = value
 
         return merged_dict

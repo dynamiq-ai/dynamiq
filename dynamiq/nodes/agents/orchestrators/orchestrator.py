@@ -58,7 +58,7 @@ class Orchestrator(Node, ABC):
         Generate a comprehensive final result based on the provided data.
 
         Args:
-            input_data (dict[str, str]): Data to use to provide final result.
+            input_data (dict[str, str]): Input data for the manager.
             config (RunnableConfig): Configuration for the runnable.
             **kwargs: Additional keyword arguments.
 
@@ -88,12 +88,12 @@ class Orchestrator(Node, ABC):
         self._chat_history = []
 
     @abstractmethod
-    def run_task(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
+    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
         """
         Process the given task.
 
         Args:
-            task (str): The task to be processed.
+            input_task (str): The task to be processed.
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
@@ -130,8 +130,8 @@ class Orchestrator(Node, ABC):
         if self.streaming.enabled:
             self.setup_streaming()
 
-        result = self.run_task(
-            task=input_task,
+        result = self.run_flow(
+            input_task=input_task,
             config=config,
             **run_kwargs,
         )

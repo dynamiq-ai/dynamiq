@@ -289,22 +289,22 @@ class LinearOrchestrator(Orchestrator):
         logger.debug(f"LinearOrchestrator {self.id}: Returning final task output")
         return tasks_outputs
 
-    def run_task(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
+    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
         """
         Process the given task using the manager agent logic.
 
         Args:
-            task (str): The task to be processed.
+            input_task (str): The task to be processed.
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
             str: The final answer generated after processing the task.
         """
-        tasks = self.get_tasks(task, config=config, **kwargs)
+        tasks = self.get_tasks(input_task, config=config, **kwargs)
         logger.debug(f"LinearOrchestrator {self.id}: tasks initialized:\n '{tasks}'")
         self.run_tasks(tasks=tasks, config=config, **kwargs)
         logger.debug(f"LinearOrchestrator {self.id}: tasks assigned and executed.")
-        return self.generate_final_answer(task, config, **kwargs)
+        return self.generate_final_answer(input_task, config, **kwargs)
 
     def setup_streaming(self) -> None:
         """Setups streaming for orchestrator."""
