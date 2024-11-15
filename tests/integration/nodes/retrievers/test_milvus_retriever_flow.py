@@ -20,7 +20,7 @@ def mock_milvus_client():
 @pytest.fixture
 def mock_milvus_connection():
     return MilvusConnection(
-        deployment_type=MilvusDeploymentType.LOCAL_FILE,
+        deployment_type=MilvusDeploymentType.FILE,
         uri="test.db",
     )
 
