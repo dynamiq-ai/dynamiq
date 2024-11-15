@@ -47,7 +47,7 @@ black = "~24.8.0"
 pypdf = "~4.3.1"
 python-pptx = "1.0.2"
 qdrant-client = "~1.11.3"
-
+pymilvus = "~2.4.3"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~69.1.1"
