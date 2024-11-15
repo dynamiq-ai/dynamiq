@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,7 +25,9 @@ def pinecone_document_retriever(mock_pinecone_vector_store):
     return retriever
 
 
-def test_initialization_with_defaults():
+@patch("dynamiq.storages.vector.pinecone.pinecone.PineconeVectorStore.connect_to_index", return_value=MagicMock())
+@patch("dynamiq.connections.Pinecone.connect", return_value=MagicMock())
+def test_initialization_with_defaults(mock_connect, mock_connect_to_index):
     retriever = PineconeDocumentRetriever()
     assert isinstance(retriever.connection, Pinecone)
 
