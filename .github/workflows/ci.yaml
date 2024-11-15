@@ -121,13 +121,17 @@ jobs:
         with:
           name: coverage_report
           path: reports
-      - name: Produce the coverage report
+
+      - name: Produce the coverage report on push or internal PR
         if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: MishaKav/pytest-coverage-comment@main
         with:
           pytest-xml-coverage-path: ./reports/coverage.xml
           junitxml-path: ./reports/test-results.xml
-          create-new-comment: false
+          create-new-comment: true
+
+      - name: Produce the coverage report on fork PR
+        run: coverage report
 
   build-mkdocs:
     runs-on: ubuntu-latest
