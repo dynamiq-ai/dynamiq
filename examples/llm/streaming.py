@@ -22,12 +22,9 @@ def run_openai_node_with_streaming(prompt: Prompt):
     streaming_handler = StreamingIteratorCallbackHandler()
 
     # Run the LLM node with streaming support
-    response = openai_node.run(
-        input_data={}, prompt=prompt, config=RunnableConfig(callbacks=[streaming_handler], streaming=True)
-    )
-    print("Response:", response)
+    response = openai_node.run(input_data={}, prompt=prompt, config=RunnableConfig(callbacks=[streaming_handler]))
 
-    # Collect the streamed responses
+    print("Response:", response)
     print("Streaming Output:")
     full_content = ""
     for chunk in streaming_handler:
@@ -57,5 +54,3 @@ prompt = Prompt(
 output = run_openai_node_with_streaming(
     prompt=prompt,
 )
-
-print("Streamed Output:", output)

@@ -33,12 +33,10 @@ def generate_agent_response(agent: SimpleAgent, user_input: str):
     response_text = ""
     if agent.streaming.enabled:
         streaming_handler = StreamingIteratorCallbackHandler()
-        agent.run(
-            input_data={"input": user_input}, config=RunnableConfig(callbacks=[streaming_handler], streaming=True)
-        )
+        agent.run(input_data={"input": user_input}, config=RunnableConfig(callbacks=[streaming_handler]))
 
         for chunk in streaming_handler:
-            content = chunk.data.get("content", " ")
+            content = chunk.data.get("choices", [{}])[0].get("delta", {}).get("content", "")
             if content:
                 response_text += " " + content
                 yield " " + content
