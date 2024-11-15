@@ -19,10 +19,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Create .env file on push or internal PR
-        if: >
-          github.event_name == 'push' ||
-          (github.event_name == 'pull_request' &&
-           github.event.pull_request.head.repo.full_name == github.repository)
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: SpicyPizza/create-envfile@v2.0
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -32,9 +29,7 @@ jobs:
           envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
 
       - name: Create .env file on fork PR
-        if: >
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         uses: SpicyPizza/create-envfile@v2.0
 
       - name: Build
@@ -78,10 +73,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Create .env file on push or internal PR
-        if: >
-          github.event_name == 'push' ||
-          (github.event_name == 'pull_request' &&
-           github.event.pull_request.head.repo.full_name == github.repository)
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: SpicyPizza/create-envfile@v2.0
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -91,9 +83,7 @@ jobs:
           envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
 
       - name: Create .env file on fork PR
-        if: >
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         uses: SpicyPizza/create-envfile@v2.0
 
       - name: Load Image
@@ -106,16 +96,11 @@ jobs:
           targets: dynamiq-app-test
 
       - name: Run tests on push or internal PR
-        if: >
-          github.event_name == 'push' ||
-          (github.event_name == 'pull_request' &&
-           github.event.pull_request.head.repo.full_name == github.repository)
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
         run: docker compose up dynamiq-app-test-cov --exit-code-from dynamiq-app-test-cov
 
       - name: Run tests on fork PR
-        if: >
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         run: docker compose up dynamiq-app-test-cov-exclude-integration-with-creds --exit-code-from dynamiq-app-test-cov-exclude-integration-with-creds
 
       - uses: actions/upload-artifact@v4
@@ -137,6 +122,7 @@ jobs:
           name: coverage_report
           path: reports
       - name: Produce the coverage report
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: MishaKav/pytest-coverage-comment@main
         with:
           pytest-xml-coverage-path: ./reports/coverage.xml
