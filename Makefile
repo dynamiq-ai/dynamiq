@@ -22,12 +22,31 @@ prepare:
 
 lint: prepare
 
+test-integration:
+	pytest tests/integration
+
+test-integration-with-creds:
+	pytest tests/integration_with_creds
+
+test-exclude-integration-with-creds:
+	pytest tests --ignore=tests/integration_with_creds
+
+test-unit:
+	pytest tests/unit
+
 test:
 	pytest tests
 
 test-cov:
 	mkdir -p ./reports
 	coverage run -m pytest --junitxml=./reports/test-results.xml tests
+	coverage report --skip-empty
+	coverage html -d ./reports/htmlcov --omit="*/test_*,*/tests.py"
+	coverage xml -o ./reports/coverage.xml --omit="*/test_*,*/tests.py"
+
+test-cov-exclude-integration-with-creds:
+	mkdir -p ./reports
+	coverage run -m pytest --junitxml=./reports/test-results.xml tests --ignore=tests/integration_with_creds
 	coverage report --skip-empty
 	coverage html -d ./reports/htmlcov --omit="*/test_*,*/tests.py"
 	coverage xml -o ./reports/coverage.xml --omit="*/test_*,*/tests.py"
