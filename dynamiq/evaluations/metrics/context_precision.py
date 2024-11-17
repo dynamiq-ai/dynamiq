@@ -1,20 +1,89 @@
 import logging
 
+from pydantic import BaseModel, PrivateAttr, field_validator, model_validator
+
 from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
-from dynamiq.nodes.llms import BaseLLM, OpenAI
+from dynamiq.nodes.llms import BaseLLM
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class ContextPrecisionEvaluator:
-    def __init__(self, llm: BaseLLM):
-        self.llm = llm
-        self._initialize_evaluators()
+class ContextPrecisionInput(BaseModel):
+    """
+    Input model for context precision evaluation.
 
-    def _initialize_evaluators(self):
-        # Initialize the LLMEvaluator for context precision
+    Attributes:
+        questions (List[str]): List of questions.
+        answers (List[str]): List of corresponding answers.
+        contexts_list (List[List[str]]): List of contexts for each question.
+        verbose (bool): Flag to enable verbose logging.
+    """
 
+    questions: list[str]
+    answers: list[str]
+    contexts_list: list[list[str]]
+    verbose: bool = False
+
+    @model_validator(mode="after")
+    def check_equal_length(self):
+        if not (len(self.questions) == len(self.answers) == len(self.contexts_list)):
+            raise ValueError("Questions, answers, and contexts_list must have the same length.")
+        return self
+
+
+class ContextPrecisionOutput(BaseModel):
+    """
+    Output model for context precision evaluation.
+
+    Attributes:
+        final_scores (List[float]): List of context precision scores.
+    """
+
+    final_scores: list[float]
+
+
+class VerdictResult(BaseModel):
+    """
+    Model for the verdict result from the evaluator.
+
+    Attributes:
+        verdict (int): 1 if the context was useful, 0 otherwise.
+        reason (str): Reason for the verdict.
+    """
+
+    verdict: int
+    reason: str
+
+    @field_validator("verdict")
+    @classmethod
+    def validate_verdict(cls, v):
+        if v not in (0, 1):
+            raise ValueError("Verdict must be either 0 or 1.")
+        return v
+
+
+class ContextPrecisionEvaluator(BaseModel):
+    """
+    Evaluator class for context precision metric.
+
+    Attributes:
+        llm (BaseLLM): The language model to use for evaluation.
+    """
+
+    llm: BaseLLM
+
+    # Private attribute (not part of the Pydantic model fields)
+    _context_precision_evaluator: LLMEvaluator = PrivateAttr()
+
+    class Config:
+        arbitrary_types_allowed = True  # Allow arbitrary types
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self._initialize_evaluator()
+
+    def _initialize_evaluator(self):
         context_precision_instructions = (
             'Given a "Question", "Answer", and "Context", verify if the Context was '
             "useful in arriving at the given Answer.\n"
@@ -25,7 +94,7 @@ class ContextPrecisionEvaluator:
             "strings."
         )
 
-        self.context_precision_evaluator = LLMEvaluator(
+        self._context_precision_evaluator = LLMEvaluator(
             instructions=context_precision_instructions.strip(),
             inputs=[
                 ("question", list[str]),
@@ -125,6 +194,15 @@ class ContextPrecisionEvaluator:
 
     @staticmethod
     def calculate_average_precision(verdicts: list[int]) -> float:
+        """
+        Calculate the average precision based on verdicts.
+
+        Args:
+            verdicts (List[int]): List of verdicts (1 for relevant, 0 for not relevant).
+
+        Returns:
+            float: The average precision score.
+        """
         numerator = 0.0
         cumulative_hits = 0
         total_relevant = sum(verdicts)
@@ -138,36 +216,56 @@ class ContextPrecisionEvaluator:
         average_precision = numerator / total_relevant
         return average_precision
 
-    def evaluate(
+    def run(
         self,
         questions: list[str],
         answers: list[str],
         contexts_list: list[list[str]],
         verbose: bool = False,
     ) -> list[float]:
-        if not (len(questions) == len(answers) == len(contexts_list)):
-            raise ValueError("Questions, answers, and contexts_list must have the same length.")
+        """
+        Evaluate the context precision for each question.
+
+        Args:
+            questions (List[str]): List of questions.
+            answers (List[str]): List of corresponding answers.
+            contexts_list (List[List[str]]): List of contexts for each question.
+            verbose (bool): Flag to enable verbose logging.
+
+        Returns:
+            List[float]: List of context precision scores for each question.
+        """
+        input_data = ContextPrecisionInput(
+            questions=questions,
+            answers=answers,
+            contexts_list=contexts_list,
+            verbose=verbose,
+        )
 
         final_scores = []
 
-        for idx in range(len(questions)):
-            question = questions[idx]
-            answer = answers[idx]
-            contexts = contexts_list[idx]
+        for idx in range(len(input_data.questions)):
+            question = input_data.questions[idx]
+            answer = input_data.answers[idx]
+            contexts = input_data.contexts_list[idx]
 
             verdicts = []
             for context in contexts:
                 # Prepare inputs for the evaluator
-                result = self.context_precision_evaluator.run(
+                result = self._context_precision_evaluator.run(
                     question=[question],
                     answer=[answer],
                     context=[context],
                 )
                 # Extract the verdict (ensure it's an int)
-                verdict = int(result["results"][0]["verdict"])
+                verdict_raw = result["results"][0]["verdict"]
+                if isinstance(verdict_raw, str):
+                    verdict = int(verdict_raw.strip())
+                else:
+                    verdict = int(verdict_raw)
                 verdicts.append(verdict)
 
-                if verbose:
+                if input_data.verbose:
                     reason = result["results"][0]["reason"]
                     # Use logging instead of print
                     logger.debug(f"Question: {question}")
@@ -181,95 +279,9 @@ class ContextPrecisionEvaluator:
             score = self.calculate_average_precision(verdicts)
             final_scores.append(score)
 
-            if verbose:
+            if input_data.verbose:
                 logger.debug(f"Average Precision Score: {score}")
                 logger.debug("=" * 50)
 
-        return final_scores
-
-
-# Example usage
-if __name__ == "__main__":
-    import sys
-
-    from dotenv import find_dotenv, load_dotenv
-
-    # Load environment variables for OpenAI API
-    load_dotenv(find_dotenv())
-
-    # Configure logging level (set to DEBUG to see verbose output)
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-    # Set the logging level to DEBUG if verbose is desired
-    # logging.getLogger().setLevel(logging.DEBUG)
-
-    # Initialize the LLM (replace 'gpt-4' with your available model)
-    llm = OpenAI(model="gpt-4")
-
-    # Sample data (can be replaced with your data)
-    questions = [
-        "What can you tell me about Albert Einstein?",
-        "Who won the 2020 ICC World Cup?",
-        "What is the tallest mountain in the world?",
-    ]
-    answers = [
-        (
-            "Albert Einstein, born on 14 March 1879, was a German-born theoretical physicist, "
-            "widely held to be one of the greatest and most influential scientists of all time. "
-            "He received the 1921 Nobel Prize in Physics for his services to theoretical physics."
-        ),
-        "England",
-        "Mount Everest.",
-    ]
-    contexts_list = [
-        [
-            # Contexts for the first question
-            (
-                "Albert Einstein (14 March 1879 – 18 April 1955) was a German-born theoretical "
-                "physicist, widely held to be one of the greatest and most influential scientists "
-                "of all time. Best known for developing the theory of relativity, he also made "
-                "important contributions to quantum mechanics."
-            ),
-            (
-                "Albert Einstein's work is also known for its influence on the philosophy of "
-                "science. His mass–energy equivalence formula E = mc^2 has been called 'the world's "
-                "most famous equation'."
-            ),
-        ],
-        [
-            # Contexts for the second question
-            (
-                "The 2022 ICC Men's T20 World Cup, held from October 16 to November 13, 2022, in "
-                "Australia, was the eighth edition of the tournament. Originally scheduled for "
-                "2020, it was postponed due to the COVID-19 pandemic. England emerged victorious, "
-                "defeating Pakistan by five wickets in the final to clinch their second ICC Men's "
-                "T20 World Cup title."
-            ),
-            (
-                "The 2016 ICC World Twenty20 was held in India from 8 March to 3 April 2016. The "
-                "West Indies won the tournament, beating England in the final."
-            ),
-        ],
-        [
-            # Contexts for the third question
-            (
-                "The Andes is the longest continental mountain range in the world, located in "
-                "South America. It features many high peaks but not the tallest in the world."
-            ),
-            ("Mount Kilimanjaro is the highest mountain in Africa, standing at 5,895 meters " "above sea level."),
-        ],
-    ]
-
-    # Initialize evaluator and evaluate
-    evaluator = ContextPrecisionEvaluator(llm)
-    correctness_scores = evaluator.evaluate(
-        questions, answers, contexts_list, verbose=False  # Set to True to enable verbose logging
-    )
-
-    # Print the results
-    for idx, score in enumerate(correctness_scores):
-        print(f"Question: {questions[idx]}")
-        print(f"Context Precision Score: {score}")
-        print("-" * 50)
-
-    print("Context Precision Scores:")
-    print(correctness_scores)
+        output_data = ContextPrecisionOutput(final_scores=final_scores)
+        return output_data.final_scores
