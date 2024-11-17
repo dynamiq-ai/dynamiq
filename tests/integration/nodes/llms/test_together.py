@@ -85,5 +85,6 @@ def test_workflow_with_together_ai(mock_llm_response_text, mock_llm_executor, mo
         seed=None,
         top_p=None,
         api_key=connection.api_key,
-        response_format=None
+        response_format=None,
+        drop_params=True,
     )

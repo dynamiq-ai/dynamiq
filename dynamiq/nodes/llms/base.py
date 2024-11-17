@@ -297,6 +297,7 @@ class BaseLLM(ConnectionNode):
             presence_penalty=self.presence_penalty,
             frequency_penalty=self.frequency_penalty,
             response_format=response_format,
+            drop_params=True,
             **params,
         )
 
