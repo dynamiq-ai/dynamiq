@@ -1,19 +1,150 @@
 import logging
 
+from pydantic import BaseModel, PrivateAttr, model_validator
+
 from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
-from dynamiq.nodes.llms import BaseLLM, OpenAI
+from dynamiq.nodes.llms import BaseLLM
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class FaithfulnessEvaluator:
-    def __init__(self, llm: BaseLLM):
-        self.llm = llm
+class SimplifyStatementsInput(BaseModel):
+    """
+    Input model for simplifying statements.
+
+    Attributes:
+        questions (List[str]): List of questions.
+        answers (List[str]): List of corresponding answers.
+    """
+
+    questions: list[str]
+    answers: list[str]
+
+    @model_validator(mode="after")
+    def check_equal_length(self):
+        if len(self.questions) != len(self.answers):
+            raise ValueError("Questions and answers must have the same length.")
+        return self
+
+
+class SimplifyStatementsOutput(BaseModel):
+    """
+    Output model for simplified statements.
+
+    Attributes:
+        statements_list (List[List[str]]): List of lists of simplified statements.
+    """
+
+    statements_list: list[list[str]]
+
+
+class NLIInput(BaseModel):
+    """
+    Input model for NLI evaluation.
+
+    Attributes:
+        contexts (List[str]): List of contexts.
+        statements_list (List[List[str]]): List of lists of statements.
+    """
+
+    contexts: list[str]
+    statements_list: list[list[str]]
+
+    @model_validator(mode="after")
+    def check_equal_length(self):
+        if len(self.contexts) != len(self.statements_list):
+            raise ValueError("Contexts and statements_list must have the same length.")
+        return self
+
+
+class NLIResultItem(BaseModel):
+    """
+    Model for individual NLI result.
+
+    Attributes:
+        statement (str): The statement being evaluated.
+        verdict (int): 1 if faithful, 0 otherwise.
+        reason (str): Reason for the verdict.
+    """
+
+    statement: str
+    verdict: int
+    reason: str
+
+    @model_validator(mode="after")
+    def validate_verdict(self):
+        if self.verdict not in (0, 1):
+            raise ValueError("Verdict must be either 0 or 1.")
+        return self
+
+
+class NLIOutput(BaseModel):
+    """
+    Output model for NLI evaluation.
+
+    Attributes:
+        results_list (List[List[NLIResultItem]]): List of lists of NLI results.
+    """
+
+    results_list: list[list[NLIResultItem]]
+
+
+class RunInput(BaseModel):
+    """
+    Input model for running the faithfulness evaluation.
+
+    Attributes:
+        questions (List[str]): List of questions.
+        answers (List[str]): List of corresponding answers.
+        contexts_list (List[List[str]]): List of contexts for each question.
+        verbose (bool): Flag to enable verbose logging.
+    """
+
+    questions: list[str]
+    answers: list[str]
+    contexts_list: list[list[str]]
+    verbose: bool = False
+
+    @model_validator(mode="after")
+    def check_equal_length(self):
+        if not (len(self.questions) == len(self.answers) == len(self.contexts_list)):
+            raise ValueError("Questions, answers, and contexts_list must have the same length.")
+        return self
+
+
+class RunOutput(BaseModel):
+    """
+    Output model for faithfulness evaluation.
+
+    Attributes:
+        final_scores (List[float]): List of faithfulness scores.
+    """
+
+    final_scores: list[float]
+
+
+class FaithfulnessEvaluator(BaseModel):
+    """
+    Evaluator class for faithfulness metric.
+
+    Attributes:
+        llm (BaseLLM): The language model to use for evaluation.
+    """
+
+    llm: BaseLLM
+
+    _statement_simplifier: LLMEvaluator = PrivateAttr()
+    _nli_evaluator: LLMEvaluator = PrivateAttr()
+
+    class Config:
+        arbitrary_types_allowed = True  # Allow arbitrary types
+
+    def __init__(self, **data):
+        super().__init__(**data)
         self._initialize_evaluators()
 
     def _initialize_evaluators(self):
-        # Prompt to simplify sentences and remove pronouns
         simplify_instructions = (
             "Given a 'Question' and an 'Answer', break down each sentence in the "
             "Answer into one or more fully understandable statements.\n"
@@ -23,7 +154,7 @@ class FaithfulnessEvaluator:
             "- Ensure your response is valid JSON, using double quotes for all strings."
         )
 
-        self.statement_simplifier = LLMEvaluator(
+        self._statement_simplifier = LLMEvaluator(
             instructions=simplify_instructions.strip(),
             inputs=[
                 ("question", list[str]),
@@ -59,7 +190,6 @@ class FaithfulnessEvaluator:
             llm=self.llm,
         )
 
-        # Prompt to check faithfulness of statements
         nli_instructions = (
             "Your task is to judge the faithfulness of a series of statements based "
             "on a given Context.\n"
@@ -71,7 +201,7 @@ class FaithfulnessEvaluator:
             "- Ensure your response is valid JSON, using double quotes for all strings."
         )
 
-        self.nli_evaluator = LLMEvaluator(
+        self._nli_evaluator = LLMEvaluator(
             instructions=nli_instructions.strip(),
             inputs=[
                 ("context", list[str]),
@@ -112,7 +242,7 @@ class FaithfulnessEvaluator:
                                 ),
                             },
                             {
-                                "statement": "John is taking a course on Artificial Intelligence.",
+                                "statement": ("John is taking a course on Artificial Intelligence."),
                                 "verdict": 0,
                                 "reason": (
                                     "The context lists his courses, and Artificial " "Intelligence is not mentioned."
@@ -122,8 +252,8 @@ class FaithfulnessEvaluator:
                                 "statement": "John is a dedicated student.",
                                 "verdict": 1,
                                 "reason": (
-                                    "The context mentions he spends significant time studying "
-                                    "and stays late to work on projects."
+                                    "The context mentions he spends significant time "
+                                    "studying and stays late to work on projects."
                                 ),
                             },
                             {
@@ -140,118 +270,123 @@ class FaithfulnessEvaluator:
             llm=self.llm,
         )
 
-    def evaluate(
+    def simplify_statements(self, questions: list[str], answers: list[str]) -> list[list[str]]:
+        """
+        Simplify the answers into fully understandable statements.
+
+        Args:
+            questions (List[str]): List of questions.
+            answers (List[str]): List of corresponding answers.
+
+        Returns:
+            List[List[str]]: List of lists of simplified statements.
+        """
+        input_data = SimplifyStatementsInput(questions=questions, answers=answers)
+        results = self._statement_simplifier.run(
+            question=input_data.questions,
+            answer=input_data.answers,
+        )
+        statements_list = []
+        for result in results["results"]:
+            statements = result["statements"]
+            if isinstance(statements, list):
+                statements_list.append(statements)
+            else:
+                statements_list.append([statements])
+        output_data = SimplifyStatementsOutput(statements_list=statements_list)
+        return output_data.statements_list
+
+    def check_faithfulness(
+        self,
+        contexts: list[str],
+        statements_list: list[list[str]],
+    ) -> list[list[NLIResultItem]]:
+        """
+        Check the faithfulness of statements against contexts.
+
+        Args:
+            contexts (List[str]): List of contexts.
+            statements_list (List[List[str]]): List of lists of statements.
+
+        Returns:
+            List[List[NLIResultItem]]: List of lists of NLI results.
+        """
+        input_data = NLIInput(contexts=contexts, statements_list=statements_list)
+        results = self._nli_evaluator.run(
+            context=input_data.contexts,
+            statements=input_data.statements_list,
+        )
+        results_list = []
+        for result in results["results"]:
+            items = []
+            for item in result["results"]:
+                nli_item = NLIResultItem(
+                    statement=item["statement"],
+                    verdict=int(item["verdict"]),
+                    reason=item["reason"],
+                )
+                items.append(nli_item)
+            results_list.append(items)
+        output_data = NLIOutput(results_list=results_list)
+        return output_data.results_list
+
+    def run(
         self,
         questions: list[str],
         answers: list[str],
         contexts_list: list[list[str]],
         verbose: bool = False,
     ) -> list[float]:
-        if not (len(questions) == len(answers) == len(contexts_list)):
-            raise ValueError("Questions, answers, and contexts_list must have the same length.")
+        """
+        Evaluate the faithfulness of answers given contexts.
 
+        Args:
+            questions (List[str]): List of questions.
+            answers (List[str]): List of corresponding answers.
+            contexts_list (List[List[str]]): List of contexts for each question.
+            verbose (bool): Flag to enable verbose logging.
+
+        Returns:
+            List[float]: List of faithfulness scores.
+        """
+        input_data = RunInput(
+            questions=questions,
+            answers=answers,
+            contexts_list=contexts_list,
+            verbose=verbose,
+        )
         final_scores = []
 
-        for idx in range(len(questions)):
-            question = questions[idx]
-            answer = answers[idx]
-            contexts = contexts_list[idx]
+        for idx in range(len(input_data.questions)):
+            question = input_data.questions[idx]
+            answer = input_data.answers[idx]
+            contexts = input_data.contexts_list[idx]
             context = "\n".join(contexts)
 
             # Simplify statements
-            simplify_result = self.statement_simplifier.run(
-                question=[question],
-                answer=[answer],
-            )
-            statements = simplify_result["results"][0]["statements"]
+            statements_list = self.simplify_statements([question], [answer])
+            statements = statements_list[0]
 
             # Check faithfulness of statements
-            nli_result = self.nli_evaluator.run(
-                context=[context],
-                statements=[statements],
-            )
-            results = nli_result["results"][0]["results"]
+            results_list = self.check_faithfulness([context], [statements])
+            results = results_list[0]
 
             # Compute faithfulness score
             num_statements = len(results)
-            num_faithful = sum(int(item["verdict"]) for item in results)
+            num_faithful = sum(item.verdict for item in results)
             score = num_faithful / num_statements if num_statements > 0 else 0.0
             final_scores.append(score)
 
-            if verbose:
+            if input_data.verbose:
                 logger.debug(f"Question: {question}")
                 logger.debug(f"Answer: {answer}")
                 logger.debug(f"Context: {context}")
                 logger.debug("Simplified Statements:")
                 logger.debug(statements)
                 logger.debug("Faithfulness Results:")
-                logger.debug(results)
+                logger.debug([item.dict() for item in results])
                 logger.debug(f"Faithfulness Score: {score}")
                 logger.debug("-" * 50)
 
-        return final_scores
-
-
-# Example usage
-if __name__ == "__main__":
-    import sys
-
-    from dotenv import find_dotenv, load_dotenv
-
-    # Load environment variables for OpenAI API
-    load_dotenv(find_dotenv())
-
-    # Configure logging level (set to DEBUG to see verbose output)
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-    # Uncomment the following line to enable verbose logging
-    # logging.getLogger().setLevel(logging.DEBUG)
-
-    # Initialize the LLM (replace 'gpt-4' with your available model)
-    llm = OpenAI(model="gpt-4")
-
-    # Sample data
-    questions = ["Who was Albert Einstein and what is he best known for?"]
-    answers = [
-        (
-            "He was a German-born theoretical physicist, widely acknowledged to be one "
-            "of the greatest and most influential physicists of all time. He was best "
-            "known for developing the theory of relativity, he also made important "
-            "contributions to the development of the theory of quantum mechanics."
-        )
-    ]
-    contexts_list = [
-        [
-            (
-                "Albert Einstein (14 March 1879 - 18 April 1955) was a German-born "
-                "theoretical physicist, widely held to be one of the greatest and "
-                "most influential scientists of all time. Best known for developing "
-                "the theory of relativity, he also made important contributions to "
-                "quantum mechanics, and was thus a central figure in the revolutionary "
-                "reshaping of the scientific understanding of nature that modern "
-                "physics accomplished in the first decades of the twentieth century. "
-                "His mass-energy equivalence formula E = mc^2, which arises from "
-                "relativity theory, has been called 'the world's most famous equation'. "
-                "He received the 1921 Nobel Prize in Physics 'for his services to "
-                "theoretical physics, and especially for his discovery of the law of "
-                "the photoelectric effect', a pivotal step in the development of "
-                "quantum theory. His work is also known for its influence on the "
-                "philosophy of science. In a 1999 poll of 130 leading physicists "
-                "worldwide by the British journal Physics World, Einstein was "
-                "ranked the greatest physicist of all time. His intellectual "
-                "achievements and originality have made Einstein synonymous with genius."
-            )
-        ]
-    ]
-
-    # Initialize evaluator and evaluate
-    evaluator = FaithfulnessEvaluator(llm)
-    faithfulness_scores = evaluator.evaluate(questions, answers, contexts_list, verbose=True)
-
-    # Print the results
-    for idx, score in enumerate(faithfulness_scores):
-        print(f"Question: {questions[idx]}")
-        print(f"Faithfulness Score: {score}")
-        print("-" * 50)
-
-    print("Faithfulness Scores:")
-    print(faithfulness_scores)
+        output_data = RunOutput(final_scores=final_scores)
+        return output_data.final_scores
