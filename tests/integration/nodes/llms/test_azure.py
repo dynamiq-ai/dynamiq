@@ -86,5 +86,6 @@ def test_workflow_with_azure_llm(mock_llm_response_text, mock_llm_executor, mode
         presence_penalty=None,
         top_p=None,
         api_key=connection.api_key,
-        response_format=None
+        response_format=None,
+        drop_params=True,
     )

@@ -18,7 +18,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Create .env file
+      - name: Create .env file on push or internal PR
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: SpicyPizza/create-envfile@v2.0
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -26,6 +27,10 @@ jobs:
           envkey_PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
           envkey_PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
           envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
+
+      - name: Create .env file on fork PR
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        uses: SpicyPizza/create-envfile@v2.0
 
       - name: Build
         uses: docker/bake-action@v5
@@ -67,7 +72,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Create .env file
+      - name: Create .env file on push or internal PR
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: SpicyPizza/create-envfile@v2.0
         with:
           envkey_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -75,6 +81,10 @@ jobs:
           envkey_PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
           envkey_PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
           envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
+
+      - name: Create .env file on fork PR
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        uses: SpicyPizza/create-envfile@v2.0
 
       - name: Load Image
         uses: docker/bake-action@v5
@@ -85,8 +95,13 @@ jobs:
             *.cache-to=type=gha,mode=max
           targets: dynamiq-app-test
 
-      - name: Test
+      - name: Run tests on push or internal PR
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
         run: docker compose up dynamiq-app-test-cov --exit-code-from dynamiq-app-test-cov
+
+      - name: Run tests on fork PR
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: docker compose up dynamiq-app-test-cov-exclude-integration-with-creds --exit-code-from dynamiq-app-test-cov-exclude-integration-with-creds
 
       - uses: actions/upload-artifact@v4
         with:
@@ -94,6 +109,7 @@ jobs:
           path: ./reports
 
   coverage:
+    if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
     needs:
       - test
     runs-on: ubuntu-latest
@@ -106,12 +122,13 @@ jobs:
         with:
           name: coverage_report
           path: reports
-      - name: Produce the coverage report
+
+      - name: Produce the coverage report on push or internal PR
         uses: MishaKav/pytest-coverage-comment@main
         with:
           pytest-xml-coverage-path: ./reports/coverage.xml
           junitxml-path: ./reports/test-results.xml
-          create-new-comment: false
+          create-new-comment: true
 
   build-mkdocs:
     runs-on: ubuntu-latest

@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, validator
 
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.env import get_env_var
@@ -54,6 +54,7 @@ class ConnectionType(str, enum.Enum):
     AI21 = "AI21"
     Qdrant = "Qdrant"
     SambaNova = "SambaNova"
+    Milvus = "Milvus"
     Perplexity = "Perplexity"
 
 
@@ -853,6 +854,64 @@ class SambaNova(BaseApiKeyConnection):
 
     def connect(self):
         pass
+
+
+class MilvusDeploymentType(str, enum.Enum):
+    """
+    Defines general deployment types for Milvus deployments.
+    Attributes:
+        FILE (str): Represents a file-based deployment, validated with a .db suffix.
+        HOST (str): Represents a host-based deployment, which could be a cloud, cluster,
+                    or single machine with or without authentication.
+    """
+
+    FILE = "file"
+    HOST = "host"
+
+
+class Milvus(BaseConnection):
+    """
+    Represents a connection to the Milvus service.
+
+    Attributes:
+        type (Literal[ConnectionType.Milvus]): The type of connection, always 'Milvus'.
+        deployment_type (MilvusDeploymentType): The deployment type of the Milvus service
+        api_key (Optional[str]): The API key for Milvus on Zilliz Cloud, required only for cloud deployment.
+        uri (str): The URI for the Milvus instance (file path, Docker URL, or cloud URL).
+    """
+
+    type: Literal[ConnectionType.Milvus] = ConnectionType.Milvus
+    deployment_type: MilvusDeploymentType = MilvusDeploymentType.FILE
+    uri: str = Field(default_factory=partial(get_env_var, "MILVUS_URI", "http://localhost:19530"))
+    api_key: str | None = Field(default_factory=partial(get_env_var, "MILVUS_API_TOKEN", None))
+
+    @validator("uri", pre=True)
+    def validate_uri(cls, uri, values):
+        deployment_type = values.get("deployment_type")
+
+        if deployment_type == MilvusDeploymentType.FILE and not uri.endswith(".db"):
+            raise ValueError("For FILE deployment, URI should point to a file ending with '.db'.")
+        elif deployment_type == MilvusDeploymentType.HOST and not uri.startswith(("http", "https")):
+            raise ValueError("For HOST deployment, URI should start with 'http' or 'https'.")
+
+        return uri
+
+    def connect(self):
+        from pymilvus import MilvusClient
+
+        if self.deployment_type == MilvusDeploymentType.FILE:
+            milvus_client = MilvusClient(uri=self.uri)
+
+        elif self.deployment_type == MilvusDeploymentType.HOST:
+            if self.api_key:
+                milvus_client = MilvusClient(uri=self.uri, token=self.api_key)
+            else:
+                milvus_client = MilvusClient(uri=self.uri)
+
+        else:
+            raise ValueError("Invalid deployment type for Milvus connection.")
+
+        return milvus_client
 
 
 class Perplexity(BaseApiKeyConnection):
