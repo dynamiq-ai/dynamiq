@@ -1,17 +1,169 @@
 import json
 import logging
 
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+
 from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
-from dynamiq.nodes.llms import BaseLLM, OpenAI
+from dynamiq.nodes.llms import BaseLLM
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class AnswerCorrectnessEvaluator:
-    def __init__(self, llm: BaseLLM, weights: list[float] = [0.75, 0.25]):
-        self.llm = llm
-        self.weights = weights
+class ExtractStatementsInput(BaseModel):
+    """
+    Input model for extracting statements.
+
+    Attributes:
+        texts (List[str]): The texts from which to extract key statements.
+    """
+
+    texts: list[str]
+
+
+class ExtractStatementsOutput(BaseModel):
+    """
+    Output model for extracted statements.
+
+    Attributes:
+        statements_list (List[List[str]]): A list of lists containing the
+        extracted statements.
+    """
+
+    statements_list: list[list[str]]
+
+
+class ClassifyStatementsInput(BaseModel):
+    """
+    Input model for classifying statements.
+
+    Attributes:
+        questions (List[str]): The list of questions.
+        answer_statements_list (List[List[str]]): The list of answer statements.
+        ground_truth_statements_list (List[List[str]]): The list of ground
+        truth statements.
+    """
+
+    questions: list[str]
+    answer_statements_list: list[list[str]]
+    ground_truth_statements_list: list[list[str]]
+
+
+class ClassificationResult(BaseModel):
+    """
+    Model for classification results.
+
+    Attributes:
+        TP (List[str]): True Positives.
+        FP (List[str]): False Positives.
+        FN (List[str]): False Negatives.
+    """
+
+    TP: list[str] = Field(default_factory=list)
+    FP: list[str] = Field(default_factory=list)
+    FN: list[str] = Field(default_factory=list)
+
+    @field_validator("TP", "FP", "FN", mode="before")
+    @classmethod
+    def set_default_list(cls, v):
+        return v or []
+
+
+class ClassifyStatementsOutput(BaseModel):
+    """
+    Output model for classification of statements.
+
+    Attributes:
+        classifications_list (List[ClassificationResult]): The list of
+        classification results.
+    """
+
+    classifications_list: list[ClassificationResult]
+
+
+class ComputeSimilarityScoresInput(BaseModel):
+    """
+    Input model for computing similarity scores.
+
+    Attributes:
+        answers (List[str]): The list of answers.
+        ground_truths (List[str]): The list of ground truth texts.
+    """
+
+    answers: list[str]
+    ground_truths: list[str]
+
+
+class ComputeSimilarityScoresOutput(BaseModel):
+    """
+    Output model for similarity scores.
+
+    Attributes:
+        similarity_scores (List[float]): The list of similarity scores.
+    """
+
+    similarity_scores: list[float]
+
+
+class RunInput(BaseModel):
+    """
+    Input model for running the evaluator.
+
+    Attributes:
+        questions (List[str]): The list of questions.
+        answers (List[str]): The list of answers.
+        ground_truths (List[str]): The list of ground truth texts.
+        verbose (bool): Flag to enable verbose logging.
+    """
+
+    questions: list[str]
+    answers: list[str]
+    ground_truths: list[str]
+    verbose: bool = False
+
+    @model_validator(mode="after")
+    def check_equal_length(self):
+        if len(self.questions) != len(self.answers):
+            raise ValueError("Questions, answers, and ground truths must have the same length.")
+        if len(self.questions) != len(self.ground_truths):
+            raise ValueError("Questions, answers, and ground truths must have the same length.")
+        return self
+
+
+class RunOutput(BaseModel):
+    """
+    Output model for the final scores.
+
+    Attributes:
+        final_scores (List[float]): The list of final correctness scores.
+    """
+
+    final_scores: list[float]
+
+
+class AnswerCorrectnessEvaluator(BaseModel):
+    """
+    Evaluator class for computing the correctness of answers given
+    questions and ground truths.
+
+    Attributes:
+        llm (BaseLLM): The language model to use for evaluation.
+        weights (List[float]): The weights to combine F1 and similarity scores.
+    """
+
+    llm: BaseLLM
+    weights: list[float] = Field(default_factory=lambda: [0.75, 0.25])
+
+    # Private attributes (not part of the Pydantic model fields)
+    _statement_extractor: LLMEvaluator = PrivateAttr()
+    _statement_classifier: LLMEvaluator = PrivateAttr()
+    _similarity_evaluator: LLMEvaluator = PrivateAttr()
+
+    class Config:
+        arbitrary_types_allowed = True  # Allow arbitrary types like LLMEvaluator and BaseLLM
+
+    def __init__(self, **data):
+        super().__init__(**data)
         self._initialize_evaluators()
 
     def _initialize_evaluators(self):
@@ -22,17 +174,21 @@ class AnswerCorrectnessEvaluator:
             "For each input text, extract the key statements.\n"
             "- Keep statements concise and focused.\n"
             "- Return the statements as a JSON array of strings.\n"
-            "- Ensure that your response is valid JSON, using double quotes for all strings."
+            "- Ensure that your response is valid JSON, using double quotes "
+            "for all strings."
         )
-        self.statement_extractor = LLMEvaluator(
+        self._statement_extractor = LLMEvaluator(
             instructions=extract_instructions.strip(),
             inputs=[("texts", list[str])],
             outputs=["statements"],
             examples=[
                 {
-                    "inputs": {"texts": ["The sun is powered by nuclear fusion. It provides heat and light."]},
+                    "inputs": {"texts": ["The sun is powered by nuclear fusion. It provides " "heat and light."]},
                     "outputs": {
-                        "statements": [["The sun is powered by nuclear fusion.", "It provides heat and light."]]
+                        "statements": [
+                            "The sun is powered by nuclear fusion.",
+                            "It provides heat and light.",
+                        ]
                     },
                 },
             ],
@@ -41,17 +197,21 @@ class AnswerCorrectnessEvaluator:
 
         # Classify Statements Evaluator
         classify_instructions = (
-            'Given a "Question", "Answer Statements", and "Ground Truth Statements", '
-            "classify the statements:\n"
-            '- "TP" (True Positive): Statements present in both Answer and Ground Truth.\n'
-            '- "FP" (False Positive): Statements in Answer but not in Ground Truth.\n'
-            '- "FN" (False Negative): Statements in Ground Truth but not in Answer.\n'
+            'Given a "Question", "Answer Statements", and "Ground Truth '
+            'Statements", classify the statements:\n'
+            '- "TP" (True Positive): Statements present in both Answer and '
+            "Ground Truth.\n"
+            '- "FP" (False Positive): Statements in Answer but not in Ground '
+            "Truth.\n"
+            '- "FN" (False Negative): Statements in Ground Truth but not in '
+            "Answer.\n"
             "Each statement should only belong to one category.\n"
-            'Provide the classifications as a JSON object with keys "TP", "FP", "FN", '
-            "and values as lists of statements.\n"
-            "Ensure that your response is valid JSON, using double quotes for all strings."
+            'Provide the classifications as a JSON object with keys "TP", '
+            '"FP", "FN", and values as lists of statements.\n'
+            "Ensure that your response is valid JSON, using double quotes "
+            "for all strings."
         )
-        self.statement_classifier = LLMEvaluator(
+        self._statement_classifier = LLMEvaluator(
             instructions=classify_instructions.strip(),
             inputs=[
                 ("question", list[str]),
@@ -64,25 +224,21 @@ class AnswerCorrectnessEvaluator:
                     "inputs": {
                         "question": ["What powers the sun and what is its primary function?"],
                         "answer_statements": [
-                            [
-                                "The sun is powered by nuclear fission.",
-                                "The sun's primary function is to provide light to " "the solar system.",
-                            ]
+                            "The sun is powered by nuclear fission.",
+                            "The sun's primary function is to provide light to the solar system.",
                         ],
                         "ground_truth_statements": [
-                            [
-                                "The sun is powered by nuclear fusion.",
-                                "The sun provides heat and light essential for life " "on Earth.",
-                            ]
+                            "The sun is powered by nuclear fusion.",
+                            "The sun provides heat and light essential for life on Earth.",
                         ],
                     },
                     "outputs": {
                         "classifications": {
-                            "TP": ["The sun's primary function is to provide light " "to the solar system."],
+                            "TP": ["The sun's primary function is to provide light to the solar system."],
                             "FP": ["The sun is powered by nuclear fission."],
                             "FN": [
                                 "The sun is powered by nuclear fusion.",
-                                "The sun provides heat and light essential for " "life on Earth.",
+                                "The sun provides heat and light essential for life on Earth.",
                             ],
                         }
                     },
@@ -93,14 +249,19 @@ class AnswerCorrectnessEvaluator:
 
         # Compute Similarity Evaluator
         similarity_instructions = (
-            'For each pair of "Answer" and "Ground Truth", evaluate their semantic similarity.\n'
+            'For each pair of "Answer" and "Ground Truth", evaluate their '
+            "semantic similarity.\n"
             "- Score the similarity from 0 to 1.\n"
-            "- Use 1 if the Answer is semantically identical to the Ground Truth.\n"
-            "- Use 0 if the Answer is completely dissimilar to the Ground Truth.\n"
-            "- Provide the similarity score as a single number between 0 and 1.\n"
-            "Ensure that your response is valid JSON, using double quotes for all strings."
+            "- Use 1 if the Answer is semantically identical to the Ground "
+            "Truth.\n"
+            "- Use 0 if the Answer is completely dissimilar to the Ground "
+            "Truth.\n"
+            "- Provide the similarity score as a single number between 0 "
+            "and 1.\n"
+            "Ensure that your response is valid JSON, using double quotes "
+            "for all strings."
         )
-        self.similarity_evaluator = LLMEvaluator(
+        self._similarity_evaluator = LLMEvaluator(
             instructions=similarity_instructions.strip(),
             inputs=[("answers", list[str]), ("ground_truths", list[str])],
             outputs=["similarity_score"],
@@ -124,34 +285,59 @@ class AnswerCorrectnessEvaluator:
         )
 
     def extract_statements(self, texts: list[str]) -> list[list[str]]:
-        results = self.statement_extractor.run(texts=texts)
-        statements_list = [result["statements"] for result in results["results"]]
-        return statements_list
+        input_data = ExtractStatementsInput(texts=texts)
+        results = self._statement_extractor.run(texts=input_data.texts)
+        # Extract the 'statements' from the results and ensure proper structure
+        statements_list = []
+        for result in results["results"]:
+            statements = result["statements"]
+            # Ensure 'statements' is a list of strings
+            if isinstance(statements, list):
+                statements_list.append(statements)
+            else:
+                # If not, wrap it in a list
+                statements_list.append([statements])
+        output_data = ExtractStatementsOutput(statements_list=statements_list)
+        return output_data.statements_list
 
     def classify_statements(
         self,
         questions: list[str],
         answer_statements_list: list[list[str]],
         ground_truth_statements_list: list[list[str]],
-    ) -> list[dict[str, list[str]]]:
-        results = self.statement_classifier.run(
-            question=questions,
-            answer_statements=answer_statements_list,
-            ground_truth_statements=ground_truth_statements_list,
+    ) -> list[ClassificationResult]:
+        input_data = ClassifyStatementsInput(
+            questions=questions,
+            answer_statements_list=answer_statements_list,
+            ground_truth_statements_list=ground_truth_statements_list,
         )
-        classifications_list = [result["classifications"] for result in results["results"]]
-        return classifications_list
+        results = self._statement_classifier.run(
+            question=input_data.questions,
+            answer_statements=input_data.answer_statements_list,
+            ground_truth_statements=input_data.ground_truth_statements_list,
+        )
+        classifications_list = []
+        for result in results["results"]:
+            classification = ClassificationResult(**result["classifications"])
+            classifications_list.append(classification)
+        output_data = ClassifyStatementsOutput(classifications_list=classifications_list)
+        return output_data.classifications_list
 
     def compute_similarity_scores(self, answers: list[str], ground_truths: list[str]) -> list[float]:
-        results = self.similarity_evaluator.run(answers=answers, ground_truths=ground_truths)
+        input_data = ComputeSimilarityScoresInput(answers=answers, ground_truths=ground_truths)
+        results = self._similarity_evaluator.run(
+            answers=input_data.answers,
+            ground_truths=input_data.ground_truths,
+        )
         similarity_scores = [float(result["similarity_score"]) for result in results["results"]]
-        return similarity_scores
+        output_data = ComputeSimilarityScoresOutput(similarity_scores=similarity_scores)
+        return output_data.similarity_scores
 
     @staticmethod
-    def compute_f1_score(classifications: dict[str, list[str]]) -> float:
-        tp = len(classifications.get("TP", []))
-        fp = len(classifications.get("FP", []))
-        fn = len(classifications.get("FN", []))
+    def compute_f1_score(classifications: ClassificationResult) -> float:
+        tp = len(classifications.TP)
+        fp = len(classifications.FP)
+        fn = len(classifications.FN)
         if tp == 0 and (fp > 0 or fn > 0):
             return 0.0
         if tp == 0 and fp == 0 and fn == 0:
@@ -165,103 +351,55 @@ class AnswerCorrectnessEvaluator:
         f1 = 2 * (precision * recall) / (precision + recall)
         return f1
 
-    def evaluate(
+    def run(
         self,
         questions: list[str],
         answers: list[str],
         ground_truths: list[str],
         verbose: bool = False,
     ) -> list[float]:
-        if not (len(questions) == len(answers) == len(ground_truths)):
-            raise ValueError("Questions, answers, and ground truths must have the same length.")
+        input_data = RunInput(
+            questions=questions,
+            answers=answers,
+            ground_truths=ground_truths,
+            verbose=verbose,
+        )
 
         # Extract statements
-        answer_statements_list = self.extract_statements(answers)
-        ground_truth_statements_list = self.extract_statements(ground_truths)
+        answer_statements_list = self.extract_statements(input_data.answers)
+        ground_truth_statements_list = self.extract_statements(input_data.ground_truths)
 
         # Classify statements
-        classifications_list = self.classify_statements(questions, answer_statements_list, ground_truth_statements_list)
+        classifications_list = self.classify_statements(
+            input_data.questions,
+            answer_statements_list,
+            ground_truth_statements_list,
+        )
 
         # Compute F1 scores
         f1_scores = [self.compute_f1_score(classifications) for classifications in classifications_list]
 
         # Compute similarity scores
-        similarity_scores = self.compute_similarity_scores(answers, ground_truths)
+        similarity_scores = self.compute_similarity_scores(input_data.answers, input_data.ground_truths)
 
         # Combine scores
         final_scores = []
-        for i in range(len(questions)):
+        for i in range(len(input_data.questions)):
             f1_score = f1_scores[i]
             sim_score = similarity_scores[i]
             final_score = self.weights[0] * f1_score + self.weights[1] * sim_score
             final_scores.append(final_score)
 
-            if verbose:
-                logger.debug(f"Question: {questions[i]}")
-                logger.debug(f"Answer: {answers[i]}")
-                logger.debug(f"Ground Truth: {ground_truths[i]}")
+            if input_data.verbose:
+                logger.debug(f"Question: {input_data.questions[i]}")
+                logger.debug(f"Answer: {input_data.answers[i]}")
+                logger.debug(f"Ground Truth: {input_data.ground_truths[i]}")
                 logger.debug("Classifications:")
-                logger.debug(json.dumps(classifications_list[i], indent=2))
+                logger.debug(json.dumps(classifications_list[i].dict(), indent=2))
                 logger.debug(f"F1 Score: {f1_score}")
                 logger.debug(f"Similarity Score: {sim_score}")
                 logger.debug(f"Final Score: {final_score}")
                 logger.debug("-" * 50)
-        return final_scores
 
-
-# Example usage
-if __name__ == "__main__":
-    import sys
-
-    from dotenv import find_dotenv, load_dotenv
-
-    # Load environment variables for OpenAI API
-    load_dotenv(find_dotenv())
-
-    # Configure logging level (set to DEBUG to see verbose output)
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-    # Uncomment the following line to enable verbose logging
-    # logging.getLogger().setLevel(logging.DEBUG)
-
-    # Initialize the LLM (replace 'gpt-4' with your available model)
-    llm = OpenAI(model="gpt-4")
-
-    # Sample data (can be replaced with your data)
-    questions = [
-        "What powers the sun and what is its primary function?",
-        "What is the boiling point of water?",
-    ]
-    answers = [
-        (
-            "The sun is powered by nuclear fission, similar to nuclear reactors on Earth."
-            " Its primary function is to provide light to the solar system."
-        ),
-        "The boiling point of water is 100 degrees Celsius at sea level.",
-    ]
-    ground_truths = [
-        (
-            "The sun is powered by nuclear fusion, where hydrogen atoms fuse to form helium."
-            " This fusion process releases a tremendous amount of energy. The sun provides"
-            " heat and light, which are essential for life on Earth."
-        ),
-        (
-            "The boiling point of water is 100 degrees Celsius (212 degrees Fahrenheit) at"
-            " sea level. The boiling point can change with altitude."
-        ),
-    ]
-
-    # Initialize evaluator and evaluate
-    evaluator = AnswerCorrectnessEvaluator(llm)
-    # Set verbose=True to enable detailed logging
-    correctness_scores = evaluator.evaluate(
-        questions, answers, ground_truths, verbose=False  # Set verbose=True to enable logging
-    )
-
-    # Print the results
-    for idx, score in enumerate(correctness_scores):
-        print(f"Question: {questions[idx]}")
-        print(f"Answer Correctness Score: {score}")
-        print("-" * 50)
-
-    print("Answer Correctness Scores:")
-    print(correctness_scores)
+        output_data = RunOutput(final_scores=final_scores)
+        return output_data.final_scores
