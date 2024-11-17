@@ -1,4 +1,3 @@
-import os
 import uuid
 
 import pytest
@@ -19,7 +18,7 @@ AGENT_ROLE = "helpful assistant, goal is to provide useful information and answe
 def openai_connection():
     return connections.OpenAI(
         id=str(uuid.uuid4()),
-        api_key=os.getenv("OPENAI_API_KEY"),
+        api_key="api-key",
     )
 
 
