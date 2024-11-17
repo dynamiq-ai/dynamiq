@@ -1,26 +1,122 @@
 import logging
 
+from pydantic import BaseModel, PrivateAttr, model_validator
+
 from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
-from dynamiq.nodes.llms import BaseLLM, OpenAI
+from dynamiq.nodes.llms import BaseLLM
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class FactualCorrectnessEvaluator:
-    def __init__(
-        self,
-        llm: BaseLLM,
-        mode: str = "f1",
-        beta: float = 1.0,
-        atomicity: str = "low",
-        coverage: str = "low",
-    ):
-        self.llm = llm
-        self.mode = mode
-        self.beta = beta
-        self.atomicity = atomicity
-        self.coverage = coverage
+class DecomposeClaimsInput(BaseModel):
+    """
+    Input model for decomposing texts into claims.
+
+    Attributes:
+        texts (List[str]): List of texts to decompose.
+    """
+
+    texts: list[str]
+
+
+class DecomposeClaimsOutput(BaseModel):
+    """
+    Output model for claim decomposition.
+
+    Attributes:
+        claims_list (List[List[str]]): List of lists of claims.
+    """
+
+    claims_list: list[list[str]]
+
+
+class VerifyClaimsInput(BaseModel):
+    """
+    Input model for verifying claims against premises.
+
+    Attributes:
+        premises (List[str]): List of premises.
+        claims_list (List[List[str]]): List of lists of claims.
+    """
+
+    premises: list[str]
+    claims_list: list[list[str]]
+
+
+class VerifyClaimsOutput(BaseModel):
+    """
+    Output model for claim verification.
+
+    Attributes:
+        verdicts_list (List[List[int]]): List of lists of verdicts (0 or 1).
+    """
+
+    verdicts_list: list[list[int]]
+
+
+class RunInput(BaseModel):
+    """
+    Input model for running factual correctness evaluation.
+
+    Attributes:
+        responses (List[str]): List of response texts.
+        references (List[str]): List of reference texts.
+        mode (Optional[str]): Evaluation mode ('precision', 'recall', or 'f1').
+        beta (Optional[float]): Beta value for F-beta score.
+        verbose (bool): Flag to enable verbose logging.
+    """
+
+    responses: list[str]
+    references: list[str]
+    mode: str | None = None
+    beta: float | None = None
+    verbose: bool = False
+
+    @model_validator(mode="after")
+    def check_equal_length(self):
+        if len(self.responses) != len(self.references):
+            raise ValueError("Responses and references must have the same length.")
+        return self
+
+
+class RunOutput(BaseModel):
+    """
+    Output model for factual correctness evaluation.
+
+    Attributes:
+        final_scores (List[float]): List of factual correctness scores.
+    """
+
+    final_scores: list[float]
+
+
+class FactualCorrectnessEvaluator(BaseModel):
+    """
+    Evaluator class for factual correctness metric.
+
+    Attributes:
+        llm (BaseLLM): The language model to use for evaluation.
+        mode (str): Evaluation mode ('precision', 'recall', or 'f1').
+        beta (float): Beta value for F-beta score.
+        atomicity (str): Level of atomicity ('low' or 'high').
+        coverage (str): Level of coverage ('low' or 'high').
+    """
+
+    llm: BaseLLM
+    mode: str = "f1"
+    beta: float = 1.0
+    atomicity: str = "low"
+    coverage: str = "low"
+
+    _claim_decomposer: LLMEvaluator = PrivateAttr()
+    _nli_evaluator: LLMEvaluator = PrivateAttr()
+
+    class Config:
+        arbitrary_types_allowed = True  # Allow arbitrary types
+
+    def __init__(self, **data):
+        super().__init__(**data)
         self._initialize_evaluators()
 
     def _initialize_evaluators(self):
@@ -33,7 +129,7 @@ class FactualCorrectnessEvaluator:
             "- Ensure your response is valid JSON, using double quotes for all strings."
         )
 
-        self.claim_decomposer = LLMEvaluator(
+        self._claim_decomposer = LLMEvaluator(
             instructions=decomposition_instructions.strip(),
             inputs=[("input_text", list[str])],
             outputs=["claims"],
@@ -68,7 +164,7 @@ class FactualCorrectnessEvaluator:
             "- Ensure your response is valid JSON, using double quotes for all strings."
         )
 
-        self.nli_evaluator = LLMEvaluator(
+        self._nli_evaluator = LLMEvaluator(
             instructions=nli_instructions.strip(),
             inputs=[
                 ("premise", list[str]),
@@ -115,22 +211,68 @@ class FactualCorrectnessEvaluator:
         )
 
     def decompose_claims(self, texts: list[str]) -> list[list[str]]:
-        # Decompose each text into claims
-        results = self.claim_decomposer.run(input_text=texts)
-        claims_list = [result["claims"] for result in results["results"]]
-        return claims_list
+        """
+        Decompose each text into claims.
+
+        Args:
+            texts (List[str]): List of texts to decompose.
+
+        Returns:
+            List[List[str]]: List of lists of claims.
+        """
+        input_data = DecomposeClaimsInput(texts=texts)
+        results = self._claim_decomposer.run(input_text=input_data.texts)
+        claims_list = []
+        for result in results["results"]:
+            claims = result["claims"]
+            if isinstance(claims, list):
+                claims_list.append(claims)
+            else:
+                # If claims is a single string, wrap it in a list
+                claims_list.append([claims])
+        output_data = DecomposeClaimsOutput(claims_list=claims_list)
+        return output_data.claims_list
 
     def verify_claims(self, premises: list[str], claims_list: list[list[str]]) -> list[list[int]]:
-        # Verify the claims
-        results = self.nli_evaluator.run(premise=premises, claims=claims_list)
+        """
+        Verify the claims against the premises.
+
+        Args:
+            premises (List[str]): List of premises.
+            claims_list (List[List[str]]): List of lists of claims.
+
+        Returns:
+            List[List[int]]: List of lists of verdicts.
+        """
+        input_data = VerifyClaimsInput(premises=premises, claims_list=claims_list)
+        results = self._nli_evaluator.run(
+            premise=input_data.premises,
+            claims=input_data.claims_list,
+        )
         verdicts_list = []
         for result in results["results"]:
-            verdicts = [int(item["verdict"]) for item in result["results"]]
+            verdicts_raw = result["results"]
+            verdicts = []
+            for item in verdicts_raw:
+                verdict = int(item["verdict"])
+                verdicts.append(verdict)
             verdicts_list.append(verdicts)
-        return verdicts_list
+        output_data = VerifyClaimsOutput(verdicts_list=verdicts_list)
+        return output_data.verdicts_list
 
-    def fbeta_score(self, tp: int, fp: int, fn: int) -> float:
-        beta = self.beta
+    def fbeta_score(self, tp: int, fp: int, fn: int, beta: float) -> float:
+        """
+        Calculate the F-beta score.
+
+        Args:
+            tp (int): True positives.
+            fp (int): False positives.
+            fn (int): False negatives.
+            beta (float): Beta value.
+
+        Returns:
+            float: F-beta score.
+        """
         precision = tp / (tp + fp + 1e-8) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn + 1e-8) if (tp + fn) > 0 else 0.0
         if (precision + recall) == 0:
@@ -138,26 +280,42 @@ class FactualCorrectnessEvaluator:
         score = (1 + beta**2) * precision * recall / (beta**2 * precision + recall + 1e-8)
         return score
 
-    def evaluate(
+    def run(
         self,
         responses: list[str],
         references: list[str],
-        mode: str = None,
-        beta: float = None,
+        mode: str | None = None,
+        beta: float | None = None,
         verbose: bool = False,
     ) -> list[float]:
-        if not (len(responses) == len(references)):
-            raise ValueError("Responses and references must have the same length.")
-        if mode is None:
-            mode = self.mode
-        if beta is None:
-            beta = self.beta
+        """
+        Evaluate the factual correctness of responses against references.
+
+        Args:
+            responses (List[str]): List of response texts.
+            references (List[str]): List of reference texts.
+            mode (Optional[str]): Evaluation mode ('precision', 'recall', or 'f1').
+            beta (Optional[float]): Beta value for F-beta score.
+            verbose (bool): Flag to enable verbose logging.
+
+        Returns:
+            List[float]: List of factual correctness scores.
+        """
+        input_data = RunInput(
+            responses=responses,
+            references=references,
+            mode=mode,
+            beta=beta,
+            verbose=verbose,
+        )
+        mode = input_data.mode or self.mode
+        beta = input_data.beta or self.beta
 
         final_scores = []
 
-        for idx in range(len(responses)):
-            response = responses[idx]
-            reference = references[idx]
+        for idx in range(len(input_data.responses)):
+            response = input_data.responses[idx]
+            reference = input_data.references[idx]
 
             # Decompose claims
             response_claims_list = self.decompose_claims([response])
@@ -176,7 +334,8 @@ class FactualCorrectnessEvaluator:
             if mode != "precision":
                 # Verify reference claims against response (recall)
                 response_reference_verdicts_list = self.verify_claims(
-                    premises=[response], claims_list=[reference_claims]
+                    premises=[response],
+                    claims_list=[reference_claims],
                 )
                 response_reference_verdicts = response_reference_verdicts_list[0]
                 fn = sum(1 - v for v in response_reference_verdicts)
@@ -187,12 +346,12 @@ class FactualCorrectnessEvaluator:
                 score = tp / (tp + fp + 1e-8)
             elif mode == "recall":
                 score = tp / (tp + fn + 1e-8)
-            else:  # F1 or F-beta
-                score = self.fbeta_score(tp, fp, fn)
+            else:  # 'f1' or F-beta
+                score = self.fbeta_score(tp, fp, fn, beta)
 
             final_scores.append(score)
 
-            if verbose:
+            if input_data.verbose:
                 logger.debug(f"Response: {response}")
                 logger.debug(f"Reference: {reference}")
                 logger.debug(f"Response Claims: {response_claims}")
@@ -201,49 +360,5 @@ class FactualCorrectnessEvaluator:
                 logger.debug(f"Score: {score}")
                 logger.debug("-" * 50)
 
-        return final_scores
-
-
-# Example usage
-if __name__ == "__main__":
-    import sys
-
-    from dotenv import find_dotenv, load_dotenv
-
-    # Load environment variables for OpenAI API
-    load_dotenv(find_dotenv())
-
-    # Configure logging level (set to DEBUG to see verbose output)
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-    # Uncomment the following line to enable verbose logging
-    # logging.getLogger().setLevel(logging.DEBUG)
-
-    # Initialize the LLM (replace 'gpt-4' with your available model)
-    llm = OpenAI(model="gpt-4")
-
-    # Sample data (can be replaced with your data)
-    responses = [
-        (
-            "Albert Einstein was a German theoretical physicist. "
-            "He developed the theory of relativity and contributed "
-            "to quantum mechanics."
-        ),
-        ("The Eiffel Tower is located in Berlin, Germany. " "It was constructed in 1889."),
-    ]
-    references = [
-        ("Albert Einstein was a German-born theoretical physicist. " "He developed the theory of relativity."),
-        ("The Eiffel Tower is located in Paris, France. " "It was constructed in 1887 and opened in 1889."),
-    ]
-
-    # Initialize evaluator and evaluate
-    evaluator = FactualCorrectnessEvaluator(llm)
-    correctness_scores = evaluator.evaluate(responses, references, verbose=True)
-
-    # Print the results
-    for idx, score in enumerate(correctness_scores):
-        print(f"Response: {responses[idx]}")
-        print(f"Factual Correctness Score: {score}")
-        print("-" * 50)
-
-    print("Factual Correctness Scores:")
-    print(correctness_scores)
+        output_data = RunOutput(final_scores=final_scores)
+        return output_data.final_scores
