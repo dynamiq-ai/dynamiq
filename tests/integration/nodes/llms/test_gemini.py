@@ -83,7 +83,8 @@ def test_workflow_with_gemini_llm_and_gemini_ai_studio_conn(
         presence_penalty=None,
         top_p=None,
         stop=None,
-        response_format=None
+        response_format=None,
+        drop_params=True,
     )
 
 
@@ -131,5 +132,6 @@ def test_workflow_with_gemini_llm_and_gemini_vertex_ai_conn(
         presence_penalty=None,
         vertex_project=connection.project_id,
         vertex_location=connection.project_location,
-        response_format=None
+        response_format=None,
+        drop_params=True,
     )

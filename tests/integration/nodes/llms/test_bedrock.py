@@ -87,5 +87,6 @@ def test_workflow_with_bedrock_llm(mock_llm_response_text, mock_llm_executor, mo
         top_p=None,
         aws_profile_name='default',
         aws_region_name='us-east-1',
-        response_format=None
+        response_format=None,
+        drop_params=True,
     )

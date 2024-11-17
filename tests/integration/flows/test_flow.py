@@ -119,7 +119,8 @@ def test_workflow_with_depend_nodes_with_tracing(
             frequency_penalty=None,
             top_p=None,
             client=ANY,
-            response_format=None
+            response_format=None,
+            drop_params=True,
         ),
         mock.call(
             tools=None,
@@ -135,8 +136,8 @@ def test_workflow_with_depend_nodes_with_tracing(
             frequency_penalty=None,
             top_p=None,
             api_key=anthropic_node_with_dependency.connection.api_key,
-            response_format=None
-
+            response_format=None,
+            drop_params=True,
         ),
     ]
 
@@ -266,6 +267,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
             frequency_penalty=None,
             top_p=None,
             response_format=None,
+            drop_params=True,
         )
     ]
 
