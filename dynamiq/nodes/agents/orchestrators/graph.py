@@ -2,12 +2,13 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.agents.orchestrators.orchestrator import Orchestrator, OrchestratorError
-from dynamiq.nodes.node import NodeDependency
+from dynamiq.nodes.node import Node, NodeDependency
+from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.function_tool import FunctionTool, function_tool
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
@@ -19,35 +20,20 @@ class StateNotFoundError(OrchestratorError):
 
 
 class State(BaseModel):
+    """Represents single state of graph flow
+
+    Attributes:
+        name (str): Name of the state
+        description (str): Description of the state.
+        adjacent_states (list[str]): List of adjacent node
+        tasks (list[Node]): List of tasks that have to be executed in this state.
+        conditional_edge (Python | FunctionTool): Condition that determines next state to execute.
+    """
     name: str
     description: str = ""
-    connected: list[str] = []
-    tasks: list[Agent | FunctionTool] = []
-    branch: FunctionTool = None
-
-    @field_validator("tasks", mode="before")
-    def process_callable_tasks(cls, tasks: Any):
-
-        tasks_new = []
-
-        for task in tasks:
-            if isinstance(task, Callable):
-                tasks_new.append(function_tool(task)())
-            elif isinstance(task, FunctionTool | Agent):
-                tasks_new.append(task)
-            else:
-                raise ValueError("Task has to be whether an Agent or a FunctionTool or a Callable.")
-
-        return tasks_new
-
-    @field_validator("branch")
-    def process_condition(cls, task: Any):
-        if isinstance(task, Callable):
-            tool = function_tool(task)()
-            return tool
-        elif isinstance(task, FunctionTool):
-            return task
-        raise ValueError("Condition function has to be whether a Callable or a FunctionTool.")
+    adjacent_states: list[str] = []
+    tasks: list[Node] = []
+    conditional_edge: Python | FunctionTool = None
 
 
 START = "START"
@@ -78,7 +64,7 @@ class GraphOrchestrator(Orchestrator):
     states: dict[str, State] = {START: START_STATE, END: END_STATE}
     context: dict[str, Any] = {}
 
-    def add_node(self, name: str, tasks: list[Agent | Callable]) -> None:
+    def add_node(self, name: str, tasks: list[Node | Callable]) -> None:
         """
         Adds state with specified tasks to the graph.
 
@@ -92,7 +78,17 @@ class GraphOrchestrator(Orchestrator):
         if name in self.states:
             raise ValueError(f"Error: State with name {name} already exists.")
 
-        state = State(name=name, tasks=tasks)
+        filtered_tasks = []
+
+        for task in tasks:
+            if isinstance(task, Node):
+                filtered_tasks.append(task)
+            elif isinstance(task, Callable):
+                filtered_tasks.append(function_tool(task)())
+            else:
+                raise OrchestratorError("Error: Task must be either a Node or a Callable.")
+
+        state = State(name=name, tasks=filtered_tasks)
         self.states[name] = state
 
     def add_edge(self, source: str, destination: str) -> None:
@@ -107,7 +103,7 @@ class GraphOrchestrator(Orchestrator):
             ValueError: If state with specified name is not present.
         """
         self.validate_states([source, destination])
-        self.states[source].connected.append(destination)
+        self.states[source].adjacent_states = [destination]
 
     def validate_states(self, names: list[str]) -> None:
         """
@@ -123,7 +119,7 @@ class GraphOrchestrator(Orchestrator):
             if state_name not in self.states:
                 raise ValueError(f"State with name {state_name} is not present")
 
-    def add_conditional_edge(self, source: str, destinations: list[str], path_func: Callable) -> None:
+    def add_conditional_edge(self, source: str, destinations: list[str], condition: Callable | Python) -> None:
         """
         Adds conditional edge to the graph.
 
@@ -136,12 +132,19 @@ class GraphOrchestrator(Orchestrator):
             ValueError: If state with specified name is not present.
         """
         self.validate_states(destinations + [source])
-        self.states[source].connected = destinations
-        self.states[source].branch = function_tool(path_func)()
 
-    def get_next_state(self, state: State, config: RunnableConfig, **kwargs) -> State:
+        if isinstance(condition, Python):
+            self.states[source].conditional_edge = condition
+        elif isinstance(condition, Callable):
+            self.states[source].conditional_edge = function_tool(condition)()
+        else:
+            raise OrchestratorError("Error: Conditional edge must be either a Python Node or a Callable.")
+
+        self.states[source].adjacent_states = destinations
+
+    def get_next_state_by_manager(self, state: State, config: RunnableConfig, **kwargs) -> State:
         """
-        Determine the next state based on the current state and history.
+        Determine the next state based on the current state and history. Uses GraphAgentManager.
 
         Args:
             state (State): Current state.
@@ -153,12 +156,12 @@ class GraphOrchestrator(Orchestrator):
 
         Raises:
             OrchestratorError: If there is an error parsing the action from the LLM response.
-            StateNotFoundError: If state was not valid or not found.
+            StateNotFoundError: If state is invalid or not found.
         """
         manager_result = self.manager.run(
             input_data={
                 "action": "plan",
-                "states_description": self.states_descriptions(state.connected),
+                "states_description": self.states_descriptions(state.adjacent_states),
                 "chat_history": self._chat_history,
             },
             config=config,
@@ -179,7 +182,7 @@ class GraphOrchestrator(Orchestrator):
             logger.error("GraphOrchestrator: Error when parsing response about next state.")
             raise OrchestratorError(f"Error when parsing response about next state {e}")
 
-        if next_state in list(self.states.keys()):
+        if next_state in self.states:
             return self.states[next_state]
         else:
             logger.error(f"GraphOrchestrator: State with name {next_state} was not found.")
@@ -192,23 +195,40 @@ class GraphOrchestrator(Orchestrator):
         Returns:
             state (State): Current state.
 
+        Raises:
+            OrchestratorError: If there is an error parsing output of conditional edge.
+            StateNotFoundError: If state is invalid or not found.
         """
         prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self._chat_history])
 
         logger.debug(f"GraphOrchestrator {self.id}: PROMPT {prompt}")
 
-        if len(state.connected) > 1:
-            if state.branch:
-                next_state_name = state.branch.run(
-                    input_data={"context": self.context | {"history": self._chat_history}},
+        if len(state.adjacent_states) > 1:
+            if condition := state.conditional_edge:
+                if isinstance(condition, Python):
+                    input_data = {**self.context, "history": self._chat_history}
+                else:
+                    input_data = {"context": self.context | {"history": self._chat_history}}
+
+                next_state = condition.run(
+                    input_data=input_data,
                     config=config,
                     run_depends=self._run_depends,
                 ).output.get("content")
 
-                return self.states[next_state_name]
-            return self.get_next_state(state, config)
+                if not isinstance(next_state, str):
+                    raise OrchestratorError(
+                        f"Error: Condition return invalid type. Expected a string got {type(next_state)} "
+                    )
+
+                if next_state not in self.states:
+                    raise StateNotFoundError(f"State with name {next_state} was not found.")
+
+                return self.states[next_state]
+            else:
+                return self.get_next_state_by_manager(state, config)
         else:
-            return self.states[state.connected[0]]
+            return self.states[state.adjacent_states[0]]
 
     def task_description(self, task: Agent):
         return ("Name:", task.name, "Role:", task.role)
@@ -232,7 +252,7 @@ class GraphOrchestrator(Orchestrator):
         state = self.states[self.initial_state]
 
         while True:
-            logger.info(f"GraphOrchestrator {self.id}: Next action: {state.name}")
+            logger.info(f"GraphOrchestrator {self.id}: Next state: {state.name}")
 
             if state.name == END:
                 return self.get_final_result(
@@ -313,18 +333,25 @@ class GraphOrchestrator(Orchestrator):
                 input_data={"context": self.context}, config=config, run_depends=self._run_depends
             ).output.get("content")
 
-            if not isinstance(result, dict):
-                raise OrchestratorError("Error: Task returned invalid data format. Expected a dictionary.")
+        elif isinstance(task, Python):
+            result = task.run(input_data={**self.context}, config=config, run_depends=self._run_depends).output.get(
+                "content"
+            )
 
-            if "result" not in result:
-                raise OrchestratorError("Error: Task returned dictionary with no 'result' key in it.")
+        if not isinstance(result, dict):
+            raise OrchestratorError(
+                f"Error: Task returned invalid data format. Expected a dictionary got {type(result)}"
+            )
 
-            if "history" in result:
-                result.pop("history")
+        if "result" not in result:
+            raise OrchestratorError("Error: Task returned dictionary with no 'result' key in it.")
 
-            content = result.pop("result")
+        if "history" in result:
+            result.pop("history")
 
-            return content, result
+        content = result.pop("result")
+
+        return content, result
 
     def merge_contexts(self, context_list: list[dict[str, Any]]) -> dict:
         """

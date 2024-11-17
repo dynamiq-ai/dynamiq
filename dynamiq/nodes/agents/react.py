@@ -286,10 +286,6 @@ class ReActAgent(Agent):
             ),
         ).model_dump()
 
-    def convert_string_to_dict(string: str) -> dict:
-        string = re.sub(r"\\+", r"\\", string)
-        return json.loads(string)
-
     def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """
         Executes the ReAct strategy by iterating through thought, action, and observation cycles.
