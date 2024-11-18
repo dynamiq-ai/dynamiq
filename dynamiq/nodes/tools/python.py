@@ -38,7 +38,8 @@ ALLOWED_MODULES = [
 ]
 
 
-def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
+def restricted_import(name):
+    """Restricted import function to allow importing only specific modules."""
     root_module_name = name.split(".")[0]
     if root_module_name not in ALLOWED_MODULES:
         logger.warning(f"Import of '{root_module_name}' is not allowed")
