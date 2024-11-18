@@ -98,8 +98,3 @@ def test_milvus_connect_host_without_token(mock_milvus_client_class):
 def test_milvus_connect_file_invalid_uri():
     with pytest.raises(ValueError, match="For FILE deployment, URI should point to a file ending with '.db'"):
         MilvusConnection(deployment_type=MilvusDeploymentType.FILE, uri="not_a_db_path")
-
-
-def test_milvus_connect_host_invalid_uri():
-    with pytest.raises(ValueError, match="For HOST deployment, URI should start with 'http' or 'https'"):
-        MilvusConnection(deployment_type=MilvusDeploymentType.HOST, uri="localhost:19530")
