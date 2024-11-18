@@ -85,7 +85,7 @@ class HttpApiCall(ConnectionNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         data = input_data.data
 
-        url = next((value for value in (input_data.url, self.url, self.connection.url) if value != ""), None)
+        url = input_data.url or self.url or self.connection.url
         if url is None:
             raise ValueError("No url provided.")
         headers = input_data.headers
