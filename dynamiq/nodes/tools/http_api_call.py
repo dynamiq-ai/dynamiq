@@ -86,7 +86,7 @@ class HttpApiCall(ConnectionNode):
         data = input_data.data
 
         url = input_data.url or self.url or self.connection.url
-        if url is None:
+        if not url:
             raise ValueError("No url provided.")
         headers = input_data.headers
         params = input_data.params
