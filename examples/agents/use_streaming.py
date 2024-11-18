@@ -27,7 +27,7 @@ def run_agent(event: str = "data") -> str:
         id="agent",
         llm=llm,
         tools=[e2b_tool],
-        streaming=StreamingConfig(enabled=True, event=event, mode=StreamingMode.ALL),
+        streaming=StreamingConfig(enabled=True, event=event, mode=StreamingMode.STEPS, tokens=False),
     )
 
     streaming_handler = StreamingIteratorCallbackHandler()
@@ -38,6 +38,7 @@ def run_agent(event: str = "data") -> str:
     print("Streaming Output:")
     full_content = ""
     for chunk in streaming_handler:
+        print(chunk.data)
         chunk_data = chunk.data
         content = chunk_data.get("choices", [{}])[0].get("delta", {}).get("content")
         if content:
