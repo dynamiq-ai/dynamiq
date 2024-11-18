@@ -1,9 +1,9 @@
 """PGVector storage implementation for Dynamiq."""
-from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
-from pgvector.psycopg2 import register_vector
+from typing import Any
+
 import psycopg2
+from pgvector.psycopg2 import register_vector
 from psycopg2.extensions import connection
 from psycopg2.extras import execute_values
 
@@ -32,7 +32,7 @@ class PGVectorStorage(VectorStorage):
         self.connection_string = connection_string
         self.collection_name = collection_name
         self.dimension = dimension
-        self._conn: Optional[connection] = None
+        self._conn: connection | None = None
 
     def _get_connection(self) -> connection:
         """Get PostgreSQL connection with pgvector extension."""
@@ -43,24 +43,26 @@ class PGVectorStorage(VectorStorage):
                 with self._conn.cursor() as cur:
                     # Create extension if not exists
                     cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+
                     # Create table if not exists
                     cur.execute(
-                        f"""
-                        CREATE TABLE IF NOT EXISTS {self.collection_name} (
-                            id TEXT PRIMARY KEY,
-                            embedding vector({self.dimension}),
-                            metadata JSONB,
-                            content TEXT
-                        );
-                        """
+                        "CREATE TABLE IF NOT EXISTS %(table)s ("
+                        "id TEXT PRIMARY KEY, "
+                        "embedding vector(%(dim)s), "
+                        "metadata JSONB, "
+                        "content TEXT"
+                        ");",
+                        {"table": self.collection_name, "dim": self.dimension},
                     )
+
                     # Create index if not exists
                     cur.execute(
-                        f"""
-                        CREATE INDEX IF NOT EXISTS {self.collection_name}_embedding_idx 
-                        ON {self.collection_name} 
-                        USING ivfflat (embedding vector_cosine_ops);
-                        """
+                        "CREATE INDEX IF NOT EXISTS %(idx)s ON %(table)s "
+                        "USING ivfflat (embedding vector_cosine_ops);",
+                        {
+                            "idx": f"{self.collection_name}_embedding_idx",
+                            "table": self.collection_name,
+                        },
                     )
                 self._conn.commit()
             except Exception as e:
@@ -69,10 +71,10 @@ class PGVectorStorage(VectorStorage):
 
     def add(
         self,
-        documents: List[Document],
-        embeddings: List[List[float]],
+        documents: list[Document],
+        embeddings: list[list[float]],
         **kwargs: Any,
-    ) -> List[str]:
+    ) -> list[str]:
         """Add documents with embeddings to storage.
 
         Args:
@@ -92,16 +94,15 @@ class PGVectorStorage(VectorStorage):
                 ]
                 execute_values(
                     cur,
-                    f"""
-                    INSERT INTO {self.collection_name} (id, embedding, metadata, content)
-                    VALUES %s
-                    ON CONFLICT (id) DO UPDATE SET
-                        embedding = EXCLUDED.embedding,
-                        metadata = EXCLUDED.metadata,
-                        content = EXCLUDED.content;
-                    """,
+                    "INSERT INTO %(table)s (id, embedding, metadata, content) "
+                    "VALUES %s "
+                    "ON CONFLICT (id) DO UPDATE SET "
+                    "embedding = EXCLUDED.embedding, "
+                    "metadata = EXCLUDED.metadata, "
+                    "content = EXCLUDED.content;",
                     data,
                     template="(%s, %s::vector, %s::jsonb, %s)",
+                    vars={"table": self.collection_name},
                 )
             conn.commit()
             return [doc.id for doc in documents]
@@ -111,10 +112,10 @@ class PGVectorStorage(VectorStorage):
 
     def search(
         self,
-        query_embedding: List[float],
+        query_embedding: list[float],
         limit: int = 10,
         **kwargs: Any,
-    ) -> List[Tuple[Document, float]]:
+    ) -> list[tuple[Document, float]]:
         """Search for similar documents.
 
         Args:
@@ -129,13 +130,15 @@ class PGVectorStorage(VectorStorage):
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"""
-                    SELECT id, metadata, content, 1 - (embedding <=> %s::vector) as similarity
-                    FROM {self.collection_name}
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s;
-                    """,
-                    (query_embedding, query_embedding, limit),
+                    "SELECT id, metadata, content, 1 - (embedding <=> %(qemb)s::vector) as similarity "
+                    "FROM %(table)s "
+                    "ORDER BY embedding <=> %(qemb)s::vector "
+                    "LIMIT %(limit)s;",
+                    {
+                        "qemb": query_embedding,
+                        "table": self.collection_name,
+                        "limit": limit,
+                    },
                 )
                 results = []
                 for id_, metadata, content, similarity in cur.fetchall():
@@ -145,7 +148,7 @@ class PGVectorStorage(VectorStorage):
         except Exception as e:
             raise VectorStorageError(f"Failed to search documents: {str(e)}")
 
-    def delete(self, document_ids: List[str], **kwargs: Any) -> None:
+    def delete(self, document_ids: list[str], **kwargs: Any) -> None:
         """Delete documents from storage.
 
         Args:
@@ -156,8 +159,8 @@ class PGVectorStorage(VectorStorage):
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"DELETE FROM {self.collection_name} WHERE id = ANY(%s);",
-                    (document_ids,),
+                    "DELETE FROM %(table)s WHERE id = ANY(%(ids)s);",
+                    {"table": self.collection_name, "ids": document_ids},
                 )
             conn.commit()
         except Exception as e:
@@ -169,7 +172,10 @@ class PGVectorStorage(VectorStorage):
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute(f"TRUNCATE TABLE {self.collection_name};")
+                cur.execute(
+                    "TRUNCATE TABLE %(table)s;",
+                    {"table": self.collection_name},
+                )
             conn.commit()
         except Exception as e:
             conn.rollback()
