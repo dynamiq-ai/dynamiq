@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from dynamiq import Workflow
@@ -8,6 +10,7 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.operators import Map
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.utils import JsonWorkflowEncoder
 
 
 def get_map_workflow(
@@ -68,3 +71,4 @@ def test_workflow_with_map_node(inputs, outputs):
         input=input_data,
         output=expected_output,
     )
+    assert json.dumps({"runs": [run.to_dict() for run in tracing.runs.values()]}, cls=JsonWorkflowEncoder)
