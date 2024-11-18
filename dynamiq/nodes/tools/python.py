@@ -38,7 +38,7 @@ ALLOWED_MODULES = [
 ]
 
 
-def restricted_import(name):
+def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
     """Restricted import function to allow importing only specific modules."""
     root_module_name = name.split(".")[0]
     if root_module_name not in ALLOWED_MODULES:

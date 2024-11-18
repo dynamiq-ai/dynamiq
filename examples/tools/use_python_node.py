@@ -130,8 +130,8 @@ def run(input_data):
 
 
 if __name__ == "__main__":
-    run_python_node_with_input()
-    run_python_node_without_input()
-    run_python_node_with_math_import()
-    run_python_node_with_random_import()
+    # run_python_node_with_input()
+    # run_python_node_without_input()
+    # run_python_node_with_math_import()
+    # run_python_node_with_random_import()
     run_python_node_with_dynamiq_import()
