@@ -56,6 +56,7 @@ class GraphOrchestrator(Orchestrator):
         manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
         agents (List[BaseAgent]): List of specialized agents available for task execution.
         objective (Optional[str]): The main objective of the orchestration.
+        max_loops (Optional[int]): Maximum number of transition between states.
     """
 
     name: str | None = "GraphOrchestrator"
@@ -63,6 +64,7 @@ class GraphOrchestrator(Orchestrator):
     initial_state: str = START
     states: dict[str, State] = {START: START_STATE, END: END_STATE}
     context: dict[str, Any] = {}
+    max_loops: int = 15
 
     def add_node(self, name: str, tasks: list[Node | Callable]) -> None:
         """
@@ -251,7 +253,7 @@ class GraphOrchestrator(Orchestrator):
         self._chat_history.append({"role": "user", "content": input_task})
         state = self.states[self.initial_state]
 
-        while True:
+        for _ in range(self.max_loops):
             logger.info(f"GraphOrchestrator {self.id}: Next state: {state.name}")
 
             if state.name == END:

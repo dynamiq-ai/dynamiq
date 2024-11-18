@@ -50,12 +50,14 @@ class AdaptiveOrchestrator(Orchestrator):
         manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
         agents (List[BaseAgent]): List of specialized agents available for task execution.
         input_tasks (Optional[str]): The main objective of the orchestration.
+        max_loops (Optional[int]): Maximum number of actions.
     """
 
     name: str | None = "AdaptiveOrchestrator"
     group: NodeGroup = NodeGroup.AGENTS
     manager: AdaptiveAgentManager
     agents: list[Agent] = []
+    max_loops: int = 15
 
     @property
     def to_dict_exclude_params(self):
@@ -153,7 +155,7 @@ class AdaptiveOrchestrator(Orchestrator):
         """
         self._chat_history.append({"role": "user", "content": input_task})
 
-        while True:
+        for _ in range(self.max_loops):
             action = self.get_next_action(config=config, **kwargs)
             logger.debug(f"AdaptiveOrchestrator {self.id}: chat history: {self._chat_history}")
             logger.debug(f"AdaptiveOrchestrator {self.id}: Next action: {action.model_dump()}")
