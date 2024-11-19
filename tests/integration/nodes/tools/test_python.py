@@ -1,10 +1,15 @@
+import json
+from io import BytesIO
+
 from pydantic import ConfigDict
 
 from dynamiq import Workflow
+from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.tools.python import Python
-from dynamiq.runnables import RunnableResult, RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types import Document
+from dynamiq.utils import JsonWorkflowEncoder
 
 
 def test_python_node_with_input():
@@ -167,19 +172,25 @@ def run(input_data):
 
 def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mock_llm_response_text):
     """Test Workflow integration with multiple nodes and dependencies."""
-    input_data = {"question": "What is LLM?"}
+    file = BytesIO(b"test")
+    file.name = "test.txt"
+    input_data = {"question": "What is LLM?", "files": [file]}
     python_node_extra_output = {"test_python": "test_python"}
 
     python_node = (
         Python(
             code=f"def run(inputs): return inputs | {python_node_extra_output}",
         )
-        .inputs(question_lowercase=lambda inputs, outputs: inputs["question"].lower())
+        .inputs(
+            question_lowercase=lambda inputs, outputs: inputs["question"].lower(),
+            file=lambda inputs, outputs: inputs["files"][0],
+        )
         .depends_on([openai_node, anthropic_node])
     )
+    tracing = TracingCallbackHandler()
     wf = Workflow(flow=Flow(nodes=[openai_node, anthropic_node, python_node]))
 
-    response = wf.run(input_data=input_data)
+    response = wf.run(input_data=input_data, config=RunnableConfig(callbacks=[tracing]))
 
     expected_output_openai_anthropic = {"content": mock_llm_response_text, "tool_calls": None}
     expected_result_openai_anthropic = RunnableResult(
@@ -191,6 +202,7 @@ def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mo
         openai_node.id: expected_result_openai_anthropic.to_tracing_depend_dict(),
         anthropic_node.id: expected_result_openai_anthropic.to_tracing_depend_dict(),
         "question_lowercase": input_data["question"].lower(),
+        "file": file,
     }
     expected_output_python = {"content": expected_input_python | python_node_extra_output}
     expected_result_python = RunnableResult(
@@ -200,10 +212,11 @@ def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mo
     )
 
     expected_output = {
-        openai_node.id: expected_result_openai_anthropic.to_dict(),
-        anthropic_node.id: expected_result_openai_anthropic.to_dict(),
-        python_node.id: expected_result_python.to_dict(),
+        openai_node.id: expected_result_openai_anthropic.to_dict(skip_format_types={BytesIO, bytes}),
+        anthropic_node.id: expected_result_openai_anthropic.to_dict(skip_format_types={BytesIO, bytes}),
+        python_node.id: expected_result_python.to_dict(skip_format_types={BytesIO, bytes}),
     }
 
     assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
     assert mock_llm_executor.call_count == 2
+    assert json.dumps({"runs": [run.to_dict() for run in tracing.runs.values()]}, cls=JsonWorkflowEncoder)
