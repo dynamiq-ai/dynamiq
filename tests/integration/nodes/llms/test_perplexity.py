@@ -86,4 +86,5 @@ def test_workflow_with_perplexity_llm(mock_llm_response_text, mock_llm_executor,
         top_p=None,
         api_key=connection.api_key,
         response_format=None,
+        drop_params=True,
     )

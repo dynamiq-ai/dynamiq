@@ -26,3 +26,15 @@ services:
     volumes:
       - ./:/app
       - ./reports:/app/reports:wr
+
+
+  dynamiq-app-test-cov-exclude-integration-with-creds:
+    image: dynamiq-app:${IMAGE_TAG:-local}
+    build:
+      target: develop
+    entrypoint: ["make", "test-cov-exclude-integration-with-creds"]
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
+      - ./reports:/app/reports:wr

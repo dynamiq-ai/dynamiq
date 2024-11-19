@@ -39,9 +39,18 @@ ALLOWED_MODULES = [
 
 
 def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
-    if name not in ALLOWED_MODULES:
-        raise ImportError(f"Import of '{name}' is not allowed")
-    return importlib.import_module(name)
+    """Restricted import function to allow importing only specific modules."""
+    root_module_name = name.split(".")[0]
+    if root_module_name not in ALLOWED_MODULES:
+        logger.warning(f"Import of '{root_module_name}' is not allowed")
+        raise ImportError(f"Import of '{root_module_name}' is not allowed")
+    try:
+        module = importlib.import_module(name)
+        logger.info(f"Successfully imported {name}")
+        return module
+    except ImportError as e:
+        logger.error(f"Failed to import {name}: {str(e)}")
+        raise
 
 
 class PythonInputSchema(BaseModel):
