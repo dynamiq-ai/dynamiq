@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any
+from typing import Any, Union
 
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
@@ -543,13 +543,21 @@ class ReActAgent(Agent):
         return final_answer["answer"]
 
     def generate_input_formats(self, tools: list[Node]) -> str:
+        """Generate formatted input descriptions for each tool."""
         input_formats = []
         for tool in tools:
-            params = [
-                f"{name} ({field.annotation.__name__}): {field.description or 'No description'}"
-                for name, field in tool.input_schema.model_fields.items()
-                if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True)
-            ]
+            params = []
+            for name, field in tool.input_schema.model_fields.items():
+                if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
+                    # Handle Union types
+                    if hasattr(field.annotation, "__origin__") and field.annotation.__origin__ is Union:
+                        type_names = [t.__name__ for t in field.annotation.__args__ if hasattr(t, "__name__")]
+                        type_str = " | ".join(type_names)
+                    else:
+                        type_str = getattr(field.annotation, "__name__", str(field.annotation))
+
+                    description = field.description or "No description"
+                    params.append(f"{name} ({type_str}): {description}")
 
             input_formats.append(f" - {self.sanitize_tool_name(tool.name)}\n \t* " + "\n\t* ".join(params))
         return "\n".join(input_formats)
@@ -587,24 +595,33 @@ class ReActAgent(Agent):
         self.format_schema = schema
 
     @staticmethod
-    def filter_format_type(param_type: str) -> str:
-        "Filters proper type for an function calling schema"
-        match param_type:
-            case "bool":
-                return "boolean"
-            case "int":
-                return "integer"
-            case "float":
-                return "float"
-        return "string"
+    def filter_format_type(param_type: str | type) -> str:
+        """Filters proper type for a function calling schema."""
+        if isinstance(param_type, str):
+            match param_type:
+                case "bool":
+                    return "boolean"
+                case "int":
+                    return "integer"
+                case "float":
+                    return "float"
+                case _:
+                    return "string"
+        elif hasattr(param_type, "__origin__") and param_type.__origin__ is Union:
+            # Handle Union types by using the first type in the Union
+            first_type = param_type.__args__[0]
+            return "string" if not hasattr(first_type, "__name__") else first_type.__name__
+        else:
+            return getattr(param_type, "__name__", "string")
 
     def generate_function_calling_schemas(self):
+        """Generate schemas for function calling."""
         self.format_schema.append(final_answer_function_schema)
         for tool in self.tools:
             properties = {}
             for name, field in tool.input_schema.model_fields.items():
                 if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
-                    param_type = self.filter_format_type(field.annotation.__name__)
+                    param_type = self.filter_format_type(field.annotation)
                     description = field.description or "No description"
                     properties[name] = {"type": param_type, "description": description}
 
@@ -613,7 +630,7 @@ class ReActAgent(Agent):
                 "strict": True,
                 "function": {
                     "name": self.sanitize_tool_name(tool.name),
-                    "description": tool.description[:1024],  # Expected a string with maximum length 1024
+                    "description": tool.description[:1024],
                     "parameters": {
                         "type": "object",
                         "properties": {
