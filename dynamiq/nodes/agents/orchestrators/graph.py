@@ -332,13 +332,15 @@ class GraphOrchestrator(Orchestrator):
 
         elif isinstance(task, FunctionTool):
             result = task.run(
-                input_data={"context": self.context}, config=config, run_depends=self._run_depends
+                input_data={"context": self.context | {"history": self._chat_history}},
+                config=config,
+                run_depends=self._run_depends,
             ).output.get("content")
 
         elif isinstance(task, Python):
-            result = task.run(input_data={**self.context}, config=config, run_depends=self._run_depends).output.get(
-                "content"
-            )
+            result = task.run(
+                input_data={**self.context, "history": self._chat_history}, config=config, run_depends=self._run_depends
+            ).output.get("content")
 
         if not isinstance(result, dict):
             raise OrchestratorError(
