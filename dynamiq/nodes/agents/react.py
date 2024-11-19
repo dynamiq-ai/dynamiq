@@ -351,17 +351,21 @@ class ReActAgent(Agent):
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
 
-                            self.stream_chunk(
-                                input_chunk=llm_generated_output,
+                            self.stream_content(
+                                content=llm_generated_output,
+                                source=self.name,
+                                step=f"reasoning_{loop_num + 1}",
                                 config=config,
                                 **kwargs,
                             )
                         if "Answer:" in llm_generated_output:
                             final_answer = self._extract_final_answer(llm_generated_output)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
-                                self.stream_chunk(
-                                    input_chunk=final_answer,
+                            if self.streaming.enabled:
+                                self.stream_content(
+                                    content=final_answer,
+                                    source=self.name,
+                                    step="answer",
                                     config=config,
                                     **kwargs,
                                 )
@@ -377,8 +381,10 @@ class ReActAgent(Agent):
                         llm_generated_output = json.dumps(llm_generated_output_json)
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_chunk(
-                                input_chunk=llm_generated_output,
+                            self.stream_content(
+                                content=llm_generated_output,
+                                source=self.name,
+                                step=f"reasoning_{loop_num + 1}",
                                 config=config,
                                 **kwargs,
                             )
@@ -386,9 +392,11 @@ class ReActAgent(Agent):
                         if action == "provide_final_answer":
                             final_answer = llm_generated_output_json["answer"]
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
-                                self.stream_chunk(
-                                    input_chunk=final_answer,
+                            if self.streaming.enabled:
+                                self.stream_content(
+                                    content=final_answer,
+                                    source=self.name,
+                                    step="answer",
                                     config=config,
                                     **kwargs,
                                 )
@@ -405,8 +413,10 @@ class ReActAgent(Agent):
 
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_chunk(
-                                input_chunk=llm_generated_output,
+                            self.stream_content(
+                                content=llm_generated_output,
+                                source=self.name,
+                                step=f"reasoning_{loop_num + 1}",
                                 config=config,
                                 **kwargs,
                             )
@@ -414,9 +424,11 @@ class ReActAgent(Agent):
                         if action == "finish":
                             final_answer = llm_generated_output_json["action_input"]
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
-                                self.stream_chunk(
-                                    input_chunk=final_answer,
+                            if self.streaming.enabled:
+                                self.stream_content(
+                                    content=final_answer,
+                                    source=self.name,
+                                    step="answer",
                                     config=config,
                                     **kwargs,
                                 )
@@ -429,17 +441,21 @@ class ReActAgent(Agent):
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_chunk(
-                                input_chunk=llm_generated_output,
+                            self.stream_content(
+                                content=llm_generated_output,
+                                source=self.name,
+                                step=f"reasoning_{loop_num + 1}",
                                 config=config,
                                 **kwargs,
                             )
                         if "<answer>" in llm_generated_output:
                             final_answer = self._extract_final_answer_xml(llm_generated_output)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
-                                self.stream_chunk(
-                                    input_chunk=final_answer,
+                            if self.streaming.enabled:
+                                self.stream_content(
+                                    content=final_answer,
+                                    source=self.name,
+                                    step="answer",
                                     config=config,
                                     **kwargs,
                                 )
@@ -465,8 +481,10 @@ class ReActAgent(Agent):
                         observation = f"\nObservation: {tool_result}\n"
                         llm_generated_output += observation
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_chunk(
-                                input_chunk=observation,
+                            self.stream_content(
+                                content=observation,
+                                source=tool.name,
+                                step=f"tool_{loop_num}",
                                 config=config,
                                 **kwargs,
                             )
@@ -494,10 +512,12 @@ class ReActAgent(Agent):
             )
             raise MaxLoopsExceededException(message=error_message)
         else:
-            max_loop_final_answer = self._handle_max_loops_exceeded(previous_responses, config, kwargs)
+            max_loop_final_answer = self._handle_max_loops_exceeded(previous_responses, config, **kwargs)
             if self.streaming.enabled:
-                self.stream_chunk(
-                    input_chunk=max_loop_final_answer,
+                self.stream_content(
+                    content=max_loop_final_answer,
+                    source=self.name,
+                    step="answer",
                     config=config,
                     **kwargs,
                 )

@@ -27,7 +27,8 @@ from dynamiq.utils.logger import logger
 class StreamChunkChoiceDelta(BaseModel):
     """Delta model for content chunks."""
     content: str | dict
-    type: str
+    source: str
+    step: str
 
 
 class StreamChunkChoice(BaseModel):
@@ -255,29 +256,58 @@ class Agent(Node):
             logger.error(f"Agent {self.name} - {self.id}: LLM execution failed: {str(e)}")
             raise
 
-    def stream_chunk(self, input_chunk: str, config: RunnableConfig | None = None, **kwargs):
-        """Streams the input chunk to the callbacks."""
+    def stream_content(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
+        if self.streaming.by_tokens:
+            return self.stream_by_tokens(content=content, source=source, step=step, config=config, **kwargs)
+        return self.stream_response(content=content, source=source, step=step, config=config, **kwargs)
+
+    def stream_by_tokens(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
+        """Streams the input content to the callbacks."""
+        tokens = content.split(" ")
         final_response = []
-        for chunk in input_chunk.split(" "):
-            final_response.append(chunk)
-            chunk_for_stream = StreamChunk(
-                choices=[StreamChunkChoice(delta=StreamChunkChoiceDelta(content=chunk, type=self.name))]
+        for token in tokens:
+            final_response.append(token)
+            token_with_prefix = " " + token
+            token_for_stream = StreamChunk(
+                choices=[
+                    StreamChunkChoice(delta=StreamChunkChoiceDelta(content=token_with_prefix, source=source, step=step))
+                ]
             )
-            logger.debug(f"Agent {self.name} - {self.id}: Streaming chunk: {chunk_for_stream}")
+            logger.debug(f"Agent {self.name} - {self.id}: Streaming token: {token_for_stream}")
             self.run_on_node_execute_stream(
                 callbacks=config.callbacks,
-                chunk=chunk_for_stream.model_dump(),
+                chunk=token_for_stream.model_dump(),
                 **kwargs,
             )
         return " ".join(final_response)
+
+    def stream_response(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
+        response_for_stream = StreamChunk(
+            choices=[StreamChunkChoice(delta=StreamChunkChoiceDelta(content=content, source=source, step=step))]
+        )
+        logger.debug(f"Agent {self.name} - {self.id}: Streaming response: {response_for_stream}")
+
+        self.run_on_node_execute_stream(
+            callbacks=config.callbacks,
+            chunk=response_for_stream.model_dump(),
+            **kwargs,
+        )
+        return content
 
     def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the agent with the generated prompt and handles exceptions."""
         formatted_prompt = self.generate_prompt()
         try:
+            logger.info(f"Streaming config  {self.streaming}")
             llm_result = self._run_llm(formatted_prompt, config=config, **kwargs)
             if self.streaming.enabled:
-                return self.stream_chunk(llm_result, config=config, **kwargs)
+                return self.stream_content(
+                    content=llm_result,
+                    source=self.name,
+                    step="answer",
+                    config=config,
+                    **kwargs,
+                )
             return llm_result
 
         except Exception as e:
@@ -477,7 +507,7 @@ class AgentManager(Agent):
         prompt = self.generate_prompt(block_names=["plan"])
         llm_result = self._run_llm(prompt, config, **kwargs)
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            return self.stream_chunk(input_chunk=llm_result, config=config, **kwargs)
+            return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
         return llm_result
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
@@ -485,7 +515,7 @@ class AgentManager(Agent):
         prompt = self.generate_prompt(block_names=["assign"])
         llm_result = self._run_llm(prompt, config, **kwargs)
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            return self.stream_chunk(input_chunk=llm_result, config=config, **kwargs)
+            return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
         return llm_result
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
@@ -493,5 +523,5 @@ class AgentManager(Agent):
         prompt = self.generate_prompt(block_names=["final"])
         llm_result = self._run_llm(prompt, config, **kwargs)
         if self.streaming.enabled:
-            return self.stream_chunk(input_chunk=llm_result, config=config, **kwargs)
+            return self.stream_content(content=llm_result, step="answer", source=self.name, config=config, **kwargs)
         return llm_result
