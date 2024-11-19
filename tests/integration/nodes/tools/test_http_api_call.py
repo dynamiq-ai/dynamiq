@@ -48,7 +48,7 @@ def test_workflow_with_httpapicall(
 
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
-        input={"data": {}, "url_path": "", "headers": {}, "params": {}},
+        input={"data": {}, "url": "", "headers": {}, "params": {}},
         output={"content": result, "status_code": 200},
     ).to_dict(skip_format_types={bytes})
 

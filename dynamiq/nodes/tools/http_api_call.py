@@ -1,7 +1,6 @@
 import enum
 import json
 from typing import Any, ClassVar, Literal
-from urllib.parse import urljoin
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -20,7 +19,7 @@ class ResponseType(str, enum.Enum):
 
 class HttpApiCallInputSchema(BaseModel):
     data: dict = Field(default={}, description="Parameter to provide payload.")
-    url_path: str = Field(default="", description="Parameter to provide for path to the endpoint.")
+    url: str = Field(default="", description="Parameter to provide endpoint url.")
     headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
 
@@ -62,6 +61,7 @@ class HttpApiCall(ConnectionNode):
     data: dict[str, Any] = Field(default_factory=dict)
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
+    url: str = ""
     response_type: ResponseType | str | None = ResponseType.RAW
     input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
@@ -85,9 +85,9 @@ class HttpApiCall(ConnectionNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         data = input_data.data
 
-        url = self.connection.url
-        if url_path := input_data.url_path:
-            url = urljoin(url, url_path)
+        url = input_data.url or self.url or self.connection.url
+        if not url:
+            raise ValueError("No url provided.")
         headers = input_data.headers
         params = input_data.params
 
