@@ -208,7 +208,7 @@ class Http(BaseConnection):
     """
 
     type: Literal[ConnectionType.Http] = ConnectionType.Http
-    url: str
+    url: str = ""
     method: HTTPMethod
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] | None = Field(default_factory=dict)
