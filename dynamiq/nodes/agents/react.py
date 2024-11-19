@@ -608,9 +608,19 @@ class ReActAgent(Agent):
                 case _:
                     return "string"
         elif hasattr(param_type, "__origin__") and param_type.__origin__ is Union:
-            # Handle Union types by using the first type in the Union
             first_type = param_type.__args__[0]
-            return "string" if not hasattr(first_type, "__name__") else first_type.__name__
+            if isinstance(first_type, type):
+                type_name = first_type.__name__
+                match type_name:
+                    case "bool":
+                        return "boolean"
+                    case "int":
+                        return "integer"
+                    case "float":
+                        return "float"
+                    case _:
+                        return "string"
+            return "string"
         else:
             return getattr(param_type, "__name__", "string")
 
