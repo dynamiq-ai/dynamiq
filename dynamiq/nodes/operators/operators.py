@@ -68,6 +68,7 @@ class ChoiceExecute(BaseModel):
 class Choice(Node):
     """Represents a choice node in a flow."""
 
+    name: str | None = "Choice"
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
     options: list[ChoiceOption] = []
 
@@ -195,9 +196,30 @@ class Choice(Node):
 class Map(Node):
     """Represents a map node in a flow."""
 
+    name: str | None = "Map"
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
     node: Node
     behavior: Behavior | None = Behavior.RETURN
+
+    @property
+    def to_dict_exclude_params(self):
+        """
+        Property to define which parameters should be excluded when converting the class instance to a dictionary.
+
+        Returns:
+            dict: A dictionary defining the parameters to exclude.
+        """
+        return super().to_dict_exclude_params | {"node": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the instance.
+        """
+        data = super().to_dict(**kwargs)
+        data["node"] = self.node.to_dict(**kwargs)
+        return data
 
     def execute(
         self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
