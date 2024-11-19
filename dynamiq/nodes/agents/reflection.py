@@ -79,22 +79,22 @@ class ReflectionAgent(Agent):
             result = self._run_llm(formatted_prompt, config=config, **kwargs)
             output_content = self.extract_output_content(result)
             if self.streaming.enabled:
-                if self.streaming.mode == StreamingMode.ANSWER:
-                    logger.debug("Streaming mode set to ANSWER. Returning final output.")
+                if self.streaming.mode == StreamingMode.FINAL:
+                    logger.debug("Streaming mode set to FINAL. Returning final output.")
                     if not output_content:
                         logger.warning("No output content extracted.")
                         return ""
                     return self.stream_content(
-                        input_content=output_content[-1],
-                        input_step="answer",
-                        input_source=self.name,
+                        content=output_content[-1],
+                        step="answer",
+                        source=self.name,
                         config=config,
                         **kwargs,
                     )
-                elif self.streaming.mode == StreamingMode.STEPS:
+                elif self.streaming.mode == StreamingMode.ALL:
                     logger.debug("Streaming mode set to ALL. Returning all output.")
                     return self.stream_content(
-                        input_content=result, input_step="reasoning", input_source=self.name, config=config, **kwargs
+                        content=result, step="reasoning", source=self.name, config=config, **kwargs
                     )
 
             if not output_content:

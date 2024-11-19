@@ -12,8 +12,8 @@ from dynamiq.utils import generate_uuid
 class StreamingMode(Enum):
     """Enumeration for streaming modes."""
 
-    ANSWER = "answer"  # Only final output
-    STEPS = "steps"  # All intermediate steps and final output
+    FINAL = "final"  # Only final output
+    ALL = "all"  # All intermediate steps and final output
 
 
 STREAMING_EVENT = "streaming"
@@ -75,15 +75,15 @@ class StreamingConfig(BaseModel):
         input_queue (Queue | None): Input queue for streaming. Defaults to None.
         input_queue_done_event (Event | None): Event to signal input queue completion. Defaults to None.
         mode (StreamingMode): Streaming mode. Defaults to StreamingMode.ANSWER.
-        tokens (bool): Whether to stream tokens. Defaults to False.
+        by_tokens (bool): Whether to stream  by tokens. Defaults to False.
     """
     enabled: bool = False
     event: str = STREAMING_EVENT
     timeout: float | None = None
     input_queue: Queue | None = None
     input_queue_done_event: Event | None = None
-    mode: StreamingMode = StreamingMode.ANSWER
-    tokens: bool = False
+    mode: StreamingMode = StreamingMode.FINAL
+    by_tokens: bool = True
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

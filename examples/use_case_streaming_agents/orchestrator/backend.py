@@ -33,8 +33,8 @@ def setup_agent(streaming_enabled: bool, streaming_mode: str) -> ReActAgent:
     """
     llm = setup_llm()
     memory = Memory(backend=InMemory())
-    mode_mapping = {"Answer": StreamingMode.ANSWER, "Steps": StreamingMode.STEPS}
-    mode = mode_mapping.get(streaming_mode, StreamingMode.ANSWER)
+    mode_mapping = {"Answer": StreamingMode.FINAL, "Steps": StreamingMode.ALL}
+    mode = mode_mapping.get(streaming_mode, StreamingMode.FINAL)
     streaming_config = StreamingConfig(enabled=streaming_enabled, mode=mode)
     tool_code = E2BInterpreterTool(connection=E2B())
 
