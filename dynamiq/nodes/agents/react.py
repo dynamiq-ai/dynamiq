@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, Union
+from typing import Any, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
@@ -607,20 +607,11 @@ class ReActAgent(Agent):
                     return "float"
                 case _:
                     return "string"
-        elif hasattr(param_type, "__origin__") and param_type.__origin__ is Union:
-            first_type = param_type.__args__[0]
-            if isinstance(first_type, type):
-                type_name = first_type.__name__
-                match type_name:
-                    case "bool":
-                        return "boolean"
-                    case "int":
-                        return "integer"
-                    case "float":
-                        return "float"
-                    case _:
-                        return "string"
-            return "string"
+        elif get_origin(param_type) is Union:  # Use `get_origin` to detect Unions
+            first_type = next((arg for arg in get_args(param_type) if arg is not type(None)), None)
+            if first_type is None:
+                return "string"
+            return getattr(first_type, "__name__", "string")
         else:
             return getattr(param_type, "__name__", "string")
 
