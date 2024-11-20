@@ -311,57 +311,56 @@ class GraphOrchestrator(Orchestrator):
                     manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
                 )["input"]
 
-                result = task.run(
+                response = task.run(
                     input_data={"input": agent_input},
                     config=config,
                     run_depends=thread_run_depends,
                     **kwargs,
                 )
 
-                content = result.output.get("content")
+                result = response.output.get("content")
 
-                if result.status != RunnableStatus.SUCCESS:
-                    logger.error(f"GraphOrchestrator: Failed to execute Agent {task.name} with Error: {content}")
-                    raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {content}")
+                if response.status != RunnableStatus.SUCCESS:
+                    logger.error(f"GraphOrchestrator: Failed to execute Agent {task.name} with Error: {result}")
+                    raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {result}")
 
-                return content, {}
+                return result, {}
 
             except Exception as e:
                 logger.error(f"GraphOrchestrator: Error when parsing response about next state {e}")
                 raise OrchestratorError(f"Error when parsing response about next state {e}")
 
         elif isinstance(task, FunctionTool):
-            input_data = ({"context": self.context | {"history": self._chat_history}},)
-
-        elif isinstance(task, Python):
+            input_data = {"context": self.context | {"history": self._chat_history}}
+        else:
             input_data = {**self.context, "history": self._chat_history}
 
-        output = task.run(
+        response = task.run(
             input_data=input_data,
             config=config,
             run_depends=self._run_depends,
         )
 
-        content = output.output.get("content")
+        context = response.output.get("content")
 
-        if output.status != RunnableStatus.SUCCESS:
-            logger.error(f"GraphOrchestrator: Failed to execute {task.name} with Error: {content}")
-            raise OrchestratorError(f"Failed to execute {task.name} with Error: {content}")
+        if response.status != RunnableStatus.SUCCESS:
+            logger.error(f"GraphOrchestrator: Failed to execute {task.name} with Error: {context}")
+            raise OrchestratorError(f"Failed to execute {task.name} with Error: {context}")
 
-        if not isinstance(content, dict):
+        if not isinstance(context, dict):
             raise OrchestratorError(
-                f"Error: Task returned invalid data format. Expected a dictionary got {type(content)}"
+                f"Error: Task returned invalid data format. Expected a dictionary got {type(context)}"
             )
 
-        if "result" not in content:
+        if "result" not in context:
             raise OrchestratorError("Error: Task returned dictionary with no 'result' key in it.")
 
-        if "history" in content:
-            content.pop("history")
+        if "history" in context:
+            context.pop("history")
 
-        result = content.pop("result")
+        result = context.pop("result")
 
-        return output, content
+        return result, context
 
     def merge_contexts(self, context_list: list[dict[str, Any]]) -> dict:
         """
