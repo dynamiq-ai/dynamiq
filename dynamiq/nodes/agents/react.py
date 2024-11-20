@@ -597,6 +597,15 @@ class ReActAgent(Agent):
     @staticmethod
     def filter_format_type(param_type: str | type) -> str:
         """Filters proper type for a function calling schema."""
+        type_mapping = {
+            int: "integer",
+            float: "float",
+            bool: "boolean",
+            str: "string",
+            list: "list",
+            dict: "dict",
+        }
+
         if isinstance(param_type, str):
             match param_type:
                 case "bool":
@@ -607,13 +616,13 @@ class ReActAgent(Agent):
                     return "float"
                 case _:
                     return "string"
-        elif get_origin(param_type) is Union:  # Use `get_origin` to detect Unions
+        elif get_origin(param_type) is Union:
             first_type = next((arg for arg in get_args(param_type) if arg is not type(None)), None)
             if first_type is None:
                 return "string"
-            return getattr(first_type, "__name__", "string")
+            return type_mapping.get(first_type, getattr(first_type, "__name__", "string"))
         else:
-            return getattr(param_type, "__name__", "string")
+            return type_mapping.get(param_type, getattr(param_type, "__name__", "string"))
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
