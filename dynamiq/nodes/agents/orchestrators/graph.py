@@ -331,31 +331,37 @@ class GraphOrchestrator(Orchestrator):
                 raise OrchestratorError(f"Error when parsing response about next state {e}")
 
         elif isinstance(task, FunctionTool):
-            result = task.run(
-                input_data={"context": self.context | {"history": self._chat_history}},
-                config=config,
-                run_depends=self._run_depends,
-            ).output.get("content")
+            input_data = ({"context": self.context | {"history": self._chat_history}},)
 
         elif isinstance(task, Python):
-            result = task.run(
-                input_data={**self.context, "history": self._chat_history}, config=config, run_depends=self._run_depends
-            ).output.get("content")
+            input_data = {**self.context, "history": self._chat_history}
 
-        if not isinstance(result, dict):
+        output = task.run(
+            input_data=input_data,
+            config=config,
+            run_depends=self._run_depends,
+        )
+
+        content = output.output.get("content")
+
+        if output.status != RunnableStatus.SUCCESS:
+            logger.error(f"GraphOrchestrator: Failed to execute {task.name} with Error: {content}")
+            raise OrchestratorError(f"Failed to execute {task.name} with Error: {content}")
+
+        if not isinstance(content, dict):
             raise OrchestratorError(
-                f"Error: Task returned invalid data format. Expected a dictionary got {type(result)}"
+                f"Error: Task returned invalid data format. Expected a dictionary got {type(content)}"
             )
 
-        if "result" not in result:
+        if "result" not in content:
             raise OrchestratorError("Error: Task returned dictionary with no 'result' key in it.")
 
-        if "history" in result:
-            result.pop("history")
+        if "history" in content:
+            content.pop("history")
 
-        content = result.pop("result")
+        result = content.pop("result")
 
-        return content, result
+        return output, content
 
     def merge_contexts(self, context_list: list[dict[str, Any]]) -> dict:
         """
