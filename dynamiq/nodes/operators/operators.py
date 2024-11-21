@@ -260,7 +260,7 @@ class Map(Node):
                 logger.error(f"Node under iteration index {index} has failed.")
             output.append(result.output)
 
-        return output
+        return {"outputs": output}
 
 
 class Pass(Node):

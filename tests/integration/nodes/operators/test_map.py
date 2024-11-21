@@ -62,7 +62,7 @@ def test_workflow_with_map_node(inputs, outputs):
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=input_data,
-        output=outputs,
+        output={"outputs": outputs},
     ).to_dict()
 
     expected_output = {wf_map_node.flow.nodes[0].id: expected_result}
