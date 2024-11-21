@@ -1,5 +1,6 @@
 import json
 import re
+import types
 from typing import Any, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling
@@ -550,9 +551,8 @@ class ReActAgent(Agent):
             for name, field in tool.input_schema.model_fields.items():
                 if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
                     # Handle Union types
-                    if hasattr(field.annotation, "__origin__") and field.annotation.__origin__ is Union:
-                        type_names = [t.__name__ for t in field.annotation.__args__ if hasattr(t, "__name__")]
-                        type_str = " | ".join(type_names)
+                    if get_origin(field.annotation) in (Union, types.UnionType):
+                        type_str = str(field.annotation)
                     else:
                         type_str = getattr(field.annotation, "__name__", str(field.annotation))
 
@@ -602,8 +602,6 @@ class ReActAgent(Agent):
             float: "float",
             bool: "boolean",
             str: "string",
-            list: "list",
-            dict: "dict",
         }
 
         if isinstance(param_type, str):
