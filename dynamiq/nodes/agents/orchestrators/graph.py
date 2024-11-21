@@ -1,3 +1,4 @@
+import copy
 import json
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, ClassVar
@@ -114,20 +115,20 @@ class State(Node):
             OrchestratorError: If an error occurs during the execution process.
 
         """
-        if isinstance(task, Agent):
 
-            thread_run_depends = run_depends
+        if isinstance(task, Agent):
             manager_result = self.manager.run(
                 input_data={
                     "action": "assign",
                     "task": self.task_description(task),
                     "chat_history": chat_history,
                 },
+                run_depends=run_depends,
                 config=config,
                 **kwargs,
             )
 
-            thread_run_depends = [NodeDependency(node=self.manager).to_dict()]
+            run_depends = [NodeDependency(node=self.manager).to_dict()]
 
             if manager_result.status != RunnableStatus.SUCCESS:
                 logger.error("GraphOrchestrator: Error generating actions for state.")
@@ -141,7 +142,7 @@ class State(Node):
                 response = task.run(
                     input_data={"input": agent_input},
                     config=config,
-                    run_depends=thread_run_depends,
+                    run_depends=run_depends,
                     **kwargs,
                 )
 
@@ -198,7 +199,12 @@ class State(Node):
 
         if len(self.tasks) == 1:
             result, context = self._submit_task(
-                self.tasks[0], global_context, chat_history, run_depends, config=config, **kwargs
+                self.tasks[0],
+                copy.deepcopy(global_context),
+                copy.deepcopy(chat_history),
+                copy.deepcopy(run_depends),
+                config=config,
+                **kwargs,
             )
 
             chat_history.append(
@@ -218,15 +224,13 @@ class State(Node):
 
                 futures = [
                     executor.submit(
-                        self._submit_task, global_context, task, chat_history, run_depends, config=config, **kwargs
+                        self._submit_task, task, global_context, chat_history, run_depends, config=config, **kwargs
                     )
                     for task in self.tasks
                 ]
-
                 for future in futures:
 
                     result, context = future.result()
-
                     chat_history.append(
                         {
                             "role": "system",
@@ -235,9 +239,7 @@ class State(Node):
                     )
 
                     contexts.append(context)
-
             global_context = global_context | self.merge_contexts(contexts)
-        # run_depends = [NodeDependency(node=task).to_dict() for task in self.tasks]
 
         return {"context": global_context, "chat_history": chat_history}
 

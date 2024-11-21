@@ -30,6 +30,14 @@ nodes:
               connection: openai-conn
               model: gpt-3.5-turbo
 
+          - id: rease
+            type: dynamiq.nodes.agents.ReActAgent
+            role: Research on relevant information
+            llm:
+              id: agent-researcher-llm
+              type: dynamiq.nodes.llms.OpenAI
+              connection: openai-conn
+              model: gpt-3.5-turbo
           next_states:
             - "writer"
       writer:
