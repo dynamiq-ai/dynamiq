@@ -1,13 +1,16 @@
 import json
 from typing import Any
 
+from dynamiq import Workflow
+from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import E2B
+from dynamiq.flows import Flow
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, Prompt
-from dynamiq.runnables import RunnableResult, RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from examples.llm_setup import setup_llm
 
 
@@ -148,23 +151,29 @@ def create_orchestrator() -> GraphOrchestrator:
     return orchestrator
 
 
-def run_orchestrator() -> RunnableResult:
+def run_orchestrator(request="Write 100 lines of code.") -> RunnableResult:
     """Runs orchestrator"""
     orchestrator = create_orchestrator()
     orchestrator.context = {
-        "messages": [Message(role="user", content="Make 100 lines of code")],
+        "messages": [Message(role="user", content=request)],
         "iterations_num": 0,
         "reiterate": False,
     }
 
-    result = orchestrator.run(
+    tracing = TracingCallbackHandler()
+
+    workflow = Workflow(flow=Flow(nodes=[orchestrator]))
+
+    result = workflow.run(
         input_data={"input": "Provide final code that succeed and reflection on coding process."},
-        config=None,
+        config=RunnableConfig(callbacks=[tracing]),
     )
-    return result
+
+    print(result.output[orchestrator.id])
+    return result.output[orchestrator.id]["output"]["content"], tracing.runs
 
 
 if __name__ == "__main__":
-    result = run_orchestrator()
+    result, _ = run_orchestrator()
     print("Result:")
-    print(result.output.get("content"))
+    print(result)

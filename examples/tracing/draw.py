@@ -140,6 +140,30 @@ def draw_simple_agent_graph_in_png(
     draw_graph_in_png(graph, output_path)
 
 
+def draw_simple_graph_orchestrator_graph_in_png(
+    output_path: str = os.path.join(os.path.dirname(__file__), "simple_graph_orchestrator.png")
+) -> None:
+    from examples.graph_like.graph_orchestrator_yaml import run_workflow
+
+    traces = run_workflow()
+
+    print(traces)
+    graph = get_graph_by_traces([run for _, run in traces.items()])
+    draw_graph_in_png(graph, output_path)
+
+
+def draw_graph_orchestrator_graph_in_png(
+    output_path: str = os.path.join(os.path.dirname(__file__), "graph_orchestrator.png")
+) -> None:
+    from examples.graph_like.code_assistant import run_orchestrator
+
+    _, traces = run_orchestrator(request="Print number from 1 to 10.")
+
+    print(traces)
+    graph = get_graph_by_traces([run for _, run in traces.items()])
+    draw_graph_in_png(graph, output_path)
+
+
 def draw_reflexion_agent_graph_in_png(
     output_path: str = os.path.join(
         os.path.dirname(__file__), "reflexion_agent_graph.png"
@@ -158,6 +182,8 @@ def draw_react_agent_graph_in_png(
     from examples.agents.use_react_wf import run_workflow
 
     _, traces = run_workflow()
+
+    print(traces)
     graph = get_graph_by_traces([run for _, run in traces.items()])
     draw_graph_in_png(graph, output_path)
 
@@ -214,3 +240,5 @@ if __name__ == "__main__":
     draw_job_posting_linear_agent_graph_in_png()
     draw_literature_overview_adaptive_agent_graph_in_png()
     draw_adaptive_coding_react_agent_graph_in_png()
+    draw_simple_graph_orchestrator_graph_in_png()
+    draw_graph_orchestrator_graph_in_png()

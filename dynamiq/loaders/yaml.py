@@ -383,6 +383,7 @@ class WorkflowYAMLLoader:
 
             if isinstance(param_data, dict) and param_data.get("type"):
                 param_id = param_data.get("id")
+
                 updated_node_init_data[param_name] = cls.get_nodes_without_depends(
                     data={param_id: param_data},
                     nodes=nodes,
@@ -393,7 +394,8 @@ class WorkflowYAMLLoader:
                     connection_manager=connection_manager,
                     init_components=init_components,
                 )[param_id]
-            if isinstance(param_data, list):
+
+            elif isinstance(param_data, list):
                 updated_items = []
                 for item in param_data:
                     if isinstance(item, dict) and (item_id := item.get("id")):
@@ -412,6 +414,23 @@ class WorkflowYAMLLoader:
                     else:
                         updated_items.append(item)
                 updated_node_init_data[param_name] = updated_items
+
+            elif isinstance(param_data, dict):
+                updated_items = {}
+                for name, item in param_data.items():
+                    if isinstance(item, dict) and (item_id := item.get("id")):
+                        updated_items[name] = cls.get_updated_node_init_data_with_initialized_nodes(
+                            node_init_data={item_id: item},
+                            nodes=nodes,
+                            flows=flows,
+                            connections=connections,
+                            prompts=prompts,
+                            registry=registry,
+                            connection_manager=connection_manager,
+                            init_components=init_components,
+                        )[item_id]
+
+                        updated_node_init_data[param_name] = updated_items
 
         return updated_node_init_data
 
@@ -497,6 +516,7 @@ class WorkflowYAMLLoader:
                     node_id=node_id, node_data=node_data, flows=flows
                 )
             try:
+
                 node_init_data = cls.get_updated_node_init_data_with_initialized_nodes(
                     node_init_data=node_init_data,
                     nodes=nodes,
@@ -507,16 +527,20 @@ class WorkflowYAMLLoader:
                     connection_manager=connection_manager,
                     init_components=init_components,
                 )
+
                 node = node_cls(**node_init_data)
+
                 if init_components:
                     node.init_components(connection_manager=connection_manager)
                     node.is_postponed_component_init = False
+
             except Exception as e:
                 raise WorkflowYAMLLoaderException(
                     f"Node '{node_id}' data is invalid. Data: {node_data}. Error: {e}"
                 )
 
             new_nodes[node_id] = node
+
         return new_nodes
 
     @classmethod
@@ -547,6 +571,7 @@ class WorkflowYAMLLoader:
         Returns:
             A dictionary of newly created nodes with dependencies.
         """
+
         new_nodes = cls.get_nodes_without_depends(
             data=nodes_data,
             nodes=nodes,
@@ -557,6 +582,7 @@ class WorkflowYAMLLoader:
             connection_manager=connection_manager,
             init_components=init_components,
         )
+
         all_nodes = nodes | new_nodes
         for node_id, node in new_nodes.items():
             node.depends = cls.get_node_dependencies(
@@ -614,6 +640,7 @@ class WorkflowYAMLLoader:
                 for node_id, node_data in nodes_data.items()
                 if node_id in dependant_flows_nodes_ids
             }
+
             dependant_nodes = cls.get_nodes(
                 nodes_data=dependant_flows_nodes_data,
                 nodes={},

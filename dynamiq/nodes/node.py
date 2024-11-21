@@ -483,6 +483,7 @@ class Node(BaseModel, Runnable, ABC):
         time_start = datetime.now()
 
         config = ensure_config(config)
+
         run_id = uuid4()
         merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", run_id)})
         if depends_result is None:

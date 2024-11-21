@@ -118,6 +118,7 @@ class Orchestrator(Node, ABC):
         Returns:
             dict[str, Any]: The result of the orchestration process.
         """
+
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -125,15 +126,17 @@ class Orchestrator(Node, ABC):
         input_task = input_data.input or self.input_task
 
         logger.debug(f"LinearOrchestrator {self.id}: starting the flow with input_task:\n```{self.input_task}```")
-        run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
-        run_kwargs.pop("run_depends", None)
+
+        kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
+        kwargs.pop("run_depends", None)
+
         if self.streaming.enabled:
             self.setup_streaming()
 
         result = self.run_flow(
             input_task=input_task,
             config=config,
-            **run_kwargs,
+            **kwargs,
         )
 
         logger.debug(f"LinearOrchestrator {self.id}: output collected")
