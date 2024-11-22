@@ -53,10 +53,10 @@ class PineconeDocumentWriter(VectorStoreNode, PineconeWriterVectorStoreParams):
             if self.create_if_not_exist and self.index_type is None:
                 raise ValueError("Index type 'pod' or 'serverless' must be specified when creating an index")
 
-            if self.index_type == PineconeIndexType.POD and self.environment is None and self.pod_type is None:
+            if self.index_type == PineconeIndexType.POD and (self.environment is None or self.pod_type is None):
                 raise ValueError("'environment' and 'pod_type' must be specified for 'pod' index")
 
-            if self.index_type == PineconeIndexType.SERVERLESS and self.cloud is None and self.region is None:
+            if self.index_type == PineconeIndexType.SERVERLESS and (self.cloud is None or self.region is None):
                 raise ValueError("'cloud' and 'region' must be specified for 'serverless' index")
 
         return self

@@ -24,6 +24,7 @@ class HttpApiCallInputSchema(BaseModel):
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
 
     @field_validator("data", "headers", "params", mode="before")
+    @classmethod
     def validate_dict_fields(cls, value: Any, field: str) -> Any:
         if isinstance(value, str):
             try:

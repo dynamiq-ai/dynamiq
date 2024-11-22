@@ -696,7 +696,7 @@ class Node(BaseModel, Runnable, ABC):
         """
 
         if isinstance(input_data, BaseModel):
-            input_data = input_data.model_dump()
+            input_data = dict(input_data)
 
         for callback in callbacks:
             callback.on_node_start(self.to_dict(), input_data, **kwargs)
@@ -769,7 +769,7 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs: Additional keyword arguments.
         """
         if isinstance(input_data, BaseModel):
-            input_data = input_data.model_dump()
+            input_data = dict(input_data)
 
         for callback in callbacks:
             callback.on_node_execute_start(self.to_dict(), input_data, **kwargs)
