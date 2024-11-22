@@ -53,7 +53,9 @@ def get_graph_by_traces(traces: list[Run]) -> Graph:
         for node_dep in node_data.get("depends", []):
             edges.append(
                 GraphEdge(
-                    source=traces_ids_by_node_id[node_dep["node"]["id"]][-1],
+                    source=(
+                        node_dep["run_id"] if node_dep["run_id"] else traces_ids_by_node_id[node_dep["node"]["id"]][-1]
+                    ),
                     target=trace_id,
                     type=GraphEdgeType.DEPENDS,
                 )
@@ -63,15 +65,19 @@ def get_graph_by_traces(traces: list[Run]) -> Graph:
             for run_node_dep in run_node_depends:
                 edges.append(
                     GraphEdge(
-                        source=traces_ids_by_node_id[run_node_dep["node"]["id"]][-1],
+                        source=(
+                            run_node_dep["run_id"]
+                            if run_node_dep["run_id"]
+                            else traces_ids_by_node_id[run_node_dep["node"]["id"]][-1]
+                        ),
                         target=trace_id,
                         type=GraphEdgeType.DEPENDS,
                     )
                 )
-        elif parent_node := node_by_trace_id.get(str(trace.parent_run_id)):
+        elif node_by_trace_id.get(str(trace.parent_run_id)):
             edges.append(
                 GraphEdge(
-                    source=traces_ids_by_node_id[parent_node["id"]][-1],
+                    source=str(trace.parent_run_id),
                     target=trace_id,
                     type=GraphEdgeType.PARENT,
                 )
@@ -147,7 +153,6 @@ def draw_simple_graph_orchestrator_graph_in_png(
 
     traces = run_workflow()
 
-    print(traces)
     graph = get_graph_by_traces([run for _, run in traces.items()])
     draw_graph_in_png(graph, output_path)
 
@@ -233,12 +238,4 @@ def draw_adaptive_coding_react_agent_graph_in_png(
 
 
 if __name__ == "__main__":
-    draw_simple_agent_graph_in_png()
-    draw_simple_agent_with_memory_graph_in_png()
-    draw_reflexion_agent_graph_in_png()
-    draw_react_agent_graph_in_png()
-    draw_job_posting_linear_agent_graph_in_png()
-    draw_literature_overview_adaptive_agent_graph_in_png()
-    draw_adaptive_coding_react_agent_graph_in_png()
     draw_simple_graph_orchestrator_graph_in_png()
-    draw_graph_orchestrator_graph_in_png()

@@ -115,6 +115,7 @@ class State(Node):
             OrchestratorError: If an error occurs during the execution process.
 
         """
+
         run_depends = []
         if isinstance(task, Agent):
             manager_result = self.manager.run(
@@ -128,11 +129,11 @@ class State(Node):
                 **kwargs,
             )
 
-            run_depends = [NodeDependency(node=self.manager).to_dict()]
+            run_depends = [NodeDependency(node=self.manager, run_id=str(manager_result.run_id)).to_dict()]
 
             if manager_result.status != RunnableStatus.SUCCESS:
-                logger.error("GraphOrchestrator: Error generating actions for state.")
-                raise OrchestratorError("Error generating actions for state.")
+                logger.error(f"GraphOrchestrator: Error generating actions for state: {manager_result}")
+                raise OrchestratorError(f"GraphOrchestrator: Error generating actions for state: {manager_result}")
 
             try:
                 agent_input = json.loads(
@@ -188,7 +189,6 @@ class State(Node):
 
     def execute(self, input_data: StateInputSchema, config: RunnableConfig = None, **kwargs) -> dict:
         logger.debug(f"State {self.id}: starting the flow with input_task:\n```{input_data}```")
-
         kwargs.pop("run_depends", None)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
