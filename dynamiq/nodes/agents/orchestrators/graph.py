@@ -100,7 +100,7 @@ class State(Node):
             if task.is_postponed_component_init:
                 task.init_components(connection_manager)
 
-    def _submit_task(self, task, global_context, chat_history, run_depends, config, **kwargs) -> str:
+    def _submit_task(self, task, global_context, chat_history, config, **kwargs) -> str:
         """Executes task
 
         Args:
@@ -115,7 +115,7 @@ class State(Node):
             OrchestratorError: If an error occurs during the execution process.
 
         """
-
+        run_depends = []
         if isinstance(task, Agent):
             manager_result = self.manager.run(
                 input_data={
@@ -195,14 +195,12 @@ class State(Node):
 
         global_context = input_data.context
         chat_history = input_data.chat_history
-        run_depends = []
 
         if len(self.tasks) == 1:
             result, context = self._submit_task(
                 self.tasks[0],
-                copy.deepcopy(global_context),
-                copy.deepcopy(chat_history),
-                copy.deepcopy(run_depends),
+                global_context,
+                chat_history,
                 config=config,
                 **kwargs,
             )
@@ -224,7 +222,12 @@ class State(Node):
 
                 futures = [
                     executor.submit(
-                        self._submit_task, task, global_context, chat_history, run_depends, config=config, **kwargs
+                        self._submit_task,
+                        task,
+                        copy.deepcopy(global_context),
+                        copy.deepcopy(chat_history),
+                        config=config,
+                        **kwargs,
                     )
                     for task in self.tasks
                 ]
