@@ -57,6 +57,7 @@ class ConnectionType(str, enum.Enum):
     SambaNova = "SambaNova"
     Milvus = "Milvus"
     Perplexity = "Perplexity"
+    DeepSeek = "DeepSeek"
 
 
 class HTTPMethod(str, enum.Enum):
@@ -915,8 +916,16 @@ class Milvus(BaseConnection):
 
 
 class Perplexity(BaseApiKeyConnection):
-    type: Literal[ConnectionType.Replicate] = ConnectionType.Replicate
+    type: Literal[ConnectionType.Perplexity] = ConnectionType.Perplexity
     api_key: str = Field(default_factory=partial(get_env_var, "PERPLEXITYAI_API_KEY"))
+
+    def connect(self):
+        pass
+
+
+class DeepSeek(BaseApiKeyConnection):
+    type: Literal[ConnectionType.DeepSeek] = ConnectionType.DeepSeek
+    api_key: str = Field(default_factory=partial(get_env_var, "DEEPSEEK_API_KEY"))
 
     def connect(self):
         pass
