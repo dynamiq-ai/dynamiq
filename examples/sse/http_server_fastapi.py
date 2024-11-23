@@ -4,8 +4,12 @@ import logging
 from fastapi import FastAPI
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
+from dynamiq import Workflow
+from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
-from examples.ws.ws_server_fastapi import run_wf
+from dynamiq.flows import Flow
+from dynamiq.runnables import RunnableConfig
+from examples.ws.ws_server_fastapi import OPENAI_NODE, WF_ID
 
 app = FastAPI()
 
@@ -29,10 +33,16 @@ async def send_stream_events_by_sse(
 
 
 async def run_wf_async(
-    wf_data: dict, streaming_handler: AsyncStreamingIteratorCallbackHandler
+    wf: Workflow,
+    wf_input: dict,
+    streaming_handler: AsyncStreamingIteratorCallbackHandler,
+    tracing_handler: TracingCallbackHandler,
 ):
-    await asyncio.get_running_loop().run_in_executor(
-        None, run_wf, wf_data, streaming_handler
+    asyncio.get_running_loop().run_in_executor(
+        None,
+        wf.run,
+        wf_input,
+        RunnableConfig(callbacks=[streaming_handler, tracing_handler]),
     )
 
 
@@ -41,10 +51,9 @@ async def wf_run(wf_data: dict):
     logger.info("Workflow run request received")
 
     streaming_handler = AsyncStreamingIteratorCallbackHandler()
-
-    await asyncio.create_task(run_wf_async(wf_data, streaming_handler))
-    await asyncio.sleep(0.01)
-
+    tracing_handler = TracingCallbackHandler()
+    wf = Workflow(id=WF_ID, flow=Flow(nodes=[OPENAI_NODE]))
+    await asyncio.create_task(run_wf_async(wf, wf_data, streaming_handler, tracing_handler))
     return EventSourceResponse(send_stream_events_by_sse(streaming_handler))
 
 
