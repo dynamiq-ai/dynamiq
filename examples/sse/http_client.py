@@ -38,10 +38,9 @@ async def http_client():
                     OPENAI_2_NODE_STREAMING_EVENT,
                 ):
                     message = event.data
-                    output_stream[event.entity_id] += message["choices"][0]["delta"]["content"]
-                    logger.info(
-                        f"Streaming {event.entity_id}: {output_stream[event.entity_id]}"
-                    )
+                    if message_content := message["choices"][0]["delta"]["content"]:
+                        output_stream[event.entity_id] += message_content
+                        logger.info(f"Streaming {event.entity_id}: {output_stream[event.entity_id]}")
                 else:
                     logger.info(f"Final output {event.entity_id}: {event.data}")
 
