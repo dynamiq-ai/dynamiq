@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from weaviate import WeaviateClient
     from weaviate.collections.classes.data import DataObject
 
-
 DOCUMENT_COLLECTION_PROPERTIES = [
     {"name": "_original_id", "dataType": ["text"]},
     {"name": "content", "dataType": ["text"]},
@@ -25,7 +24,6 @@ DOCUMENT_COLLECTION_PROPERTIES = [
     {"name": "blob_mime_type", "dataType": ["text"]},
     {"name": "score", "dataType": ["number"]},
 ]
-
 
 DEFAULT_QUERY_LIMIT = 9999
 
@@ -42,6 +40,7 @@ class WeaviateVectorStore:
         connection: Weaviate | None = None,
         client: Optional["WeaviateClient"] = None,
         index_name: str = "default",
+        content_key: str = "content",
         create_if_not_exist: bool = False,
     ):
         """
@@ -73,6 +72,7 @@ class WeaviateVectorStore:
                 )
 
         self._collection_settings = collection_settings
+        self.content_key = content_key
         self._collection = self.client.collections.get(collection_settings["class"])
 
     def close(self):
@@ -112,7 +112,11 @@ class WeaviateVectorStore:
 
         return data
 
-    def _to_document(self, data: "DataObject[dict[str, Any], None]") -> Document:
+    def _to_document(
+        self,
+        data: "DataObject[dict[str, Any], None]",
+        content_key: str | None = None,
+    ) -> Document:
         """
         Convert a data object read from Weaviate into a Document.
 
@@ -125,7 +129,7 @@ class WeaviateVectorStore:
         document_data = data.properties
         document_id = document_data.pop("_original_id")
 
-        content = document_data.pop("content")
+        content = document_data.pop(content_key or self.content_key)
 
         if isinstance(data.vector, list):
             document_data["embedding"] = data.vector
@@ -197,9 +201,7 @@ class WeaviateVectorStore:
         offset = 0
         partial_result = None
         result = []
-        while (
-            partial_result is None or len(partial_result.objects) == DEFAULT_QUERY_LIMIT
-        ):
+        while partial_result is None or len(partial_result.objects) == DEFAULT_QUERY_LIMIT:
             try:
                 partial_result = self._collection.query.fetch_objects(
                     filters=convert_filters(filters),
@@ -315,9 +317,7 @@ class WeaviateVectorStore:
                 msg = f"Expected a Document, got '{type(doc)}' instead."
                 raise ValueError(msg)
 
-            if policy == DuplicatePolicy.SKIP and self._collection.data.exists(
-                uuid=generate_uuid5(doc.id)
-            ):
+            if policy == DuplicatePolicy.SKIP and self._collection.data.exists(uuid=generate_uuid5(doc.id)):
                 continue
 
             try:
@@ -336,9 +336,7 @@ class WeaviateVectorStore:
             raise VectorStoreDuplicateDocumentException(msg)
         return written
 
-    def write_documents(
-        self, documents: list[Document], policy: DuplicatePolicy = DuplicatePolicy.NONE
-    ) -> int:
+    def write_documents(self, documents: list[Document], policy: DuplicatePolicy = DuplicatePolicy.NONE) -> int:
         """
         Write documents to Weaviate using the specified policy.
 
