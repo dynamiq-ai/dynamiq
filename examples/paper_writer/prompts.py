@@ -153,7 +153,9 @@ ABSTRACT_WRITER_PROMPT = """
 You are an AI assistant that analyzes a text and writes an 'Abstract' section \
 with 200 words or less after the title and before the first section of the paper. \
 The abstract section begins with the section 'Abstract'. You must only return the final \
-document in Markdown format.
+document in Markdown format. Keep all the rest unchanged from draft!.
+
+Look to user instruction it can have information regarding how to generate 'Abstract' section.
 """
 
 TASK_TEMPLATE = """

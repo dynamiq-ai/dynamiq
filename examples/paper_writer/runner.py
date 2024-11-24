@@ -21,6 +21,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents.orchestrators.graph import END, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.llms.openai import OpenAI
+from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
 from dynamiq.runnables import RunnableResult
 
 STATES = {
@@ -39,13 +40,7 @@ STATES = {
 
 
 def is_paper_review_complete(context: dict[str, Any]):
-    print(context.get("max_revisions"))
-    print("Max revisions")
-    print(context.get("revision_number"))
-    print("revision_number")
-    if context.get("update_instruction"):
-        return "write_paper_review"
-    elif context.get("revision_number") <= context.get("max_revisions"):
+    if context.get("revision_number") <= context.get("max_revisions"):
         return "reflection_review"
     else:
         return "write_abstract"
@@ -110,14 +105,32 @@ def parse_configuration(filename):
     return state
 
 
-def run_orchestrator(orchestrator: GraphOrchestrator, configuration_context: dict) -> RunnableResult:
+def run_orchestrator(orchestrator: GraphOrchestrator) -> RunnableResult:
     """Runs orchestrator"""
-
     result = orchestrator.run(
-        input_data={
-            "input": f"Write {configuration_context["type_of_document"]} about {configuration_context["title"]}"
-        },
+        input_data={"input": "Write document"},
         config=None,
     )
 
     return result.output["content"]
+
+
+if __name__ == "__main__":
+    configuration_file = "/Users/maksym/Documents/Files/Heavy/Work/Dynamiq/dynamiq/examples/paper_writer/test.yaml"
+    configuration_context = parse_configuration(configuration_file)
+    orchestrator = create_orchestrator(configuration_context)
+    orchestrator.context["update_instruction"] = "Make abstract block exactly 3 senteces"
+    result = run_orchestrator(orchestrator, configuration_context)
+
+    feedback_tool = HumanFeedbackTool()
+
+    while True:
+        user_feedback = feedback_tool.run(input_data={"input": orchestrator.context.get("draft")}).output["content"]
+        if user_feedback == "EXIT":
+            break
+
+        orchestrator.context["update_instruction"] = user_feedback
+        result = orchestrator.run(input_data={"input": f"Update {configuration_context["type_of_document"]}"})
+
+    print("Result:")
+    print(result)

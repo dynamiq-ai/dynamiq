@@ -1,0 +1,64 @@
+title: "Writing Masterpieces when You Become the Adivisor"
+suggest_title: True
+generate_citations: True
+type_of_document: "research seminal paper"
+area_of_paper: "AI and Computer Science"
+section_names:
+- Introduction
+- Related Work
+- Architecture
+- Results
+- Conclusions
+- References
+number_of_paragraphs:
+  "Introduction": 4
+  "Related Work": 7
+  "Architecture": 4
+  "Results": 4
+  "Conclusions": 3
+  "References": 0
+hypothesis: "
+We want to show in this paper that we turn paper writers into 'advisors'
+and a multi-agent system into a 'advisee' who will observe the instructions by,
+interactively turning a course draft of a paper into a publication ready
+document.
+"
+instructions: "
+For the following instructions, you should use your own words.
+\n\n
+The section 'Introduction', you should focus on:
+\n
+- In the first paragraph, you should discuss that the world has change
+since the release of ChatGPT.
+\n
+In the section 'Architecture', you should show the picture
+'/file=images/multi-agent.jpeg' to discuss we write a paper by defining a
+title and hypothesis, writing topic sentences, expanding topic sentences into
+paragraphs, writing the paragraphs, and finally reviewing what you have written.
+"
+results: "
+This is an example on how you can put a results table.
+<table>
+  <tr>
+      <td> </td>
+      <td> Normal Text Rate</td>
+      <td> Kiroku Rate</td>
+  </tr>
+  <tr>
+    <td> Experiment 1</td>
+    <td> 3 </td>
+    <td> 9 </td>
+  </tr>
+  <tr>
+    <td> Experiment 2</td>
+    <td> 5 </td>
+    <td> 10 </td>
+  </tr>
+</table>
+"
+references:
+- "Harrison Chase, Rotem Weiss. AI Agents in LangGraph. https://www.deeplearning.ai/short-courses/ai-agents-in-langgraph"
+number_of_queries: 8
+sentences_per_paragraph: 10
+max_revisions: 1
+temperature: 0.1
