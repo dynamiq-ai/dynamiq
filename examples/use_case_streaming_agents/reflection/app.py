@@ -7,7 +7,7 @@ st.sidebar.title("Agent Configuration")
 agent_role = st.sidebar.text_input("Agent Role", "helpful assistant")
 streaming_enabled = st.sidebar.checkbox("Enable Streaming", value=False)
 
-streaming_mode = st.sidebar.radio("Streaming Mode", options=["Final", "All"], index=0)  # Default to "Final"
+streaming_mode = st.sidebar.radio("Streaming Mode", options=["Answer", "Steps"], index=0)  # Default to "Final"
 
 if "agent" not in st.session_state or st.sidebar.button("Apply Changes"):
     st.session_state.agent = setup_agent(agent_role, streaming_enabled, streaming_mode)

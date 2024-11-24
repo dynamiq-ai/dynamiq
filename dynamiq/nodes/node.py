@@ -124,9 +124,10 @@ class NodeDependency(BaseModel):
     """
     node: "Node"
     option: str | None = None
+    run_id: str | None = None
 
-    def __init__(self, node: "Node", option: str | None = None):
-        super().__init__(node=node, option=option)
+    def __init__(self, node: "Node", option: str | None = None, run_id: str | None = None):
+        super().__init__(node=node, option=option, run_id=run_id)
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary.
@@ -134,10 +135,7 @@ class NodeDependency(BaseModel):
         Returns:
             dict: A dictionary representation of the instance.
         """
-        return {
-            "node": self.node.to_dict(**kwargs),
-            "option": self.option,
-        }
+        return {"node": self.node.to_dict(**kwargs), "option": self.option, "run_id": self.run_id}
 
 
 class NodeMetadata(BaseModel):
@@ -483,6 +481,7 @@ class Node(BaseModel, Runnable, ABC):
         time_start = datetime.now()
 
         config = ensure_config(config)
+
         run_id = uuid4()
         merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", run_id)})
         if depends_result is None:
@@ -503,9 +502,7 @@ class Node(BaseModel, Runnable, ABC):
             )
             logger.info(f"Node {self.name} - {self.id}: execution skipped.")
             return RunnableResult(
-                status=RunnableStatus.SKIP,
-                input=transformed_input,
-                output=format_value(e),
+                status=RunnableStatus.SKIP, input=transformed_input, output=format_value(e), run_id=str(run_id)
             )
 
         try:
@@ -532,9 +529,7 @@ class Node(BaseModel, Runnable, ABC):
                 f"{format_duration(time_start, datetime.now())}."
             )
             return RunnableResult(
-                status=RunnableStatus.SUCCESS,
-                input=transformed_input,
-                output=transformed_output,
+                status=RunnableStatus.SUCCESS, input=transformed_input, output=transformed_output, run_id=str(run_id)
             )
         except Exception as e:
             self.run_on_node_error(config.callbacks, e, **merged_kwargs)
@@ -548,6 +543,7 @@ class Node(BaseModel, Runnable, ABC):
                 status=RunnableStatus.FAILURE,
                 input=input_data,
                 output=format_value(e, recoverable=recoverable),
+                run_id=str(run_id),
             )
 
     def execute_with_retry(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs):
@@ -695,7 +691,7 @@ class Node(BaseModel, Runnable, ABC):
         """
 
         if isinstance(input_data, BaseModel):
-            input_data = input_data.model_dump()
+            input_data = dict(input_data)
 
         for callback in callbacks:
             callback.on_node_start(self.to_dict(), input_data, **kwargs)
@@ -768,7 +764,7 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs: Additional keyword arguments.
         """
         if isinstance(input_data, BaseModel):
-            input_data = input_data.model_dump()
+            input_data = dict(input_data)
 
         for callback in callbacks:
             callback.on_node_execute_start(self.to_dict(), input_data, **kwargs)

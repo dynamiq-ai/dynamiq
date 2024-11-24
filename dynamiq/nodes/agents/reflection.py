@@ -84,10 +84,18 @@ class ReflectionAgent(Agent):
                     if not output_content:
                         logger.warning("No output content extracted.")
                         return ""
-                    return self.stream_chunk(output_content[-1], config=config, **kwargs)
+                    return self.stream_content(
+                        content=output_content[-1],
+                        step="answer",
+                        source=self.name,
+                        config=config,
+                        **kwargs,
+                    )
                 elif self.streaming.mode == StreamingMode.ALL:
                     logger.debug("Streaming mode set to ALL. Returning all output.")
-                    return self.stream_chunk(result, config=config, **kwargs)
+                    return self.stream_content(
+                        content=result, step="reasoning", source=self.name, config=config, **kwargs
+                    )
 
             if not output_content:
                 logger.warning("No output content extracted.")

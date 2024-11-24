@@ -8,6 +8,7 @@ from .cerebras import Cerebras
 from .cohere import Cohere
 from .custom_llm import CustomLLM
 from .deepinfra import DeepInfra
+from .deepseek import DeepSeek
 from .gemini import Gemini
 from .groq import Groq
 from .huggingface import HuggingFace

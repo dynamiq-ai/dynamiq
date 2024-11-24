@@ -1,6 +1,7 @@
 import textwrap
 
 from dynamiq import Workflow
+from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.base import Agent
@@ -8,6 +9,7 @@ from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrat
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
+from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
@@ -150,15 +152,16 @@ def run_workflow(input_data: dict) -> dict:
 
     user_prompt = generate_customer_prompt(input_data)
 
-    print(user_prompt)
+    tracing = TracingCallbackHandler()
+
     result = workflow.run(
         input_data={
             "input": user_prompt,
-        }
+        },
+        config=RunnableConfig(callbacks=[tracing]),
     )
     logger.info("Workflow completed")
-    content = result.output[orchestrator.id]
-    return content
+    return result.output[orchestrator.id]["output"]["content"], tracing.runs
 
 
 if __name__ == "__main__":
@@ -172,7 +175,7 @@ if __name__ == "__main__":
         "dates": user_dates,
         "interests": user_interests,
     }
-    content = run_workflow(input_data)["output"]["content"]
+    content, _ = run_workflow(input_data)
     print(content)
     with open(OUTPUT_FILE_PATH, "w") as f:
         f.write(content)

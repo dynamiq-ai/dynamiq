@@ -11,6 +11,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.utils import format_value
 from dynamiq.utils.logger import logger
 
 ALLOWED_MODULES = [
@@ -54,7 +55,10 @@ def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
 
 
 class PythonInputSchema(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
+
+    def to_dict(self, **kwargs) -> dict:
+        return {field: format_value(value, **kwargs) for field, value in self.model_extra.items()}
 
 
 class Python(Node):
@@ -87,7 +91,7 @@ class Python(Node):
         Returns:
             Any: Result of the code execution.
         """
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {dict(input_data)}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -164,7 +168,7 @@ class Python(Node):
             if "run" not in restricted_globals:
                 raise ValueError("The 'run' function is not defined in the provided code.")
 
-            result = restricted_globals["run"](input_data.model_dump())
+            result = restricted_globals["run"](dict(input_data))
             if self.is_optimized_for_agents:
                 result = str(result)
         except Exception as e:
