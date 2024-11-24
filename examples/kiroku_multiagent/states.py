@@ -2,10 +2,7 @@ import json
 import re
 from typing import Any
 
-from dynamiq.connections import ZenRows
-from dynamiq.nodes.tools.zenrows import ZenRowsTool
-from dynamiq.prompts import Message, Prompt
-from examples.kiroku_multiagent.prompts import (
+from prompts import (
     ABSTRACT_WRITER_PROMPT,
     INTERNET_SEARCH_PROMPT,
     PAPER_WRITER_PROMPT,
@@ -17,10 +14,19 @@ from examples.kiroku_multiagent.prompts import (
     TOPIC_SENTENCE_REVIEW_PROMPT,
     WRITER_REVIEW_PROMPT,
 )
-from examples.llm_setup import setup_llm
 
-llm = setup_llm()
-tool_scrapper = ZenRowsTool(connection=ZenRows())
+from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.connections import Tavily
+from dynamiq.nodes.llms.openai import OpenAI
+from dynamiq.nodes.tools.tavily import TavilyTool
+from dynamiq.prompts import Message, Prompt
+
+llm = OpenAI(
+    name="OpenAI LLM",
+    connection=OpenAIConnection(),
+    model="gpt-4o-mini",
+)
+tool_scrapper = TavilyTool(connection=Tavily())
 
 
 def inference_model(messages):
@@ -44,17 +50,25 @@ def suggest_title_review_state(context: dict[str, Any]):
 
     instruction = context.get("update_instruction")
     if instruction:
-        message = Message(role="user", content=instruction)
+        message = Message(
+            role="user",
+            content=(
+                "Here is instruction user provided to system to refine paper."
+                "It can be irrelevant to title."
+                f"In case it is irrelevant to general title, just return that was previously - {
+                    context.get("title")}"
+                f"Instruction: {instruction}"
+            ),
+        )
     else:
-        message = Message(role="user", content="Just return the final title without any additional information")
+        message = Message(role="user", content="Just return the first title without any additional information")
 
     messages.append(message)
     llm_result = inference_model(messages)
 
-    if not instruction:
-        messages = []
+    messages = []
 
-    return {"result": llm_result, "messages": messages}
+    return {"result": llm_result, "title": llm_result, "messages": messages, "state": "suggest_title_review_state"}
 
 
 def suggest_title_state(context: dict[str, Any]):
@@ -79,7 +93,7 @@ def suggest_title_state(context: dict[str, Any]):
 
     llm_result = inference_model(messages)
 
-    return {"result": llm_result, "messages": messages}
+    return {"result": llm_result, "title": llm_result, "messages": messages, "state": "suggest_title_state"}
 
 
 def internet_search_state(context: dict[str, Any]):
@@ -108,9 +122,9 @@ def internet_search_state(context: dict[str, Any]):
         ),
     ]
 
-    generated_queries = json.loads(inference_model(messsages))["queries"]
-
-    for ref in context["references"]:
+    a = inference_model(messsages)
+    generated_queries = json.loads(a)["queries"]
+    for ref in context.get("references", []):
         search_match = re.search(r"http.*(\s|$)", ref)
         if search_match:
             l, r = search_match.span()
@@ -119,7 +133,7 @@ def internet_search_state(context: dict[str, Any]):
 
     content = context.get("content", [])
     for query in generated_queries:
-        search_result = tool_scrapper.run(input_data={"url": query})
+        search_result = tool_scrapper.run(input_data={"query": query}).output["content"]["raw_response"]["results"]
 
         for result in search_result:
             text = f"link: {result['url']}, " f"content: {result['content']}"
@@ -127,6 +141,7 @@ def internet_search_state(context: dict[str, Any]):
             content.append(text)
 
     return {
+        "state": "internet_search_state",
         "result": "Gathered information.",
         "content": content,
     }
@@ -143,15 +158,28 @@ def write_topic(context: dict[str, Any]):
     messages.append(
         Message(
             role="user",
-            content=(f"This is the content of a search on the internet for the paper:\n\n" f"{content}\n\n" f"{task}"),
+            content=(
+                f"This is the content of a search on the internet for the paper:\n\n"
+                f"{
+                     content}\n\n"
+                f"{task}"
+            ),
         )
     )
 
     result = inference_model(messages)
 
+    print(result)
+
     messages.append(Message(role="system", content=result))
 
-    return {"result": f"Topic proposed{result}", "plan": result, "draft": result, "messages": messages}
+    return {
+        "result": f"Topic proposed{result}",
+        "plan": result,
+        "draft": result,
+        "messages": messages,
+        "state": "write_topic",
+    }
 
 
 def review_topic_sentence(context: dict[str, Any]):
@@ -161,6 +189,8 @@ def review_topic_sentence(context: dict[str, Any]):
     instruction = context.get("update_instruction")
     plan = context.get("plan")
     task = context.get("task")
+
+    result = context.get("draft", "")
     if instruction:
         review_topic_sentences.append(instruction)
         messages.append(
@@ -186,6 +216,7 @@ def review_topic_sentence(context: dict[str, Any]):
         "draft": result,
         "messages": messages,
         "review_topic_sentences": review_topic_sentences,
+        "state": "review_topic_sentence",
     }
 
 
@@ -196,6 +227,7 @@ def write_paper(context: dict[str, Any]):
     task = context.get("task")
     sentences_per_paragraph = context.get("sentences_per_paragraph")
     state = context.get("state")
+    draft = context.get("draft")
     if state == "internet_search":
         additional_info = " in terms of topic sentences"
     else:
@@ -218,7 +250,7 @@ def write_paper(context: dict[str, Any]):
                 "Generate a new draft of the document based on the "
                 "information I gave you.\n\n"
                 f"Here is my current draft{additional_info}:\n\n"
-                f"{state['draft']}\n\n"
+                f"{draft}\n\n"
             ),
         ),
     ]
@@ -237,8 +269,7 @@ def write_paper_review(context: dict[str, Any]):
     review_instructions = context.get("review_instructions", [])
     instruction = context.get("update_instruction")
     draft = context.get("draft")
-    task = context.get("task")
-
+    result = context.get("draft")
     if instruction:
         review_instructions.append(instruction)
         joined_instructions = "\n".join(review_instructions)
@@ -248,7 +279,16 @@ def write_paper_review(context: dict[str, Any]):
                 role="user",
                 content=(
                     "Here is my task:\n\n"
-                    f"{task}"
+                    f"{TASK_TEMPLATE.format(
+                       title=context.get("title"),
+                       type_of_document=context.get("type_of_document"),
+                       area_of_paper=context.get("area_of_paper"),
+                       sections=context.get("sections"),
+                       instruction=instruction,
+                       hypothesis=context.get("hypothesis"),
+                       results=context.get("results", ["No results"]),
+                       references="\n".join(context.get("references")))
+                       }"
                     "\n\n"
                     "Here is my draft:\n\n"
                     f"{draft}"
@@ -328,7 +368,14 @@ def generate_references(context: dict[str, Any]):
         Message(role="system", content=REFERENCES_PROMPT),
         Message(
             role="user",
-            content=("Generate references for the following content entries. " "\n\n" "Content:" "\n\n" f"{content}"),
+            content=(
+                "Generate references for the following content entries. "
+                "\n\n"
+                "Content:"
+                "\n\n"
+                f"{
+                     content}"
+            ),
         ),
     ]
 
@@ -346,6 +393,7 @@ def generate_citation(context: dict[str, Any]):
     draft = context.get("draft")
     draft = draft + "\n\n" + references
     return {
+        "result": "Generated citation",
         "state": "generate_citation",
         "draft": draft,
     }
