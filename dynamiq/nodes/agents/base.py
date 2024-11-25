@@ -71,7 +71,6 @@ class Agent(Node):
         "You are a helpful AI assistant designed to assist users with various tasks and queries."
         "Your goal is to provide accurate, helpful, and friendly responses to the best of your abilities."
     )
-    DEFAULT_DATE: ClassVar[str] = Field(default_factory=lambda: datetime.now().strftime("%d %B %Y"))
 
     llm: Node = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
@@ -136,7 +135,7 @@ class Agent(Node):
         self._prompt_blocks = {
             "introduction": self.DEFAULT_INTRODUCTION,
             "role": self.role or "",
-            "date": self.DEFAULT_DATE,
+            "date": datetime.now().strftime("%d %B %Y"),
             "tools": "{tool_description}",
             "files": "{file_description}",
             "instructions": "",
