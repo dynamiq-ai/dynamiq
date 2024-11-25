@@ -16,7 +16,7 @@ from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.utils import JsonWorkflowEncoder
 
 
-def get_orchestrator_workflow(model: str, connection: connections.OpenAI, context_input: dict):
+def get_orchestrator_workflow1(model: str, connection: connections.OpenAI, context_input: dict):
     llm = OpenAI(
         name="OpenAI",
         model=model,
@@ -64,22 +64,63 @@ def get_orchestrator_workflow(model: str, connection: connections.OpenAI, contex
     return wf_orchestrator
 
 
+def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, context_input: dict):
+    llm = OpenAI(
+        name="OpenAI",
+        model=model,
+        connection=connection,
+        temperature=0.1,
+    )
+
+    agent_manager = GraphAgentManager(llm=llm)
+    graph_orchestrator = GraphOrchestrator(manager=agent_manager, initial_state = "task1_task2", final_summarizer=True, context=context_input)
+
+    # Task 1
+    def task1(_: dict):
+        return {"result": "task 1 completed", "task1": "task 1 result"}
+
+    # Task 2
+    def run(_: dict):
+        return {"result": "task 2 completed", "task2": "task 2 result"}
+
+    task2 = Python(code=textwrap.dedent(inspect.getsource(run)))
+
+    graph_orchestrator.add_node("task1_task2", [task1, task2])
+    graph_orchestrator.add_edge("task1_task2", END)
+
+
+    wf_orchestrator = Workflow(
+        flow=Flow(
+            nodes=[graph_orchestrator],
+        ),
+    )
+
+    return wf_orchestrator
+
+
 @pytest.mark.parametrize(
     ("context_input", "outputs", "context_output"),
     [
         (
+            get_orchestrator_workflow1,
             {},
             {"content": "mocked_response"},
             {"task1": "task 1 result", "task2": "task 2 result"},
         ),
-        (
+        (   
+            get_orchestrator_workflow1,
             {"task3": True},
             {"content": "mocked_response"},
             {"task1": "task 1 result", "task2": "task 2 result", "task3": "task 3 result"},
         ),
+        (   
+            get_orchestrator_workflow2,
+            {"content": "mocked_response"},
+            {"task1": "task 1 result", "task2": "task 2 result"},
+        ),
     ],
 )
-def test_workflow_with_map_node(context_input, outputs, context_output):
+def test_workflow_with_map_node(get_orchestrator_workflow, context_input, outputs, context_output):
     model = "gpt-3.5-turbo"
     connection = connections.OpenAI(
         api_key="api_key",
