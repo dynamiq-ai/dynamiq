@@ -36,7 +36,6 @@ ALLOWED_MODULES = [
     "typing",
     "urllib",
     "uuid",
-    "deepcopy",
 ]
 
 
@@ -101,10 +100,10 @@ class Python(Node):
         def safe_print(*args, **kwargs):
             print(*args, file=stdout, **kwargs)
 
-        def guarded_write(obj, attr, value):
-            """Guard to allow writing a value to an object attribute."""
-            setattr(obj, attr, value)
-            return value
+        def guarded_write(obj, value):
+            """Guard to allow writing a value to an object."""
+            obj = value
+            return obj
 
         restricted_globals = {
             "__builtins__": {
