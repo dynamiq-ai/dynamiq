@@ -73,7 +73,9 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
     )
 
     agent_manager = GraphAgentManager(llm=llm)
-    graph_orchestrator = GraphOrchestrator(manager=agent_manager, initial_state = "task1_task2", final_summarizer=True, context=context_input)
+    graph_orchestrator = GraphOrchestrator(
+        manager=agent_manager, initial_state="task1_task2", final_summarizer=True, context=context_input
+    )
 
     # Task 1
     def task1(_: dict):
@@ -87,7 +89,6 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
 
     graph_orchestrator.add_node("task1_task2", [task1, task2])
     graph_orchestrator.add_edge("task1_task2", END)
-
 
     wf_orchestrator = Workflow(
         flow=Flow(
@@ -107,13 +108,13 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
             {"content": "mocked_response"},
             {"task1": "task 1 result", "task2": "task 2 result"},
         ),
-        (   
+        (
             get_orchestrator_workflow1,
             {"task3": True},
             {"content": "mocked_response"},
             {"task1": "task 1 result", "task2": "task 2 result", "task3": "task 3 result"},
         ),
-        (   
+        (
             get_orchestrator_workflow2,
             {"content": "mocked_response"},
             {"task1": "task 1 result", "task2": "task 2 result"},
