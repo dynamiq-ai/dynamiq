@@ -71,11 +71,11 @@ class Agent(Node):
         "You are a helpful AI assistant designed to assist users with various tasks and queries."
         "Your goal is to provide accurate, helpful, and friendly responses to the best of your abilities."
     )
-    DEFAULT_DATE: ClassVar[str] = datetime.now().strftime("%d %B %Y")
+    DEFAULT_DATE: ClassVar[str] = Field(default_factory=lambda: datetime.now().strftime("%d %B %Y"))
 
     llm: Node = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
-    error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
     name: str = "AI Agent"
@@ -108,8 +108,14 @@ class Agent(Node):
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         return data
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
-        """Initialize components for the manager and agents."""
+    def init_components(self, connection_manager: ConnectionManager | None = None):
+        """
+        Initialize components for the manager and agents.
+
+        Args:
+            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
+        """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.llm.is_postponed_component_init:
             self.llm.init_components(connection_manager)

@@ -21,11 +21,12 @@ class MemoryRetrievalStrategy(Enum):
 class Memory:
     """Manages the storage and retrieval of messages."""
 
-    def __init__(self, search_limit: int = 5, search_filters: dict = None, backend: MemoryBackend = InMemory()):
+    def __init__(self, search_limit: int = 5, search_filters: dict = None, backend: MemoryBackend | None = None):
         """Initializes the Memory with the given search parameters and backend.
 
         If no backend is provided, an InMemory backend is used by default.
         """
+        backend = backend or InMemory()
         if not isinstance(backend, MemoryBackend):
             raise TypeError("backend must be an instance of Backend")
 
@@ -41,7 +42,8 @@ class Memory:
             message = Message(role=role, content=content, metadata=metadata)
             self.backend.add(message)
             logger.debug(
-                f"Memory {self.backend.name}: Added message: {message.role}: {message.content[:min(20, len(message.content))]}..."  # noqa: E501
+                f"Memory {self.backend.name}: "
+                f"Added message: {message.role}: {message.content[:min(20, len(message.content))]}..."
             )
         except Exception as e:
             logger.error(f"Error adding message: {e}")
@@ -64,7 +66,8 @@ class Memory:
             query=query, limit=self.search_limit, filters=filters or self.search_filters
         )
         logger.debug(
-            f"Memory {self.backend.name}: Found {len(search_results)} search results for query: {query}, filters: {filters}"  # noqa: E501
+            f"Memory {self.backend.name}: Found {len(search_results)} search results for query: {query}, "
+            f"filters: {filters}"
         )
         return search_results
 

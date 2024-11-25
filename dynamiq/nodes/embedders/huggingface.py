@@ -52,9 +52,7 @@ class HuggingFaceDocumentEmbedder(ConnectionNode):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"document_embedder": True}
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initializes the components of the HuggingFaceDocumentEmbedder.
 
@@ -64,6 +62,7 @@ class HuggingFaceDocumentEmbedder(ConnectionNode):
             connection_manager (ConnectionManager): The connection manager to use. Defaults to a new
                 ConnectionManager instance.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.document_embedder is None:
             self.document_embedder = HuggingFaceEmbedderComponent(
@@ -141,9 +140,7 @@ class HuggingFaceTextEmbedder(ConnectionNode):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"text_embedder": True}
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the HuggingFaceTextEmbedder.
 
@@ -153,6 +150,7 @@ class HuggingFaceTextEmbedder(ConnectionNode):
             connection_manager (ConnectionManager): The connection manager to use. Defaults to a new
                 ConnectionManager instance.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.text_embedder is None:
             self.text_embedder = HuggingFaceEmbedderComponent(

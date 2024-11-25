@@ -98,15 +98,14 @@ class LLMDocumentRanker(Node):
         data["llm"] = self.llm.to_dict(**kwargs)
         return data
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the document ranker component.
 
         Args:
             connection_manager (ConnectionManager): The connection manager to use. Default is a new instance.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.llm.is_postponed_component_init:
             self.llm.init_components(connection_manager)

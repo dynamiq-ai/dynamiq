@@ -76,7 +76,7 @@ class SummarizerTool(Node):
     )
     llm: Node
     chunk_size: int = Field(default=4000, description="The maximum number of words in each chunk")
-    error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     prompt_template: str = Field(
         default=PROMPT_TEMPLATE_SUMMARIZER,
         description="The prompt template for the summarizer",
@@ -85,13 +85,14 @@ class SummarizerTool(Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[SummarizerInputSchema]] = SummarizerInputSchema
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
+    def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
         Initialize the components of the tool.
 
         Args:
-            connection_manager (ConnectionManager): The connection manager to use for initialization.
+            connection_manager (ConnectionManager, optional): connection manager. Defaults to ConnectionManager.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.llm.is_postponed_component_init:
             self.llm.init_components(connection_manager)

@@ -57,7 +57,7 @@ class MilvusDocumentRetriever(VectorStoreNode):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"document_retriever": True}
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the MilvusDocumentRetriever.
 
@@ -67,6 +67,7 @@ class MilvusDocumentRetriever(VectorStoreNode):
             connection_manager (ConnectionManager): The connection manager to use.
                 Defaults to a new ConnectionManager instance.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.document_retriever is None:
             self.document_retriever = MilvusDocumentRetrieverComponent(
