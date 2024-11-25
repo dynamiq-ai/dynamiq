@@ -158,6 +158,7 @@ def write_topic(context: dict[str, Any]):
                 role="user",
                 content=(
                     f"This is the content of a search on the internet for the paper:\n\n" f"{content}\n\n" f"{task}"
+                    f"Here is section names that have to be present {context.get("section_names")}"
                 ),
             ),
         ]
@@ -217,6 +218,7 @@ def write_paper(context: dict[str, Any]):
     review_instructions = context.get("review_instructions", [])
     task = context.get("task")
     sentences_per_paragraph = context.get("sentences_per_paragraph")
+    number_of_paragraphs = context.get("number_of_paragraphs")
     state = context.get("state")
     draft = context.get("draft")
     plan = context.get("plan")
@@ -248,6 +250,7 @@ def write_paper(context: dict[str, Any]):
                     f"{draft}\n\n"
                     f"Here is my plan, stick to it (use according headings):\n\n"
                     f"{plan}\n\n"
+                    f"Here is number of paragraphs that have to be written for each section {number_of_paragraphs}"
                     f"Keep response in markdown."
                 ),
             ),
