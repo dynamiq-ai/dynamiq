@@ -55,14 +55,14 @@ def test_workflow_with_map_node(inputs, outputs):
         api_key="api_key",
     )
     wf_map_node = get_map_workflow(model, connection)
-    input_data = {"inputs": inputs}
+    input_data = {"input": inputs}
     tracing = TracingCallbackHandler()
     response = wf_map_node.run(input_data=input_data, config=RunnableConfig(callbacks=[tracing]))
 
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=input_data,
-        output=outputs,
+        output={"output": outputs},
     ).to_dict()
 
     expected_output = {wf_map_node.flow.nodes[0].id: expected_result}

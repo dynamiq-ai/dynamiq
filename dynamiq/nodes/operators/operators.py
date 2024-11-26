@@ -239,7 +239,7 @@ class Map(Node):
             Exception: If the input is not a list or if any flow execution fails.
         """
         if isinstance(input_data, dict):
-            input_data = input_data["inputs"]
+            input_data = input_data["input"]
 
         if not isinstance(input_data, list):
             logger.error(f"Map operator {self.id} input is not a list.")
@@ -260,7 +260,7 @@ class Map(Node):
                 logger.error(f"Node under iteration index {index} has failed.")
             output.append(result.output)
 
-        return output
+        return {"output": output}
 
 
 class Pass(Node):
