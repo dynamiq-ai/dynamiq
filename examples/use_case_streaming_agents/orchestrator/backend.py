@@ -1,7 +1,7 @@
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import E2B, ScaleSerp
 from dynamiq.memory import Memory
-from dynamiq.memory.backend.in_memory import InMemory
+from dynamiq.memory.backends.in_memory import InMemory
 from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
 from dynamiq.nodes.agents.react import ReActAgent
