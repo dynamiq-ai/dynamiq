@@ -4,7 +4,7 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Qdrant as QdrantConnection
-from dynamiq.memory.backend.base import MemoryBackend
+from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.prompts import Message
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.storages.vector.qdrant import QdrantVectorStore

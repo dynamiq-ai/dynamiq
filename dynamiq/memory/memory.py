@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from dynamiq.memory.backend import InMemory, MemoryBackend
+from dynamiq.memory.backends import InMemory, MemoryBackend
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
 

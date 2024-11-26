@@ -378,7 +378,7 @@ A simple chatbot that uses the `Memory` module to store and retrieve conversatio
 ```python
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.memory import Memory
-from dynamiq.memory.backend.in_memory import InMemory
+from dynamiq.memory.backends.in_memory import InMemory
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.llms import OpenAI
 
