@@ -7,6 +7,31 @@ from dynamiq.types import Document
 
 
 class BaseEmbedder(BaseModel):
+    """
+    Initializes the Embedder component with given configuration.
+
+    Attributes:
+        connection (Optional[BaseConnection]): The connection to the  API. A new connection
+            is created if none is provided.
+        model (str): The model name to use for embedding.
+        prefix (str): A prefix string to prepend to each document text before embedding.
+        suffix (str): A suffix string to append to each document text after embedding.
+        batch_size (int): The number of documents to encode in a single batch.
+        meta_fields_to_embed (Optional[list[str]]): A list of document meta fields to embed alongside
+            the document text.
+        embedding_separator (str): The separator string used to join document text with meta fields
+            for embedding.
+        truncate(str): truncate embeddings that are too long from start or end, ("NONE"|"START"|"END").
+            Passing "START" will discard the start of the input. "END" will discard the end of the input. In both
+            cases, input is discarded until the remaining input is exactly the maximum input token length
+            for the model. If "NONE" is selected, when the input exceeds the maximum input token length
+            an error will be returned.
+        input_type(str):specifies the type of input you're giving to the model. Supported values are
+            "search_document", "search_query", "classification" and "clustering".
+        dimensions(int):he number of dimensions the resulting output embeddings should have.
+            Only supported in OpenAI/Azure text-embedding-3 and later models.
+
+    """
     model: str
     connection: BaseConnection
     prefix: str = ""
@@ -20,31 +45,6 @@ class BaseEmbedder(BaseModel):
     client: Any | None = None
 
     _embedding: Callable = PrivateAttr()
-    """
-        Initializes the Embedder component with given configuration.
-
-        Attributes:
-            connection (Optional[BaseConnection]): The connection to the  API. A new connection
-                is created if none is provided.
-            model (str): The model name to use for embedding.
-            prefix (str): A prefix string to prepend to each document text before embedding.
-            suffix (str): A suffix string to append to each document text after embedding.
-            batch_size (int): The number of documents to encode in a single batch.
-            meta_fields_to_embed (Optional[list[str]]): A list of document meta fields to embed alongside
-                the document text.
-            embedding_separator (str): The separator string used to join document text with meta fields
-                for embedding.
-            truncate(str): truncate embeddings that are too long from start or end, ("NONE"|"START"|"END").
-                Passing "START" will discard the start of the input. "END" will discard the end of the input. In both
-                cases, input is discarded until the remaining input is exactly the maximum input token length
-                for the model. If "NONE" is selected, when the input exceeds the maximum input token length
-                an error will be returned.
-            input_type(str):specifies the type of input you're giving to the model. Supported values are
-                "search_document", "search_query", "classification" and "clustering".
-            dimensions(int):he number of dimensions the resulting output embeddings should have.
-                Only supported in OpenAI/Azure text-embedding-3 and later models.
-
-    """
 
     def __init__(self, *args, **kwargs):
         # Import in runtime to save memory

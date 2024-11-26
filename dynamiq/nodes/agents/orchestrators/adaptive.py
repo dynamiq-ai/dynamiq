@@ -94,9 +94,7 @@ class AdaptiveOrchestrator(Node):
         self._chat_history = []
         self._run_depends = []
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ) -> None:
+    def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
         Initialize components of the orchestrator.
 
