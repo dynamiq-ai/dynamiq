@@ -9,7 +9,7 @@ from typing import Any, Callable, ClassVar
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError
 
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.memory import Memory
+from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -82,7 +82,7 @@ class Agent(Node):
     role: str | None = None
     max_loops: int = 1
     memory: Memory | None = Field(None, description="Memory node for the agent.")
-    memory_retrieval_strategy: str = "all"  # all, relevant, both
+    memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.ALL
 
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -215,20 +215,23 @@ class Agent(Node):
 
     def _retrieve_memory(self, input_data):
         """
-        Retrieves memory based on the selected strategy: 'relevant', 'all', or 'both'.
+        Retrieves memory based on the selected strategy:
+        - RELEVANT: retrieves relevant memory based on the user input
+        - ALL: retrieves all messages in the memory
+        - BOTH: retrieves both relevant memory and all messages
         """
         user_id = input_data.get("user_id", None)
         filters = {"user_id": user_id} if user_id else None
 
-        if self.memory_retrieval_strategy == "relevant":
+        if self.memory_retrieval_strategy == MemoryRetrievalStrategy.RELEVANT:
             relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
             self._prompt_variables["relevant_memory"] = relevant_memory
 
-        elif self.memory_retrieval_strategy == "all":
+        elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.ALL:
             context = self.memory.get_all_messages_as_string()
             self._prompt_variables["context"] = context
 
-        elif self.memory_retrieval_strategy == "both":
+        elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.BOTH:
             relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
             context = self.memory.get_all_messages_as_string()
             self._prompt_variables["relevant_memory"] = relevant_memory
