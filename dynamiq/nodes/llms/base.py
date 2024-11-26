@@ -67,7 +67,7 @@ class BaseLLM(ConnectionNode):
     temperature: float = 0.1
     max_tokens: int = 1000
     stop: list[str] = None
-    error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     top_p: float | None = None
     seed: int | None = None
     presence_penalty: float | None = None

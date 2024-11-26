@@ -3,16 +3,16 @@ from dynamiq.connections import AWS as BedrockConnection
 
 
 class BedrockEmbedder(BaseEmbedder):
+    """
+    Initializes the BedrockEmbedder component with given configuration.
+
+    Attributes:
+        connection (BedrockConnection): The connection to the  Bedrock API. A new connection
+            is created if none is provided.
+        model (str): The model name to use for embedding. Defaults to "amazon.titan-embed-text-v1".
+    """
     connection: BedrockConnection
     model: str = "amazon.titan-embed-text-v1"
-    """
-        Initializes the BedrockEmbedder component with given configuration.
-
-        Attributes:
-            connection (BedrockConnection): The connection to the  Bedrock API. A new connection
-                is created if none is provided.
-            model (str): The model name to use for embedding. Defaults to "amazon.titan-embed-text-v1".
-    """
 
     def __init__(self, **kwargs):
         if kwargs.get("client") is None and kwargs.get("connection") is None:

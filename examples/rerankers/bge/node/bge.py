@@ -33,9 +33,7 @@ class BGEDocumentRanker(Node):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"ranker": True}
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ) -> None:
+    def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
         Initialize the document ranker component.
 
@@ -43,6 +41,7 @@ class BGEDocumentRanker(Node):
             connection_manager (ConnectionManager): The connection manager to use, default is a new
                 instance.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.ranker is None:
             self.ranker = DocumentRankerComponent(

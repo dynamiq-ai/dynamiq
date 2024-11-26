@@ -33,7 +33,7 @@ class PyPDFConverter(Node):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"file_converter": True}
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the PyPDFConverter.
 
@@ -41,6 +41,7 @@ class PyPDFConverter(Node):
             connection_manager (ConnectionManager, optional): The connection manager to use.
                 Defaults to a new ConnectionManager instance.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.file_converter is None:
             self.file_converter = PyPDFFileConverterComponent(

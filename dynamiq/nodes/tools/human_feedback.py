@@ -76,8 +76,9 @@ class HumanFeedbackTool(Node):
     name: str = "Human Feedback Tool"
     description: str = "Tool to gather user information. Use it to check actual information or get additional input."
     input_method: InputMethod | InputMethodCallable = InputMethod.console
-    model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def input_method_console(self, prompt: str) -> str:
         """

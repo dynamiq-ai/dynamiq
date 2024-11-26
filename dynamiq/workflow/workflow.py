@@ -24,7 +24,7 @@ class Workflow(BaseModel, Runnable):
         version (str | None): Version of the workflow.
     """
     id: str = Field(default_factory=generate_uuid)
-    flow: BaseFlow = Flow()
+    flow: BaseFlow = Field(default_factory=Flow)
     version: str | None = None
 
     def __enter__(self):
