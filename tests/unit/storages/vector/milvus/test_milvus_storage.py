@@ -127,9 +127,9 @@ def test_filter_documents_raises_value_error(milvus_vector_store):
         milvus_vector_store.filter_documents(filters=None)
 
 
-def test_get_result_to_documents():
+def test_get_result_to_documents(milvus_vector_store):
     result = [{"id": "1", "content": "Document 1", "vector": [0.1, 0.2], "metadata": {"type": "test"}}]
-    documents = MilvusVectorStore._get_result_to_documents(result)
+    documents = milvus_vector_store._get_result_to_documents(result)
     assert len(documents) == 1
     assert documents[0].id == "1"
     assert documents[0].content == "Document 1"

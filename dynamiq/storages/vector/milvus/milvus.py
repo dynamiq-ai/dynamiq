@@ -290,7 +290,6 @@ class MilvusVectorStore:
             filter=filter_expression,
             output_fields=["*"],
         )
-
         return self._get_result_to_documents(result, content_key=content_key, embedding_key=embedding_key)
 
     # @staticmethod
