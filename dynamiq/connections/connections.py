@@ -58,6 +58,7 @@ class ConnectionType(str, enum.Enum):
     Milvus = "Milvus"
     Perplexity = "Perplexity"
     DeepSeek = "DeepSeek"
+    Exa = "Exa"
 
 
 class HTTPMethod(str, enum.Enum):
@@ -929,3 +930,32 @@ class DeepSeek(BaseApiKeyConnection):
 
     def connect(self):
         pass
+
+
+class Exa(HttpApiKey):
+    """
+    Represents a connection to the Exa AI Search API.
+
+    Attributes:
+        type (Literal[ConnectionType.Exa]): The type of connection, which is always 'Exa'.
+        url (str): The URL of the Exa API.
+        api_key (str): The API key for authentication, fetched from the environment variable 'EXA_API_KEY'.
+        method (Literal[HTTPMethod.POST]): HTTP method used for the request, defaults to HTTPMethod.POST.
+        headers (dict[str, Any]): HTTP headers for the request.
+    """
+
+    type: Literal[ConnectionType.Exa] = ConnectionType.Exa
+    url: str = Field(default="https://api.exa.ai/search")
+    api_key: str = Field(default_factory=partial(get_env_var, "EXA_API_KEY"))
+    method: Literal[HTTPMethod.POST] = HTTPMethod.POST
+    headers: dict[str, Any] = Field(default_factory=dict)
+
+    def connect(self):
+        """
+        Configures the request headers with the API key for authentication.
+
+        Returns:
+            requests: The requests module for making HTTP requests.
+        """
+        self.headers.update({"x-api-key": self.api_key, "Content-Type": "application/json"})
+        return super().connect()
