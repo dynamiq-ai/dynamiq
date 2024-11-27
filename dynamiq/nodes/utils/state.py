@@ -2,7 +2,8 @@ import copy
 import json
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
@@ -39,7 +40,15 @@ class State(Node):
     next_states: list[str] = []
     tasks: list[Node] = []
     condition: Python | FunctionTool = None
-    manager: GraphAgentManager
+    manager: GraphAgentManager | None = None
+
+    @model_validator(mode="after")
+    def validate_manager(self):
+        for task in self.tasks:
+            if isinstance(task, Agent) and not self.manager:
+                raise ValueError("Error: Provide manager to state to execute agent tasks.")
+
+        return self
 
     @property
     def to_dict_exclude_params(self):
@@ -52,7 +61,10 @@ class State(Node):
             dict: A dictionary representation of the instance.
         """
         data = super().to_dict(**kwargs)
-        data["manager"] = self.manager.to_dict(**kwargs)
+        if self.manager:
+            data["manager"] = self.manager.to_dict(**kwargs)
+        else:
+            data["manager"] = None
         data["tasks"] = [task.to_dict(**kwargs) for task in self.tasks]
         return data
 

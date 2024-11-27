@@ -66,10 +66,11 @@ class GraphOrchestrator(Orchestrator):
         super().__init__(**kwargs)
         self.states.extend(
             [
-                State(id=START, manager=self.manager, description="Initial state"),
-                State(id=END, manager=self.manager, description="Final state"),
+                State(id=START, description="Initial state"),
+                State(id=END, description="Final state"),
             ]
         )
+
         self._state_by_id = {state.id: state for state in self.states}
 
     @property
@@ -103,15 +104,18 @@ class GraphOrchestrator(Orchestrator):
 
         filtered_tasks = []
 
+        has_agent = False
         for task in tasks:
             if isinstance(task, Node):
+                if isinstance(task, Agent):
+                    has_agent = True
                 filtered_tasks.append(task)
             elif isinstance(task, Callable):
                 filtered_tasks.append(function_tool(task)())
             else:
                 raise OrchestratorError("Error: Task must be either a Node or a Callable.")
 
-        state = State(id=name, name=name, manager=self.manager, tasks=filtered_tasks)
+        state = State(id=name, name=name, manager=self.manager if has_agent else None, tasks=filtered_tasks)
         self.states.append(state)
         self._state_by_id[state.id] = state
 
