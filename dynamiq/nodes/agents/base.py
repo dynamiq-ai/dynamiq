@@ -9,7 +9,7 @@ from typing import Any, Callable, ClassVar
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError
 
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.memory import Memory
+from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -71,18 +71,17 @@ class Agent(Node):
         "You are a helpful AI assistant designed to assist users with various tasks and queries."
         "Your goal is to provide accurate, helpful, and friendly responses to the best of your abilities."
     )
-    DEFAULT_DATE: ClassVar[str] = datetime.now().strftime("%d %B %Y")
 
     llm: Node = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
-    error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
     name: str = "AI Agent"
     role: str | None = None
     max_loops: int = 1
     memory: Memory | None = Field(None, description="Memory node for the agent.")
-    memory_retrieval_strategy: str = "all"  # all, relevant, both
+    memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.ALL
 
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -108,8 +107,14 @@ class Agent(Node):
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         return data
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
-        """Initialize components for the manager and agents."""
+    def init_components(self, connection_manager: ConnectionManager | None = None):
+        """
+        Initialize components for the manager and agents.
+
+        Args:
+            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
+        """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.llm.is_postponed_component_init:
             self.llm.init_components(connection_manager)
@@ -130,7 +135,7 @@ class Agent(Node):
         self._prompt_blocks = {
             "introduction": self.DEFAULT_INTRODUCTION,
             "role": self.role or "",
-            "date": self.DEFAULT_DATE,
+            "date": datetime.now().strftime("%d %B %Y"),
             "tools": "{tool_description}",
             "files": "{file_description}",
             "instructions": "",
@@ -215,20 +220,23 @@ class Agent(Node):
 
     def _retrieve_memory(self, input_data):
         """
-        Retrieves memory based on the selected strategy: 'relevant', 'all', or 'both'.
+        Retrieves memory based on the selected strategy:
+        - RELEVANT: retrieves relevant memory based on the user input
+        - ALL: retrieves all messages in the memory
+        - BOTH: retrieves both relevant memory and all messages
         """
         user_id = input_data.get("user_id", None)
         filters = {"user_id": user_id} if user_id else None
 
-        if self.memory_retrieval_strategy == "relevant":
+        if self.memory_retrieval_strategy == MemoryRetrievalStrategy.RELEVANT:
             relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
             self._prompt_variables["relevant_memory"] = relevant_memory
 
-        elif self.memory_retrieval_strategy == "all":
+        elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.ALL:
             context = self.memory.get_all_messages_as_string()
             self._prompt_variables["context"] = context
 
-        elif self.memory_retrieval_strategy == "both":
+        elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.BOTH:
             relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
             context = self.memory.get_all_messages_as_string()
             self._prompt_variables["relevant_memory"] = relevant_memory

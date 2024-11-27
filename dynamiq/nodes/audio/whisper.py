@@ -2,6 +2,8 @@ import io
 from typing import Any, Literal
 from urllib.parse import urljoin
 
+from pydantic import Field
+
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import Whisper as WhisperConnection
 from dynamiq.nodes import ErrorHandling
@@ -30,7 +32,7 @@ class WhisperSTT(ConnectionNode):
     name: str = "Whisper"
     model: str
     connection: WhisperConnection | OpenAIConnection | None = None
-    error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     default_file_name: str = DEFAULT_FILE_NAME
     default_content_type: str = DEFAULT_CONTENT_TYPE
 

@@ -10,6 +10,11 @@ class OpenAIEmbedder(BaseEmbedder):
     with instances of the Document class from the dynamiq package. The embeddings generated can be used for tasks
     such as similarity search, clustering, and more.
 
+    Attributes:
+        connection (OpenAIConnection): The connection to the  OpenAI API. A new connection
+            is created if none is provided.
+        model (str): The model name to use for embedding. Defaults to "text-embedding-3-small"
+
 
     Example:
         >>> from dynamiq.types import Document
@@ -30,14 +35,6 @@ class OpenAIEmbedder(BaseEmbedder):
 
     connection: OpenAIConnection | None = None
     model: str = "text-embedding-3-small"
-    """
-        Initializes the OpenAIEmbedder component with given configuration.
-
-        Attributes:
-            connection (OpenAIConnection): The connection to the  OpenAI API. A new connection
-                is created if none is provided.
-            model (str): The model name to use for embedding. Defaults to "text-embedding-3-small"
-    """
 
     def __init__(self, **kwargs):
         if kwargs.get("client") is None and kwargs.get("connection") is None:
