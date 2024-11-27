@@ -3,7 +3,7 @@ connections:
     type: dynamiq.connections.OpenAI
 
 nodes:
-  literature-orchestrator:
+  research-orchestrator:
     type: dynamiq.nodes.agents.orchestrators.GraphOrchestrator
     manager:
       id: graph-manager-agent
@@ -15,11 +15,16 @@ nodes:
         model: gpt-3.5-turbo
     initial_state: researcher
     states:
-      # type: dict
-      researcher:
-          id: researcher
+        - id: researcher
           type: dynamiq.nodes.agents.orchestrators.graph.State
-
+          manager:
+            id: graph-manager-agent
+            type: dynamiq.nodes.agents.orchestrators.GraphAgentManager
+            llm:
+              id: manager-llm
+              type: dynamiq.nodes.llms.OpenAI
+              connection: openai-conn
+              model: gpt-3.5-turbo
           tasks:
           - id: agent-researcher
             type: dynamiq.nodes.agents.ReActAgent
@@ -30,7 +35,7 @@ nodes:
               connection: openai-conn
               model: gpt-3.5-turbo
 
-          - id: rease
+          - id: agent-researcher2
             type: dynamiq.nodes.agents.ReActAgent
             role: Research on relevant information
             llm:
@@ -40,28 +45,35 @@ nodes:
               model: gpt-3.5-turbo
           next_states:
             - "writer"
-      writer:
-        id: writer
-        type: dynamiq.nodes.agents.orchestrators.graph.State
 
-        tasks:
-        - id: agent-researcher
-          type: dynamiq.nodes.agents.ReActAgent
-          role: Form results in short report
-          llm:
-            id: agent-researcher-llm
-            type: dynamiq.nodes.llms.OpenAI
-            connection: openai-conn
-            model: gpt-3.5-turbo
+        - id: writer
+          type: dynamiq.nodes.agents.orchestrators.graph.State
+          manager:
+            id: graph-manager-agent
+            type: dynamiq.nodes.agents.orchestrators.GraphAgentManager
+            llm:
+              id: manager-llm
+              type: dynamiq.nodes.llms.OpenAI
+              connection: openai-conn
+              model: gpt-3.5-turbo
+          tasks:
+          - id: agent-researcher
+            type: dynamiq.nodes.agents.ReActAgent
+            role: Form results in short report
+            llm:
+              id: agent-researcher-llm
+              type: dynamiq.nodes.llms.OpenAI
+              connection: openai-conn
+              model: gpt-3.5-turbo
 
-        next_states:
-          - "END"
+          next_states:
+            - "END"
 
 flows:
   agent-flow:
     name: Agent Flow
     nodes:
-      - literature-orchestrator
+      - research-orchestrator
 
 workflows:
   agent-workflow:

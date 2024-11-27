@@ -53,9 +53,7 @@ def get_graph_by_traces(traces: list[Run]) -> Graph:
         for node_dep in node_data.get("depends", []):
             edges.append(
                 GraphEdge(
-                    source=(
-                        node_dep["run_id"] if node_dep["run_id"] else traces_ids_by_node_id[node_dep["node"]["id"]][-1]
-                    ),
+                    source=traces_ids_by_node_id[node_dep["node"]["id"]][-1],
                     target=trace_id,
                     type=GraphEdgeType.DEPENDS,
                 )
@@ -65,19 +63,15 @@ def get_graph_by_traces(traces: list[Run]) -> Graph:
             for run_node_dep in run_node_depends:
                 edges.append(
                     GraphEdge(
-                        source=(
-                            run_node_dep["run_id"]
-                            if run_node_dep["run_id"]
-                            else traces_ids_by_node_id[run_node_dep["node"]["id"]][-1]
-                        ),
+                        source=traces_ids_by_node_id[run_node_dep["node"]["id"]][-1],
                         target=trace_id,
                         type=GraphEdgeType.DEPENDS,
                     )
                 )
-        elif node_by_trace_id.get(str(trace.parent_run_id)):
+        elif parent_node := node_by_trace_id.get(str(trace.parent_run_id)):
             edges.append(
                 GraphEdge(
-                    source=str(trace.parent_run_id),
+                    source=traces_ids_by_node_id[parent_node["id"]][-1],
                     target=trace_id,
                     type=GraphEdgeType.PARENT,
                 )
@@ -162,7 +156,7 @@ def draw_graph_orchestrator_graph_in_png(
 ) -> None:
     from examples.graph_like.code_assistant import run_orchestrator
 
-    _, traces = run_orchestrator(request="Print number from 1 to 10.")
+    _, traces = run_orchestrator(request="Write 100 lines of code.")
 
     print(traces)
     graph = get_graph_by_traces([run for _, run in traces.items()])
@@ -238,4 +232,12 @@ def draw_adaptive_coding_react_agent_graph_in_png(
 
 
 if __name__ == "__main__":
-    draw_simple_graph_orchestrator_graph_in_png()
+    # draw_simple_agent_graph_in_png()
+    # draw_simple_agent_with_memory_graph_in_png()
+    # draw_reflexion_agent_graph_in_png()
+    # draw_react_agent_graph_in_png()
+    # draw_job_posting_linear_agent_graph_in_png()
+    # draw_literature_overview_adaptive_agent_graph_in_png()
+    # draw_adaptive_coding_react_agent_graph_in_png()
+    # draw_simple_graph_orchestrator_graph_in_png()
+    draw_graph_orchestrator_graph_in_png()

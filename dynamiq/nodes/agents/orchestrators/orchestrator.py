@@ -26,16 +26,14 @@ class Orchestrator(Node, ABC):
 
     Attributes:
         manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
-        agents (List[BaseAgent]): List of specialized agents available for task execution.
         objective (Optional[str]): The main objective of the orchestration.
     """
 
     name: str | None = "Orchestrator"
     group: NodeGroup = NodeGroup.AGENTS
-    manager: AgentManager
-    _chat_history: list = []
     input_schema: ClassVar[type[OrchestratorInputSchema]] = OrchestratorInputSchema
-    input_task: str = ""
+    manager: AgentManager
+    objective: str = ""
 
     def __init__(self, **kwargs):
         """
@@ -123,9 +121,9 @@ class Orchestrator(Node, ABC):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        input_task = input_data.input or self.input_task
+        input_task = input_data.input or self.objective
 
-        logger.debug(f"LinearOrchestrator {self.id}: starting the flow with input_task:\n```{self.input_task}```")
+        logger.debug(f"LinearOrchestrator {self.id}: starting the flow with input_task:\n```{input_task}```")
 
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)

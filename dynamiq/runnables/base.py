@@ -64,7 +64,6 @@ class RunnableResult(BaseModel):
     status: RunnableStatus
     input: Any = None
     output: Any = None
-    run_id: str = ""
 
     def to_depend_dict(
         self,
@@ -120,7 +119,6 @@ class RunnableResult(BaseModel):
             "status": self.status.value,
             "input": format_value(self.input, skip_format_types, force_format_types),
             "output": format_value(self.output, skip_format_types, force_format_types),
-            "run_id": self.run_id,
         }
 
 

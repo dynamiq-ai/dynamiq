@@ -395,7 +395,7 @@ class WorkflowYAMLLoader:
                     init_components=init_components,
                 )[param_id]
 
-            elif isinstance(param_data, list):
+            if isinstance(param_data, list):
                 updated_items = []
                 for item in param_data:
                     if isinstance(item, dict) and (item_id := item.get("id")):
@@ -414,23 +414,6 @@ class WorkflowYAMLLoader:
                     else:
                         updated_items.append(item)
                 updated_node_init_data[param_name] = updated_items
-
-            elif isinstance(param_data, dict):
-                updated_items = {}
-                for name, item in param_data.items():
-                    if isinstance(item, dict) and (item_id := item.get("id")):
-                        updated_items[name] = cls.get_updated_node_init_data_with_initialized_nodes(
-                            node_init_data={item_id: item},
-                            nodes=nodes,
-                            flows=flows,
-                            connections=connections,
-                            prompts=prompts,
-                            registry=registry,
-                            connection_manager=connection_manager,
-                            init_components=init_components,
-                        )[item_id]
-
-                        updated_node_init_data[param_name] = updated_items
 
         return updated_node_init_data
 

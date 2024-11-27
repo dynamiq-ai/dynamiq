@@ -49,7 +49,7 @@ class AdaptiveOrchestrator(Orchestrator):
     Attributes:
         manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
         agents (List[BaseAgent]): List of specialized agents available for task execution.
-        input_tasks (Optional[str]): The main objective of the orchestration.
+        objective (Optional[str]): The main objective of the orchestration.
         max_loops (Optional[int]): Maximum number of actions.
     """
 
@@ -73,10 +73,6 @@ class AdaptiveOrchestrator(Orchestrator):
         data["manager"] = self.manager.to_dict(**kwargs)
         data["agents"] = [agent.to_dict(**kwargs) for agent in self.agents]
         return data
-
-    def reset_run_state(self):
-        self._chat_history = []
-        self._run_depends = []
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
         """

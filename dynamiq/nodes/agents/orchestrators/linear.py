@@ -40,10 +40,10 @@ class LinearOrchestrator(Orchestrator):
     Attributes:
         manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
         agents (List[BaseAgent]): List of specialized agents available for task execution.
-        input_task (str | None): Initial task input.
-        use_summarizer (bool): Indicates if a final summarizer is used.
-        summarize_all_answers (bool): Indicates whether to summarize answers to all tasks or use only last one.\
-              Will only be applied if use_summarizer is set to True.
+        objective (Optional[str]): The main objective of the orchestration.
+        use_summarizer (Optional[bool]): Indicates if a final summarizer is used.
+        summarize_all_answers (Optional[bool]): Indicates whether to summarize answers to all tasks
+             or use only last one. Will only be applied if use_summarizer is set to True.
 
     """
 
@@ -77,6 +77,7 @@ class LinearOrchestrator(Orchestrator):
     def reset_run_state(self):
         self._results = {}
         self._run_depends = []
+        self._chat_history = []
 
     def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
         """Initialize components for the manager and agents."""
