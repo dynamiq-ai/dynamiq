@@ -79,8 +79,14 @@ class LinearOrchestrator(Orchestrator):
         self._run_depends = []
         self._chat_history = []
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
-        """Initialize components for the manager and agents."""
+    def init_components(self, connection_manager: ConnectionManager | None = None):
+        """
+        Initialize components for the manager and agents.
+
+        Args:
+            connection_manager (Optional[ConnectionManager]): The connection manager. Defaults to ConnectionManager.
+        """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.manager.is_postponed_component_init:
             self.manager.init_components(connection_manager)

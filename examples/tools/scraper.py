@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from dynamiq.connections import ZenRows
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
@@ -25,7 +25,7 @@ class ScraperSummarizerTool(ZenRowsTool):
     )
     connection: ZenRows
     llm: Node
-    error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     chunk_size: int = 8000
     prompt: str = PROMPT_TEMPLATE_SUMMARIZER_LITE
 

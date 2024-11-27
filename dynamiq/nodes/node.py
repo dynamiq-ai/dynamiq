@@ -198,12 +198,12 @@ class Node(BaseModel, Runnable, ABC):
     name: str | None = None
     description: str | None = None
     group: NodeGroup
-    error_handling: ErrorHandling = ErrorHandling()
-    input_transformer: InputTransformer = InputTransformer()
+    error_handling: ErrorHandling = Field(default_factory=ErrorHandling)
+    input_transformer: InputTransformer = Field(default_factory=InputTransformer)
     input_mapping: dict[str, Any] = {}
-    output_transformer: OutputTransformer = OutputTransformer()
-    caching: CachingConfig = CachingConfig()
-    streaming: StreamingConfig = StreamingConfig()
+    output_transformer: OutputTransformer = Field(default_factory=OutputTransformer)
+    caching: CachingConfig = Field(default_factory=CachingConfig)
+    streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     depends: list[NodeDependency] = []
     metadata: NodeMetadata | None = None
 
@@ -389,15 +389,12 @@ class Node(BaseModel, Runnable, ABC):
 
         return inputs
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize node components.
 
         Args:
-            connection_manager (ConnectionManager, optional): Connection manager instance.
-                Defaults to ConnectionManager().
+            connection_manager (ConnectionManager, optional): The connection manager.
         """
         self.is_postponed_component_init = False
 
@@ -972,15 +969,14 @@ class ConnectionNode(Node, ABC):
             raise ValueError("'connection' or 'client' should be specified")
         return self
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize components for the node.
 
         Args:
-            connection_manager (ConnectionManager): The connection manager to use.
+            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.client is None:
             self.client = connection_manager.get_connection_client(
@@ -1020,15 +1016,14 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
 
         return vector_store
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize components for the node.
 
         Args:
-            connection_manager (ConnectionManager): The connection manager to use.
+            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
         """
+        connection_manager = connection_manager or ConnectionManager()
         # Use vector_store client if it is already initialized
         if self.vector_store:
             self.client = self.vector_store.client

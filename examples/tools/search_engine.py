@@ -60,15 +60,14 @@ class SearchEngineTool(Node):
         )
         return data
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the tool.
 
         Args:
             connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager().
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if (
             self.search_tool is not None

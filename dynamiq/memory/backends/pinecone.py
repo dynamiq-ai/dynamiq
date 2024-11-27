@@ -2,7 +2,7 @@ import uuid
 
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Pinecone as PineconeConnection
-from dynamiq.memory.backend.base import MemoryBackend
+from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.prompts import Message
 from dynamiq.storages.vector.pinecone import PineconeVectorStore
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType

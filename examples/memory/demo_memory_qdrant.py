@@ -1,6 +1,6 @@
 from dynamiq.components.embedders.openai import OpenAIEmbedder
 from dynamiq.connections import Qdrant as QdrantConnection
-from dynamiq.memory.backend.qdrant import Qdrant
+from dynamiq.memory.backends.qdrant import Qdrant
 from dynamiq.memory.memory import Memory
 from dynamiq.prompts import MessageRole
 

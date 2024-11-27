@@ -3,6 +3,8 @@ import json
 from typing import Any, Literal
 from urllib.parse import urljoin
 
+from pydantic import Field
+
 from dynamiq.connections import ElevenLabs as ElevenLabsConnection
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
@@ -70,7 +72,7 @@ class ElevenLabsTTS(ConnectionNode):
     name: str = "ElevenLabsTTS"
     voice_id: Voices | str | None = Voices.Rachel
     connection: ElevenLabsConnection | None = None
-    error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     model: str = "eleven_monolingual_v1"
     stability: float = 0.5
     similarity_boost: float = 0.5
@@ -153,7 +155,7 @@ class ElevenLabsSTS(ConnectionNode):
     name: str = "ElevenLabsSTS"
     voice_id: Voices | str | None = Voices.Rachel
     connection: ElevenLabsConnection | None = None
-    error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     model: str = "eleven_english_sts_v2"
     stability: float = 0.5
     similarity_boost: float = 0.5

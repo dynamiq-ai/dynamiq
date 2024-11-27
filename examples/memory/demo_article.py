@@ -1,7 +1,7 @@
 from dynamiq.components.embedders.openai import OpenAIEmbedder
 from dynamiq.connections import Qdrant as QdrantConnection
 from dynamiq.memory import Memory
-from dynamiq.memory.backend import Qdrant
+from dynamiq.memory.backends import Qdrant
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.prompts import MessageRole
 from examples.llm_setup import setup_llm

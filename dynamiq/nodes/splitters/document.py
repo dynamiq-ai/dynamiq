@@ -45,15 +45,14 @@ class DocumentSplitter(Node):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"document_splitter": True}
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ) -> None:
+    def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """Initializes the components of the DocumentSplitter.
 
         Args:
             connection_manager (ConnectionManager, optional): The connection manager to use.
                 Defaults to ConnectionManager().
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.document_splitter is None:
             self.document_splitter = DocumentSplitterComponent(

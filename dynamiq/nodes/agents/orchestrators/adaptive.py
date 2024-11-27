@@ -74,12 +74,16 @@ class AdaptiveOrchestrator(Orchestrator):
         data["agents"] = [agent.to_dict(**kwargs) for agent in self.agents]
         return data
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
+    def reset_run_state(self):
+        self._chat_history = []
+        self._run_depends = []
+
+    def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
         Initialize components of the orchestrator.
 
         Args:
-            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
+            connection_manager (Optional[ConnectionManager]): The connection manager. Defaults to ConnectionManager.
         """
         super().init_components(connection_manager)
         if self.manager.is_postponed_component_init:
