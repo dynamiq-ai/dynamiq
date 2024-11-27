@@ -1,6 +1,5 @@
 import copy
 import json
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
@@ -32,7 +31,7 @@ class State(Node):
         condition (Python | FunctionTool): Condition that determines next state to execute.
         manager (GraphAgentManager): The managing agent responsible for overseeing state execution.
     """
-    
+
     name: str = "State"
     group: NodeGroup = NodeGroup.UTILS
     input_schema: ClassVar[type[StateInputSchema]] = StateInputSchema
@@ -102,9 +101,16 @@ class State(Node):
             if task.is_postponed_component_init:
                 task.init_components(connection_manager)
 
-    def _submit_task(self, task: Node, global_context: dict[str, Any], chat_history: list[dict[str, str]], config: RunnableConfig, **kwargs) -> tuple[str, dict[str, Any]]:
-        """ Executes single task.
-    
+    def _submit_task(
+        self,
+        task: Node,
+        global_context: dict[str, Any],
+        chat_history: list[dict[str, str]],
+        config: RunnableConfig,
+        **kwargs,
+    ) -> tuple[str, dict[str, Any]]:
+        """Executes single task.
+
         Args:
             task (Node): Task to be executed.
             global_context (dict[str, Any]): Current context of the execution.
@@ -224,7 +230,9 @@ class State(Node):
 
             for task in self.tasks:
 
-                result, context = self._submit_task(task, copy.deepcopy(global_context), copy.deepcopy(chat_history), config=config, **kwargs)
+                result, context = self._submit_task(
+                    task, copy.deepcopy(global_context), copy.deepcopy(chat_history), config=config, **kwargs
+                )
 
                 chat_history.append(
                     {
@@ -237,4 +245,3 @@ class State(Node):
             global_context = global_context | self.merge_contexts(contexts)
 
         return {"context": global_context, "chat_history": chat_history}
-
