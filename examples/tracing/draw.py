@@ -158,7 +158,6 @@ def draw_graph_orchestrator_graph_in_png(
 
     _, traces = run_orchestrator(request="Write 100 lines of code.")
 
-    print(traces)
     graph = get_graph_by_traces([run for _, run in traces.items()])
     draw_graph_in_png(graph, output_path)
 
@@ -182,7 +181,6 @@ def draw_react_agent_graph_in_png(
 
     _, traces = run_workflow()
 
-    print(traces)
     graph = get_graph_by_traces([run for _, run in traces.items()])
     draw_graph_in_png(graph, output_path)
 
@@ -232,12 +230,12 @@ def draw_adaptive_coding_react_agent_graph_in_png(
 
 
 if __name__ == "__main__":
-    # draw_simple_agent_graph_in_png()
-    # draw_simple_agent_with_memory_graph_in_png()
-    # draw_reflexion_agent_graph_in_png()
-    # draw_react_agent_graph_in_png()
-    # draw_job_posting_linear_agent_graph_in_png()
-    # draw_literature_overview_adaptive_agent_graph_in_png()
-    # draw_adaptive_coding_react_agent_graph_in_png()
-    # draw_simple_graph_orchestrator_graph_in_png()
+    draw_simple_agent_graph_in_png()
+    draw_simple_agent_with_memory_graph_in_png()
+    draw_reflexion_agent_graph_in_png()
+    draw_react_agent_graph_in_png()
+    draw_job_posting_linear_agent_graph_in_png()
+    draw_literature_overview_adaptive_agent_graph_in_png()
+    draw_adaptive_coding_react_agent_graph_in_png()
+    draw_simple_graph_orchestrator_graph_in_png()
     draw_graph_orchestrator_graph_in_png()
