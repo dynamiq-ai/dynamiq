@@ -25,6 +25,8 @@ class MilvusVectorStore:
         connection: Milvus | None = None,
         client: Optional["MilvusClient"] = None,
         index_name: str = "default",
+        content_key: str = "content",
+        embedding_key: str = "embedding",
         metric_type: str = "COSINE",
         index_type: str = "AUTOINDEX",
         dimension: int = 1536,
@@ -37,6 +39,8 @@ class MilvusVectorStore:
         self.index_name = index_name
         self.metric_type = metric_type
         self.index_type = index_type
+        self.content_key = content_key
+        self.embedding_key = embedding_key
         self.dimension = dimension
         self.create_if_not_exist = create_if_not_exist
         self.schema = self.client.create_schema(
@@ -44,12 +48,14 @@ class MilvusVectorStore:
             enable_dynamic_field=True,
         )
         self.schema.add_field(field_name="id", datatype=DataType.VARCHAR, is_primary=True, max_length=65_535)
-        self.schema.add_field(field_name="content", datatype=DataType.VARCHAR, max_length=65_535)
-        self.schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dim=self.dimension)
+        self.schema.add_field(field_name=self.content_key, datatype=DataType.VARCHAR, max_length=65_535)
+        self.schema.add_field(field_name=self.embedding_key, datatype=DataType.FLOAT_VECTOR, dim=self.dimension)
 
         self.index_params = self.client.prepare_index_params()
         self.index_params.add_index(field_name="id")
-        self.index_params.add_index(field_name="vector", index_type=self.index_type, metric_type=self.metric_type)
+        self.index_params.add_index(
+            field_name=self.embedding_key, index_type=self.index_type, metric_type=self.metric_type
+        )
 
         if not self.client.has_collection(self.index_name):
             if self.create_if_not_exist:
@@ -75,13 +81,17 @@ class MilvusVectorStore:
         """
         return self.client.get_collection_stats(self.index_name)["row_count"]
 
-    def write_documents(self, documents: list[Document]) -> int:
+    def write_documents(
+        self, documents: list[Document], content_key: str | None = None, embedding_key: str | None = None
+    ) -> int:
         """
         Write (or overwrite) documents into the Milvus store.
 
         This method processes a list of Document objects and writes them into the vector store.
 
         Args:
+            content_key:
+            embedding_key:
             documents (List[Document]): A list of Document objects to be written into the document store.
 
         Raises:
@@ -91,15 +101,16 @@ class MilvusVectorStore:
             int: The number of documents successfully written to the document store.
         """
         data_to_upsert = []
-
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
         for doc in documents:
             if not isinstance(doc, Document):
                 raise ValueError("All items in 'documents' must be of type Document.")
 
             document_data = {
                 "id": doc.id,
-                "vector": doc.embedding,
-                "content": doc.content,
+                embedding_key: doc.embedding,
+                content_key: doc.content,
             }
 
             if doc.metadata:
@@ -164,11 +175,15 @@ class MilvusVectorStore:
         filters = create_file_id_filter(file_id)
         self.delete_documents_by_filters(filters)
 
-    def list_documents(self, limit: int = 1000) -> list[Document]:
+    def list_documents(
+        self, limit: int = 1000, content_key: str | None = None, embedding_key: str | None = None
+    ) -> list[Document]:
         """
         List all documents in the collection up to a specified limit.
 
         Args:
+            content_key:
+            embedding_key:
             limit (int): Maximum number of documents to retrieve. Defaults to 1000.
 
         Returns:
@@ -177,21 +192,24 @@ class MilvusVectorStore:
         if not self.client.has_collection(self.index_name):
             raise ValueError(f"Collection '{self.index_name}' does not exist.")
 
-        collection_info = self.client.describe_collection(collection_name=self.index_name)
+        result = self.client.query(collection_name=self.index_name, filter="", output_fields=["*"], limit=limit)
 
-        output_fields = [field["name"] for field in collection_info["fields"]]
-
-        result = self.client.query(collection_name=self.index_name, filter="", output_fields=output_fields, limit=limit)
-
-        return self._get_result_to_documents(result)
+        return self._get_result_to_documents(result, content_key=content_key, embedding_key=embedding_key)
 
     def search_embeddings(
-        self, query_embeddings: list[list[float]], top_k: int, filters: dict[str, Any] | None = None
+        self,
+        query_embeddings: list[list[float]],
+        top_k: int,
+        filters: dict[str, Any] | None = None,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
     ) -> list[Document]:
         """
         Perform vector search on the stored documents using query embeddings.
 
         Args:
+            embedding_key:
+            content_key:
             query_embeddings (list[list[float]]): A list of embeddings to use as queries.
             top_k (int): The maximum number of documents to retrieve.
             filters (dict[str, Any] | None): A dictionary of filters to apply to the search. Defaults to None.
@@ -212,10 +230,12 @@ class MilvusVectorStore:
             search_params=search_params,
         )
 
-        return self._convert_query_result_to_documents(results[0])
+        return self._convert_query_result_to_documents(results[0], content_key=content_key, embedding_key=embedding_key)
 
-    @staticmethod
-    def _convert_query_result_to_documents(result: list[dict[str, Any]]) -> list[Document]:
+    # @staticmethod
+    def _convert_query_result_to_documents(
+        self, result: list[dict[str, Any]], content_key: str | None = None, embedding_key: str | None = None
+    ) -> list[Document]:
         """
         Convert Milvus search results to Document objects.
 
@@ -226,12 +246,13 @@ class MilvusVectorStore:
             List[Document]: A list of Document instances created from the Milvus search result.
         """
         documents = []
-
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
         for hit in result:
             entity = hit.get("entity", {})
-            content = entity.get("content", "")
-            embedding = entity.get("vector", [])
-            metadata = {k: v for k, v in entity.items() if k not in ("content", "vector")}
+            content = entity.get(content_key, "")
+            embedding = entity.get(embedding_key, [])
+            metadata = {k: v for k, v in entity.items() if k not in (content_key, embedding_key)}
 
             doc = Document(
                 id=str(hit.get("id", "")),
@@ -244,7 +265,9 @@ class MilvusVectorStore:
 
         return documents
 
-    def filter_documents(self, filters: dict[str, Any] | None = None) -> list[Document]:
+    def filter_documents(
+        self, filters: dict[str, Any] | None = None, content_key: str | None = None, embedding_key: str | None = None
+    ) -> list[Document]:
         """
         Retrieve documents that match the provided filters.
 
@@ -268,10 +291,12 @@ class MilvusVectorStore:
             output_fields=["*"],
         )
 
-        return self._get_result_to_documents(result)
+        return self._get_result_to_documents(result, content_key=content_key, embedding_key=embedding_key)
 
-    @staticmethod
-    def _get_result_to_documents(result: list[dict[str, Any]]) -> list[Document]:
+    # @staticmethod
+    def _get_result_to_documents(
+        self, result: list[dict[str, Any]], content_key: str | None = None, embedding_key: str | None = None
+    ) -> list[Document]:
         """
         Convert Milvus query result into Documents.
 
@@ -282,14 +307,15 @@ class MilvusVectorStore:
             List[Document]: A list containing Document objects created from the Milvus query result.
         """
         documents = []
-
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
         for entry in result:
             document_dict: dict[str, Any] = {
                 "id": str(entry.get("id", "")),
-                "content": entry.get("content", ""),
-                "embedding": entry.get("vector", []),
+                "content": entry.get(content_key, ""),
+                "embedding": entry.get(embedding_key, []),
             }
-            metadata = {k: v for k, v in entry.items() if k not in ("id", "content", "vector")}
+            metadata = {k: v for k, v in entry.items() if k not in ("id", content_key, embedding_key)}
 
             if metadata:
                 document_dict["metadata"] = metadata

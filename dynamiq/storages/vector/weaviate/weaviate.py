@@ -217,11 +217,12 @@ class WeaviateVectorStore:
             offset += DEFAULT_QUERY_LIMIT
         return result
 
-    def filter_documents(self, filters: dict[str, Any] | None = None) -> list[Document]:
+    def filter_documents(self, filters: dict[str, Any] | None = None, content_key: str | None = None) -> list[Document]:
         """
         Filter documents based on the provided filters.
 
         Args:
+            content_key:
             filters (dict[str, Any] | None): The filters to apply to the document list.
 
         Returns:
@@ -231,13 +232,14 @@ class WeaviateVectorStore:
             result = self._query_with_filters(filters)
         else:
             result = self._query()
-        return [self._to_document(doc) for doc in result]
+        return [self._to_document(doc, content_key=content_key) for doc in result]
 
-    def list_documents(self, include_embeddings: bool = False) -> list[Document]:
+    def list_documents(self, include_embeddings: bool = False, content_key: str | None = None) -> list[Document]:
         """
         List all documents in the DocumentStore.
 
         Args:
+            content_key:
             include_embeddings (bool): Whether to include document embeddings in the result.
 
         Returns:
@@ -248,7 +250,7 @@ class WeaviateVectorStore:
             include_vector=include_embeddings
             # If using named vectors, you can specify ones to include e.g. ['title', 'body'], or True to include all
         ):
-            document = self._to_document(item)
+            document = self._to_document(item, content_key=content_key)
             documents.append(document)
         return documents
 
@@ -434,6 +436,7 @@ class WeaviateVectorStore:
         exclude_document_embeddings=True,
         distance: float | None = None,
         certainty: float | None = None,
+        content_key: str | None = None,
     ) -> list[Document]:
         """
         Perform embedding-based retrieval on the documents.
@@ -468,4 +471,4 @@ class WeaviateVectorStore:
             return_metadata=["certainty"],
         )
 
-        return [self._to_document(doc) for doc in result.objects]
+        return [self._to_document(doc, content_key=content_key) for doc in result.objects]

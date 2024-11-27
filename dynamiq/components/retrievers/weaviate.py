@@ -41,6 +41,7 @@ class WeaviateDocumentRetriever:
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
+        content_key: str | None = None,
     ):
         """
         Retrieves documents from the WeaviateDocumentStore that are similar to the provided query embedding.
@@ -63,6 +64,7 @@ class WeaviateDocumentRetriever:
             filters=filters,
             top_k=top_k,
             exclude_document_embeddings=exclude_document_embeddings,
+            content_key=content_key,
         )
         logger.debug(f"Retrieved {len(docs)} documents from Weaviate Vector Store.")
 

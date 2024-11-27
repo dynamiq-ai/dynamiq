@@ -42,6 +42,7 @@ class PineconeDocumentRetriever:
         self,
         query_embedding: list[float],
         exclude_document_embeddings: bool = True,
+        content_key: str | None = None,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
     ):
@@ -49,6 +50,7 @@ class PineconeDocumentRetriever:
         Retrieves documents from the PineconeDocumentStore that are similar to the provided query embedding.
 
         Args:
+            content_key:
             query_embedding (List[float]): The embedding vector of the query for which similar documents are to be
             retrieved.
             exclude_document_embeddings (bool, optional): Specifies whether to exclude the embeddings of the retrieved
@@ -67,6 +69,7 @@ class PineconeDocumentRetriever:
             filters=filters,
             top_k=top_k,
             exclude_document_embeddings=exclude_document_embeddings,
+            content_key=content_key,
         )
         logger.debug(f"Retrieved {len(docs)} documents from Pinecone Vector Store.")
 

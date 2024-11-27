@@ -40,11 +40,15 @@ class MilvusDocumentRetriever:
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
     ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the MilvusVectorStore that are similar to the provided query embedding.
 
         Args:
+            embedding_key:
+            content_key:
             query_embedding (List[float]): The embedding vector of the query for which similar documents are to be
             retrieved.
             exclude_document_embeddings (bool, optional): Specifies whether to exclude the embeddings of the retrieved
@@ -64,6 +68,8 @@ class MilvusDocumentRetriever:
             query_embeddings=query_embeddings,
             filters=filters,
             top_k=top_k,
+            content_key=content_key,
+            embedding_key=embedding_key,
         )
 
         # Optionally exclude embeddings from the retrieved documents
