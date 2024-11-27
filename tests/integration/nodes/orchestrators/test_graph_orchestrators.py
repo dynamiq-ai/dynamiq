@@ -78,11 +78,11 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
     )
 
     # Task 1
-    def task1(_: dict):
+    def task1(context: dict):
         return {"result": "task 1 completed", "task1": "task 1 result"}
 
     # Task 2
-    def run(_: dict):
+    def run(context: dict):
         return {"result": "task 2 completed", "task2": "task 2 result"}
 
     task2 = Python(code=textwrap.dedent(inspect.getsource(run)))
@@ -100,7 +100,7 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
 
 
 @pytest.mark.parametrize(
-    ("context_input", "outputs", "context_output"),
+    ("get_orchestrator_workflow", "context_input", "outputs", "context_output"),
     [
         (
             get_orchestrator_workflow1,
@@ -116,6 +116,7 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
         ),
         (
             get_orchestrator_workflow2,
+            {},
             {"content": "mocked_response"},
             {"task1": "task 1 result", "task2": "task 2 result"},
         ),
