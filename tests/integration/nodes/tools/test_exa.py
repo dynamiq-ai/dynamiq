@@ -50,7 +50,7 @@ def test_exa_basic_search(mock_requests, mock_exa_response):
     exa_connection = Exa(api_key="test_key")
     exa_tool = ExaTool(connection=exa_connection, model_config=ConfigDict())
 
-    input_data = {"query": "artificial intelligence", "num_results": 2, "type": "neural", "get_contents": False}
+    input_data = {"query": "artificial intelligence", "limit": 2, "query_type": "neural", "include_full_content": False}
 
     result = exa_tool.run(input_data, None)
 
@@ -59,9 +59,9 @@ def test_exa_basic_search(mock_requests, mock_exa_response):
 
     input_dump = result.input.model_dump()
     assert input_dump["query"] == input_data["query"]
-    assert input_dump["num_results"] == input_data["num_results"]
-    assert input_dump["type"] == input_data["type"]
-    assert input_dump["get_contents"] == input_data["get_contents"]
+    assert input_dump["limit"] == input_data["limit"]
+    assert input_dump["query_type"] == input_data["query_type"]
+    assert input_dump["include_full_content"] == input_data["include_full_content"]
 
     assert input_dump["use_autoprompt"] is False
     assert input_dump["category"] is None
@@ -82,7 +82,7 @@ def test_exa_search_agent_optimized(mock_requests, mock_exa_response):
     exa_connection = Exa(api_key="test_key")
     exa_tool = ExaTool(connection=exa_connection, is_optimized_for_agents=True, model_config=ConfigDict())
 
-    input_data = {"query": "artificial intelligence", "get_contents": True}
+    input_data = {"query": "artificial intelligence", "include_full_content": True}
 
     result = exa_tool.run(input_data, None)
 
