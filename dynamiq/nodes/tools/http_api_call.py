@@ -90,15 +90,12 @@ class HttpApiCall(ConnectionNode):
                 - "content" (bytes|string|dict[str,Any]): Value containing the result of request.
                 - "status_code" (int): The status code of the request.
         """
-        data = self.connection.data | self.data | input_data.data
-        json_data = {}
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        payload_type = input_data.payload_type or self.payload_type
-        if payload_type == RequestPayloadType.JSON:
-            json_data = data
-            data = {}
 
+        data = self.connection.data | self.data | input_data.data
+        payload_type = input_data.payload_type or self.payload_type
+        extras = {"data": data} if payload_type == RequestPayloadType.RAW else {"json": data}
         url = input_data.url or self.url or self.connection.url
         if not url:
             raise ValueError("No url provided.")
@@ -108,11 +105,10 @@ class HttpApiCall(ConnectionNode):
         response = self.client.request(
             method=self.connection.method,
             url=url,
-            json=json_data,
             headers=self.connection.headers | self.headers | headers,
             params=self.connection.params | self.params | params,
-            data=data,
             timeout=self.timeout,
+            **extras,
         )
 
         if response.status_code not in self.success_codes:
