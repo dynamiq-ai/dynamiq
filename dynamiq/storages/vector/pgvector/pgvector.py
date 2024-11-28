@@ -66,9 +66,9 @@ class PGVectorStore:
         connection: PGVector | str | None = None,
         client: Optional["PGVector"] = None,
         create_extension: bool = True,
-        table_name: str = "dynamiq",
+        table_name: str = "dynamiq_vector_store",
         schema_name: str = "public",
-        dimension: int = 2,
+        dimension: int = 1536,
         vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY,
         index_method: PGVectorIndexMethod = PGVectorIndexMethod.EXACT,
         index_name: str | None = None,
@@ -167,7 +167,7 @@ class PGVectorStore:
 
         query = SQL(
             """
-            CREATE TABLE IF NOT EXISTS {table_name} (
+            CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} (
                 id VARCHAR(128) PRIMARY KEY,
                 content TEXT,
                 metadata JSONB,
@@ -175,6 +175,7 @@ class PGVectorStore:
             );
             """
         ).format(
+            schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
             dimension=self.dimension,
         )
@@ -193,9 +194,10 @@ class PGVectorStore:
 
         query = SQL(
             """
-            DROP TABLE IF EXISTS {table_name};
+            DROP TABLE IF EXISTS {schema_name}.{table_name};
             """
         ).format(
+            schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
         )
 
@@ -222,10 +224,11 @@ class PGVectorStore:
         query = SQL(
             """
             CREATE INDEX IF NOT EXISTS {index_name}
-            ON {table_name} USING {index_method} (embedding {vector_ops});
+            ON {schema_name}.{table_name} USING {index_method} (embedding {vector_ops});
             """
         ).format(
             index_name=Identifier(f"{self.table_name}_{self.index_method}_index"),
+            schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
             index_method=Identifier(self.index_method),
             vector_ops=Identifier(vector_ops),
@@ -272,7 +275,9 @@ class PGVectorStore:
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                query = SQL("SELECT COUNT(*) FROM {table_name}").format(table_name=Identifier(self.table_name))
+                query = SQL("SELECT COUNT(*) FROM {schema_name}.{table_name}").format(
+                    schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name)
+                )
                 result = self._execute_sql_query(query, cursor=cur)
                 return result.fetchone()[0]
 
@@ -303,14 +308,14 @@ class PGVectorStore:
                 for doc in documents:
                     query = SQL(
                         """
-                        INSERT INTO {table_name} (id, content, metadata, embedding)
+                        INSERT INTO {schema_name}.{table_name} (id, content, metadata, embedding)
                         VALUES (%s, %s, %s, %s)
                         ON CONFLICT (id) DO UPDATE
                         SET content = EXCLUDED.content,
                         metadata = EXCLUDED.metadata,
                         embedding = EXCLUDED.embedding;
                         """
-                    ).format(table_name=Identifier(self.table_name))
+                    ).format(schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name))
                     self._execute_sql_query(
                         query, (doc.id, doc.content, Jsonb(doc.metadata), doc.embedding), cursor=cur
                     )
@@ -329,7 +334,8 @@ class PGVectorStore:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     sql_where_clause, params = _convert_filters_to_query(filters)
-                    query = SQL("DELETE FROM {table_name}").format(
+                    query = SQL("DELETE FROM {schema_name}.{table_name}").format(
+                        schema_name=Identifier(self.schema_name),
                         table_name=Identifier(self.table_name),
                         sql_where_clause=sql_where_clause,
                     )
@@ -350,7 +356,9 @@ class PGVectorStore:
         if delete_all:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
-                    query = SQL("DELETE FROM {table_name}").format(table_name=Identifier(self.table_name))
+                    query = SQL("DELETE FROM {schema_name}.{table_name}").format(
+                        schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name)
+                    )
                     self._execute_sql_query(query, cursor=cur)
                     conn.commit()
         else:
@@ -362,8 +370,8 @@ class PGVectorStore:
     def delete_documents_by_file_id(self, document_ids: list[str]) -> None:
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                query = SQL("DELETE FROM {table_name} WHERE id = ANY(%s::text[])").format(
-                    table_name=Identifier(self.table_name)
+                query = SQL("DELETE FROM {schema_name}.{table_name} WHERE id = ANY(%s::text[])").format(
+                    schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name)
                 )
                 self._execute_sql_query(query, (document_ids,), cursor=cur)
                 conn.commit()
@@ -381,8 +389,9 @@ class PGVectorStore:
         select_fields = "id, content, metadata" + (", embedding" if include_embeddings else "")
         with self._get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
-                query = SQL("SELECT {select_fields} FROM {table_name}").format(
+                query = SQL("SELECT {select_fields} FROM {schema_name}.{table_name}").format(
                     select_fields=SQL(select_fields),
+                    schema_name=Identifier(self.schema_name),
                     table_name=Identifier(self.table_name),
                 )
                 result = self._execute_sql_query(query, cursor=cur)
@@ -500,8 +509,11 @@ class PGVectorStore:
         select_fields = "id, content, metadata" if exclude_document_embeddings else "*"
 
         # Build the base SELECT query with score
-        base_select = SQL("SELECT {fields}, {score} FROM {table_name}").format(
-            fields=SQL(select_fields), score=SQL(score_definition), table_name=Identifier(self.table_name)
+        base_select = SQL("SELECT {fields}, {score} FROM {schema_name}.{table_name}").format(
+            fields=SQL(select_fields),
+            score=SQL(score_definition),
+            schema_name=Identifier(self.schema_name),
+            table_name=Identifier(self.table_name),
         )
 
         # Handle filters if they exist
