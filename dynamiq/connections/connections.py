@@ -204,15 +204,12 @@ class Http(BaseConnection):
         url (str): The URL of the API.
         method (str): HTTP method used for the request, defaults to HTTPMethod.POST.
         headers (dict[str, Any]): Additional headers to include in the request, defaults to an empty dictionary.
-        json_data (dict[str, Any]): Data to include in the request as json, encoded automatically,
-            defaults to an empty dictionary.
         params (Optional[dict[str, Any]]): Parameters to include in the request, defaults to an empty dictionary.
         data (Optional[dict[str, Any]]): Data to include in the request, defaults to an empty dictionary.
     """
 
     type: Literal[ConnectionType.Http] = ConnectionType.Http
     url: str = ""
-    json_data: dict[str, Any] = Field(default_factory=dict)
     method: HTTPMethod
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] | None = Field(default_factory=dict)

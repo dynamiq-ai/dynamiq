@@ -17,14 +17,19 @@ class ResponseType(str, enum.Enum):
     JSON = "json"
 
 
+class RequestPayloadType(str, enum.Enum):
+    RAW = "raw"
+    JSON = "json"
+
+
 class HttpApiCallInputSchema(BaseModel):
     data: dict = Field(default={}, description="Parameter to provide payload.")
     url: str = Field(default="", description="Parameter to provide endpoint url.")
-    json_data: dict = Field(default={}, description="Parameter to provide endpoint json request data.")
+    payload_type: RequestPayloadType = Field(default=None, description="Parameter to specify the type of input data.")
     headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
 
-    @field_validator("data", "headers", "params", "json_data", mode="before")
+    @field_validator("data", "headers", "params", mode="before")
     @classmethod
     def validate_dict_fields(cls, value: Any, field: str) -> Any:
         if isinstance(value, str):
@@ -50,7 +55,7 @@ class HttpApiCall(ConnectionNode):
         timeout (float): The timeout in seconds.
         data(dict[str,Any]): The data to send as body of request.
         headers(dict[str,Any]): The headers of request.
-        json_data (dict[str, Any]): Data to include in the request as json, encoded automatically.
+        payload_type (dict[str, Any]): Parameter to specify the type of input data.
         params(dict[str,Any]): The additional query params of request.
         response_type(ResponseType|str): The type of response content.
     """
@@ -61,11 +66,11 @@ class HttpApiCall(ConnectionNode):
     connection: HttpConnection
     success_codes: list[int] = [200]
     timeout: float = 30
+    payload_type: RequestPayloadType = RequestPayloadType.RAW
     data: dict[str, Any] = Field(default_factory=dict)
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     url: str = ""
-    json_data: dict[str, Any] = Field(default_factory=dict)
     response_type: ResponseType | str | None = ResponseType.RAW
     input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
@@ -75,7 +80,7 @@ class HttpApiCall(ConnectionNode):
         This method takes input data and returns content of API call response.
 
         Args:
-            input_data (dict[str, Any]): The input data containing(optionally) data, headers, json,
+            input_data (dict[str, Any]): The input data containing(optionally) data, headers, payload_type,
                 params for request.
             config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
             **kwargs: Additional keyword arguments.
@@ -85,13 +90,16 @@ class HttpApiCall(ConnectionNode):
                 - "content" (bytes|string|dict[str,Any]): Value containing the result of request.
                 - "status_code" (int): The status code of the request.
         """
+        data = self.connection.data | self.data | input_data.data
+        json_data = {}
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        data = input_data.data
+        payload_type = input_data.payload_type or self.payload_type
+        if payload_type == RequestPayloadType.JSON:
+            json_data = data
+            data = {}
 
         url = input_data.url or self.url or self.connection.url
-        # json_data = input_data.json or self.json or self.connection.json
-        json_data = self.connection.json_data | self.json_data | input_data.json_data
         if not url:
             raise ValueError("No url provided.")
         headers = input_data.headers
@@ -103,7 +111,7 @@ class HttpApiCall(ConnectionNode):
             json=json_data,
             headers=self.connection.headers | self.headers | headers,
             params=self.connection.params | self.params | params,
-            data=self.connection.data | self.data | data,
+            data=data,
             timeout=self.timeout,
         )
 
