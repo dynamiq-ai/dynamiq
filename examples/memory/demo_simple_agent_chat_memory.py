@@ -1,5 +1,5 @@
 from dynamiq.memory import Memory
-from dynamiq.memory.backend.in_memory import InMemory
+from dynamiq.memory.backends.in_memory import InMemory
 from dynamiq.nodes.agents.simple import SimpleAgent
 from examples.llm_setup import setup_llm
 
