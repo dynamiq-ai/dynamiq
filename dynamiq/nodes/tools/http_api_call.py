@@ -20,10 +20,11 @@ class ResponseType(str, enum.Enum):
 class HttpApiCallInputSchema(BaseModel):
     data: dict = Field(default={}, description="Parameter to provide payload.")
     url: str = Field(default="", description="Parameter to provide endpoint url.")
+    json_data: dict = Field(default={}, description="Parameter to provide endpoint json request data.")
     headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
 
-    @field_validator("data", "headers", "params", mode="before")
+    @field_validator("data", "headers", "params", "json_data", mode="before")
     @classmethod
     def validate_dict_fields(cls, value: Any, field: str) -> Any:
         if isinstance(value, str):
@@ -49,6 +50,7 @@ class HttpApiCall(ConnectionNode):
         timeout (float): The timeout in seconds.
         data(dict[str,Any]): The data to send as body of request.
         headers(dict[str,Any]): The headers of request.
+        json_data (dict[str, Any]): Data to include in the request as json, encoded automatically.
         params(dict[str,Any]): The additional query params of request.
         response_type(ResponseType|str): The type of response content.
     """
@@ -63,6 +65,7 @@ class HttpApiCall(ConnectionNode):
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     url: str = ""
+    json_data: dict[str, Any] = Field(default_factory=dict)
     response_type: ResponseType | str | None = ResponseType.RAW
     input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
@@ -72,7 +75,7 @@ class HttpApiCall(ConnectionNode):
         This method takes input data and returns content of API call response.
 
         Args:
-            input_data (dict[str, Any]): The input data containing(optionally) data, headers,
+            input_data (dict[str, Any]): The input data containing(optionally) data, headers, json,
                 params for request.
             config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
             **kwargs: Additional keyword arguments.
@@ -87,6 +90,8 @@ class HttpApiCall(ConnectionNode):
         data = input_data.data
 
         url = input_data.url or self.url or self.connection.url
+        # json_data = input_data.json or self.json or self.connection.json
+        json_data = self.connection.json_data | self.json_data | input_data.json_data
         if not url:
             raise ValueError("No url provided.")
         headers = input_data.headers
@@ -95,6 +100,7 @@ class HttpApiCall(ConnectionNode):
         response = self.client.request(
             method=self.connection.method,
             url=url,
+            json=json_data,
             headers=self.connection.headers | self.headers | headers,
             params=self.connection.params | self.params | params,
             data=self.connection.data | self.data | data,
@@ -107,10 +113,7 @@ class HttpApiCall(ConnectionNode):
             )
 
         response_type = self.response_type
-        if (
-            "response_type" not in self.model_fields_set
-            and response.headers.get("content-type") == "application/json"
-        ):
+        if "response_type" not in self.model_fields_set and response.headers.get("content-type") == "application/json":
             response_type = ResponseType.JSON
 
         if response_type == ResponseType.TEXT:
