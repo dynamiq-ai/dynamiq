@@ -1,7 +1,7 @@
 import uuid
-from typing import Any
 
 from pydantic import ConfigDict, Field
+from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from dynamiq.components.embedders.base import BaseEmbedder
@@ -31,7 +31,7 @@ class Qdrant(MemoryBackend):
     on_disk: bool = Field(default=False)
     create_if_not_exist: bool = Field(default=True)
     vector_store: QdrantVectorStore | None = None
-    client: Any = None
+    _client: QdrantClient | None = None
 
     def model_post_init(self, __context) -> None:
         """Initialize the vector store after model initialization."""
@@ -45,7 +45,7 @@ class Qdrant(MemoryBackend):
                 on_disk=self.on_disk,
                 recreate_index=False,
             )
-            self.client = self.vector_store._client
+            self._client = self.vector_store._client
             if not self.client:
                 raise QdrantError("Failed to initialize Qdrant client")
         except Exception as e:
