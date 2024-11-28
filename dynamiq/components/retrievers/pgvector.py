@@ -59,7 +59,7 @@ class PGVectorDocumentRetriever:
         Returns:
             List[Document]: A list of Document instances sorted by their relevance to the query_embedding.
         """
-        
+
         top_k = top_k or self.top_k
         filters = filters or self.filters
 
@@ -72,4 +72,3 @@ class PGVectorDocumentRetriever:
         logger.debug(f"Retrieved {len(docs)} documents from pgvector Vector Store.")
 
         return {"documents": docs}
-
