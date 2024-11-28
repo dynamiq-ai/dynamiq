@@ -36,7 +36,7 @@ def advanced_search_with_contents_example():
     )
 
     print("Search Results with Contents:")
-    print(result["content"])
+    print(result.output.get("content"))
 
 
 if __name__ == "__main__":

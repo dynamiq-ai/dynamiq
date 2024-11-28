@@ -932,7 +932,7 @@ class DeepSeek(BaseApiKeyConnection):
         pass
 
 
-class Exa(HttpApiKey):
+class Exa(Http):
     """
     Represents a connection to the Exa AI Search API.
 
@@ -941,14 +941,12 @@ class Exa(HttpApiKey):
         url (str): The URL of the Exa API.
         api_key (str): The API key for authentication, fetched from the environment variable 'EXA_API_KEY'.
         method (Literal[HTTPMethod.POST]): HTTP method used for the request, defaults to HTTPMethod.POST.
-        headers (dict[str, Any]): HTTP headers for the request.
     """
 
     type: Literal[ConnectionType.Exa] = ConnectionType.Exa
     url: str = Field(default="https://api.exa.ai/search")
     api_key: str = Field(default_factory=partial(get_env_var, "EXA_API_KEY"))
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
-    headers: dict[str, Any] = Field(default_factory=dict)
 
     def connect(self):
         """
