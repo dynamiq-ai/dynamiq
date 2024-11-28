@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Any, Optional
 
 import psycopg
+from pgvector.psycopg import register_vector
 from psycopg import Cursor
 from psycopg.rows import dict_row
 from psycopg.sql import SQL, Identifier
@@ -64,9 +65,10 @@ class PGVectorStore:
         self,
         connection: PGVector | str | None = None,
         client: Optional["PGVector"] = None,
+        create_extension: bool = True,
         table_name: str = "dynamiq",
         schema_name: str = "public",
-        dimension: int = 1536,
+        dimension: int = 2,
         vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY,
         index_method: PGVectorIndexMethod = PGVectorIndexMethod.EXACT,
         index_name: str | None = None,
@@ -85,6 +87,13 @@ class PGVectorStore:
             self.connection_string = str(connection)
         else:
             raise ValueError("connection must be a string or PGVector object")
+
+        self.create_extension = create_extension
+        if self.create_extension:
+            self._conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            self._conn.commit()
+
+        register_vector(self._conn)
 
         self.client = client if client else self._conn
 
@@ -503,7 +512,7 @@ class PGVectorStore:
 
         # Determine sort order based on vector function type
         is_distance_metric = vector_function in ["l2_distance", "l1_distance"]
-        
+
         # Sort by score in ascending order if using a distance metric
         # as the smaller the distance, the more similar the vectors are
         sort_order = "ASC" if is_distance_metric else "DESC"
