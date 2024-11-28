@@ -3,7 +3,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from dynamiq.connections import Exa
+from dynamiq.connections import Exa, HTTPMethod
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
@@ -139,8 +139,8 @@ class ExaTool(ConnectionNode):
 
         try:
             response = self.client.request(
-                method=self.connection.method,
-                url=self.connection.url,
+                method=HTTPMethod.POST,
+                url="https://api.exa.ai/search",
                 json=payload,
                 headers=self.connection.headers,
             )
