@@ -98,7 +98,7 @@ class State(Node):
         """
         return f"Name: {agent.name} Role: {agent.role}"
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
+    def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
         Initialize components of the orchestrator.
 

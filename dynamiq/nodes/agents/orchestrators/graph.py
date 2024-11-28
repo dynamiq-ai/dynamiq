@@ -100,10 +100,10 @@ class GraphOrchestrator(Orchestrator):
             tasks (list[Agent | Callable]): List of tasks that have to be executed when running this state.
 
         Raises:
-            ValueError: If state with specified name already exists.
+            ValueError: If state with specified id already exists.
         """
         if state_id in self._state_by_id:
-            raise ValueError(f"Error: State with name {state_id} already exists.")
+            raise ValueError(f"Error: State with id {state_id} already exists.")
 
         filtered_tasks = []
 
@@ -127,40 +127,40 @@ class GraphOrchestrator(Orchestrator):
         Adds edge to the graph.
 
         Args:
-            source (str): Name of source state.
-            destination (str): Name of destinations state.
+            source (str): Id of source state.
+            destination (str): Ids of destination states.
 
         Raises:
-            ValueError: If state with specified name is not present.
+            ValueError: If state with specified id is not present.
         """
         self.validate_states([source, destination])
         self._state_by_id[source].next_states = [destination]
 
-    def validate_states(self, names: list[str]) -> None:
+    def validate_states(self, ids: list[str]) -> None:
         """
-        Check if the provided state names is valid (exists in the list of valid states).
+        Check if the provided state ids are valid.
 
         Args:
-            names (list[str]): names of states to validate.
+            ids (list[str]): State ids for validation.
 
         Raises:
-            ValueError: If state with specified name is not present.
+            ValueError: If state with specified id is not present.
         """
-        for state_name in names:
-            if state_name not in self._state_by_id:
-                raise ValueError(f"State with name {state_name} is not present")
+        for state_id in ids:
+            if state_id not in self._state_by_id:
+                raise ValueError(f"State with id {state_id} is not present")
 
     def add_conditional_edge(self, source: str, destinations: list[str], condition: Callable | Python) -> None:
         """
         Adds conditional edge to the graph.
 
         Args:
-            source (str): Name of source state.
-            destinations (list[str]): Names of destination states.
+            source (str): Id of source state.
+            destinations (list[str]): Ids of destination states.
             path_func (Callable | Python): Condition that will determine next state.
 
         Raises:
-            ValueError: If state with specified name is not present.
+            ValueError: If state with specified id is not present.
         """
         self.validate_states(destinations + [source])
 
@@ -216,8 +216,8 @@ class GraphOrchestrator(Orchestrator):
         if next_state in self._state_by_id:
             return self._state_by_id[next_state]
         else:
-            logger.error(f"GraphOrchestrator: State with name {next_state} was not found.")
-            raise StateNotFoundError(f"State with name {next_state} was not found.")
+            logger.error(f"GraphOrchestrator: State with id {next_state} was not found.")
+            raise StateNotFoundError(f"State with id {next_state} was not found.")
 
     def _get_next_state(self, state: State, config: RunnableConfig = None, **kwargs) -> State:
         """
@@ -253,7 +253,7 @@ class GraphOrchestrator(Orchestrator):
                     )
 
                 if next_state not in self._state_by_id:
-                    raise StateNotFoundError(f"State with name {next_state} was not found.")
+                    raise StateNotFoundError(f"State with id {next_state} was not found.")
 
                 return self._state_by_id[next_state]
             else:
