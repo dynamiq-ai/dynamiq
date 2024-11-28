@@ -1,5 +1,7 @@
 import uuid
+from typing import Any
 
+from pydantic import ConfigDict, Field
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from dynamiq.components.embedders.base import BaseEmbedder
@@ -13,43 +15,34 @@ from dynamiq.types import Document
 
 class QdrantError(Exception):
     """Base exception for Qdrant-related errors."""
-
     pass
 
 
 class Qdrant(MemoryBackend):
     """Qdrant implementation of the memory storage backend."""
 
-    name = "Qdrant"
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __init__(
-        self,
-        connection: QdrantConnection,
-        embedder: BaseEmbedder,
-        index_name: str = "conversations",
-        metric: str = "cosine",
-        on_disk: bool = False,
-        create_if_not_exist: bool = True,
-    ):
-        """Initializes the Qdrant memory storage.
+    name: str = "Qdrant"
+    connection: QdrantConnection
+    embedder: BaseEmbedder
+    index_name: str = Field(default="conversations")
+    metric: str = Field(default="cosine")
+    on_disk: bool = Field(default=False)
+    create_if_not_exist: bool = Field(default=True)
+    vector_store: QdrantVectorStore | None = None
+    client: Any = None
 
-        Args:
-            connection: QdrantConnection instance for connecting to Qdrant
-            embedder: Embedder instance for creating embeddings
-            index_name: Name of the collection to store messages
-        """
-        self.connection = connection
-        self.index_name = index_name
-        self.embedder = embedder
-
+    def model_post_init(self, __context) -> None:
+        """Initialize the vector store after model initialization."""
         try:
             self.vector_store = QdrantVectorStore(
-                connection=connection,
-                index_name=index_name,
-                dimension=embedder.dimensions,
-                create_if_not_exist=create_if_not_exist,
-                metric=metric,
-                on_disk=on_disk,
+                connection=self.connection,
+                index_name=self.index_name,
+                dimension=self.embedder.dimensions,
+                create_if_not_exist=self.create_if_not_exist,
+                metric=self.metric,
+                on_disk=self.on_disk,
                 recreate_index=False,
             )
             self.client = self.vector_store._client
@@ -73,35 +66,19 @@ class Qdrant(MemoryBackend):
         role = metadata.pop("role")
         return Message(content=document.content, role=role, metadata=metadata, score=document.score)
 
-    def add(self, message: Message):
-        """Stores a message in Qdrant.
-
-        Args:
-            message: Message to store
-
-        Raises:
-            QdrantError: If failed to add message
-        """
+    def add(self, message: Message) -> None:
+        """Stores a message in Qdrant."""
         try:
             document = self._message_to_document(message)
             embedding_result = self.embedder.embed_text(document.content)
             document.embedding = embedding_result["embedding"]
 
-            self.vector_store.write_documents(
-                documents=[document], policy=DuplicatePolicy.SKIP  # Changed from OVERWRITE to prevent recreation
-            )
+            self.vector_store.write_documents(documents=[document], policy=DuplicatePolicy.SKIP)
         except Exception as e:
             raise QdrantError(f"Failed to add message to Qdrant: {e}") from e
 
-    def get_all(self, limit: int = None) -> list[Message]:
-        """Retrieves all messages from Qdrant.
-
-        Args:
-            limit: Maximum number of messages to retrieve
-
-        Returns:
-            List of messages sorted by timestamp
-        """
+    def get_all(self, limit: int | None = None) -> list[Message]:
+        """Retrieves all messages from Qdrant."""
         try:
             documents = self.vector_store.list_documents(include_embeddings=False)
             messages = [self._document_to_message(doc) for doc in documents]
@@ -109,17 +86,8 @@ class Qdrant(MemoryBackend):
         except Exception as e:
             raise QdrantError(f"Failed to retrieve messages from Qdrant: {e}") from e
 
-    def search(self, query: str = None, limit: int = 10, filters: dict = None) -> list[Message]:
-        """Searches for messages in Qdrant.
-
-        Args:
-            query: Text query to search for
-            limit: Maximum number of results to return
-            filters: Metadata filters to apply
-
-        Returns:
-            List of matching messages
-        """
+    def search(self, query: str | None = None, limit: int = 10, filters: dict | None = None) -> list[Message]:
+        """Searches for messages in Qdrant."""
         try:
             qdrant_filters = self._prepare_filters(filters)
             if query:
@@ -169,7 +137,7 @@ class Qdrant(MemoryBackend):
                 return True
             raise QdrantError(f"Failed to check if Qdrant collection is empty: {e}") from e
 
-    def clear(self):
+    def clear(self) -> None:
         """Clears the Qdrant collection."""
         try:
             self.vector_store.delete_documents(delete_all=True)

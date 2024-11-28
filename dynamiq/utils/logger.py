@@ -1,7 +1,7 @@
 import logging
 import os
 
-DEBUG = os.getenv("DEBUG", False)
+DEBUG = os.getenv("DEBUG", True)
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",

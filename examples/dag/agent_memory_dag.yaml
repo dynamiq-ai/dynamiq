@@ -1,0 +1,28 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+
+nodes:
+  memory-agent:
+    type: dynamiq.nodes.agents.simple.SimpleAgent
+    llm:
+      id: memory-agent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-3.5-turbo
+    memory:
+      backend:
+        type: dynamiq.memory.backends.InMemory
+      search_limit: 3
+    role: "a helpful assistant capable of retaining context and answering questions effectively"
+
+flows:
+  memory-agent-flow:
+    name: Memory Agent Flow
+    nodes:
+      - memory-agent
+
+workflows:
+  memory-agent-workflow:
+    flow: memory-agent-flow
+    version: 1

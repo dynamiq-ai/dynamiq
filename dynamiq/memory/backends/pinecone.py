@@ -1,5 +1,7 @@
 import uuid
 
+from pydantic import ConfigDict, Field
+
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory.backends.base import MemoryBackend
@@ -15,40 +17,38 @@ class PineconeError(Exception):
 
 
 class Pinecone(MemoryBackend):
-    name = "Pinecone"
+    """Pinecone memory backend implementation."""
 
-    def __init__(
-        self,
-        connection: PineconeConnection,
-        embedder: BaseEmbedder,
-        index_type: PineconeIndexType,
-        index_name: str = "conversations",
-        namespace: str = "default",
-        cloud: str | None = None,
-        region: str | None = None,
-        environment: str | None = None,
-        pod_type: str | None = None,
-        pods: int = 1,
-    ):
-        """Initializes the Pinecone memory storage."""
-        self.connection = connection
-        self.index_name = index_name
-        self.embedder = embedder
-        self.namespace = namespace
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    name: str = "Pinecone"
+    connection: PineconeConnection
+    embedder: BaseEmbedder
+    index_type: PineconeIndexType
+    index_name: str = Field(default="conversations")
+    namespace: str = Field(default="default")
+    cloud: str | None = Field(default=None)
+    region: str | None = Field(default=None)
+    environment: str | None = Field(default=None)
+    pod_type: str | None = Field(default=None)
+    pods: int = Field(default=1)
+    vector_store: PineconeVectorStore | None = None
+
+    def model_post_init(self, __context) -> None:
+        """Initialize the vector store after model initialization."""
         try:
             self.vector_store = PineconeVectorStore(
-                connection=connection,
-                index_name=index_name,
-                namespace=namespace,
-                dimension=embedder.dimensions,
+                connection=self.connection,
+                index_name=self.index_name,
+                namespace=self.namespace,
+                dimension=self.embedder.dimensions,
                 create_if_not_exist=True,
-                index_type=index_type,
-                cloud=cloud,
-                region=region,
-                environment=environment,
-                pod_type=pod_type,
-                pods=pods,
+                index_type=self.index_type,
+                cloud=self.cloud,
+                region=self.region,
+                environment=self.environment,
+                pod_type=self.pod_type,
+                pods=self.pods,
             )
             # Verify connection
             if not self.vector_store._index:
@@ -63,7 +63,7 @@ class Pinecone(MemoryBackend):
             id=str(uuid.uuid4()),
             content=message.content,
             metadata={"role": message.role.value, **(message.metadata or {})},
-            embedding=None,  # Will be populated during write
+            embedding=None,
         )
 
     def _document_to_message(self, document: Document) -> Message:
@@ -72,7 +72,7 @@ class Pinecone(MemoryBackend):
         role = metadata.pop("role")
         return Message(content=document.content, role=role, metadata=metadata, score=document.score)
 
-    def add(self, message: Message):
+    def add(self, message: Message) -> None:
         """Stores a message in Pinecone."""
         try:
             document = self._message_to_document(message)
@@ -93,7 +93,7 @@ class Pinecone(MemoryBackend):
         except Exception as e:
             raise PineconeError(f"Error retrieving messages from Pinecone: {e}") from e
 
-    def _prepare_filters(self, filters: dict = None) -> dict:
+    def _prepare_filters(self, filters: dict | None = None) -> dict | None:
         """Convert simple filters to Pinecone filter format."""
         if not filters:
             return None
@@ -105,7 +105,7 @@ class Pinecone(MemoryBackend):
             return {"operator": "AND", "conditions": conditions}
         return filters
 
-    def search(self, query: str = None, filters: dict = None, limit: int = 10) -> list[Message]:
+    def search(self, query: str | None = None, filters: dict | None = None, limit: int = 10) -> list[Message]:
         """Searches for messages in Pinecone based on the query and/or filters."""
         try:
             normalized_filters = self._prepare_filters(filters)
@@ -142,7 +142,7 @@ class Pinecone(MemoryBackend):
         except Exception as e:
             raise PineconeError(f"Error checking if Pinecone index is empty: {e}") from e
 
-    def clear(self):
+    def clear(self) -> None:
         """Clears the Pinecone index."""
         try:
             self.vector_store.delete_documents(delete_all=True)
