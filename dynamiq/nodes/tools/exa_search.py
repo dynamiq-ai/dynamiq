@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -9,23 +10,30 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
 
+class QueryType(str, Enum):
+    keyword = "keyword"
+    neural = "neural"
+    auto = "auto"
+
+
 class ExaInputSchema(BaseModel):
     """Schema for Exa search input parameters."""
 
     query: str = Field(description="The search query string.")
-    get_contents: bool = Field(
+    include_full_content: bool = Field(
         default=False, description="If true, retrieve full content, highlights, and summaries for search results."
     )
     use_autoprompt: bool = Field(
         default=False, description="If true, query will be converted to a Exa query. Default false."
     )
-    type: Literal["keyword", "neural", "auto"] = Field(
-        default="neural", description="The Type of search: 'keyword', 'neural', or 'auto'."
+    query_type: QueryType = Field(
+        default=QueryType.auto,
+        description="Type of query to be used. Options are 'keyword', 'neural', or 'auto'. Default is 'auto'.",
     )
     category: str | None = Field(
         default=None, description="A data category to focus on (e.g., company, research paper, news article)."
     )
-    num_results: int = Field(default=10, ge=1, le=100, description="Number of search results to return. Default 10.")
+    limit: int = Field(default=10, ge=1, le=100, description="Number of search results to return. Default 10.")
     include_domains: list[str] | None = Field(default=None, description="List of domains to include in the search.")
     exclude_domains: list[str] | None = Field(default=None, description="List of domains to exclude from the search.")
     include_text: list[str] | None = Field(default=None, description="Strings that must be present in webpage text.")
@@ -112,17 +120,17 @@ class ExaTool(ConnectionNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         payload = {k: v for k, v in input_data.model_dump().items() if v is not None}
-        get_contents = payload.pop("get_contents", False)
+        include_full_content = payload.pop("include_full_content", False)
 
         payload = {
             "query": payload.pop("query"),
             "useAutoprompt": payload.pop("use_autoprompt", False),
-            "type": payload.pop("type", "neural"),
-            "numResults": payload.pop("num_results", 10),
+            "type": payload.pop("query_type", "neural"),
+            "numResults": payload.pop("limit", 10),
             **{self.to_camel_case(k): v for k, v in payload.items()},
         }
 
-        if get_contents:
+        if include_full_content:
             payload["contents"] = {
                 "text": {"maxCharacters": 1000, "includeHtmlTags": False},
                 "highlights": {"numSentences": 3, "highlightsPerUrl": 2, "query": payload["query"]},
