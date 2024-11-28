@@ -26,6 +26,7 @@ class Pinecone(MemoryBackend):
     embedder: BaseEmbedder
     index_type: PineconeIndexType
     index_name: str = Field(default="conversations")
+    create_if_not_exist: bool = Field(default=True)
     namespace: str = Field(default="default")
     cloud: str | None = Field(default=None)
     region: str | None = Field(default=None)
@@ -42,7 +43,7 @@ class Pinecone(MemoryBackend):
                 index_name=self.index_name,
                 namespace=self.namespace,
                 dimension=self.embedder.dimensions,
-                create_if_not_exist=True,
+                create_if_not_exist=self.create_if_not_exist,
                 index_type=self.index_type,
                 cloud=self.cloud,
                 region=self.region,

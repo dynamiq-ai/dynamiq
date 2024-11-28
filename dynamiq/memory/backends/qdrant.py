@@ -30,6 +30,7 @@ class Qdrant(MemoryBackend):
     metric: str = Field(default="cosine")
     on_disk: bool = Field(default=False)
     create_if_not_exist: bool = Field(default=True)
+    recreate_index: bool = Field(default=False)
     vector_store: QdrantVectorStore | None = None
     _client: QdrantClient | None = None
 
@@ -43,7 +44,7 @@ class Qdrant(MemoryBackend):
                 create_if_not_exist=self.create_if_not_exist,
                 metric=self.metric,
                 on_disk=self.on_disk,
-                recreate_index=False,
+                recreate_index=self.recreate_index,
             )
             self._client = self.vector_store._client
             if not self.client:
