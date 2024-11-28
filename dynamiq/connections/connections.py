@@ -58,6 +58,7 @@ class ConnectionType(str, enum.Enum):
     Milvus = "Milvus"
     Perplexity = "Perplexity"
     DeepSeek = "DeepSeek"
+    PGVector = "PGVector"
 
 
 class HTTPMethod(str, enum.Enum):
@@ -929,3 +930,55 @@ class DeepSeek(BaseApiKeyConnection):
 
     def connect(self):
         pass
+
+
+class PGVector(BaseConnection):
+    type: Literal[ConnectionType.PGVector] = ConnectionType.PGVector
+    host: str = Field(default_factory=partial(get_env_var, "PGVECTOR_HOST", "localhost"))
+    port: str | int = Field(default_factory=partial(get_env_var, "PGVECTOR_PORT", "5432"))
+    database: str = Field(default_factory=partial(get_env_var, "PGVECTOR_DATABASE", "db"))
+    user: str = Field(default_factory=partial(get_env_var, "PGVECTOR_USER", "postgres"))
+    password: str = Field(default_factory=partial(get_env_var, "PGVECTOR_PASSWORD", "password"))
+
+    def connect(self):
+        try:
+            import psycopg
+
+            conn = psycopg.connect(
+                host=self.host, port=self.port, dbname=self.database, user=self.user, password=self.password
+            )
+            logger.debug(f"Connected to PGVector with host={self.host} and port={str(self.port)}")
+            return conn
+        except ImportError:
+            raise ImportError("Please install psycopg to use PGVector connection")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to PGVector: {str(e)}")
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing
+
+                -the host with the key 'host'.
+
+                -the port with the key 'port'.
+
+                -the database with the key 'database'.
+
+                -the user with the key 'user'.
+
+                -the password with the key 'password'.
+        """
+        return {
+            "host": self.host,
+            "port": self.port,
+            "database": self.database,
+            "user": self.user,
+            "password": self.password,
+        }
+
+    def __str__(self):
+        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
