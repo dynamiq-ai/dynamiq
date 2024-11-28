@@ -25,7 +25,7 @@ class RequestPayloadType(str, enum.Enum):
 class HttpApiCallInputSchema(BaseModel):
     data: dict = Field(default={}, description="Parameter to provide payload.")
     url: str = Field(default="", description="Parameter to provide endpoint url.")
-    payload_type: RequestPayloadType = Field(default=None, description="Parameter to specify the type of input data.")
+    payload_type: RequestPayloadType = Field(default=None, description="Parameter to specify the type of payload data.")
     headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
 
@@ -55,7 +55,7 @@ class HttpApiCall(ConnectionNode):
         timeout (float): The timeout in seconds.
         data(dict[str,Any]): The data to send as body of request.
         headers(dict[str,Any]): The headers of request.
-        payload_type (dict[str, Any]): Parameter to specify the type of input data.
+        payload_type (dict[str, Any]): Parameter to specify the type of payload data.
         params(dict[str,Any]): The additional query params of request.
         response_type(ResponseType|str): The type of response content.
     """
