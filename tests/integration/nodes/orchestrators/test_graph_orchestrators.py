@@ -45,12 +45,12 @@ def get_orchestrator_workflow1(model: str, connection: connections.OpenAI, conte
     def orchestrate(context: dict):
         return "task3" if context.get("task3", False) else END
 
-    graph_orchestrator.add_node("task1", [task1])
-    graph_orchestrator.add_node("task2", [task2])
+    graph_orchestrator.add_state("task1", [task1])
+    graph_orchestrator.add_state("task2", [task2])
     graph_orchestrator.add_edge(START, "task1")
     graph_orchestrator.add_edge("task1", "task2")
 
-    graph_orchestrator.add_node("task3", [task3])
+    graph_orchestrator.add_state("task3", [task3])
     graph_orchestrator.add_conditional_edge("task2", ["task3", END], orchestrate)
 
     graph_orchestrator.add_edge("task3", END)
@@ -87,7 +87,7 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
 
     task2 = Python(code=textwrap.dedent(inspect.getsource(run)))
 
-    graph_orchestrator.add_node("task1_task2", [task1, task2])
+    graph_orchestrator.add_state("task1_task2", [task1, task2])
     graph_orchestrator.add_edge("task1_task2", END)
 
     wf_orchestrator = Workflow(

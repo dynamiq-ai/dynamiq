@@ -46,7 +46,7 @@ class GraphOrchestrator(Orchestrator):
     states: list[State] = []
     max_loops: int = 15
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()) -> None:
+    def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
         Initialize components of the orchestrator.
 
@@ -64,14 +64,17 @@ class GraphOrchestrator(Orchestrator):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.states.extend(
-            [
-                State(id=START, description="Initial state"),
-                State(id=END, description="Final state"),
-            ]
-        )
-
         self._state_by_id = {state.id: state for state in self.states}
+
+        if START not in self._state_by_id:
+            start_state = State(id=START, description="Initial state")
+            self._state_by_id[START] = start_state
+            self.states.append(start_state)
+
+        if END not in self._state_by_id:
+            end_state = State(id=END, description="Final state")
+            self._state_by_id[END] = end_state
+            self.states.append(end_state)
 
     @property
     def to_dict_exclude_params(self):
@@ -88,19 +91,19 @@ class GraphOrchestrator(Orchestrator):
         data["states"] = [state.to_dict(**kwargs) for state in self.states]
         return data
 
-    def add_node(self, name: str, tasks: list[Node | Callable]) -> None:
+    def add_state(self, state_id: str, tasks: list[Node | Callable]) -> None:
         """
         Adds state with specified tasks to the graph.
 
         Args:
-            name (str): Name of state.
+            state_id (str): Id of the state.
             tasks (list[Agent | Callable]): List of tasks that have to be executed when running this state.
 
         Raises:
             ValueError: If state with specified name already exists.
         """
-        if name in self._state_by_id:
-            raise ValueError(f"Error: State with name {name} already exists.")
+        if state_id in self._state_by_id:
+            raise ValueError(f"Error: State with name {state_id} already exists.")
 
         filtered_tasks = []
 
@@ -115,7 +118,7 @@ class GraphOrchestrator(Orchestrator):
             else:
                 raise OrchestratorError("Error: Task must be either a Node or a Callable.")
 
-        state = State(id=name, name=name, manager=self.manager if has_agent else None, tasks=filtered_tasks)
+        state = State(id=state_id, name=state_id, manager=self.manager if has_agent else None, tasks=filtered_tasks)
         self.states.append(state)
         self._state_by_id[state.id] = state
 
