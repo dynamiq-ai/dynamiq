@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import Any, ClassVar, Literal
+from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -136,13 +137,14 @@ class ExaTool(ConnectionNode):
                 "highlights": {"numSentences": 3, "highlightsPerUrl": 2, "query": payload["query"]},
                 "summary": {"query": f"Summarize the main points about {payload['query']}"},
             }
+        connection_url = urljoin(self.connection.url, "/search")
 
         try:
             response = self.client.request(
                 method=HTTPMethod.POST,
-                url="https://api.exa.ai/search",
+                url=connection_url,
                 json=payload,
-                headers=self.connection.headers,
+                headers={"x-api-key": self.connection.api_key, "Content-Type": "application/json"},
             )
             response.raise_for_status()
             search_result = response.json()

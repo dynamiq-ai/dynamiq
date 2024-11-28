@@ -932,7 +932,7 @@ class DeepSeek(BaseApiKeyConnection):
         pass
 
 
-class Exa(Http):
+class Exa(HttpApiKey):
     """
     Represents a connection to the Exa AI Search API.
 
@@ -942,6 +942,7 @@ class Exa(Http):
     """
 
     type: Literal[ConnectionType.Exa] = ConnectionType.Exa
+    url: str = Field(default="https://api.exa.ai")
     api_key: str = Field(default_factory=partial(get_env_var, "EXA_API_KEY"))
 
     def connect(self):
@@ -951,5 +952,4 @@ class Exa(Http):
         Returns:
             requests: The requests module for making HTTP requests.
         """
-        self.headers.update({"x-api-key": self.api_key, "Content-Type": "application/json"})
         return super().connect()
