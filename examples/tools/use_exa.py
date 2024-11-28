@@ -1,5 +1,5 @@
 from dynamiq.connections import Exa
-from dynamiq.nodes.tools.exa_search import ExaInputSchema, ExaTool, QueryType
+from dynamiq.nodes.tools.exa_search import ExaTool, QueryType
 
 
 def basic_search_example():
@@ -25,14 +25,14 @@ def advanced_search_with_contents_example():
     exa_tool = ExaTool(connection=exa_connection, is_optimized_for_agents=True)
 
     result = exa_tool.run(
-        input_data=ExaInputSchema(
-            query="AI breakthroughs in healthcare",
-            limit=5,
-            query_type=QueryType.neural,
-            use_autoprompt=True,
-            category="research paper",
-            include_full_content=True,
-        )
+        input_data={
+            "query": "Latest developments in quantum computing",
+            "limit": 5,
+            "query_type": QueryType.neural,
+            "use_autoprompt": True,
+            "category": "research paper",
+            "include_full_content": True,
+        }
     )
 
     print("Search Results with Contents:")
