@@ -4,11 +4,11 @@ from dynamiq.connections import Milvus
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import MilvusVectorStore
-from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
+from dynamiq.storages.vector.milvus.milvus import MilvusVectorStoreParams
 from dynamiq.utils.logger import logger
 
 
-class MilvusDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
+class MilvusDocumentWriter(VectorStoreNode, MilvusVectorStoreParams):
     """
     Document Writer Node using Milvus Vector Store.
 
@@ -45,7 +45,7 @@ class MilvusDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
 
     @property
     def vector_store_params(self):
-        return self.model_dump(include=set(BaseWriterVectorStoreParams.model_fields)) | {
+        return self.model_dump(include=set(MilvusVectorStoreParams.model_fields)) | {
             "connection": self.connection,
             "client": self.client,
         }

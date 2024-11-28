@@ -6,9 +6,10 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import MilvusVectorStore
+from dynamiq.storages.vector.milvus.milvus import MilvusVectorStoreParams
 
 
-class MilvusDocumentRetriever(VectorStoreNode):
+class MilvusDocumentRetriever(VectorStoreNode, MilvusVectorStoreParams):
     """
     Document Retriever using Milvus.
 
@@ -52,6 +53,13 @@ class MilvusDocumentRetriever(VectorStoreNode):
     @property
     def vector_store_cls(self):
         return MilvusVectorStore
+
+    @property
+    def vector_store_params(self):
+        return self.model_dump(include=set(MilvusVectorStoreParams.model_fields)) | {
+            "connection": self.connection,
+            "client": self.client,
+        }
 
     @property
     def to_dict_exclude_params(self):
