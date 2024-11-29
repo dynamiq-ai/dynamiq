@@ -16,8 +16,8 @@ def main():
     # Uncomment the following line to enable verbose logging
     # logging.getLogger().setLevel(logging.DEBUG)
 
-    # Initialize the LLM (replace 'gpt-4' with your available model)
-    llm = OpenAI(model="gpt-4")
+    # Initialize the LLM (replace 'gpt-4o-mini' with your available model)
+    llm = OpenAI(model="gpt-4o-mini")
 
     # Sample data
     questions = ["Who was Albert Einstein and what is he best known for?"]

@@ -17,7 +17,7 @@ def main():
     # logging.getLogger().setLevel(logging.DEBUG)
 
     # Initialize the LLM (replace 'gpt-4o-mini' with your available model)
-    llm = OpenAI(model="gpt-4")
+    llm = OpenAI(model="gpt-4o-mini")
 
     # Sample data (can be replaced with your data)
     questions = [
