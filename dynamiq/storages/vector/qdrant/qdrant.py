@@ -136,6 +136,7 @@ class QdrantVectorStore:
         init_from: dict | None = None,
         wait_result_from_api: bool = True,
         metadata: dict | None = None,
+        content_key: str | None = None,
         write_batch_size: int = 100,
         scroll_size: int = 10_000,
         payload_fields_to_index: list[dict] | None = None,
@@ -233,6 +234,7 @@ class QdrantVectorStore:
         self.return_embedding = return_embedding
         self.write_batch_size = write_batch_size
         self.scroll_size = scroll_size
+        self.content_key = content_key
 
     @property
     def client(self):
@@ -315,6 +317,7 @@ class QdrantVectorStore:
         self,
         documents: list[Document],
         policy: DuplicatePolicy = DuplicatePolicy.FAIL,
+        content_key: str | None = None,
     ) -> int:
         """Writes documents to Qdrant using the specified policy.
 
@@ -350,6 +353,7 @@ class QdrantVectorStore:
             batch = convert_dynamiq_documents_to_qdrant_points(
                 document_batch,
                 use_sparse_embeddings=self.use_sparse_embeddings,
+                content_key=content_key or self.content_key,
             )
 
             self.client.upsert(
@@ -412,10 +416,12 @@ class QdrantVectorStore:
         self,
         filters: dict[str, Any] | rest.Filter | None = None,
         include_embeddings: bool = False,
+        content_key: str | None = None,
     ) -> Generator[Document, None, None]:
         """Returns a generator that yields documents from Qdrant based on the provided filters.
 
         Args:
+            content_key:
             filters: Filters applied to the retrieved documents.
             include_embeddings: Whether to include the embeddings of the retrieved documents.
 
@@ -442,9 +448,13 @@ class QdrantVectorStore:
             )
 
             for record in records:
-                yield convert_qdrant_point_to_dynamiq_document(record, use_sparse_embeddings=self.use_sparse_embeddings)
+                yield convert_qdrant_point_to_dynamiq_document(
+                    record,
+                    use_sparse_embeddings=self.use_sparse_embeddings,
+                    content_key=content_key or self.content_key,
+                )
 
-    def list_documents(self, include_embeddings: bool = False) -> list[Document]:
+    def list_documents(self, include_embeddings: bool = False, content_key: str | None = None) -> list[Document]:
         """Returns a list of all documents in the Document Store.
 
         Args:
@@ -453,16 +463,19 @@ class QdrantVectorStore:
         Returns:
             A list of all documents in the Document Store.
         """
-        return list(self.get_documents_generator(include_embeddings=include_embeddings))
+        return list(
+            self.get_documents_generator(
+                include_embeddings=include_embeddings, content_key=content_key or self.content_key
+            )
+        )
 
     def get_documents_by_id(
-        self,
-        ids: list[str],
-        index: str | None = None,
+        self, ids: list[str], index: str | None = None, content_key: str | None = None
     ) -> list[Document]:
         """Retrieves documents from Qdrant by their IDs.
 
         Args:
+            content_key:
             ids: A list of document IDs to retrieve.
             index: The name of the index to retrieve documents from.
 
@@ -483,7 +496,11 @@ class QdrantVectorStore:
 
         for record in records:
             documents.append(
-                convert_qdrant_point_to_dynamiq_document(record, use_sparse_embeddings=self.use_sparse_embeddings)
+                convert_qdrant_point_to_dynamiq_document(
+                    record,
+                    use_sparse_embeddings=self.use_sparse_embeddings,
+                    content_key=content_key or self.content_key,
+                )
             )
         return documents
 
@@ -495,6 +512,7 @@ class QdrantVectorStore:
         scale_score: bool = False,
         return_embedding: bool = False,
         score_threshold: float | None = None,
+        content_key: str | None = None,
     ) -> list[Document]:
         """Queries Qdrant using a sparse embedding and returns the most relevant documents.
 
@@ -538,7 +556,9 @@ class QdrantVectorStore:
             score_threshold=score_threshold,
         ).points
         results = [
-            convert_qdrant_point_to_dynamiq_document(point, use_sparse_embeddings=self.use_sparse_embeddings)
+            convert_qdrant_point_to_dynamiq_document(
+                point, use_sparse_embeddings=self.use_sparse_embeddings, content_key=content_key or self.content_key
+            )
             for point in points
         ]
         if scale_score:
@@ -556,6 +576,7 @@ class QdrantVectorStore:
         scale_score: bool = False,
         return_embedding: bool = False,
         score_threshold: float | None = None,
+        content_key: str | None = None,
     ) -> list[Document]:
         """Queries Qdrant using a dense embedding and returns the most relevant documents.
 
@@ -584,7 +605,9 @@ class QdrantVectorStore:
             score_threshold=score_threshold,
         ).points
         results = [
-            convert_qdrant_point_to_dynamiq_document(point, use_sparse_embeddings=self.use_sparse_embeddings)
+            convert_qdrant_point_to_dynamiq_document(
+                point, use_sparse_embeddings=self.use_sparse_embeddings, content_key=content_key or self.content_key
+            )
             for point in points
         ]
         if scale_score:
@@ -605,6 +628,7 @@ class QdrantVectorStore:
         top_k: int = 10,
         return_embedding: bool = False,
         score_threshold: float | None = None,
+        content_key: str | None = None,
     ) -> list[Document]:
         """Retrieves documents based on dense and sparse embeddings and fuses the results using Reciprocal Rank Fusion.
 
@@ -667,7 +691,12 @@ class QdrantVectorStore:
             msg = "Error during hybrid search"
             raise QdrantStoreError(msg) from e
 
-        results = [convert_qdrant_point_to_dynamiq_document(point, use_sparse_embeddings=True) for point in points]
+        results = [
+            convert_qdrant_point_to_dynamiq_document(
+                point, use_sparse_embeddings=True, content_key=content_key or self.content_key
+            )
+            for point in points
+        ]
 
         return results
 
