@@ -1,7 +1,8 @@
 import logging
 from functools import cached_property
+from typing import Any
 
-from pydantic import BaseModel, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, PrivateAttr, computed_field, field_validator, model_validator
 
 from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
 from dynamiq.nodes.llms import BaseLLM
@@ -73,11 +74,12 @@ class NLIResultItem(BaseModel):
     verdict: int
     reason: str
 
-    @model_validator(mode="after")
-    def validate_verdict(self):
-        if self.verdict not in (0, 1):
+    @field_validator("verdict")
+    @classmethod
+    def validate_verdict(cls, v):
+        if v not in (0, 1):
             raise ValueError("Verdict must be either 0 or 1.")
-        return self
+        return v
 
 
 class NLIOutput(BaseModel):
@@ -163,10 +165,12 @@ class FaithfulnessEvaluator(BaseModel):
         self._statement_simplifier = LLMEvaluator(
             instructions=simplify_instructions.strip(),
             inputs=[
-                ("question", list[str]),
-                ("answer", list[str]),
+                {"name": "question", "type": list[str]},
+                {"name": "answer", "type": list[str]},
             ],
-            outputs=["statements"],
+            outputs=[
+                {"name": "statements", "type": list[str]},
+            ],
             examples=[
                 {
                     "inputs": {
@@ -184,11 +188,11 @@ class FaithfulnessEvaluator(BaseModel):
                     "outputs": {
                         "statements": [
                             "Albert Einstein was a German-born theoretical physicist.",
-                            "Albert Einstein is recognized as one of the greatest and "
-                            "most influential physicists of all time.",
-                            "Albert Einstein was best known for developing the theory " "of relativity.",
-                            "Albert Einstein also made important contributions to the "
-                            "development of quantum mechanics.",
+                            "Albert Einstein is recognized as one of the greatest"
+                            " and most influential physicists of all time.",
+                            "Albert Einstein was best known for developing the theory of relativity.",
+                            "Albert Einstein also made important contributions to the development"
+                            " of quantum mechanics.",
                         ]
                     },
                 },
@@ -210,10 +214,12 @@ class FaithfulnessEvaluator(BaseModel):
         self._nli_evaluator = LLMEvaluator(
             instructions=nli_instructions.strip(),
             inputs=[
-                ("context", list[str]),
-                ("statements", list[list[str]]),
+                {"name": "context", "type": list[str]},
+                {"name": "statements", "type": list[list[str]]},
             ],
-            outputs=["results"],
+            outputs=[
+                {"name": "results", "type": list[dict[str, Any]]},
+            ],
             examples=[
                 {
                     "inputs": {
@@ -242,32 +248,26 @@ class FaithfulnessEvaluator(BaseModel):
                             {
                                 "statement": "John is majoring in Biology.",
                                 "verdict": 0,
-                                "reason": (
-                                    "The context states that John is pursuing a degree "
-                                    "in Computer Science, not Biology."
-                                ),
+                                "reason": "The context states that John is pursuing a degree"
+                                " in Computer Science, not Biology.",
                             },
                             {
-                                "statement": ("John is taking a course on Artificial Intelligence."),
+                                "statement": "John is taking a course on Artificial Intelligence.",
                                 "verdict": 0,
-                                "reason": (
-                                    "The context lists his courses, and Artificial " "Intelligence is not mentioned."
-                                ),
+                                "reason": "The context lists his courses,"
+                                " and Artificial Intelligence is not mentioned.",
                             },
                             {
                                 "statement": "John is a dedicated student.",
                                 "verdict": 1,
-                                "reason": (
-                                    "The context mentions he spends significant time "
-                                    "studying and stays late to work on projects."
-                                ),
+                                "reason": "The context mentions he spends significant time"
+                                " studying and stays late to work on projects.",
                             },
                             {
                                 "statement": "John has a part-time job.",
                                 "verdict": 0,
-                                "reason": (
-                                    "There is no information in the context about John " "having a part-time job."
-                                ),
+                                "reason": "There is no information in the context"
+                                " about John having a part-time job.",
                             },
                         ]
                     },
@@ -294,7 +294,7 @@ class FaithfulnessEvaluator(BaseModel):
         )
         statements_list = []
         for result in results["results"]:
-            statements = result["statements"]
+            statements = result.get("statements")
             if isinstance(statements, list):
                 statements_list.append(statements)
             else:
