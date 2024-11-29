@@ -124,9 +124,7 @@ class RunInput(BaseModel):
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if len(self.questions) != len(self.answers):
-            raise ValueError("Questions, answers, and ground truths must have the same length.")
-        if len(self.questions) != len(self.ground_truths):
+        if len(self.questions) != len(self.answers) or len(self.questions) != len(self.ground_truths):
             raise ValueError("Questions, answers, and ground truths must have the same length.")
         return self
 
@@ -185,11 +183,11 @@ class AnswerCorrectnessEvaluator(BaseModel):
         )
         self._statement_extractor = LLMEvaluator(
             instructions=extract_instructions.strip(),
-            inputs=[("texts", list[str])],
-            outputs=["statements"],
+            inputs=[{"name": "texts", "type": list[str]}],
+            outputs=[{"name": "statements", "type": list[str]}],
             examples=[
                 {
-                    "inputs": {"texts": ["The sun is powered by nuclear fusion. It provides " "heat and light."]},
+                    "inputs": {"texts": ["The sun is powered by nuclear fusion. It provides heat and light."]},
                     "outputs": {
                         "statements": [
                             "The sun is powered by nuclear fusion.",
@@ -220,11 +218,11 @@ class AnswerCorrectnessEvaluator(BaseModel):
         self._statement_classifier = LLMEvaluator(
             instructions=classify_instructions.strip(),
             inputs=[
-                ("question", list[str]),
-                ("answer_statements", list[list[str]]),
-                ("ground_truth_statements", list[list[str]]),
+                {"name": "question", "type": list[str]},
+                {"name": "answer_statements", "type": list[list[str]]},
+                {"name": "ground_truth_statements", "type": list[list[str]]},
             ],
-            outputs=["classifications"],
+            outputs=[{"name": "classifications", "type": dict[str, list[str]]}],
             examples=[
                 {
                     "inputs": {
@@ -269,8 +267,8 @@ class AnswerCorrectnessEvaluator(BaseModel):
         )
         self._similarity_evaluator = LLMEvaluator(
             instructions=similarity_instructions.strip(),
-            inputs=[("answers", list[str]), ("ground_truths", list[str])],
-            outputs=["similarity_score"],
+            inputs=[{"name": "answers", "type": list[str]}, {"name": "ground_truths", "type": list[str]}],
+            outputs=[{"name": "similarity_score", "type": float}],
             examples=[
                 {
                     "inputs": {
@@ -296,7 +294,7 @@ class AnswerCorrectnessEvaluator(BaseModel):
         # Extract the 'statements' from the results and ensure proper structure
         statements_list = []
         for result in results["results"]:
-            statements = result["statements"]
+            statements = result.get("statements")
             # Ensure 'statements' is a list of strings
             if isinstance(statements, list):
                 statements_list.append(statements)
