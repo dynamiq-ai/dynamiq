@@ -1,5 +1,6 @@
 import logging
 from functools import cached_property
+from typing import Any
 
 from pydantic import BaseModel, PrivateAttr, computed_field, model_validator
 
@@ -137,8 +138,8 @@ class FactualCorrectnessEvaluator(BaseModel):
 
         self._claim_decomposer = LLMEvaluator(
             instructions=decomposition_instructions.strip(),
-            inputs=[("input_text", list[str])],
-            outputs=["claims"],
+            inputs=[{"name": "input_text", "type": list[str]}],
+            outputs=[{"name": "claims", "type": list[str]}],
             examples=[
                 {
                     "inputs": {
@@ -173,10 +174,10 @@ class FactualCorrectnessEvaluator(BaseModel):
         self._nli_evaluator = LLMEvaluator(
             instructions=nli_instructions.strip(),
             inputs=[
-                ("premise", list[str]),
-                ("claims", list[list[str]]),
+                {"name": "premise", "type": list[str]},
+                {"name": "claims", "type": list[list[str]]},
             ],
-            outputs=["results"],
+            outputs=[{"name": "results", "type": list[dict[str, Any]]}],
             examples=[
                 {
                     "inputs": {
@@ -197,7 +198,7 @@ class FactualCorrectnessEvaluator(BaseModel):
                             {
                                 "claim": "Albert Einstein was a German theoretical physicist.",
                                 "verdict": 1,
-                                "reason": ("The premise states he was a German-born theoretical physicist."),
+                                "reason": "The premise states he was a German-born theoretical physicist.",
                             },
                             {
                                 "claim": "Albert Einstein developed the theory of relativity.",
@@ -207,7 +208,7 @@ class FactualCorrectnessEvaluator(BaseModel):
                             {
                                 "claim": "Albert Einstein contributed to quantum mechanics.",
                                 "verdict": 0,
-                                "reason": ("The premise does not mention contributions to quantum mechanics."),
+                                "reason": "The premise does not mention contributions to quantum mechanics.",
                             },
                         ]
                     },
@@ -230,7 +231,7 @@ class FactualCorrectnessEvaluator(BaseModel):
         results = self._claim_decomposer.run(input_text=input_data.texts)
         claims_list = []
         for result in results["results"]:
-            claims = result["claims"]
+            claims = result.get("claims")
             if isinstance(claims, list):
                 claims_list.append(claims)
             else:
