@@ -103,11 +103,14 @@ class ContextPrecisionEvaluator(BaseModel):
         self._context_precision_evaluator = LLMEvaluator(
             instructions=context_precision_instructions.strip(),
             inputs=[
-                ("question", list[str]),
-                ("answer", list[str]),
-                ("context", list[str]),
+                {"name": "question", "type": list[str]},
+                {"name": "answer", "type": list[str]},
+                {"name": "context", "type": list[str]},
             ],
-            outputs=["verdict", "reason"],
+            outputs=[
+                {"name": "verdict", "type": int},
+                {"name": "reason", "type": str},
+            ],
             examples=[
                 {
                     "inputs": {
