@@ -944,7 +944,7 @@ class Exa(Http):
     """
 
     type: Literal[ConnectionType.Exa] = ConnectionType.Exa
-    url: str = Field(default="https://api.exa.ai")
+    url: Literal["https://api.exa.ai"] = Field(default="https://api.exa.ai")
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
     api_key: str = Field(default_factory=partial(get_env_var, "EXA_API_KEY"))
 
