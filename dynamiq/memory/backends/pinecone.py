@@ -11,6 +11,7 @@ from dynamiq.types import Document
 
 class PineconeError(Exception):
     """Base exception class for Pinecone-related errors."""
+
     pass
 
 

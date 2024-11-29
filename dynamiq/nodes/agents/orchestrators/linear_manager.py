@@ -95,7 +95,6 @@ class LinearAgentManager(AgentManager):
                 "plan": self._get_linear_plan_prompt(),
                 "assign": self._get_linear_assign_prompt(),
                 "final": self._get_linear_final_prompt(),
-                "run": self._get_linear_agent_run(),
             }
         )
 

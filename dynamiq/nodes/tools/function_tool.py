@@ -96,6 +96,7 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
     :param func: Function to be converted into a tool.
     :return: A FunctionTool subclass that wraps the provided function.
     """
+
     def create_input_schema(func) -> type[BaseModel]:
         signature = inspect.signature(func)
         params_dict = {param.name: (param.annotation, param.default) for param in signature.parameters.values()}
@@ -107,8 +108,8 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
     class FunctionToolFromDecorator(FunctionTool[T]):
         name: str = Field(default=func.__name__)
         description: str = Field(
-            default=func.__doc__
-            or f"A tool for executing the {func.__name__} function."
+            default=(func.__doc__ or "") + "\nFunction signature:" + str(inspect.signature(func))
+            or f"A tool for executing the {func.__name__} function with signature: {str(inspect.signature(func))}"
         )
         _original_func = staticmethod(func)
         input_schema: ClassVar[type[BaseModel]] = create_input_schema(func)

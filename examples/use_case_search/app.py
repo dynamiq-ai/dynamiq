@@ -1,5 +1,7 @@
 import time
+
 import streamlit as st
+
 from examples.use_case_search.server import process_query
 
 
