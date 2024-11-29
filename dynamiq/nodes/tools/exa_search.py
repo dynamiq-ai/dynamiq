@@ -1,9 +1,10 @@
 from enum import Enum
 from typing import Any, ClassVar, Literal
+from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from dynamiq.connections import Exa, HTTPMethod
+from dynamiq.connections import Exa
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
@@ -137,12 +138,14 @@ class ExaTool(ConnectionNode):
                 "summary": {"query": f"Summarize the main points about {payload['query']}"},
             }
 
+        connection_url = urljoin(self.connection.url, "search")
+
         try:
             response = self.client.request(
-                method=HTTPMethod.POST,
-                url="https://api.exa.ai/search",
+                method=self.connection.method,
+                url=connection_url,
                 json=payload,
-                headers={"x-api-key": self.connection.api_key, "Content-Type": "application/json"},
+                headers=self.connection.headers,
             )
             response.raise_for_status()
             search_result = response.json()
