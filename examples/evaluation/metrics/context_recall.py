@@ -3,7 +3,7 @@ import sys
 
 from dotenv import find_dotenv, load_dotenv
 
-from dynamiq.evaluations.metrics.context_recall import ContextRecallEvaluator
+from dynamiq.evaluations.metrics import ContextRecallEvaluator
 from dynamiq.nodes.llms import OpenAI
 
 

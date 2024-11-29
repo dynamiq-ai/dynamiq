@@ -3,7 +3,7 @@ import sys
 
 from dotenv import find_dotenv, load_dotenv
 
-from dynamiq.evaluations.metrics.context_precision import ContextPrecisionEvaluator
+from dynamiq.evaluations.metrics import ContextPrecisionEvaluator
 from dynamiq.nodes.llms import OpenAI
 
 

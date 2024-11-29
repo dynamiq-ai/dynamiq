@@ -3,7 +3,7 @@ import sys
 
 from dotenv import find_dotenv, load_dotenv
 
-from dynamiq.evaluations.metrics.faithfulness import FaithfulnessEvaluator
+from dynamiq.evaluations.metrics import FaithfulnessEvaluator
 from dynamiq.nodes.llms import OpenAI
 
 
