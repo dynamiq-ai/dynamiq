@@ -101,8 +101,8 @@ class StreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
 
     def __init__(
         self,
-        queue: Queue | None = Queue(),
-        done_event: threading.Event | None = threading.Event(),
+        queue: Queue | None = None,
+        done_event: threading.Event | None = None,
     ) -> None:
         """Initialize StreamingIteratorCallbackHandler.
 
@@ -110,6 +110,10 @@ class StreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
             queue (Queue | None): Queue for streaming events.
             done_event (threading.Event | None): Event to signal completion.
         """
+        if queue is None:
+            queue = Queue()
+        if done_event is None:
+            done_event = threading.Event()
         super().__init__(queue, done_event)
         self._iterator = self._iter_queue_events()
 
@@ -148,8 +152,8 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
 
     def __init__(
         self,
-        queue: asyncio.Queue | None = asyncio.Queue(),
-        done_event: asyncio.Event | None = asyncio.Event(),
+        queue: asyncio.Queue | None = None,
+        done_event: asyncio.Event | None = None,
     ) -> None:
         """Initialize AsyncStreamingIteratorCallbackHandler.
 
@@ -157,6 +161,10 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
             queue (asyncio.Queue | None): Queue for streaming events.
             done_event (asyncio.Event | None): Event to signal completion.
         """
+        if queue is None:
+            queue = asyncio.Queue()
+        if done_event is None:
+            done_event = asyncio.Event()
         super().__init__(queue, done_event)
         self._iterator = self._iter_queue_events()
 

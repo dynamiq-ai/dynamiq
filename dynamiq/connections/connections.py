@@ -3,7 +3,8 @@ from abc import ABC, abstractmethod
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.env import get_env_var
@@ -56,6 +57,7 @@ class ConnectionType(str, enum.Enum):
     SambaNova = "SambaNova"
     Milvus = "Milvus"
     Perplexity = "Perplexity"
+    DeepSeek = "DeepSeek"
 
 
 class HTTPMethod(str, enum.Enum):
@@ -207,7 +209,7 @@ class Http(BaseConnection):
     """
 
     type: Literal[ConnectionType.Http] = ConnectionType.Http
-    url: str
+    url: str = ""
     method: HTTPMethod
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] | None = Field(default_factory=dict)
@@ -876,23 +878,22 @@ class Milvus(BaseConnection):
     Attributes:
         type (Literal[ConnectionType.Milvus]): The type of connection, always 'Milvus'.
         deployment_type (MilvusDeploymentType): The deployment type of the Milvus service
-        api_key (Optional[str]): The API key for Milvus on Zilliz Cloud, required only for cloud deployment.
-        uri (str): The URI for the Milvus instance (file path, Docker URL, or cloud URL).
+        api_key (Optional[str]): The API key for Milvus
+        uri (str): The URI for the Milvus instance (file path or host URL).
     """
 
     type: Literal[ConnectionType.Milvus] = ConnectionType.Milvus
-    deployment_type: MilvusDeploymentType = MilvusDeploymentType.FILE
+    deployment_type: MilvusDeploymentType = MilvusDeploymentType.HOST
     uri: str = Field(default_factory=partial(get_env_var, "MILVUS_URI", "http://localhost:19530"))
     api_key: str | None = Field(default_factory=partial(get_env_var, "MILVUS_API_TOKEN", None))
 
-    @validator("uri", pre=True)
-    def validate_uri(cls, uri, values):
-        deployment_type = values.get("deployment_type")
+    @field_validator("uri")
+    @classmethod
+    def validate_uri(cls, uri: str, values: ValidationInfo) -> str:
+        deployment_type = values.data.get("deployment_type")
 
         if deployment_type == MilvusDeploymentType.FILE and not uri.endswith(".db"):
             raise ValueError("For FILE deployment, URI should point to a file ending with '.db'.")
-        elif deployment_type == MilvusDeploymentType.HOST and not uri.startswith(("http", "https")):
-            raise ValueError("For HOST deployment, URI should start with 'http' or 'https'.")
 
         return uri
 
@@ -915,8 +916,16 @@ class Milvus(BaseConnection):
 
 
 class Perplexity(BaseApiKeyConnection):
-    type: Literal[ConnectionType.Replicate] = ConnectionType.Replicate
+    type: Literal[ConnectionType.Perplexity] = ConnectionType.Perplexity
     api_key: str = Field(default_factory=partial(get_env_var, "PERPLEXITYAI_API_KEY"))
+
+    def connect(self):
+        pass
+
+
+class DeepSeek(BaseApiKeyConnection):
+    type: Literal[ConnectionType.DeepSeek] = ConnectionType.DeepSeek
+    api_key: str = Field(default_factory=partial(get_env_var, "DEEPSEEK_API_KEY"))
 
     def connect(self):
         pass

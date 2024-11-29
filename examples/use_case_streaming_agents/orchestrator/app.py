@@ -7,7 +7,7 @@ from backend import generate_agent_response, setup_agent
 st.sidebar.title("Agent Configuration")
 streaming_enabled = st.sidebar.checkbox("Enable Streaming", value=False)
 
-streaming_mode = st.sidebar.radio("Streaming Mode", options=["Final", "All"], index=0)
+streaming_mode = st.sidebar.radio("Streaming Mode", options=["Steps", "Answer"], index=0)
 if "agent" not in st.session_state or st.sidebar.button("Apply Changes"):
     st.session_state.agent = setup_agent(streaming_enabled, streaming_mode)
     st.session_state.messages = []

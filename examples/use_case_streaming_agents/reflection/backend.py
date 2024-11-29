@@ -2,7 +2,7 @@ import re
 
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.memory import Memory
-from dynamiq.memory.backend.in_memory import InMemory
+from dynamiq.memory.backends.in_memory import InMemory
 from dynamiq.nodes.agents.reflection import ReflectionAgent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
@@ -17,7 +17,7 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -
     llm = setup_llm()
     memory = Memory(backend=InMemory())
 
-    mode_mapping = {"Final": StreamingMode.FINAL, "All": StreamingMode.ALL}
+    mode_mapping = {"Answer": StreamingMode.FINAL, "Steps": StreamingMode.ALL}
     mode = mode_mapping.get(streaming_mode, StreamingMode.FINAL)
     streaming_config = StreamingConfig(enabled=streaming_enabled, mode=mode)
 

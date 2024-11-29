@@ -1,9 +1,8 @@
 from dynamiq.components.embedders.openai import OpenAIEmbedder
 from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory import Memory
-from dynamiq.memory.backend import Pinecone
+from dynamiq.memory.backends import Pinecone
 from dynamiq.prompts import MessageRole
-
 
 pinecone_connection = PineconeConnection()
 embedder = OpenAIEmbedder(dimensions=1536)

@@ -4,7 +4,7 @@ from io import BytesIO
 from typing import Any
 from uuid import uuid4
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.executors.base import BaseExecutor
@@ -30,7 +30,7 @@ class Flow(BaseFlow):
     nodes: list[Node] = []
     executor: type[BaseExecutor] = ThreadExecutor
     max_node_workers: int | None = None
-    connection_manager: ConnectionManager = ConnectionManager()
+    connection_manager: ConnectionManager = Field(default_factory=ConnectionManager)
 
     def __init__(self, **kwargs):
         """

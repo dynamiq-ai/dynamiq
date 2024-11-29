@@ -1,7 +1,4 @@
-import json
-
 from dotenv import load_dotenv
-
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Anthropic, ScaleSerp
@@ -12,9 +9,8 @@ from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
-from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
-from examples.tools.file_reader import FileReadTool
+from examples.tools.file_reader import FileReaderTool
 
 # Load environment variables
 load_dotenv()
@@ -57,7 +53,7 @@ def create_workflow() -> Workflow:
 
     # Initialize tools
     tool_search = ScaleSerpTool(connection=search_connection)
-    tool_file_read = FileReadTool(file_path="job_example.md")
+    tool_file_read = FileReaderTool(file_path="job_example.md")
 
     # Create agents
     agent_researcher = ReActAgent(
@@ -124,12 +120,6 @@ def run_planner() -> tuple[str, dict]:
             config=RunnableConfig(callbacks=[tracing]),
         )
 
-        # Dump traces
-        _ = json.dumps(
-            {"runs": [run.to_dict() for run in tracing.runs.values()]},
-            cls=JsonWorkflowEncoder,
-        )
-
         logger.info("Workflow completed successfully")
 
         # Print and save result
@@ -145,4 +135,4 @@ def run_planner() -> tuple[str, dict]:
 
 
 if __name__ == "__main__":
-    run_planner()
+    print(run_planner()[0])

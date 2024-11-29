@@ -9,7 +9,7 @@ from typing import Any, Callable, ClassVar
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError
 
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.memory import Memory
+from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -27,7 +27,8 @@ from dynamiq.utils.logger import logger
 class StreamChunkChoiceDelta(BaseModel):
     """Delta model for content chunks."""
     content: str | dict
-    type: str
+    source: str
+    step: str
 
 
 class StreamChunkChoice(BaseModel):
@@ -70,18 +71,17 @@ class Agent(Node):
         "You are a helpful AI assistant designed to assist users with various tasks and queries."
         "Your goal is to provide accurate, helpful, and friendly responses to the best of your abilities."
     )
-    DEFAULT_DATE: ClassVar[str] = datetime.now().strftime("%d %B %Y")
 
     llm: Node = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
-    error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
     name: str = "AI Agent"
     role: str | None = None
     max_loops: int = 1
     memory: Memory | None = Field(None, description="Memory node for the agent.")
-    memory_retrieval_strategy: str = "all"  # all, relevant, both
+    memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.ALL
 
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -107,8 +107,14 @@ class Agent(Node):
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         return data
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
-        """Initialize components for the manager and agents."""
+    def init_components(self, connection_manager: ConnectionManager | None = None):
+        """
+        Initialize components for the manager and agents.
+
+        Args:
+            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
+        """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.llm.is_postponed_component_init:
             self.llm.init_components(connection_manager)
@@ -129,20 +135,20 @@ class Agent(Node):
         self._prompt_blocks = {
             "introduction": self.DEFAULT_INTRODUCTION,
             "role": self.role or "",
-            "date": self.DEFAULT_DATE,
+            "date": datetime.now().strftime("%d %B %Y"),
             "tools": "{tool_description}",
             "files": "{file_description}",
             "instructions": "",
             "output_format": "",
             "relevant_information": "{relevant_memory}",
-            "conversation_history": "{context}",
+            "conversation_history": "{conversation_history}",
             "request": "User request: {input}",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
             "file_description": self.file_description,
             "user_input": "",
-            "context": "",
+            "conversation_history": "",
             "relevant_memory": "",
         }
 
@@ -182,7 +188,7 @@ class Agent(Node):
                 chat_history = TypeAdapter(list[Message]).validate_python(chat_history)
                 chat_history = self._retrieve_chat_history(chat_history)
                 logger.debug(f"Agent {self.name} - {self.id}: Chat history: {len(chat_history)}")
-                self._prompt_variables["context"] = chat_history
+                self._prompt_variables["conversation_history"] = chat_history
 
             except ValidationError as e:
                 raise TypeError(f"Invalid chat history: {e}")
@@ -214,24 +220,27 @@ class Agent(Node):
 
     def _retrieve_memory(self, input_data):
         """
-        Retrieves memory based on the selected strategy: 'relevant', 'all', or 'both'.
+        Retrieves memory based on the selected strategy:
+        - RELEVANT: retrieves relevant memory based on the user input
+        - ALL: retrieves all messages in the memory
+        - BOTH: retrieves both relevant memory and all messages
         """
         user_id = input_data.get("user_id", None)
         filters = {"user_id": user_id} if user_id else None
 
-        if self.memory_retrieval_strategy == "relevant":
+        if self.memory_retrieval_strategy == MemoryRetrievalStrategy.RELEVANT:
             relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
             self._prompt_variables["relevant_memory"] = relevant_memory
 
-        elif self.memory_retrieval_strategy == "all":
+        elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.ALL:
             context = self.memory.get_all_messages_as_string()
-            self._prompt_variables["context"] = context
+            self._prompt_variables["conversation_history"] = context
 
-        elif self.memory_retrieval_strategy == "both":
+        elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.BOTH:
             relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
             context = self.memory.get_all_messages_as_string()
             self._prompt_variables["relevant_memory"] = relevant_memory
-            self._prompt_variables["context"] = context
+            self._prompt_variables["conversation_history"] = context
 
     def _run_llm(self, prompt: str, config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and handles streaming or full responses."""
@@ -255,29 +264,58 @@ class Agent(Node):
             logger.error(f"Agent {self.name} - {self.id}: LLM execution failed: {str(e)}")
             raise
 
-    def stream_chunk(self, input_chunk: str, config: RunnableConfig | None = None, **kwargs):
-        """Streams the input chunk to the callbacks."""
+    def stream_content(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
+        if self.streaming.by_tokens:
+            return self.stream_by_tokens(content=content, source=source, step=step, config=config, **kwargs)
+        return self.stream_response(content=content, source=source, step=step, config=config, **kwargs)
+
+    def stream_by_tokens(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
+        """Streams the input content to the callbacks."""
+        tokens = content.split(" ")
         final_response = []
-        for chunk in input_chunk.split(" "):
-            final_response.append(chunk)
-            chunk_for_stream = StreamChunk(
-                choices=[StreamChunkChoice(delta=StreamChunkChoiceDelta(content=chunk, type=self.name))]
+        for token in tokens:
+            final_response.append(token)
+            token_with_prefix = " " + token
+            token_for_stream = StreamChunk(
+                choices=[
+                    StreamChunkChoice(delta=StreamChunkChoiceDelta(content=token_with_prefix, source=source, step=step))
+                ]
             )
-            logger.debug(f"Agent {self.name} - {self.id}: Streaming chunk: {chunk_for_stream}")
+            logger.debug(f"Agent {self.name} - {self.id}: Streaming token: {token_for_stream}")
             self.run_on_node_execute_stream(
                 callbacks=config.callbacks,
-                chunk=chunk_for_stream.model_dump(),
+                chunk=token_for_stream.model_dump(),
                 **kwargs,
             )
         return " ".join(final_response)
+
+    def stream_response(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
+        response_for_stream = StreamChunk(
+            choices=[StreamChunkChoice(delta=StreamChunkChoiceDelta(content=content, source=source, step=step))]
+        )
+        logger.debug(f"Agent {self.name} - {self.id}: Streaming response: {response_for_stream}")
+
+        self.run_on_node_execute_stream(
+            callbacks=config.callbacks,
+            chunk=response_for_stream.model_dump(),
+            **kwargs,
+        )
+        return content
 
     def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the agent with the generated prompt and handles exceptions."""
         formatted_prompt = self.generate_prompt()
         try:
+            logger.info(f"Streaming config  {self.streaming}")
             llm_result = self._run_llm(formatted_prompt, config=config, **kwargs)
             if self.streaming.enabled:
-                return self.stream_chunk(llm_result, config=config, **kwargs)
+                return self.stream_content(
+                    content=llm_result,
+                    source=self.name,
+                    step="answer",
+                    config=config,
+                    **kwargs,
+                )
             return llm_result
 
         except Exception as e:
@@ -477,7 +515,7 @@ class AgentManager(Agent):
         prompt = self.generate_prompt(block_names=["plan"])
         llm_result = self._run_llm(prompt, config, **kwargs)
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            return self.stream_chunk(input_chunk=llm_result, config=config, **kwargs)
+            return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
         return llm_result
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
@@ -485,7 +523,7 @@ class AgentManager(Agent):
         prompt = self.generate_prompt(block_names=["assign"])
         llm_result = self._run_llm(prompt, config, **kwargs)
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            return self.stream_chunk(input_chunk=llm_result, config=config, **kwargs)
+            return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
         return llm_result
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
@@ -493,5 +531,5 @@ class AgentManager(Agent):
         prompt = self.generate_prompt(block_names=["final"])
         llm_result = self._run_llm(prompt, config, **kwargs)
         if self.streaming.enabled:
-            return self.stream_chunk(input_chunk=llm_result, config=config, **kwargs)
+            return self.stream_content(content=llm_result, step="answer", source=self.name, config=config, **kwargs)
         return llm_result

@@ -4,7 +4,7 @@ import pytest
 
 from dynamiq import Workflow, connections, flows, prompts
 from dynamiq.memory import Memory
-from dynamiq.memory.backend import InMemory
+from dynamiq.memory.backends import InMemory
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.prompts import MessageRole

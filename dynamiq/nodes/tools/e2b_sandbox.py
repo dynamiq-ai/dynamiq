@@ -68,32 +68,32 @@ def generate_file_description(file: bytes | io.BytesIO, length: int = 20) -> str
     return f"File starting with: {file_content.hex()}"
 
 
-def handle_file_upload(
-    files,
-):
-    """Handles file uploading with additional metadata."""
-    files_data = []
-    for file in files:
-        if not isinstance(file, bytes | io.BytesIO):
-            raise ValueError(f"Error: Invalid file data type: {type(file)}. Expected bytes or BytesIO.")
-
-        file_name = getattr(file, "name", generate_fallback_filename(file))
-        description = getattr(file, "description", generate_file_description(file))
-        files_data.append(
-            FileData(
-                data=file.getvalue() if isinstance(file, io.BytesIO) else file,
-                name=file_name,
-                description=description,
-            )
-        )
-
-    return files_data
-
-
 class FileData(BaseModel):
     data: bytes
     name: str
     description: str
+
+
+def handle_file_upload(files: list[bytes | io.BytesIO | FileData]) -> list[FileData]:
+    """Handles file uploading with additional metadata."""
+    files_data = []
+    for file in files:
+        if isinstance(file, FileData):
+            files_data.append(file)
+        elif isinstance(file, bytes | io.BytesIO):
+            file_name = getattr(file, "name", generate_fallback_filename(file))
+            description = getattr(file, "description", generate_file_description(file))
+            files_data.append(
+                FileData(
+                    data=file.getvalue() if isinstance(file, io.BytesIO) else file,
+                    name=file_name,
+                    description=description,
+                )
+            )
+        else:
+            raise ValueError(f"Error: Invalid file data type: {type(file)}. Expected bytes or BytesIO or FileData.")
+
+    return files_data
 
 
 class E2BInterpreterInputSchema(BaseModel):
@@ -115,10 +115,8 @@ class E2BInterpreterInputSchema(BaseModel):
         return self
 
     @field_validator("files", mode="before")
-    def files_validator(
-        cls,
-        files,
-    ):
+    @classmethod
+    def files_validator(cls, files: list[bytes | io.BytesIO | FileData]) -> list[FileData]:
         return handle_file_upload(files)
 
 
@@ -153,10 +151,8 @@ class E2BInterpreterTool(ConnectionNode):
     input_schema: ClassVar[type[E2BInterpreterInputSchema]] = E2BInterpreterInputSchema
 
     @field_validator("files", mode="before")
-    def files_validator(
-        cls,
-        files,
-    ):
+    @classmethod
+    def files_validator(cls, files: list[bytes | io.BytesIO | FileData]) -> list[FileData]:
         return handle_file_upload(files)
 
     def __init__(self, **kwargs):
@@ -269,7 +265,7 @@ class E2BInterpreterTool(ConnectionNode):
                 "Error: No output. Please use 'print()' to display the result of your Python code.",
                 recoverable=True,
             )
-        if "Error" in process.stderr:
+        if process.exit_code != 0:
             raise ToolExecutionException(f"Error during Python code execution: {process.stderr}", recoverable=True)
         return process.stdout
 

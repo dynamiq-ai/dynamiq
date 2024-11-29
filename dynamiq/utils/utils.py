@@ -108,6 +108,7 @@ def format_value(value: Any, skip_format_types: set = None, force_format_types: 
     Returns:
         Any: Formatted value.
     """
+    from dynamiq.nodes.tools.python import PythonInputSchema
     from dynamiq.runnables import RunnableResult
 
     if skip_format_types is None:
@@ -133,8 +134,8 @@ def format_value(value: Any, skip_format_types: set = None, force_format_types: 
         return type(value)(
             format_value(v, skip_format_types, force_format_types) for v in value
         )
-    if isinstance(value, RunnableResult):
-        return value.to_dict(skip_format_types, force_format_types)
+    if isinstance(value, (RunnableResult, PythonInputSchema)):
+        return value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types)
     if isinstance(value, BaseModel):
         return value.to_dict() if hasattr(value, "to_dict") else value.model_dump()
     if isinstance(value, Exception):

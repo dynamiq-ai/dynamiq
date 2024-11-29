@@ -1,6 +1,7 @@
 import json
 import re
-from typing import Any
+import types
+from typing import Any, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
@@ -286,10 +287,6 @@ class ReActAgent(Agent):
             ),
         ).model_dump()
 
-    def convert_string_to_dict(string: str) -> dict:
-        string = re.sub(r'\\+', r'\\', string)
-        return json.loads(string)
-
     def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """
         Executes the ReAct strategy by iterating through thought, action, and observation cycles.
@@ -312,7 +309,7 @@ class ReActAgent(Agent):
                 tools_desc=self.tool_description,
                 tools_name=self.tool_names,
                 context="\n".join(previous_responses),
-                input_formats=self.generate_input_formats(self.tools)
+                input_formats=self.generate_input_formats(self.tools),
             )
             logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1} started.")
 
@@ -351,17 +348,21 @@ class ReActAgent(Agent):
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
 
-                            self.stream_chunk(
-                                input_chunk=llm_generated_output,
+                            self.stream_content(
+                                content=llm_generated_output,
+                                source=self.name,
+                                step=f"reasoning_{loop_num + 1}",
                                 config=config,
                                 **kwargs,
                             )
                         if "Answer:" in llm_generated_output:
                             final_answer = self._extract_final_answer(llm_generated_output)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
-                                self.stream_chunk(
-                                    input_chunk=final_answer,
+                            if self.streaming.enabled:
+                                self.stream_content(
+                                    content=final_answer,
+                                    source=self.name,
+                                    step="answer",
                                     config=config,
                                     **kwargs,
                                 )
@@ -377,8 +378,10 @@ class ReActAgent(Agent):
                         llm_generated_output = json.dumps(llm_generated_output_json)
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_chunk(
-                                input_chunk=llm_generated_output,
+                            self.stream_content(
+                                content=llm_generated_output,
+                                source=self.name,
+                                step=f"reasoning_{loop_num + 1}",
                                 config=config,
                                 **kwargs,
                             )
@@ -386,9 +389,11 @@ class ReActAgent(Agent):
                         if action == "provide_final_answer":
                             final_answer = llm_generated_output_json["answer"]
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
-                                self.stream_chunk(
-                                    input_chunk=final_answer,
+                            if self.streaming.enabled:
+                                self.stream_content(
+                                    content=final_answer,
+                                    source=self.name,
+                                    step="answer",
                                     config=config,
                                     **kwargs,
                                 )
@@ -405,8 +410,10 @@ class ReActAgent(Agent):
 
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_chunk(
-                                input_chunk=llm_generated_output,
+                            self.stream_content(
+                                content=llm_generated_output,
+                                source=self.name,
+                                step=f"reasoning_{loop_num + 1}",
                                 config=config,
                                 **kwargs,
                             )
@@ -414,9 +421,11 @@ class ReActAgent(Agent):
                         if action == "finish":
                             final_answer = llm_generated_output_json["action_input"]
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
-                                self.stream_chunk(
-                                    input_chunk=final_answer,
+                            if self.streaming.enabled:
+                                self.stream_content(
+                                    content=final_answer,
+                                    source=self.name,
+                                    step="answer",
                                     config=config,
                                     **kwargs,
                                 )
@@ -429,17 +438,21 @@ class ReActAgent(Agent):
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_chunk(
-                                input_chunk=llm_generated_output,
+                            self.stream_content(
+                                content=llm_generated_output,
+                                source=self.name,
+                                step=f"reasoning_{loop_num + 1}",
                                 config=config,
                                 **kwargs,
                             )
                         if "<answer>" in llm_generated_output:
                             final_answer = self._extract_final_answer_xml(llm_generated_output)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled and self.streaming.mode == StreamingMode.FINAL:
-                                self.stream_chunk(
-                                    input_chunk=final_answer,
+                            if self.streaming.enabled:
+                                self.stream_content(
+                                    content=final_answer,
+                                    source=self.name,
+                                    step="answer",
                                     config=config,
                                     **kwargs,
                                 )
@@ -465,8 +478,10 @@ class ReActAgent(Agent):
                         observation = f"\nObservation: {tool_result}\n"
                         llm_generated_output += observation
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_chunk(
-                                input_chunk=observation,
+                            self.stream_content(
+                                content=observation,
+                                source=tool.name,
+                                step=f"tool_{loop_num}",
                                 config=config,
                                 **kwargs,
                             )
@@ -494,10 +509,12 @@ class ReActAgent(Agent):
             )
             raise MaxLoopsExceededException(message=error_message)
         else:
-            max_loop_final_answer = self._handle_max_loops_exceeded(previous_responses, config, kwargs)
+            max_loop_final_answer = self._handle_max_loops_exceeded(previous_responses, config, **kwargs)
             if self.streaming.enabled:
-                self.stream_chunk(
-                    input_chunk=max_loop_final_answer,
+                self.stream_content(
+                    content=max_loop_final_answer,
+                    source=self.name,
+                    step="answer",
                     config=config,
                     **kwargs,
                 )
@@ -523,13 +540,20 @@ class ReActAgent(Agent):
         return final_answer["answer"]
 
     def generate_input_formats(self, tools: list[Node]) -> str:
+        """Generate formatted input descriptions for each tool."""
         input_formats = []
         for tool in tools:
-            params = [
-                f"{name} ({field.annotation.__name__}): {field.description or 'No description'}"
-                for name, field in tool.input_schema.model_fields.items()
-                if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True)
-            ]
+            params = []
+            for name, field in tool.input_schema.model_fields.items():
+                if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
+                    # Handle Union types
+                    if get_origin(field.annotation) in (Union, types.UnionType):
+                        type_str = str(field.annotation)
+                    else:
+                        type_str = getattr(field.annotation, "__name__", str(field.annotation))
+
+                    description = field.description or "No description"
+                    params.append(f"{name} ({type_str}): {description}")
 
             input_formats.append(f" - {self.sanitize_tool_name(tool.name)}\n \t* " + "\n\t* ".join(params))
         return "\n".join(input_formats)
@@ -567,24 +591,41 @@ class ReActAgent(Agent):
         self.format_schema = schema
 
     @staticmethod
-    def filter_format_type(param_type: str) -> str:
-        "Filters proper type for an function calling schema"
-        match param_type:
-            case "bool":
-                return "boolean"
-            case "int":
-                return "integer"
-            case "float":
-                return "float"
-        return "string"
+    def filter_format_type(param_type: str | type) -> str:
+        """Filters proper type for a function calling schema."""
+        type_mapping = {
+            int: "integer",
+            float: "float",
+            bool: "boolean",
+            str: "string",
+        }
+
+        if isinstance(param_type, str):
+            match param_type:
+                case "bool":
+                    return "boolean"
+                case "int":
+                    return "integer"
+                case "float":
+                    return "float"
+                case _:
+                    return "string"
+        elif get_origin(param_type) is Union:
+            first_type = next((arg for arg in get_args(param_type) if arg is not type(None)), None)
+            if first_type is None:
+                return "string"
+            return type_mapping.get(first_type, getattr(first_type, "__name__", "string"))
+        else:
+            return type_mapping.get(param_type, getattr(param_type, "__name__", "string"))
 
     def generate_function_calling_schemas(self):
+        """Generate schemas for function calling."""
         self.format_schema.append(final_answer_function_schema)
         for tool in self.tools:
             properties = {}
             for name, field in tool.input_schema.model_fields.items():
                 if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
-                    param_type = self.filter_format_type(field.annotation.__name__)
+                    param_type = self.filter_format_type(field.annotation)
                     description = field.description or "No description"
                     properties[name] = {"type": param_type, "description": description}
 
@@ -593,7 +634,7 @@ class ReActAgent(Agent):
                 "strict": True,
                 "function": {
                     "name": self.sanitize_tool_name(tool.name),
-                    "description": tool.description[:1024],  # Expected a string with maximum length 1024
+                    "description": tool.description[:1024],
                     "parameters": {
                         "type": "object",
                         "properties": {

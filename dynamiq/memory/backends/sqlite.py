@@ -3,12 +3,13 @@ import re
 import sqlite3
 import uuid
 
-from dynamiq.memory.backend.base import MemoryBackend
+from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.prompts import Message
 
 
 class SQLiteError(Exception):
     """Base exception class for SQLite-related errors in the memory backend."""
+
     pass
 
 

@@ -28,7 +28,7 @@ class RetrievalTool(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Retrieval Tool"
     description: str = "A tool for retrieving relevant documents based on a query."
-    error_handling: ErrorHandling = ErrorHandling(timeout_seconds=600)
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     connection_manager: ConnectionManager | None = None
     text_embedder: ConnectionNode | None = None
     document_retriever: ConnectionNode | None = None
@@ -54,12 +54,13 @@ class RetrievalTool(Node):
         self.text_embedder = text_embedder
         self.document_retriever = document_retriever
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """Initialize components with the connection manager.
 
         Args:
-            connection_manager (ConnectionManager): Connection manager.
+            connection_manager (ConnectionManager, optional): connection manager. Defaults to ConnectionManager.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if (
             hasattr(self.text_embedder, "is_postponed_component_init")
@@ -72,7 +73,7 @@ class RetrievalTool(Node):
         ):
             self.document_retriever.init_components(connection_manager)
 
-    def format_content(self, documents: list[Document], metadata_fields: list[str] = ["title", "url"]) -> str:
+    def format_content(self, documents: list[Document], metadata_fields: list[str] | None = None) -> str:
         """Format the retrieved documents' metadata and content.
 
         Args:
@@ -82,6 +83,7 @@ class RetrievalTool(Node):
         Returns:
             str: Formatted content of the documents.
         """
+        metadata_fields = metadata_fields or ["title", "url"]
         formatted_docs = []
         for i, doc in enumerate(documents):
             metadata = doc.metadata
