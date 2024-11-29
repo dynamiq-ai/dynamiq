@@ -1,7 +1,8 @@
 import json
 import logging
+from functools import cached_property
 
-from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, computed_field, field_validator, model_validator
 
 from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
 from dynamiq.nodes.llms import BaseLLM
@@ -161,6 +162,11 @@ class AnswerCorrectnessEvaluator(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True  # Allow arbitrary types like LLMEvaluator and BaseLLM
+
+    @computed_field
+    @cached_property
+    def type(self) -> str:
+        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     def __init__(self, **data):
         super().__init__(**data)
