@@ -1,6 +1,5 @@
 from enum import Enum
 from typing import Any
-
 from pydantic import BaseModel, ValidationError
 
 from dynamiq.connections.managers import ConnectionManager
