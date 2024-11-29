@@ -28,7 +28,6 @@ class PineconeIndexType(str, enum.Enum):
 
 class PineconeVectorStoreParams(BaseVectorStoreParams):
     namespace: str = "default"
-    content_key: str = "content"
 
 
 class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVectorStoreParams):
@@ -263,7 +262,7 @@ class PineconeVectorStore:
         List documents in the Pinecone vector store.
 
         Args:
-            content_key: Key word that been used to store content in metadata
+            content_key: Key word that been used to store content.
             include_embeddings (bool): Whether to include embeddings in the results. Defaults to False.
 
         Returns:

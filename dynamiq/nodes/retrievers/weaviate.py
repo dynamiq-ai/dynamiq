@@ -8,9 +8,10 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import WeaviateVectorStore
+from dynamiq.storages.vector.base import BaseVectorStoreParams
 
 
-class WeaviateDocumentRetriever(VectorStoreNode):
+class WeaviateDocumentRetriever(VectorStoreNode, BaseVectorStoreParams):
     """Document Retriever using Weaviate.
 
     This class implements a document retriever that uses Weaviate as the vector store backend.
@@ -57,6 +58,13 @@ class WeaviateDocumentRetriever(VectorStoreNode):
         return WeaviateVectorStore
 
     @property
+    def vector_store_params(self):
+        return self.model_dump(include=set(BaseVectorStoreParams.model_fields)) | {
+            "connection": self.connection,
+            "client": self.client,
+        }
+
+    @property
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"document_retriever": True}
 
@@ -77,9 +85,7 @@ class WeaviateDocumentRetriever(VectorStoreNode):
                 vector_store=self.vector_store, filters=self.filters, top_k=self.top_k
             )
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Execute the document retrieval process.
 

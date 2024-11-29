@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
 class MilvusVectorStoreParams(BaseWriterVectorStoreParams):
     embedding_key: str = "embedding"
-    content_key: str = "content"
 
 
 class MilvusVectorStore:

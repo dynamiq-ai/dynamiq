@@ -3,8 +3,8 @@ from typing import Any, Literal
 from dynamiq.connections import Weaviate
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.storages.vector import WeaviateVectorStore
 from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
-from dynamiq.storages.vector.weaviate.weaviate import WeaviateVectorStore
 from dynamiq.utils.logger import logger
 
 
@@ -70,8 +70,9 @@ class WeaviateDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = input_data["documents"]
+        content_key = input_data.get("content_key", None)
 
-        upserted_count = self.vector_store.write_documents(documents)
+        upserted_count = self.vector_store.write_documents(documents, content_key=content_key)
         logger.debug(f"Upserted {upserted_count} documents to Weaviate Vector Store.")
 
         return {
