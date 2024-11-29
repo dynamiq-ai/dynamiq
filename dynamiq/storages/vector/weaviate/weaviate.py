@@ -103,7 +103,7 @@ class WeaviateVectorStore:
             dict[str, Any]: A dictionary representing the Weaviate data object.
         """
         data = document.to_dict()
-        data[content_key or self.content_key] = data.pop("content")
+        data[content_key or self.content_key] = data.pop("content", "")
         data["_original_id"] = data.pop("id")
         metadata = data.get("metadata", {})
 
@@ -457,6 +457,7 @@ class WeaviateVectorStore:
             exclude_document_embeddings (bool): Whether to exclude document embeddings in the result.
             distance (float | None): The maximum distance for retrieval.
             certainty (float | None): The minimum certainty for retrieval.
+            content_key: The field used to store content in the storage.
 
         Returns:
             list[Document]: A list of retrieved documents.

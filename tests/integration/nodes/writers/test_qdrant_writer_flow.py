@@ -48,8 +48,7 @@ def test_write_workflow(
     mock_set_up_collection,
 ):
     document_writer_node = QdrantDocumentWriter(
-        vector_store=mock_qdrant_vector_store,
-        index_name="test-collection",
+        vector_store=mock_qdrant_vector_store, index_name="test-collection", сontent_key="content"
     )
 
     # Build the indexing flow

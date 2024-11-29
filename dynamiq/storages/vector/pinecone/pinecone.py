@@ -275,7 +275,7 @@ class PineconeVectorStore:
 
             documents = []
             for pinecone_doc in response["vectors"].values():
-                content = pinecone_doc["metadata"].pop(content_key or self.content_key, None)
+                content = pinecone_doc["metadata"].pop(content_key or self.content_key, "")
 
                 embedding = None
                 if include_embeddings and pinecone_doc["values"] != self._dummy_vector:
@@ -348,6 +348,7 @@ class PineconeVectorStore:
         Convert Document objects to Pinecone-compatible format.
 
         Args:
+            content_key: The field used to store content in the storage.
             documents (list[Document]): List of Document objects to convert.
 
         Returns:
@@ -391,6 +392,7 @@ class PineconeVectorStore:
             namespace (str | None): The namespace to query. Defaults to None.
             filters (dict[str, Any] | None): Filters for the query. Defaults to None.
             top_k (int): Maximum number of documents to retrieve. Defaults to 10.
+            content_key: The field used to store content in the storage.
             exclude_document_embeddings (bool): Whether to exclude embeddings in results. Defaults to True.
 
         Returns:
@@ -421,6 +423,7 @@ class PineconeVectorStore:
         Convert Pinecone query results to Document objects.
 
         Args:
+            content_key: The field used to store content in the storage.
             query_result (dict[str, Any]): The query result from Pinecone.
 
         Returns:
@@ -429,7 +432,7 @@ class PineconeVectorStore:
         pinecone_docs = query_result["matches"]
         documents = []
         for pinecone_doc in pinecone_docs:
-            content = pinecone_doc["metadata"].pop(content_key, None)
+            content = pinecone_doc["metadata"].pop(content_key, "")
 
             embedding = None
             if pinecone_doc["values"] != self._dummy_vector:

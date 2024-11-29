@@ -95,8 +95,8 @@ class MilvusVectorStore:
         This method processes a list of Document objects and writes them into the vector store.
 
         Args:
-            content_key:
-            embedding_key:
+            content_key: The field used to store content in the storage.
+            embedding_key: The field used to store vector in the storage.
             documents (List[Document]): A list of Document objects to be written into the document store.
 
         Raises:
@@ -187,8 +187,8 @@ class MilvusVectorStore:
         List all documents in the collection up to a specified limit.
 
         Args:
-            content_key:
-            embedding_key:
+            content_key: The field used to store content in the storage.
+            embedding_key: The field used to store vector in the storage.
             limit (int): Maximum number of documents to retrieve. Defaults to 1000.
 
         Returns:
@@ -213,8 +213,8 @@ class MilvusVectorStore:
         Perform vector search on the stored documents using query embeddings.
 
         Args:
-            embedding_key:
-            content_key:
+            content_key: The field used to store content in the storage.
+            embedding_key: The field used to store vector in the storage.
             query_embeddings (list[list[float]]): A list of embeddings to use as queries.
             top_k (int): The maximum number of documents to retrieve.
             filters (dict[str, Any] | None): A dictionary of filters to apply to the search. Defaults to None.
@@ -245,6 +245,8 @@ class MilvusVectorStore:
         Convert Milvus search results to Document objects.
 
         Args:
+            content_key: The field used to store content in the storage.
+            embedding_key: The field used to store vector in the storage.
             result (List[Dict[str, Any]]): The result from a Milvus search operation.
 
         Returns:
@@ -277,6 +279,8 @@ class MilvusVectorStore:
         Retrieve documents that match the provided filters.
 
         Args:
+            content_key: The field used to store content in the storage.
+            embedding_key: The field used to store vector in the storage.
             filters (Dict[str, Any] | None): The filters to apply to the document list.
 
         Returns:
@@ -305,6 +309,8 @@ class MilvusVectorStore:
         Convert Milvus query result into Documents.
 
         Args:
+            content_key: The field used to store content in the storage.
+            embedding_key: The field used to store vector in the storage.
             result (List[Dict[str, Any]]): The result from a Milvus query operation.
 
         Returns:

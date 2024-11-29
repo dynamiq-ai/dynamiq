@@ -327,6 +327,7 @@ class QdrantVectorStore:
         - `SKIP`: Existing documents will be skipped, and only new documents will be added.
 
         Args:
+            content_key: The field used to store content in the storage.
             documents: A list of Document objects to write to Qdrant.
             policy: The policy for handling duplicate documents.
 
@@ -421,7 +422,7 @@ class QdrantVectorStore:
         """Returns a generator that yields documents from Qdrant based on the provided filters.
 
         Args:
-            content_key:
+            content_key: The field used to store content in the storage.
             filters: Filters applied to the retrieved documents.
             include_embeddings: Whether to include the embeddings of the retrieved documents.
 
@@ -458,6 +459,7 @@ class QdrantVectorStore:
         """Returns a list of all documents in the Document Store.
 
         Args:
+            content_key: The field used to store content in the storage.
             include_embeddings: Whether to include the embeddings of the retrieved documents.
 
         Returns:
@@ -475,9 +477,10 @@ class QdrantVectorStore:
         """Retrieves documents from Qdrant by their IDs.
 
         Args:
-            content_key:
+            content_key: The field used to store content in the storage.
             ids: A list of document IDs to retrieve.
             index: The name of the index to retrieve documents from.
+            content_key: The field used to store content in the storage.
 
         Returns:
             A list of documents.
@@ -525,6 +528,7 @@ class QdrantVectorStore:
             score_threshold: A minimal score threshold for the result. Score of the returned result might be higher or
                 smaller than the threshold depending on the Distance function used. E.g. for cosine similarity only
                 higher scores will be returned.
+            content_key: The field used to store content in the storage.
 
         Returns:
             List of documents that are most similar to `query_sparse_embedding`.
@@ -589,6 +593,7 @@ class QdrantVectorStore:
             score_threshold: A minimal score threshold for the result. Score of the returned result might be higher or
                 smaller than the threshold depending on the Distance function used. E.g. for cosine similarity only
                 higher scores will be returned.
+            content_key: The field used to store content in the storage.
 
         Returns:
             List of documents that are most similar to `query_embedding`.
@@ -644,6 +649,7 @@ class QdrantVectorStore:
             score_threshold: A minimal score threshold for the result. Score of the returned result might be higher or
                 smaller than the threshold depending on the Distance function used. E.g. for cosine similarity only
                 higher scores will be returned.
+            content_key: The field used to store content in the storage.
 
         Returns:
             List of Document that are most similar to `query_embedding` and `query_sparse_embedding`.
