@@ -136,9 +136,9 @@ def create_orchestrator() -> GraphOrchestrator:
         manager=GraphAgentManager(llm=llm),
     )
 
-    orchestrator.add_state("generate_code", [generate_code_solution])
-    orchestrator.add_state("validate_code", [validate_code])
-    orchestrator.add_state("reflect", [reflect])
+    orchestrator.add_state_by_tasks("generate_code", [generate_code_solution])
+    orchestrator.add_state_by_tasks("validate_code", [validate_code])
+    orchestrator.add_state_by_tasks("reflect", [reflect])
 
     orchestrator.add_edge(START, "generate_code")
     orchestrator.add_edge("generate_code", "validate_code")

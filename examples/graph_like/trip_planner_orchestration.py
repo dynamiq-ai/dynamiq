@@ -138,9 +138,9 @@ def run_workflow(input_data: dict) -> dict:
         final_summarizer=True,
     )
 
-    orchestrator.add_state("select_city", [agent_selection_city])
-    orchestrator.add_state("gather_city_information", [agent_city_guide])
-    orchestrator.add_state("document_infromation", [agent_writer])
+    orchestrator.add_state_by_tasks("select_city", [agent_selection_city])
+    orchestrator.add_state_by_tasks("gather_city_information", [agent_city_guide])
+    orchestrator.add_state_by_tasks("document_infromation", [agent_writer])
 
     orchestrator.add_edge(START, "select_city")
     orchestrator.add_edge("select_city", "gather_city_information")

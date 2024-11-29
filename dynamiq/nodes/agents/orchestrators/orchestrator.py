@@ -109,7 +109,7 @@ class Orchestrator(Node, ABC):
         Execute the LinearOrchestrator flow.
 
         Args:
-            input_data (Any): The input data containing the objective or additional context.
+            input_data (OrchestratorInputSchema): The input data containing the objective.
             config (Optional[RunnableConfig]): Configuration for the runnable.
             **kwargs: Additional keyword arguments.
 

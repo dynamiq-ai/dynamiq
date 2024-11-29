@@ -305,11 +305,11 @@ def create_workflow() -> Workflow:
             return next_state
 
     # Create states
-    graph_orchestrator.add_state("concierge", [concierge])
-    graph_orchestrator.add_state("stock_lookup", [stock_lookup])
-    graph_orchestrator.add_state("transfer_money", [transfer_money])
-    graph_orchestrator.add_state("authenticate", [authentificate])
-    graph_orchestrator.add_state("account_balance", [account_balance])
+    graph_orchestrator.add_state_by_tasks("concierge", [concierge])
+    graph_orchestrator.add_state_by_tasks("stock_lookup", [stock_lookup])
+    graph_orchestrator.add_state_by_tasks("transfer_money", [transfer_money])
+    graph_orchestrator.add_state_by_tasks("authenticate", [authentificate])
+    graph_orchestrator.add_state_by_tasks("account_balance", [account_balance])
 
     # Add path to other nodes through concierge
     graph_orchestrator.add_conditional_edge(

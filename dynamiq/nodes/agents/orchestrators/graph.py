@@ -24,16 +24,15 @@ END = "END"
 
 class GraphOrchestrator(Orchestrator):
     """
-    Orchestrates the execution of complex tasks using multiple specialized agents.
+    Orchestrates the execution of complex tasks, interconnected within the graph structure.
 
-    This class manages the breakdown of a main objective into subtasks,
-    delegates these subtasks to appropriate agents, and synthesizes the results
+    This class manages the execution by following structure of directed graph. When finished synthesizes the results
     into a final answer.
 
     Attributes:
         manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
         context (Dict[str, Any]): Context of the orchestrator.
-        states (List[State]): List of states within graph orchestrator.
+        states (List[State]): List of states within orchestrator.
         initial_state (str): State to start from.
         objective (Optional[str]): The main objective of the orchestration.
         max_loops (Optional[int]): Maximum number of transition between states.
@@ -51,7 +50,7 @@ class GraphOrchestrator(Orchestrator):
         Initialize components of the orchestrator.
 
         Args:
-            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
+            connection_manager (Optional[ConnectionManager]): The connection manager. Defaults to ConnectionManager.
         """
         super().init_components(connection_manager)
 
@@ -91,13 +90,13 @@ class GraphOrchestrator(Orchestrator):
         data["states"] = [state.to_dict(**kwargs) for state in self.states]
         return data
 
-    def add_state(self, state_id: str, tasks: list[Node | Callable]) -> None:
+    def add_state_by_tasks(self, state_id: str, tasks: list[Node | Callable]) -> None:
         """
-        Adds state with specified tasks to the graph.
+        Adds state to the graph based on tasks.
 
         Args:
             state_id (str): Id of the state.
-            tasks (list[Agent | Callable]): List of tasks that have to be executed when running this state.
+            tasks (list[Node | Callable]): List of tasks that have to be executed when running this state.
 
         Raises:
             ValueError: If state with specified id already exists.
@@ -122,56 +121,73 @@ class GraphOrchestrator(Orchestrator):
         self.states.append(state)
         self._state_by_id[state.id] = state
 
-    def add_edge(self, source: str, destination: str) -> None:
+    def add_state(self, state: State) -> None:
         """
-        Adds edge to the graph.
+        Adds state to the graph.
 
         Args:
-            source (str): Id of source state.
-            destination (str): Ids of destination states.
+            state (State): State to add to the graph.
 
         Raises:
-            ValueError: If state with specified id is not present.
+            ValueError: If state with specified id already exists.
         """
-        self.validate_states([source, destination])
-        self._state_by_id[source].next_states = [destination]
+        if state.id in self._state_by_id:
+            raise ValueError(f"Error: State with id {state.id} already exists.")
+
+        self.states.append(state)
+        self._state_by_id[state.id] = state
+
+    def add_edge(self, source_id: str, destination_id: str) -> None:
+        """
+        Adds edge to the graph. When source state finishes execution, destination state will be executed next.
+
+        Args:
+            source_id (str): Id of source state.
+            destination_id (str): Id of destination state.
+
+        Raises:
+            ValueError: If state with specified id does not exist.
+        """
+        self.validate_states([source_id, destination_id])
+        self._state_by_id[source_id].next_states = [destination_id]
 
     def validate_states(self, ids: list[str]) -> None:
         """
         Check if the provided state ids are valid.
 
         Args:
-            ids (list[str]): State ids for validation.
+            ids (list[str]): State ids to validate.
 
         Raises:
-            ValueError: If state with specified id is not present.
+            ValueError: If state with specified id does not exist.
         """
         for state_id in ids:
             if state_id not in self._state_by_id:
-                raise ValueError(f"State with id {state_id} is not present")
+                raise ValueError(f"State with id {state_id} does not exist")
 
-    def add_conditional_edge(self, source: str, destinations: list[str], condition: Callable | Python) -> None:
+    def add_conditional_edge(self, source_id: str, destination_ids: list[str], condition: Callable | Python) -> None:
         """
         Adds conditional edge to the graph.
+        Conditional edge provides opportunity to choose between destination states based on condition.
 
         Args:
-            source (str): Id of source state.
-            destinations (list[str]): Ids of destination states.
-            path_func (Callable | Python): Condition that will determine next state.
+            source_id (str): Id of the source state.
+            destination_ids (list[str]): Ids of destination states.
+            condition (Callable | Python): Condition that will determine next state.
 
         Raises:
             ValueError: If state with specified id is not present.
         """
-        self.validate_states(destinations + [source])
+        self.validate_states(destination_ids + [source_id])
 
         if isinstance(condition, Python):
-            self._state_by_id[source].condition = condition
+            self._state_by_id[source_id].condition = condition
         elif isinstance(condition, Callable):
-            self._state_by_id[source].condition = function_tool(condition)()
+            self._state_by_id[source_id].condition = function_tool(condition)()
         else:
             raise OrchestratorError("Error: Conditional edge must be either a Python Node or a Callable.")
 
-        self._state_by_id[source].next_states = destinations
+        self._state_by_id[source_id].next_states = destination_ids
 
     def get_next_state_by_manager(self, state: State, config: RunnableConfig, **kwargs) -> State:
         """
@@ -183,11 +199,11 @@ class GraphOrchestrator(Orchestrator):
             **kwargs: Additional keyword arguments.
 
         Returns:
-            State: Next state.
+            State: Next state to execute.
 
         Raises:
             OrchestratorError: If there is an error parsing the action from the LLM response.
-            StateNotFoundError: If state is invalid or not found.
+            StateNotFoundError: If the state is invalid or not found.
         """
         manager_result = self.manager.run(
             input_data={
@@ -228,7 +244,7 @@ class GraphOrchestrator(Orchestrator):
 
         Raises:
             OrchestratorError: If there is an error parsing output of conditional edge.
-            StateNotFoundError: If state is invalid or not found.
+            StateNotFoundError: If the state is invalid or not found.
         """
         prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self._chat_history])
 
@@ -306,7 +322,7 @@ class GraphOrchestrator(Orchestrator):
 
                 self.context = self.context | output["context"]
                 self._run_depends = [NodeDependency(node=state).to_dict()]
-                self._chat_history = output["chat_history"]
+                self._chat_history = self._chat_history + output["chat_history"]
 
             state = self._get_next_state(state, config=config, **kwargs)
 

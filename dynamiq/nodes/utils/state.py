@@ -25,6 +25,7 @@ class State(Node):
     """Represents single state of graph flow
 
     Attributes:
+        id (str): Unique identifier for the state.
         name (str): Name of the state
         description (str): Description of the state.
         next_states (list[str]): List of adjacent node
@@ -33,6 +34,7 @@ class State(Node):
         manager (GraphAgentManager): The managing agent responsible for overseeing state execution.
     """
 
+    id: str
     name: str = "State"
     group: NodeGroup = NodeGroup.UTILS
     input_schema: ClassVar[type[StateInputSchema]] = StateInputSchema
@@ -70,10 +72,12 @@ class State(Node):
 
     def merge_contexts(self, context_list: list[dict[str, Any]]) -> dict:
         """
-        Merges contexts, and raises an error when lossless merging is not possible.
+        Merges contexts. Raises error when lossless merging is not possible.
 
+        Args:
+            context_list (list[dict[str, Any]]): List of contexts to merge.
         Raises:
-            OrchestratorError: If multiple changes of the same variable are detected.
+            OrchestratorError: If multiple changes of the same context variable are detected.
         """
         merged_dict = {}
 
@@ -81,7 +85,7 @@ class State(Node):
             for key, value in d.items():
                 if key in merged_dict:
                     if merged_dict[key] != value:
-                        raise OrchestratorError(f"Error: multiple changes of variable {key} are detected.")
+                        raise OrchestratorError(f"Error: multiple changes of context variable {key} are detected.")
                 merged_dict[key] = value
 
         return merged_dict
@@ -103,7 +107,7 @@ class State(Node):
         Initialize components of the orchestrator.
 
         Args:
-            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
+            connection_manager (Optional[ConnectionManager]): The connection manager. Defaults to ConnectionManager.
         """
         super().init_components(connection_manager)
         if self.manager and self.manager.is_postponed_component_init:
@@ -210,6 +214,17 @@ class State(Node):
         return result, context
 
     def execute(self, input_data: StateInputSchema, config: RunnableConfig = None, **kwargs) -> dict:
+        """
+        Execute the State.
+
+        Args:
+            input_data (StateInputSchema): The input data containing context and chat history.
+            config (Optional[RunnableConfig]): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict[str, Any]: The result of the state execution (updated context and chat history).
+        """
         logger.debug(f"State {self.id}: starting the flow with input_task:\n```{input_data}```")
         kwargs.pop("run_depends", None)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -217,6 +232,8 @@ class State(Node):
 
         global_context = input_data.context
         chat_history = input_data.chat_history
+
+        new_history_messages = []
 
         if len(self.tasks) == 1:
             result, context = self._submit_task(
@@ -227,7 +244,7 @@ class State(Node):
                 **kwargs,
             )
 
-            chat_history.append(
+            new_history_messages.append(
                 {
                     "role": "system",
                     "content": f"Result: {result}",
@@ -246,7 +263,7 @@ class State(Node):
                     task, copy.deepcopy(global_context), copy.deepcopy(chat_history), config=config, **kwargs
                 )
 
-                chat_history.append(
+                new_history_messages.append(
                     {
                         "role": "system",
                         "content": f"Result: {result}",
@@ -256,4 +273,4 @@ class State(Node):
                 contexts.append(context)
             global_context = global_context | self.merge_contexts(contexts)
 
-        return {"context": global_context, "chat_history": chat_history}
+        return {"context": global_context, "chat_history": new_history_messages}
