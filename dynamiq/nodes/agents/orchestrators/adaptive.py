@@ -1,20 +1,15 @@
 from enum import Enum
-from typing import Any
+
 from pydantic import BaseModel, ValidationError
 
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes import Node, NodeGroup
+from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.agents.orchestrators.orchestrator import Orchestrator, OrchestratorError
+from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
-
-
-class OrchestratorError(Exception):
-    """Base exception for AdaptiveOrchestrator errors."""
-
-    pass
 
 
 class ActionParseError(OrchestratorError):
@@ -43,7 +38,7 @@ class Action(BaseModel):
     answer: str | None = None
 
 
-class AdaptiveOrchestrator(Node):
+class AdaptiveOrchestrator(Orchestrator):
     """
     Orchestrates the execution of complex tasks using multiple specialized agents.
 
@@ -55,24 +50,14 @@ class AdaptiveOrchestrator(Node):
         manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
         agents (List[BaseAgent]): List of specialized agents available for task execution.
         objective (Optional[str]): The main objective of the orchestration.
+        max_loops (Optional[int]): Maximum number of actions.
     """
 
     name: str | None = "AdaptiveOrchestrator"
     group: NodeGroup = NodeGroup.AGENTS
     manager: AdaptiveAgentManager
     agents: list[Agent] = []
-    objective: str | None = None
-
-    def __init__(self, **kwargs):
-        """
-        Initialize the orchestrator with given parameters.
-
-        Args:
-            **kwargs: Arbitrary keyword arguments.
-        """
-        super().__init__(**kwargs)
-        self._chat_history = []
-        self._run_depends = []
+    max_loops: int = 15
 
     @property
     def to_dict_exclude_params(self):
@@ -98,7 +83,7 @@ class AdaptiveOrchestrator(Node):
         Initialize components of the orchestrator.
 
         Args:
-            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
+            connection_manager (Optional[ConnectionManager]): The connection manager. Defaults to ConnectionManager.
         """
         super().init_components(connection_manager)
         if self.manager.is_postponed_component_init:
@@ -111,11 +96,7 @@ class AdaptiveOrchestrator(Node):
     @property
     def agents_descriptions(self) -> str:
         """Get a formatted string of agent descriptions."""
-        return (
-            "\n".join([f"{i}. {agent.name}" for i, agent in enumerate(self.agents)])
-            if self.agents
-            else ""
-        )
+        return "\n".join([f"{i}. {agent.name}" for i, agent in enumerate(self.agents)]) if self.agents else ""
 
     def get_next_action(self, config: RunnableConfig = None, **kwargs) -> Action:
         """
@@ -127,9 +108,7 @@ class AdaptiveOrchestrator(Node):
         Raises:
             ActionParseError: If there is an error parsing the action from the LLM response.
         """
-        prompt = "\n".join(
-            [f"{msg['role']}: {msg['content']}" for msg in self._chat_history]
-        )
+        prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self._chat_history])
 
         logger.debug(f"AdaptiveOrchestrator {self.id}: PROMPT {prompt}")
 
@@ -145,22 +124,14 @@ class AdaptiveOrchestrator(Node):
         )
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
-        logger.debug(
-            f"AdaptiveOrchestrator {self.id}: LLM response: {manager_result.output.get('content')}"
-        )
+        logger.debug(f"AdaptiveOrchestrator {self.id}: LLM response: {manager_result.output.get('content')}")
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            logger.error(
-                f"AdaptiveOrchestrator {self.id}: Error getting next action from Manager"
-            )
+            logger.error(f"AdaptiveOrchestrator {self.id}: Error getting next action from Manager")
             raise ActionParseError("Unable to retrieve the next action from Manager.")
 
         manager_result = (
-            manager_result.output.get("content")
-            .get("result")
-            .replace("json", "")
-            .replace("```", "")
-            .strip()
+            manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
         )
         try:
             return Action.model_validate_json(manager_result)
@@ -171,20 +142,20 @@ class AdaptiveOrchestrator(Node):
             )
             raise ActionParseError("Unable to create Action from LLM output.")
 
-    def run_task(self, task: str, config: RunnableConfig = None, **kwargs) -> str:
+    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
         """
         Process the given task using the manager agent logic.
 
         Args:
-            task (str): The task to be processed.
+            input_task (str): The task to be processed.
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
             str: The final answer generated after processing the task.
         """
-        self._chat_history.append({"role": "user", "content": task})
+        self._chat_history.append({"role": "user", "content": input_task})
 
-        while True:
+        for _ in range(self.max_loops):
             action = self.get_next_action(config=config, **kwargs)
             logger.debug(f"AdaptiveOrchestrator {self.id}: chat history: {self._chat_history}")
             logger.debug(f"AdaptiveOrchestrator {self.id}: Next action: {action.model_dump()}")
@@ -193,15 +164,16 @@ class AdaptiveOrchestrator(Node):
                 self._handle_delegation(action=action, config=config, **kwargs)
             elif action.command == ActionCommand.FINAL_ANSWER:
                 return self.get_final_result(
-                    input_task=task,
-                    preliminary_answer=action.answer,
+                    {
+                        "input_task": input_task,
+                        "chat_history": self._chat_history,
+                        "preliminary_answer": action.answer,
+                    },
                     config=config,
                     **kwargs,
                 )
 
-    def _handle_delegation(
-        self, action: Action, config: RunnableConfig = None, **kwargs
-    ) -> None:
+    def _handle_delegation(self, action: Action, config: RunnableConfig = None, **kwargs) -> None:
         """
         Handle task delegation to a specialized agent.
 
@@ -230,9 +202,7 @@ class AdaptiveOrchestrator(Node):
                 }
             )
         else:
-            logger.warning(
-                f"AdaptiveOrchestrator {self.id}: Agent {action.agent} not found. Using LLM."
-            )
+            logger.warning(f"AdaptiveOrchestrator {self.id}: Agent {action.agent} not found. Using LLM.")
             result = self.manager.run(
                 input_data={"action": "run", "simple_prompt": action.task},
                 config=config,
@@ -250,87 +220,8 @@ class AdaptiveOrchestrator(Node):
                 }
             )
 
-    def get_final_result(
-        self,
-        input_task: str,
-        preliminary_answer: str,
-        config: RunnableConfig = None,
-        **kwargs,
-    ) -> str:
-        """
-        Generate a comprehensive final result based on the task and agent outputs.
-
-        Args:
-            input_task (str): The original task given.
-            preliminary_answer (str): The preliminary answer generated.
-            config (RunnableConfig): Configuration for the runnable.
-
-        Returns:
-            str: The final comprehensive result.
-
-        Raises:
-            OrchestratorError: If an error occurs while generating the final answer.
-        """
-        manager_result = self.manager.run(
-            input_data={
-                "action": "final",
-                "input_task": input_task,
-                "chat_history": self._chat_history,
-                "preliminary_answer": preliminary_answer,
-            },
-            config=config,
-            run_depends=self._run_depends,
-            **kwargs,
-        )
-        self._run_depends = [NodeDependency(node=self.manager).to_dict()]
-
-        if manager_result.status != RunnableStatus.SUCCESS:
-            logger.error(
-                f"AdaptiveOrchestrator {self.id}: Error generating final answer"
-            )
-            raise OrchestratorError("Failed to generate final answer")
-
-        return manager_result.output.get("content").get("result")
-
-    def execute(
-        self, input_data: Any, config: RunnableConfig | None = None, **kwargs
-    ) -> dict:
-        """
-        Execute the orchestration process with the given input data and configuration.
-
-        Args:
-            input_data (Any): The input data containing the objective or additional context.
-            config (Optional[RunnableConfig]): Configuration for the runnable.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            dict[str, Any]: The result of the orchestration process.
-
-        Raises:
-            OrchestratorError: If an error occurs during the orchestration process.
-        """
-        self.reset_run_state()
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        objective = input_data.get("input") or self.objective
-        logger.debug(
-            f"AdaptiveOrchestrator {self.id}: Starting the flow with objective:\n```{objective}```"
-        )
-
-        run_kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
-        run_kwargs.pop("run_depends", None)
-
-        if self.streaming.enabled:
-            self.manager.streaming = self.streaming
-            for agent in self.agents:
-                agent.streaming = self.streaming
-
-        result = self.run_task(
-            task=objective,
-            config=config,
-            **run_kwargs,
-        )
-
-        logger.debug(f"AdaptiveOrchestrator {self.id}: Output collected")
-        return {"content": result}
+    def setup_streaming(self) -> None:
+        """Setups streaming for orchestrator."""
+        self.manager.streaming = self.streaming
+        for agent in self.agents:
+            agent.streaming = self.streaming
