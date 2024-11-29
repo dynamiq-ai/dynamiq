@@ -233,7 +233,7 @@ class State(Node):
         global_context = input_data.context
         chat_history = input_data.chat_history
 
-        new_history_messages = []
+        history_messages = []
 
         if len(self.tasks) == 1:
             result, context = self._submit_task(
@@ -244,7 +244,7 @@ class State(Node):
                 **kwargs,
             )
 
-            new_history_messages.append(
+            history_messages.append(
                 {
                     "role": "system",
                     "content": f"Result: {result}",
@@ -263,7 +263,7 @@ class State(Node):
                     task, copy.deepcopy(global_context), copy.deepcopy(chat_history), config=config, **kwargs
                 )
 
-                new_history_messages.append(
+                history_messages.append(
                     {
                         "role": "system",
                         "content": f"Result: {result}",
@@ -273,4 +273,4 @@ class State(Node):
                 contexts.append(context)
             global_context = global_context | self.merge_contexts(contexts)
 
-        return {"context": global_context, "chat_history": new_history_messages}
+        return {"context": global_context, "history_messages": history_messages}

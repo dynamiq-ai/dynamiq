@@ -322,7 +322,7 @@ class GraphOrchestrator(Orchestrator):
 
                 self.context = self.context | output["context"]
                 self._run_depends = [NodeDependency(node=state).to_dict()]
-                self._chat_history = self._chat_history + output["chat_history"]
+                self._chat_history = self._chat_history + output["history_messages"]
 
             state = self._get_next_state(state, config=config, **kwargs)
 
