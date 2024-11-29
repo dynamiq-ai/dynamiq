@@ -106,7 +106,7 @@ class Orchestrator(Node, ABC):
 
     def execute(self, input_data: OrchestratorInputSchema, config: RunnableConfig = None, **kwargs) -> dict:
         """
-        Execute the LinearOrchestrator flow.
+        Execute orchestrator flow.
 
         Args:
             input_data (OrchestratorInputSchema): The input data containing the objective.
@@ -123,7 +123,7 @@ class Orchestrator(Node, ABC):
 
         input_task = input_data.input or self.objective
 
-        logger.debug(f"LinearOrchestrator {self.id}: starting the flow with input_task:\n```{input_task}```")
+        logger.debug(f"{self.name} {self.id}: starting the flow with input_task:\n```{input_task}```")
 
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
@@ -137,5 +137,5 @@ class Orchestrator(Node, ABC):
             **kwargs,
         )
 
-        logger.debug(f"LinearOrchestrator {self.id}: output collected")
+        logger.debug(f"{self.name} {self.id}: output collected")
         return {"content": result}
