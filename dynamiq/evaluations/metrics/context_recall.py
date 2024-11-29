@@ -1,6 +1,7 @@
 import json
 import logging
 from functools import cached_property
+from typing import Any
 
 from pydantic import BaseModel, PrivateAttr, computed_field, field_validator, model_validator
 
@@ -109,11 +110,13 @@ class ContextRecallEvaluator(BaseModel):
         self._classification_evaluator = LLMEvaluator(
             instructions=class_instructions.strip(),
             inputs=[
-                ("question", list[str]),
-                ("context", list[str]),
-                ("answer", list[str]),
+                {"name": "question", "type": list[str]},
+                {"name": "context", "type": list[str]},
+                {"name": "answer", "type": list[str]},
             ],
-            outputs=["classifications"],
+            outputs=[
+                {"name": "classifications", "type": list[dict[str, Any]]},
+            ],
             examples=[
                 {
                     "inputs": {
@@ -166,7 +169,7 @@ class ContextRecallEvaluator(BaseModel):
                                     "be one of the greatest and most influential "
                                     "scientists of all time."
                                 ),
-                                "reason": ("The date of birth of Einstein is mentioned in " "the context."),
+                                "reason": "The date of birth of Einstein is mentioned in the context.",
                                 "attributed": 1,
                             },
                             {
@@ -174,17 +177,17 @@ class ContextRecallEvaluator(BaseModel):
                                     "He received the 1921 Nobel Prize in Physics for "
                                     "his services to theoretical physics."
                                 ),
-                                "reason": ("The exact sentence is present in the given " "context."),
+                                "reason": "The exact sentence is present in the given context.",
                                 "attributed": 1,
                             },
                             {
                                 "statement": "He published 4 papers in 1905.",
-                                "reason": ("There is no mention about papers he wrote in " "the context."),
+                                "reason": "There is no mention about papers he wrote in the context.",
                                 "attributed": 0,
                             },
                             {
                                 "statement": "Einstein moved to Switzerland in 1895.",
-                                "reason": ("There is no supporting evidence for this in " "the context."),
+                                "reason": "There is no supporting evidence for this in the context.",
                                 "attributed": 0,
                             },
                         ]
