@@ -37,14 +37,15 @@ class BaseLLMInputSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_input_fields(self, context):
-        prompt = context.context["prompt"] or self.prompt
-        required_parameters = prompt.get_required_parameters()
-        provided_parameters = list(self.model_dump().keys())
+        prompt = context.context.get("prompt") or context.context.get("instance_prompt")
+        if prompt:
+            required_parameters = prompt.get_required_parameters()
+            provided_parameters = list(self.model_dump().keys())
 
-        if provided_parameters != required_parameters:
-            raise ValueError(
-                f"Error invalid parameters were passed. Expected: {required_parameters}. Got: {provided_parameters}"
-            )
+            if provided_parameters != required_parameters:
+                raise ValueError(
+                    f"Error invalid parameters were passed. Expected: {required_parameters}. Got: {provided_parameters}"
+                )
         return self
 
 
@@ -127,6 +128,10 @@ class BaseLLM(ConnectionNode):
         # Avoid the same imports multiple times and for future usage in execute
         self._completion = completion
         self._stream_chunk_builder = stream_chunk_builder
+
+    def get_context_for_input_schema(self) -> dict:
+        """Provides context for input schema that is required for proper validation."""
+        return {"instance_prompt": self.prompt}
 
     @classmethod
     def get_usage_data(
