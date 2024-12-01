@@ -1,4 +1,5 @@
 import enum
+import re
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -174,6 +175,33 @@ class Prompt(BasePrompt):
         from jinja2 import Template
 
         self._Template = Template
+
+    def get_required_parameters(self) -> list[str]:
+        """Extracts list of parameters required for messages.
+
+        Returns:
+            list[str]: List of parameter names
+        """
+        parameters = []
+        pattern = r"\{\{(.*?)\}\}"
+
+        for msg in self.messages:
+            if isinstance(msg, Message):
+                parameters.extend(re.findall(pattern, msg.content))
+            elif isinstance(msg, VisionMessage):
+                for content in msg.content:
+                    if isinstance(content, VisionMessageTextContent):
+                        parameters.extend(re.findall(pattern, content.text))
+
+                    elif isinstance(content, VisionMessageImageContent):
+                        parameters.extend(re.findall(pattern, content.image_url.url))
+
+                    else:
+                        raise ValueError(f"Invalid content type: {content.type}")
+            else:
+                raise ValueError(f"Invalid message type: {type(msg)}")
+
+        return parameters
 
     def format_messages(self, **kwargs) -> list[dict]:
         """

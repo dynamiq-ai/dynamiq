@@ -1,17 +1,30 @@
-from typing import Any, Literal
+from io import BytesIO
+from typing import Any, ClassVar, Literal
 
-from dynamiq.components.converters.unstructured import (
-    ConvertStrategy,
-    DocumentCreationMode,
-)
-from dynamiq.components.converters.unstructured import (
-    UnstructuredFileConverter as UnstructuredFileConverterComponent,
-)
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from dynamiq.components.converters.unstructured import ConvertStrategy, DocumentCreationMode
+from dynamiq.components.converters.unstructured import UnstructuredFileConverter as UnstructuredFileConverterComponent
 from dynamiq.connections import Unstructured
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
+
+
+class UnstructuredFileConverterInputSchema(BaseModel):
+    file_paths: list[str] = Field(default=[], description="Parameter to provide path to files.")
+    files: list[BytesIO | bytes] = Field(default=[], description="Parameter to provide files.")
+    metadata: dict = Field(default={}, description="Parameter to provide metadata.")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def validate_file_source(self):
+        """Validate that either `file_paths` or `files` is specified"""
+        if not self.file_paths and not self.files:
+            raise ValueError("Either `file_paths` or `files` must be provided.")
+        return self
 
 
 class UnstructuredFileConverter(ConnectionNode):
@@ -44,6 +57,7 @@ class UnstructuredFileConverter(ConnectionNode):
     strategy: ConvertStrategy = ConvertStrategy.AUTO
     unstructured_kwargs: dict[str, Any] | None = None
     file_converter: UnstructuredFileConverterComponent = None
+    input_schema: ClassVar[type[UnstructuredFileConverterInputSchema]] = UnstructuredFileConverterInputSchema
 
     def __init__(self, **kwargs):
         """
@@ -81,18 +95,19 @@ class UnstructuredFileConverter(ConnectionNode):
             )
 
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs
+        self, input_data: UnstructuredFileConverterInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, list[Any]]:
         """
         Execute the UnstructuredFileConverter to convert files to Documents.
 
         Args:
-            input_data: Dict containing 'file_paths', 'files', and/or 'metadata' keys.
-            config: Optional configuration for the execution.
+            input_data (UnstructuredFileConverterInputSchema): An instance containing 'file_paths',
+              'files', and/or 'metadata'.
+            config (RunnableConfig): Optional configuration for the execution.
             **kwargs: Additional keyword arguments.
 
         Returns:
-            Dict with 'documents' key containing a list of converted Documents.
+            dict[str, list[Any]]: Dictionary with 'documents' key containing a list of converted Documents.
 
         Raises:
             KeyError: If required keys are missing in input_data.
@@ -107,9 +122,9 @@ class UnstructuredFileConverter(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        file_paths = input_data.get("file_paths")
-        files = input_data.get("files")
-        metadata = input_data.get("metadata")
+        file_paths = input_data.file_paths
+        files = input_data.files
+        metadata = input_data.metadata
 
         output = self.file_converter.run(file_paths=file_paths, files=files, metadata=metadata)
         documents = output["documents"]

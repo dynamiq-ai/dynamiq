@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
-from pydantic import BaseModel, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
@@ -30,6 +30,22 @@ class BaseLLMUsageData(BaseModel):
     completion_tokens_cost_usd: float | None
     total_tokens: int
     total_tokens_cost_usd: float | None
+
+
+class BaseLLMInputSchema(BaseModel):
+    model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def validate_input_fields(self, context):
+        prompt = context.context["prompt"] or self.prompt
+        required_parameters = prompt.get_required_parameters()
+        provided_parameters = list(self.model_dump().keys())
+
+        if provided_parameters != required_parameters:
+            raise ValueError(
+                f"Error invalid parameters were passed. Expected: {required_parameters}. Got: {provided_parameters}"
+            )
+        return self
 
 
 class BaseLLM(ConnectionNode):
@@ -80,6 +96,7 @@ class BaseLLM(ConnectionNode):
 
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
+    input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
 
     @field_validator("model")
     @classmethod
@@ -240,7 +257,7 @@ class BaseLLM(ConnectionNode):
 
     def execute(
         self,
-        input_data: dict[str, Any],
+        input_data: BaseLLMInputSchema,
         config: RunnableConfig = None,
         prompt: Prompt | None = None,
         schema: dict | None = None,
@@ -253,7 +270,7 @@ class BaseLLM(ConnectionNode):
         the configured LLM.
 
         Args:
-            input_data (dict[str, Any]): The input data for the LLM.
+            input_data (BaseLLMInputSchema): The input data for the LLM.
             config (RunnableConfig, optional): The configuration for the execution. Defaults to None.
             prompt (Prompt, optional): The prompt to use for this execution. Defaults to None.
             schema (Dict[str, Any], optional): schema_ for structured output or function calling.
@@ -267,8 +284,8 @@ class BaseLLM(ConnectionNode):
         """
         config = ensure_config(config)
         prompt = prompt or self.prompt or Prompt(messages=[], tools=None)
-        messages = prompt.format_messages(**input_data)
-        base_tools = prompt.format_tools(**input_data)
+        messages = prompt.format_messages(**input_data.model_dump())
+        base_tools = prompt.format_tools(**input_data.model_dump())
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
 
         # Use initialized client if it possible
@@ -305,4 +322,6 @@ class BaseLLM(ConnectionNode):
             self._handle_streaming_completion_response if self.streaming.enabled else self._handle_completion_response
         )
 
-        return handle_completion(response=response, messages=messages, config=config, input_data=input_data, **kwargs)
+        return handle_completion(
+            response=response, messages=messages, config=config, input_data=input_data.model_dump(), **kwargs
+        )

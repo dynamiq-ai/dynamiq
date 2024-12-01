@@ -4,9 +4,9 @@ import copy
 import enum
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from pydantic import Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from dynamiq.components.converters.utils import get_filename_for_bytesio
 
@@ -53,6 +53,21 @@ def create_vision_prompt_template() -> Prompt:
     return vision_prompt
 
 
+class LLMImageConverterInputSchema(BaseModel):
+    file_paths: list[str] = Field(default=[], description="Parameter to provide path to files.")
+    files: list[BytesIO | bytes] = Field(default=[], description="Parameter to provide files.")
+    metadata: dict = Field(default={}, description="Parameter to provide metadata.")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def validate_file_source(self):
+        """Validate that either `file_paths` or `files` is specified"""
+        if not self.file_paths and not self.files:
+            raise ValueError("Either `file_paths` or `files` must be provided.")
+        return self
+
+
 class LLMImageConverter(Node):
     """
     A Node class for extracting text from images using a Large Language Model (LLM).
@@ -96,6 +111,7 @@ class LLMImageConverter(Node):
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     llm: Node
     vision_prompt: Prompt = Field(default_factory=create_vision_prompt_template)
+    input_schema: ClassVar[type[LLMImageConverterInputSchema]] = LLMImageConverterInputSchema
 
     def __init__(self, **kwargs):
         """
@@ -146,13 +162,13 @@ class LLMImageConverter(Node):
             self.llm.init_components(connection_manager)
 
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+        self, input_data: LLMImageConverterInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """
         Executes the image text extraction process.
 
         Args:
-            input_data (dict[str, Any]): A dictionary containing the images to be processed.
+            input_data (LLMImageConverterInputSchema): An instance containing the images to be processed.
             config (RunnableConfig, optional): Configuration for the execution. Default is None.
             **kwargs: Additional keyword arguments.
 
@@ -176,9 +192,9 @@ class LLMImageConverter(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = self.extract_text_from_images(
-            file_paths=input_data.get("file_paths"),
-            files=input_data.get("files"),
-            metadata=input_data.get("metadata"),
+            file_paths=input_data.file_paths,
+            files=input_data.files,
+            metadata=input_data.metadata,
             config=config,
             **kwargs,
         )
@@ -206,8 +222,6 @@ class LLMImageConverter(Node):
         Returns:
             list[Document]: A list of extracted documents.
         """
-        if file_paths is None and files is None:
-            raise ValueError("Either `file_paths` or `files` must be provided.")
 
         documents = []
 
@@ -444,6 +458,21 @@ class LLMImageConverter(Node):
         )
 
 
+class LLMPDFConverterInputSchema(BaseModel):
+    file_paths: list[str] = Field(default=[], description="Parameter to provide path to files.")
+    files: list[BytesIO | bytes] = Field(default=[], description="Parameter to provide files.")
+    metadata: dict = Field(default={}, description="Parameter to provide metadata.")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def validate_file_source(self):
+        """Validate that either `file_paths` or `files` is specified"""
+        if not self.file_paths and not self.files:
+            raise ValueError("Either `file_paths` or `files` must be provided.")
+        return self
+
+
 class LLMPDFConverter(LLMImageConverter):
     """
     A Node class for extracting text from PDFs using a Large Language Model (LLM).
@@ -484,6 +513,7 @@ class LLMPDFConverter(LLMImageConverter):
 
     _convert_from_bytes: Any = PrivateAttr()
     _convert_from_path: Any = PrivateAttr()
+    input_schema: ClassVar[type[LLMPDFConverterInputSchema]] = LLMPDFConverterInputSchema
 
     def __init__(self, **kwargs):
         """
@@ -499,13 +529,14 @@ class LLMPDFConverter(LLMImageConverter):
         self._convert_from_path = convert_from_path
 
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+        self, input_data: LLMPDFConverterInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """
         Executes the PDF text extraction process.
 
         Args:
-            input_data (dict[str, Any]): A dictionary containing the file paths or files of PDFs to be processed.
+            input_data (LLMPDFConverterInputSchema): An instance containing the file paths or
+              files of PDFs to be processed.
             config (RunnableConfig, optional): Configuration for the execution. Default is None.
             **kwargs: Additional keyword arguments.
 
@@ -528,9 +559,9 @@ class LLMPDFConverter(LLMImageConverter):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = self.extract_text_from_pdfs(
-            file_paths=input_data.get("file_paths"),
-            files=input_data.get("files"),
-            metadata=input_data.get("metadata"),
+            file_paths=input_data.file_paths,
+            files=input_data.files,
+            metadata=input_data.metadata,
             config=config,
             **kwargs,
         )
@@ -558,9 +589,6 @@ class LLMPDFConverter(LLMImageConverter):
         Returns:
             list[Document]: A list of extracted documents.
         """
-        if file_paths is None and files is None:
-            raise ValueError("Either `file_paths` or `files` must be provided.")
-
         documents = []
 
         if file_paths is not None:

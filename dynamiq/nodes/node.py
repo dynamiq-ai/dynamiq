@@ -328,7 +328,7 @@ class Node(BaseModel, Runnable, ABC):
                     depend=dep, depends_result=depends_result
                 )
 
-    def validate_input_schema(self, input_data: dict[str, Any]) -> dict[str, Any] | BaseModel:
+    def validate_input_schema(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any] | BaseModel:
         """
         Validate input data against the input schema. Returns instance of input_schema if it is is provided.
 
@@ -341,13 +341,15 @@ class Node(BaseModel, Runnable, ABC):
         from dynamiq.nodes.agents.exceptions import RecoverableAgentException
         if self.input_schema:
             try:
-                return self.input_schema(**input_data)
+                return self.input_schema.model_validate(
+                    input_data, context=kwargs | self.get_context_for_input_schema()
+                )
             except Exception as e:
                 raise RecoverableAgentException(f"Input data validation failed: {e}")
 
         return input_data
 
-    def transform_input(self, input_data: dict, depends_result: dict[Any, RunnableResult]) -> dict:
+    def transform_input(self, input_data: dict, depends_result: dict[Any, RunnableResult], **kwargs) -> dict:
         """
         Transform input data for the node.
 
@@ -387,7 +389,7 @@ class Node(BaseModel, Runnable, ABC):
             else:
                 inputs[key] = value
 
-        inputs = self.validate_input_schema(inputs)
+        inputs = self.validate_input_schema(inputs, **kwargs)
 
         return inputs
 
@@ -505,7 +507,7 @@ class Node(BaseModel, Runnable, ABC):
             )
 
         try:
-            transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
+            transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result, **kwargs)
 
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
 
@@ -635,6 +637,10 @@ class Node(BaseModel, Runnable, ABC):
                 raise e
 
             return result
+
+    def get_context_for_input_schema(self) -> dict:
+        """Provides context for input schema that is required for proper validation."""
+        return {}
 
     def get_input_streaming_event(
         self,
