@@ -46,7 +46,9 @@ class BaseLLMInputSchema(BaseModel):
                 raise ValueError(
                     f"Error invalid parameters were passed. Expected: {required_parameters}. Got: {provided_parameters}"
                 )
-        return self
+            return self
+
+        raise ValueError("Error prompt was not provided")
 
 
 class BaseLLM(ConnectionNode):
