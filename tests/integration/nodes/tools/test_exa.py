@@ -57,18 +57,11 @@ def test_exa_basic_search(mock_requests, mock_exa_response):
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
 
-    input_dump = result.input.model_dump()
+    input_dump = result.input
     assert input_dump["query"] == input_data["query"]
     assert input_dump["limit"] == input_data["limit"]
     assert input_dump["query_type"] == input_data["query_type"]
     assert input_dump["include_full_content"] == input_data["include_full_content"]
-
-    assert input_dump["use_autoprompt"] is False
-    assert input_dump["category"] is None
-    assert input_dump["include_domains"] is None
-    assert input_dump["exclude_domains"] is None
-    assert input_dump["include_text"] is None
-    assert input_dump["exclude_text"] is None
 
     mock_requests.assert_called_once()
     call_args = mock_requests.call_args

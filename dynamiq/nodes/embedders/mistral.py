@@ -1,16 +1,10 @@
-from typing import Any, Literal
-
-from dynamiq.components.embedders.mistral import (
-    MistralEmbedder as MistralEmbedderComponent,
-)
+from dynamiq.components.embedders.mistral import MistralEmbedder as MistralEmbedderComponent
 from dynamiq.connections import Mistral as MistralConnection
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
-from dynamiq.runnables import RunnableConfig
-from dynamiq.utils.logger import logger
+from dynamiq.nodes.embedders.base import DocumentEmbedder, TextEmbedder
 
 
-class MistralDocumentEmbedder(ConnectionNode):
+class MistralDocumentEmbedder(DocumentEmbedder):
     """
     Provides functionality to compute embeddings for documents using Mistral models.
 
@@ -30,7 +24,6 @@ class MistralDocumentEmbedder(ConnectionNode):
             only by 'text-embedding-3' and later models. Defaults to None.
     """
 
-    group: Literal[NodeGroup.EMBEDDERS] = NodeGroup.EMBEDDERS
     name: str = "MistralDocumentEmbedder"
     connection: MistralConnection | None = None
     model: str = "mistral/mistral-embed"
@@ -49,10 +42,6 @@ class MistralDocumentEmbedder(ConnectionNode):
             kwargs["connection"] = MistralConnection()
         super().__init__(**kwargs)
 
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"document_embedder": True}
-
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initializes the components of the MistralDocumentEmbedder.
@@ -70,34 +59,8 @@ class MistralDocumentEmbedder(ConnectionNode):
                 connection=self.connection, model=self.model, client=self.client
             )
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
-        """
-        Executes the document embedding process.
 
-        This method takes input documents, computes their embeddings using the Mistral API, and
-        returns the result.
-
-        Args:
-            input_data (dict[str, Any]): A dictionary containing the input data. Expected to have a
-                'documents' key with the documents to embed.
-            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            The output from the document_embedder component, typically the computed embeddings.
-        """
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        output = self.document_embedder.embed_documents(input_data["documents"])
-        logger.debug("MistralDocumentEmbedder executed successfully.")
-
-        return output
-
-
-class MistralTextEmbedder(ConnectionNode):
+class MistralTextEmbedder(TextEmbedder):
     """
     A component designed to embed strings using specified Mistral models.
 
@@ -118,7 +81,6 @@ class MistralTextEmbedder(ConnectionNode):
 
     """
 
-    group: Literal[NodeGroup.EMBEDDERS] = NodeGroup.EMBEDDERS
     name: str = "MistralTextEmbedder"
     connection: MistralConnection | None = None
     model: str = "mistral/mistral-embed"
@@ -136,10 +98,6 @@ class MistralTextEmbedder(ConnectionNode):
             kwargs["connection"] = MistralConnection()
         super().__init__(**kwargs)
 
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"text_embedder": True}
-
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the MistralTextEmbedder.
@@ -156,29 +114,3 @@ class MistralTextEmbedder(ConnectionNode):
             self.text_embedder = MistralEmbedderComponent(
                 connection=self.connection, model=self.model, client=self.client
             )
-
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
-        """
-        Execute the text embedding process.
-
-        This method takes input data, runs the text embedding, and returns the result.
-
-        Args:
-            input_data (dict[str, Any]): The input data containing the query to embed.
-            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            dict: A dictionary containing the embedding and the original query.
-        """
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        output = self.text_embedder.embed_text(input_data["query"])
-        logger.debug(f"MistralTextEmbedder: {output['meta']}")
-        return {
-            "embedding": output["embedding"],
-            "query": input_data["query"],
-        }

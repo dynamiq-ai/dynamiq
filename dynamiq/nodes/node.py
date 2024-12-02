@@ -325,7 +325,7 @@ class Node(BaseModel, Runnable, ABC):
                     depend=dep, depends_result=depends_result
                 )
 
-    def validate_input_schema(self, input_data: dict[str, Any]) -> dict[str, Any] | BaseModel:
+    def validate_input_schema(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any] | BaseModel:
         """
         Validate input data against the input schema. Returns instance of input_schema if it is is provided.
 
@@ -339,7 +339,9 @@ class Node(BaseModel, Runnable, ABC):
 
         if self.input_schema:
             try:
-                return self.input_schema(**input_data)
+                return self.input_schema.model_validate(
+                    input_data, context=kwargs | self.get_context_for_input_schema()
+                )
             except Exception as e:
                 raise RecoverableAgentException(f"Input data validation failed: {e}")
 
@@ -384,8 +386,6 @@ class Node(BaseModel, Runnable, ABC):
                     raise NodeException(message=f"Input mapping {key}: failed.")
             else:
                 inputs[key] = value
-
-        inputs = self.validate_input_schema(inputs)
 
         return inputs
 
@@ -511,7 +511,7 @@ class Node(BaseModel, Runnable, ABC):
             )
 
             output, from_cache = cache(self.execute_with_retry)(
-                transformed_input, config, **merged_kwargs
+                self.validate_input_schema(transformed_input, **kwargs), config, **merged_kwargs
             )
 
             merged_kwargs["is_output_from_cache"] = from_cache
@@ -627,6 +627,10 @@ class Node(BaseModel, Runnable, ABC):
 
             return result
 
+    def get_context_for_input_schema(self) -> dict:
+        """Provides context for input schema that is required for proper validation."""
+        return {}
+
     def get_input_streaming_event(
         self,
         event_msg_type: "type[StreamingEventMessage]" = StreamingEventMessage,
@@ -669,7 +673,7 @@ class Node(BaseModel, Runnable, ABC):
     def run_on_node_start(
         self,
         callbacks: list[BaseCallbackHandler],
-        input_data: dict[str, Any] | BaseModel,
+        input_data: dict[str, Any],
         **kwargs,
     ):
         """
@@ -680,9 +684,6 @@ class Node(BaseModel, Runnable, ABC):
             input_data (dict[str, Any]): Input data for the node.
             **kwargs: Additional keyword arguments.
         """
-
-        if isinstance(input_data, BaseModel):
-            input_data = dict(input_data)
 
         for callback in callbacks:
             callback.on_node_start(self.to_dict(), input_data, **kwargs)
