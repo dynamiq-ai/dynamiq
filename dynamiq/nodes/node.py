@@ -389,8 +389,6 @@ class Node(BaseModel, Runnable, ABC):
             else:
                 inputs[key] = value
 
-        inputs = self.validate_input_schema(inputs, **kwargs)
-
         return inputs
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
@@ -518,7 +516,7 @@ class Node(BaseModel, Runnable, ABC):
             )
 
             output, from_cache = cache(self.execute_with_retry)(
-                transformed_input, config, **merged_kwargs
+                self.validate_input_schema(transformed_input, **kwargs), config, **merged_kwargs
             )
 
             merged_kwargs["is_output_from_cache"] = from_cache
@@ -684,7 +682,7 @@ class Node(BaseModel, Runnable, ABC):
     def run_on_node_start(
         self,
         callbacks: list[BaseCallbackHandler],
-        input_data: dict[str, Any] | BaseModel,
+        input_data: dict[str, Any],
         **kwargs,
     ):
         """
@@ -695,9 +693,6 @@ class Node(BaseModel, Runnable, ABC):
             input_data (dict[str, Any]): Input data for the node.
             **kwargs: Additional keyword arguments.
         """
-
-        if isinstance(input_data, BaseModel):
-            input_data = dict(input_data)
 
         for callback in callbacks:
             callback.on_node_start(self.to_dict(), input_data, **kwargs)

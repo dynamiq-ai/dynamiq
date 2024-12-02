@@ -1,10 +1,11 @@
 from functools import wraps
 from typing import Any, Callable
 
+from pydantic import BaseModel
+
 from dynamiq.cache import CacheConfig
 from dynamiq.cache.managers import WorkflowCacheManager
 from dynamiq.utils.logger import logger
-
 
 FUNC_KWARGS_TO_REMOVE = (
     "input_data",
@@ -57,6 +58,8 @@ def cache_wf_entity(
             cache_manager = None
             from_cache = False
             input_data = kwargs.pop("input_data", args[0] if args else {})
+            input_data = dict(input_data) if isinstance(input_data, BaseModel) else input_data
+
             cleaned_kwargs = {k: v for k, v in kwargs.items() if k not in func_kwargs_to_remove}
             if cache_enabled and cache_config:
                 logger.debug(f"Entity_id {entity_id}: cache used")

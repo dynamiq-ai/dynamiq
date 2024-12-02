@@ -205,14 +205,14 @@ class Agent(Node):
 
         if self.memory:
             self.memory.add(role=MessageRole.USER, content=input_data.input, metadata=metadata)
-            self._retrieve_memory(input_data)
+            self._retrieve_memory(dict(input_data))
 
         files = input_data.files
         if files:
             self.files = files
             self._prompt_variables["file_description"] = self.file_description
 
-        self._prompt_variables.update(input_data)
+        self._prompt_variables.update(dict(input_data))
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
