@@ -42,7 +42,7 @@ class BaseLLMInputSchema(BaseModel):
             required_parameters = prompt.get_required_parameters()
             provided_parameters = list(self.model_dump().keys())
 
-            if provided_parameters != required_parameters:
+            if not set(required_parameters).issubset(set(provided_parameters)):
                 raise ValueError(
                     f"Error: Invalid parameters were provided. Expected: {required_parameters}."
                     f"Got: {provided_parameters}"
