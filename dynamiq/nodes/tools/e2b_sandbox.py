@@ -265,7 +265,7 @@ class E2BInterpreterTool(ConnectionNode):
                 "Error: No output. Please use 'print()' to display the result of your Python code.",
                 recoverable=True,
             )
-        if "Error" in process.stderr:
+        if process.exit_code != 0:
             raise ToolExecutionException(f"Error during Python code execution: {process.stderr}", recoverable=True)
         return process.stdout
 
