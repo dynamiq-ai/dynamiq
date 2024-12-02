@@ -1,3 +1,5 @@
+from bank_api import HOST, PORT
+
 from dynamiq import Workflow
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -10,7 +12,6 @@ from dynamiq.nodes.retrievers import PineconeDocumentRetriever
 from dynamiq.nodes.tools.http_api_call import HttpApiCall
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
 from dynamiq.nodes.tools.retriever import RetrievalTool
-from bank_api import HOST, PORT
 
 
 def run_workflow(input: str) -> str:
@@ -69,10 +70,7 @@ def run_workflow(input: str) -> str:
     human_feedback_tool = HumanFeedbackTool()
 
     def combine_inputs(_: dict, outputs: dict[str, dict]):
-        return (
-            f"Request: {input}\n"
-            f"Follow this instruction: {outputs[agent_bank_documentation.id]['content']}"
-        )
+        return f"Request: {input}\n" f"Follow this instruction: {outputs[agent_bank_documentation.id]['content']}"
 
     # Create a ReActAgent for handling internal bank API queries
     agent_bank_support = ReActAgent(
