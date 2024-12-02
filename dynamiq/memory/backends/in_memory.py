@@ -19,9 +19,9 @@ class BM25DocumentRanker(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     documents: list[str]
-    k1: float = Field(default=1.5)
-    b: float = Field(default=0.75)
-    avg_dl: float = Field(default=0.0)
+    k1: float = 1.5
+    b: float = 0.75
+    avg_dl: float = 0.0
 
     def model_post_init(self, __context) -> None:
         """Initialize average document length after model creation."""

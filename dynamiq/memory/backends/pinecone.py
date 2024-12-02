@@ -1,13 +1,12 @@
 import uuid
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict
 
 from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.prompts import Message
 from dynamiq.storages.vector.pinecone import PineconeVectorStore
-from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.types import Document
 
 
@@ -25,37 +24,13 @@ class Pinecone(MemoryBackend):
     name: str = "Pinecone"
     connection: PineconeConnection
     embedder: BaseEmbedder
-    index_type: PineconeIndexType
-    index_name: str = Field(default="conversations")
-    create_if_not_exist: bool = Field(default=True)
-    namespace: str = Field(default="default")
-    cloud: str | None = Field(default=None)
-    region: str | None = Field(default=None)
-    environment: str | None = Field(default=None)
-    pod_type: str | None = Field(default=None)
-    pods: int = Field(default=1)
-    vector_store: PineconeVectorStore | None = None
+    vector_store: PineconeVectorStore
 
     def model_post_init(self, __context) -> None:
-        """Initialize the vector store after model initialization."""
+        """Verify connection after model initialization."""
         try:
-            self.vector_store = PineconeVectorStore(
-                connection=self.connection,
-                index_name=self.index_name,
-                namespace=self.namespace,
-                dimension=self.embedder.dimensions,
-                create_if_not_exist=self.create_if_not_exist,
-                index_type=self.index_type,
-                cloud=self.cloud,
-                region=self.region,
-                environment=self.environment,
-                pod_type=self.pod_type,
-                pods=self.pods,
-            )
-            # Verify connection
             if not self.vector_store._index:
                 raise PineconeError("Failed to initialize Pinecone index")
-
         except Exception as e:
             raise PineconeError(f"Failed to initialize Pinecone vector store: {e}")
 
