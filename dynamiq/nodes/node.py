@@ -347,7 +347,7 @@ class Node(BaseModel, Runnable, ABC):
 
         return input_data
 
-    def transform_input(self, input_data: dict, depends_result: dict[Any, RunnableResult], **kwargs) -> dict:
+    def transform_input(self, input_data: dict, depends_result: dict[Any, RunnableResult]) -> dict:
         """
         Transform input data for the node.
 
@@ -500,7 +500,7 @@ class Node(BaseModel, Runnable, ABC):
             return RunnableResult(status=RunnableStatus.SKIP, input=transformed_input, output=format_value(e))
 
         try:
-            transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result, **kwargs)
+            transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
 
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
 
