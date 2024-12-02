@@ -10,7 +10,7 @@ from dynamiq.utils.logger import logger
 
 
 class DocumentEmbedderInputSchema(BaseModel):
-    documents: list[Document] = Field(..., description="Document to find embeddings for.")
+    documents: list[Document] = Field(..., description="Parameter to provide documents to find embeddings for.")
 
 
 class DocumentEmbedder(ConnectionNode):
@@ -46,7 +46,7 @@ class DocumentEmbedder(ConnectionNode):
 
 
 class TextEmbedderInputSchema(BaseModel):
-    query: str = Field(..., description="Document to find embeddings for.")
+    query: str = Field(..., description="Parameter to provide query to find embeddings for.")
 
 
 class TextEmbedder(ConnectionNode):
@@ -62,7 +62,7 @@ class TextEmbedder(ConnectionNode):
         """
         Execute the text embedding process.
 
-        This method takes input data, runs the text embedding, and returns the result.
+        This method takes text input data, computes its embeddings, and returns the result.
 
         Args:
             input_data (TextEmbedderInputSchema): The input data containing the query to embed.

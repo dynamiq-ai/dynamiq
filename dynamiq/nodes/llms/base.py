@@ -292,8 +292,8 @@ class BaseLLM(ConnectionNode):
         """
         config = ensure_config(config)
         prompt = prompt or self.prompt or Prompt(messages=[], tools=None)
-        messages = prompt.format_messages(**input_data.model_dump())
-        base_tools = prompt.format_tools(**input_data.model_dump())
+        messages = prompt.format_messages(**dict(input_data))
+        base_tools = prompt.format_tools(**dict(input_data))
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
 
         # Use initialized client if it possible
@@ -331,5 +331,5 @@ class BaseLLM(ConnectionNode):
         )
 
         return handle_completion(
-            response=response, messages=messages, config=config, input_data=input_data.model_dump(), **kwargs
+            response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
         )

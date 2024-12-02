@@ -65,7 +65,7 @@ class AgentIntermediateStep(BaseModel):
 
 
 class AgentInputSchema(BaseModel):
-    input: str = Field(..., description="Parameter to provide input to the agent")
+    input: str = Field(..., description="Parameter to provide input to the agent.")
     files: list[io.BytesIO | bytes] = Field(default=[], description="Parameter to provide files to the agent.")
 
     user_id: str = Field(default=None, description="Parameter to provide user ID.")
@@ -181,7 +181,7 @@ class Agent(Node):
         """
         Executes the agent with the given input data.
         """
-        logger.debug(f"Agent {self.name} - {self.id}: started with input {input_data}")
+        logger.debug(f"Agent {self.name} - {self.id}: started with input {dict(input_data)}")
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -512,11 +512,11 @@ class AgentManager(Agent):
         self.reset_run_state()
         config = config or RunnableConfig()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(f"AgentManager {self.name} - {self.id}: started with input {input_data.model_dump()}")
+        logger.info(f"AgentManager {self.name} - {self.id}: started with input {dict(input_data)}")
 
         action = input_data.action
 
-        self._prompt_variables.update(input_data.model_dump())
+        self._prompt_variables.update(dict(input_data))
 
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
