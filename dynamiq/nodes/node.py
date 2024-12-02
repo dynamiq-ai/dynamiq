@@ -134,10 +134,7 @@ class NodeDependency(BaseModel):
         Returns:
             dict: A dictionary representation of the instance.
         """
-        return {
-            "node": self.node.to_dict(**kwargs),
-            "option": self.option,
-        }
+        return {"node": self.node.to_dict(**kwargs), "option": self.option}
 
 
 class NodeMetadata(BaseModel):
@@ -339,6 +336,7 @@ class Node(BaseModel, Runnable, ABC):
             NodeException: If input data does not match the input schema.
         """
         from dynamiq.nodes.agents.exceptions import RecoverableAgentException
+
         if self.input_schema:
             try:
                 return self.input_schema.model_validate(
@@ -479,6 +477,7 @@ class Node(BaseModel, Runnable, ABC):
         time_start = datetime.now()
 
         config = ensure_config(config)
+
         run_id = uuid4()
         merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", run_id)})
         if depends_result is None:
@@ -498,11 +497,7 @@ class Node(BaseModel, Runnable, ABC):
                 **merged_kwargs,
             )
             logger.info(f"Node {self.name} - {self.id}: execution skipped.")
-            return RunnableResult(
-                status=RunnableStatus.SKIP,
-                input=transformed_input,
-                output=format_value(e),
-            )
+            return RunnableResult(status=RunnableStatus.SKIP, input=transformed_input, output=format_value(e))
 
         try:
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result, **kwargs)
@@ -527,11 +522,7 @@ class Node(BaseModel, Runnable, ABC):
                 f"Node {self.name} - {self.id}: execution succeeded in "
                 f"{format_duration(time_start, datetime.now())}."
             )
-            return RunnableResult(
-                status=RunnableStatus.SUCCESS,
-                input=transformed_input,
-                output=transformed_output,
-            )
+            return RunnableResult(status=RunnableStatus.SUCCESS, input=transformed_input, output=transformed_output)
         except Exception as e:
             self.run_on_node_error(config.callbacks, e, **merged_kwargs)
             logger.error(

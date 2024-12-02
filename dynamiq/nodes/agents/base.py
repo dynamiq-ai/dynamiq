@@ -154,14 +154,14 @@ class Agent(Node):
             "instructions": "",
             "output_format": "",
             "relevant_information": "{relevant_memory}",
-            "conversation_history": "{context}",
+            "conversation_history": "{conversation_history}",
             "request": "User request: {input}",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
             "file_description": self.file_description,
             "user_input": "",
-            "context": "",
+            "conversation_history": "",
             "relevant_memory": "",
         }
 
@@ -198,7 +198,7 @@ class Agent(Node):
                 chat_history = TypeAdapter(list[Message]).validate_python(chat_history)
                 chat_history = self._retrieve_chat_history(chat_history)
                 logger.debug(f"Agent {self.name} - {self.id}: Chat history: {len(chat_history)}")
-                self._prompt_variables["context"] = chat_history
+                self._prompt_variables["conversation_history"] = chat_history
 
             except ValidationError as e:
                 raise TypeError(f"Invalid chat history: {e}")
@@ -244,13 +244,13 @@ class Agent(Node):
 
         elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.ALL:
             context = self.memory.get_all_messages_as_string()
-            self._prompt_variables["context"] = context
+            self._prompt_variables["conversation_history"] = context
 
         elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.BOTH:
             relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
             context = self.memory.get_all_messages_as_string()
             self._prompt_variables["relevant_memory"] = relevant_memory
-            self._prompt_variables["context"] = context
+            self._prompt_variables["conversation_history"] = context
 
     def _run_llm(self, prompt: str, config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and handles streaming or full responses."""
