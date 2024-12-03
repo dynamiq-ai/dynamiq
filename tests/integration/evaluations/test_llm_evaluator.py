@@ -1,12 +1,25 @@
+from unittest.mock import MagicMock
+
 from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
-from dynamiq.nodes.llms import BaseLLM, OpenAI
+from dynamiq.nodes.llms import BaseLLM
 
 
-def run_example_without_ground_truth(llm: BaseLLM):
+def test_llm_evaluator_without_ground_truth():
+    # Mock LLM
+    mock_llm = MagicMock(spec=BaseLLM)
+
+    # Define what the llm.execute method should return
+    # It should return a dict with key 'content' containing the LLM's output as a string
+    mock_llm.execute.side_effect = [
+        {"content": '{"score": 0}'},
+        {"content": '{"score": 0}'},
+        {"content": '{"score": 1}'},
+    ]
+
     evaluator = LLMEvaluator(
         instructions="Is this answer problematic for children?",
-        inputs=[{"name": "answers", "type": list[str]}],
-        outputs=[{"name": "score", "type": int}],
+        inputs=[{"name": "answers", "type": list[str]}],  # Updated inputs definition
+        outputs=[{"name": "score", "type": int}],  # Updated outputs definition
         examples=[
             {
                 "inputs": {"answers": "Damn, this is straight outta hell!!!"},
@@ -17,7 +30,7 @@ def run_example_without_ground_truth(llm: BaseLLM):
                 "outputs": {"score": 0},
             },
         ],
-        llm=llm,
+        llm=mock_llm,
     )
 
     answers = [
@@ -25,15 +38,28 @@ def run_example_without_ground_truth(llm: BaseLLM):
         "Python language was created by Guido van Rossum.",
         "Damn, this is straight outta hell!!!",
     ]
+
     results = evaluator.run(answers=answers)
-    return results
+    expected_results = {"results": [{"score": 0}, {"score": 0}, {"score": 1}]}
+
+    assert results == expected_results
 
 
-def run_example_with_ground_truth(llm: BaseLLM):
+def test_llm_evaluator_with_ground_truth():
+    # Mock LLM
+    mock_llm = MagicMock(spec=BaseLLM)
+    mock_llm.execute.side_effect = [
+        {"content": '{"score": 0}'},
+        {"content": '{"score": 1}'},
+    ]
+
     evaluator = LLMEvaluator(
         instructions="Is the answer correct compared to the ground truth answer?",
-        inputs=[{"name": "answers", "type": list[str]}, {"name": "ground_truth", "type": list[str]}],
-        outputs=[{"name": "score", "type": int}],
+        inputs=[
+            {"name": "answers", "type": list[str]},
+            {"name": "ground_truth", "type": list[str]},
+        ],  # Updated inputs definition
+        outputs=[{"name": "score", "type": int}],  # Updated outputs definition
         examples=[
             {
                 "inputs": {
@@ -50,7 +76,7 @@ def run_example_with_ground_truth(llm: BaseLLM):
                 "outputs": {"score": 1},
             },
         ],
-        llm=llm,
+        llm=mock_llm,
     )
 
     answers = [
@@ -64,10 +90,19 @@ def run_example_with_ground_truth(llm: BaseLLM):
     ]
 
     results = evaluator.run(answers=answers, ground_truth=ground_truth)
-    return results
+    expected_results = {"results": [{"score": 0}, {"score": 1}]}
+
+    assert results == expected_results
 
 
-def run_example_with_answer_correctness(llm: BaseLLM):
+def test_llm_evaluator_with_answer_correctness():
+    # Mock LLM
+    mock_llm = MagicMock(spec=BaseLLM)
+    mock_llm.execute.side_effect = [
+        {"content": '{"score": 0}'},
+        {"content": '{"score": "1"}'},  # Testing with a string to ensure parsing works
+    ]
+
     instruction_text = """
         Evaluate the 'Answer Correctness'. Firstly, read the <question>, <ground_truth_answer>, and <answer_by_llm>.
         Then analyze both answers and evaluate if they are similar.
@@ -80,30 +115,30 @@ def run_example_with_answer_correctness(llm: BaseLLM):
     evaluator = LLMEvaluator(
         instructions=instruction_text.strip(),
         inputs=[
-            {"name": "question", "type": list[str]},
+            {"name": "question", "type": list[str]},  # Updated inputs definition
             {"name": "ground_truth_answer", "type": list[str]},
             {"name": "answer_by_llm", "type": list[str]},
         ],
-        outputs=[{"name": "score", "type": int}],
+        outputs=[{"name": "score", "type": int}],  # Updated outputs definition
         examples=[
             {
                 "inputs": {
                     "question": "What is the capital of Ukraine?",
-                    "answer_by_llm": "Lviv is the capital of Ukraine.",
-                    "ground_truth_answer": "Kyiv is the capital of Ukraine.",
+                    "answer_by_llm": "Lviv is the capital of Ukraine",
+                    "ground_truth_answer": "Kyiv is the capital of Ukraine",
                 },
                 "outputs": {"score": 0},
             },
             {
                 "inputs": {
                     "question": "What is the capital of Ukraine?",
-                    "answer_by_llm": "Kyiv is the capital of Ukraine.",
-                    "ground_truth_answer": "Kyiv is the capital of Ukraine.",
+                    "answer_by_llm": "Kyiv is the capital of Ukraine",
+                    "ground_truth_answer": "Kyiv is the capital of Ukraine",
                 },
                 "outputs": {"score": 1},
             },
         ],
-        llm=llm,
+        llm=mock_llm,
     )
 
     questions = [
@@ -112,42 +147,20 @@ def run_example_with_answer_correctness(llm: BaseLLM):
     ]
 
     answers = [
-        "Berlin is the capital of Great Britain.",
+        "Berlin is the capital of Great Britain",
         "Python language was created by Guido van Rossum.",
     ]
 
     ground_truth = [
-        "London is the capital of Great Britain.",
+        "London is the capital of Great Britain",
         "Python language was created by Guido van Rossum.",
     ]
 
     results = evaluator.run(
-        question=questions, answer_by_llm=answers, ground_truth_answer=ground_truth
+        question=questions,
+        answer_by_llm=answers,
+        ground_truth_answer=ground_truth,
     )
-    return results
+    expected_results = {"results": [{"score": 0}, {"score": "1"}]}
 
-
-def main():
-    # Initialize the LLM (provide your LLM configuration)
-    llm = OpenAI(
-        name="OpenAI",
-        model="gpt-4o-mini",
-        postponed_init=True,  # Corrected spelling from 'postponned' to 'postponed'
-    )
-
-    # Run the examples
-    without_ground_truth_results = run_example_without_ground_truth(llm)
-    print("Results without ground truth:")
-    print(without_ground_truth_results)
-
-    with_ground_truth_results = run_example_with_ground_truth(llm)
-    print("\nResults with ground truth:")
-    print(with_ground_truth_results)
-
-    answer_correctness_results = run_example_with_answer_correctness(llm)
-    print("\nAnswer correctness results:")
-    print(answer_correctness_results)
-
-
-if __name__ == "__main__":
-    main()
+    assert results == expected_results
