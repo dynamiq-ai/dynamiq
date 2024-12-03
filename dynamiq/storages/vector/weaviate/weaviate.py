@@ -133,7 +133,7 @@ class WeaviateVectorStore:
         document_data = data.properties
         document_id = document_data.pop("_original_id")
 
-        content = document_data.pop(content_key or self.content_key, "")
+        content = document_data.pop(content_key or self.content_key) or ""
 
         if isinstance(data.vector, list):
             document_data["embedding"] = data.vector
