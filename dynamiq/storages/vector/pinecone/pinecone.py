@@ -50,7 +50,6 @@ class PineconeVectorStore:
         connection: Pinecone | None = None,
         client: Optional["PineconeClient"] = None,
         index_name: str = "default",
-        content_key: str = "content",
         namespace: str = "default",
         batch_size: int = 100,
         dimension: int = 1536,
@@ -62,6 +61,7 @@ class PineconeVectorStore:
         environment: str | None = None,
         pod_type: str | None = None,
         pods: int = 1,
+        content_key: str = "content",
         **index_creation_kwargs,
     ):
         """

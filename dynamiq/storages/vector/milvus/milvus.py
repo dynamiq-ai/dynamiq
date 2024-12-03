@@ -30,12 +30,12 @@ class MilvusVectorStore:
         connection: Milvus | None = None,
         client: Optional["MilvusClient"] = None,
         index_name: str = "default",
-        content_key: str = "content",
-        embedding_key: str = "embedding",
         metric_type: str = "COSINE",
         index_type: str = "AUTOINDEX",
         dimension: int = 1536,
         create_if_not_exist: bool = False,
+        content_key: str = "content",
+        embedding_key: str = "embedding",
     ):
         self.client = client
         if self.client is None:

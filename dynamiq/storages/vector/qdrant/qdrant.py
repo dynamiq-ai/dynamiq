@@ -136,10 +136,10 @@ class QdrantVectorStore:
         init_from: dict | None = None,
         wait_result_from_api: bool = True,
         metadata: dict | None = None,
-        content_key: str | None = None,
         write_batch_size: int = 100,
         scroll_size: int = 10_000,
         payload_fields_to_index: list[dict] | None = None,
+        content_key: str = "content",
     ):
         """Initializes the QdrantDocumentStore.
 

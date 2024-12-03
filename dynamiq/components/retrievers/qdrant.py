@@ -46,7 +46,7 @@ class QdrantDocumentRetriever:
         """
         Retrieves documents from the QdrantDocumentStore that are similar to the provided query embedding.
         Args:
-            content_key:
+            content_key: The field used to store content in the storage.
             query_embedding (List[float]): The embedding vector of the query for which similar documents are to be
             retrieved.
             exclude_document_embeddings (bool, optional): Specifies whether to exclude the embeddings of the retrieved
