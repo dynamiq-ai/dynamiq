@@ -4,10 +4,11 @@ from dynamiq.connections import Weaviate
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import WeaviateVectorStore
+from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
 from dynamiq.utils.logger import logger
 
 
-class WeaviateDocumentWriter(VectorStoreNode):
+class WeaviateDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
     """
     Document Writer Node using Weaviate Vector Store.
 
@@ -42,6 +43,13 @@ class WeaviateDocumentWriter(VectorStoreNode):
     def vector_store_cls(self):
         return WeaviateVectorStore
 
+    @property
+    def vector_store_params(self):
+        return self.model_dump(include=set(BaseWriterVectorStoreParams.model_fields)) | {
+            "connection": self.connection,
+            "client": self.client,
+        }
+
     def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
         """
         Execute the document writing operation.
@@ -60,7 +68,7 @@ class WeaviateDocumentWriter(VectorStoreNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = input_data["documents"]
-        content_key = input_data.get("content_key", None)
+        content_key = input_data.get("content_key")
 
         upserted_count = self.vector_store.write_documents(documents, content_key=content_key)
         logger.debug(f"Upserted {upserted_count} documents to Weaviate Vector Store.")

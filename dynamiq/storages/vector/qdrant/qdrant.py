@@ -188,6 +188,7 @@ class QdrantVectorStore:
             write_batch_size: The batch size for writing documents.
             scroll_size: The scroll size for reading documents.
             payload_fields_to_index: List of payload fields to index.
+            content_key (Optional[str]): The field used to store content in the storage.
         """
 
         self._client = client
@@ -327,9 +328,9 @@ class QdrantVectorStore:
         - `SKIP`: Existing documents will be skipped, and only new documents will be added.
 
         Args:
-            content_key: The field used to store content in the storage.
             documents: A list of Document objects to write to Qdrant.
             policy: The policy for handling duplicate documents.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             The number of documents written to the document store.
@@ -422,9 +423,9 @@ class QdrantVectorStore:
         """Returns a generator that yields documents from Qdrant based on the provided filters.
 
         Args:
-            content_key: The field used to store content in the storage.
             filters: Filters applied to the retrieved documents.
             include_embeddings: Whether to include the embeddings of the retrieved documents.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             A generator that yields documents retrieved from Qdrant.
@@ -459,8 +460,8 @@ class QdrantVectorStore:
         """Returns a list of all documents in the Document Store.
 
         Args:
-            content_key: The field used to store content in the storage.
             include_embeddings: Whether to include the embeddings of the retrieved documents.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             A list of all documents in the Document Store.
@@ -477,10 +478,9 @@ class QdrantVectorStore:
         """Retrieves documents from Qdrant by their IDs.
 
         Args:
-            content_key: The field used to store content in the storage.
             ids: A list of document IDs to retrieve.
             index: The name of the index to retrieve documents from.
-            content_key: The field used to store content in the storage.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             A list of documents.
@@ -528,7 +528,7 @@ class QdrantVectorStore:
             score_threshold: A minimal score threshold for the result. Score of the returned result might be higher or
                 smaller than the threshold depending on the Distance function used. E.g. for cosine similarity only
                 higher scores will be returned.
-            content_key: The field used to store content in the storage.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             List of documents that are most similar to `query_sparse_embedding`.
@@ -593,7 +593,7 @@ class QdrantVectorStore:
             score_threshold: A minimal score threshold for the result. Score of the returned result might be higher or
                 smaller than the threshold depending on the Distance function used. E.g. for cosine similarity only
                 higher scores will be returned.
-            content_key: The field used to store content in the storage.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             List of documents that are most similar to `query_embedding`.
@@ -649,7 +649,7 @@ class QdrantVectorStore:
             score_threshold: A minimal score threshold for the result. Score of the returned result might be higher or
                 smaller than the threshold depending on the Distance function used. E.g. for cosine similarity only
                 higher scores will be returned.
-            content_key: The field used to store content in the storage.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             List of Document that are most similar to `query_embedding` and `query_sparse_embedding`.

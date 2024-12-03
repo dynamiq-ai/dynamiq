@@ -72,8 +72,8 @@ class MilvusDocumentWriter(VectorStoreNode, MilvusVectorStoreParams):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = input_data["documents"]
-        content_key = input_data.get("content_key", None)
-        embedding_key = input_data.get("embedding_key", None)
+        content_key = input_data.get("content_key")
+        embedding_key = input_data.get("embedding_key")
 
         # Write documents to Milvus
         upserted_count = self.vector_store.write_documents(

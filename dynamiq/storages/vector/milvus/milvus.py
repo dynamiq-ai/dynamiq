@@ -95,9 +95,9 @@ class MilvusVectorStore:
         This method processes a list of Document objects and writes them into the vector store.
 
         Args:
-            content_key: The field used to store content in the storage.
-            embedding_key: The field used to store vector in the storage.
             documents (List[Document]): A list of Document objects to be written into the document store.
+            content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store vector in the storage.
 
         Raises:
             ValueError: If an item in the documents list is not an instance of the Document class.
@@ -187,9 +187,9 @@ class MilvusVectorStore:
         List all documents in the collection up to a specified limit.
 
         Args:
-            content_key: The field used to store content in the storage.
-            embedding_key: The field used to store vector in the storage.
             limit (int): Maximum number of documents to retrieve. Defaults to 1000.
+            content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store vector in the storage.
 
         Returns:
             List[Document]: A list of Document instances representing all documents in the collection.
@@ -213,11 +213,11 @@ class MilvusVectorStore:
         Perform vector search on the stored documents using query embeddings.
 
         Args:
-            content_key: The field used to store content in the storage.
-            embedding_key: The field used to store vector in the storage.
             query_embeddings (list[list[float]]): A list of embeddings to use as queries.
             top_k (int): The maximum number of documents to retrieve.
             filters (dict[str, Any] | None): A dictionary of filters to apply to the search. Defaults to None.
+            content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store vector in the storage.
 
         Returns:
             List[Document]: A list of Document objects containing the retrieved documents.
@@ -245,9 +245,9 @@ class MilvusVectorStore:
         Convert Milvus search results to Document objects.
 
         Args:
-            content_key: The field used to store content in the storage.
-            embedding_key: The field used to store vector in the storage.
             result (List[Dict[str, Any]]): The result from a Milvus search operation.
+            content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store vector in the storage.
 
         Returns:
             List[Document]: A list of Document instances created from the Milvus search result.
@@ -279,9 +279,9 @@ class MilvusVectorStore:
         Retrieve documents that match the provided filters.
 
         Args:
-            content_key: The field used to store content in the storage.
-            embedding_key: The field used to store vector in the storage.
             filters (Dict[str, Any] | None): The filters to apply to the document list.
+            content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store vector in the storage.
 
         Returns:
             list[Document]: A list of Document instances that match the given filters.
@@ -309,9 +309,9 @@ class MilvusVectorStore:
         Convert Milvus query result into Documents.
 
         Args:
-            content_key: The field used to store content in the storage.
-            embedding_key: The field used to store vector in the storage.
             result (List[Dict[str, Any]]): The result from a Milvus query operation.
+            content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store vector in the storage.
 
         Returns:
             List[Document]: A list containing Document objects created from the Milvus query result.

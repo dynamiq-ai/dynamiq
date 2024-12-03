@@ -47,10 +47,10 @@ class WeaviateVectorStore:
         Initialize a new instance of WeaviateDocumentStore and connect to the Weaviate instance.
 
         Args:
-            content_key: The field used to store content in the storage.
             connection (Weaviate | None): A Weaviate connection object. If None, a new one is created.
             client (Optional[WeaviateClient]): A Weaviate client. If None, one is created from the connection.
             index_name (str): The name of the index to use. Defaults to "default".
+            content_key (Optional[str]): The field used to store content in the storage.
         """
         self.client = client
         if self.client is None:
@@ -96,8 +96,8 @@ class WeaviateVectorStore:
         Convert a Document to a Weaviate data object ready to be saved.
 
         Args:
-            content_key: The field used to store content in the storage.
             document (Document): The document to convert.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             dict[str, Any]: A dictionary representing the Weaviate data object.
@@ -124,8 +124,8 @@ class WeaviateVectorStore:
         Convert a data object read from Weaviate into a Document.
 
         Args:
-            content_key: The field used to store content in the storage.
             data (DataObject[dict[str, Any], None]): The data object from Weaviate.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             Document: The converted Document object.
@@ -226,8 +226,8 @@ class WeaviateVectorStore:
         Filter documents based on the provided filters.
 
         Args:
-            content_key: The field used to store content in the storage.
             filters (dict[str, Any] | None): The filters to apply to the document list.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: A list of Documents that match the given filters.
@@ -243,8 +243,8 @@ class WeaviateVectorStore:
         List all documents in the DocumentStore.
 
         Args:
-            content_key: The field used to store content in the storage.
             include_embeddings (bool): Whether to include document embeddings in the result.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: A list of all documents in the store.
@@ -263,8 +263,8 @@ class WeaviateVectorStore:
         Write documents to Weaviate in batches.
 
         Args:
-            content_key: The field used to store content in the storage.
             documents (list[Document]): The list of documents to write.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             int: The number of documents written.
@@ -307,9 +307,10 @@ class WeaviateVectorStore:
         Write documents to Weaviate using the specified policy.
 
         Args:
-            content_key: The field used to store content in the storage.
             documents (list[Document]): The list of documents to write.
             policy (DuplicatePolicy): The policy to use for handling duplicates.
+            content_key (Optional[str]): The field used to store content in the storage.
+
 
         Returns:
             int: The number of documents written.
@@ -351,9 +352,9 @@ class WeaviateVectorStore:
         Write documents to Weaviate using the specified policy.
 
         Args:
-            content_key: The field used to store content in the storage.
             documents (list[Document]): The list of documents to write.
             policy (DuplicatePolicy): The policy to use for handling duplicates.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             int: The number of documents written.
@@ -457,7 +458,7 @@ class WeaviateVectorStore:
             exclude_document_embeddings (bool): Whether to exclude document embeddings in the result.
             distance (float | None): The maximum distance for retrieval.
             certainty (float | None): The minimum certainty for retrieval.
-            content_key: The field used to store content in the storage.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: A list of retrieved documents.

@@ -75,6 +75,7 @@ class PineconeVectorStore:
             batch_size (int): Size of batches for operations. Defaults to 100.
             dimension (int): Number of dimensions for vectors. Defaults to 1536.
             metric (str): Metric for calculating vector similarity. Defaults to 'cosine'.
+            content_key (Optional[str]): The field used to store content in the storage. Defaults to 'content'.
             **index_creation_kwargs: Additional arguments for index creation.
         """
         self.client = client
@@ -262,8 +263,8 @@ class PineconeVectorStore:
         List documents in the Pinecone vector store.
 
         Args:
-            content_key: Key word that been used to store content.
             include_embeddings (bool): Whether to include embeddings in the results. Defaults to False.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: List of Document objects retrieved.
@@ -313,8 +314,8 @@ class PineconeVectorStore:
         Write documents to the Pinecone vector store.
 
         Args:
-            content_key: Key word that been used to store content in metadata
             documents (list[Document]): List of Document objects to write.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             int: Number of documents successfully written.
@@ -342,14 +343,14 @@ class PineconeVectorStore:
     def _convert_documents_to_pinecone_format(
         self,
         documents: list[Document],
-        content_key: str,
+        content_key: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Convert Document objects to Pinecone-compatible format.
 
         Args:
-            content_key: The field used to store content in the storage.
             documents (list[Document]): List of Document objects to convert.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[dict[str, Any]]: List of documents in Pinecone-compatible format.
@@ -381,8 +382,8 @@ class PineconeVectorStore:
         namespace: str | None = None,
         filters: dict[str, Any] | None = None,
         top_k: int = 10,
-        content_key: str | None = None,
         exclude_document_embeddings: bool = True,
+        content_key: str | None = None,
     ) -> list[Document]:
         """
         Retrieve documents similar to the given query embedding.
@@ -392,8 +393,8 @@ class PineconeVectorStore:
             namespace (str | None): The namespace to query. Defaults to None.
             filters (dict[str, Any] | None): Filters for the query. Defaults to None.
             top_k (int): Maximum number of documents to retrieve. Defaults to 10.
-            content_key: The field used to store content in the storage.
             exclude_document_embeddings (bool): Whether to exclude embeddings in results. Defaults to True.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: List of retrieved Document objects.
@@ -418,13 +419,15 @@ class PineconeVectorStore:
 
         return self._convert_query_result_to_documents(result, content_key=content_key or self.content_key)
 
-    def _convert_query_result_to_documents(self, query_result: dict[str, Any], content_key: str) -> list[Document]:
+    def _convert_query_result_to_documents(
+        self, query_result: dict[str, Any], content_key: str | None = None
+    ) -> list[Document]:
         """
         Convert Pinecone query results to Document objects.
 
         Args:
-            content_key: The field used to store content in the storage.
             query_result (dict[str, Any]): The query result from Pinecone.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: List of Document objects created from the query result.

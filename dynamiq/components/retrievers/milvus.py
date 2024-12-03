@@ -47,14 +47,14 @@ class MilvusDocumentRetriever:
         Retrieves documents from the MilvusVectorStore that are similar to the provided query embedding.
 
         Args:
-            content_key: The field used to store content in the storage.
-            embedding_key: The field used to store vector in the storage.
             query_embedding (List[float]): The embedding vector of the query for which similar documents are to be
             retrieved.
             exclude_document_embeddings (bool, optional): Specifies whether to exclude the embeddings of the retrieved
             documents from the output.
             top_k (int, optional): The maximum number of documents to return. Defaults to None.
             filters (Optional[dict[str, Any]]): Filters to apply for retrieving specific documents. Defaults to None.
+            content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store vector in the storage.
 
         Returns:
             Dict[str, List[Document]]: A dictionary containing a list of Document instances sorted by their relevance
