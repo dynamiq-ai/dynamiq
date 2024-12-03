@@ -3,7 +3,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dynamiq.components.retrievers.pgvector import PGVectorDocumentRetriever as PGVectorDocumentRetrieverComponent
-from dynamiq.connections import PGVector
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.retrievers.pgvector import PGVectorDocumentRetriever
 from dynamiq.runnables import RunnableConfig
@@ -17,16 +16,27 @@ def mock_pg_vector_store():
     return mock_store
 
 
+@pytest.fixture(autouse=True)
+def mock_pgvector_connect():
+    with patch("dynamiq.connections.connections.PGVector.connect", return_value=MagicMock()) as mock_connect:
+        yield mock_connect
+
+
 @pytest.fixture
 def pgvector_document_retriever(mock_pg_vector_store):
     retriever = PGVectorDocumentRetriever(vector_store=mock_pg_vector_store)
     return retriever
 
 
-@patch("dynamiq.connections.PGVector.connect", return_value=MagicMock())
-def test_initialization_with_defaults(mock_connect):
+@patch.object(PGVectorDocumentRetriever, "connect_to_vector_store")
+def test_initialization_with_defaults(mock_connect_to_vector_store):
+    mock_pg_vector_store = MagicMock(spec=PGVectorStore)
+    mock_connect_to_vector_store.return_value = mock_pg_vector_store
+
     retriever = PGVectorDocumentRetriever()
-    assert isinstance(retriever.connection, PGVector)
+
+    mock_connect_to_vector_store.assert_called_once()
+    assert retriever.vector_store == mock_pg_vector_store
 
 
 def test_initialization_with_vector_store(mock_pg_vector_store):
