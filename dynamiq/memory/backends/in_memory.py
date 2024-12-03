@@ -1,7 +1,7 @@
 import math
 from collections import Counter
 
-from dynamiq.memory.backend.base import MemoryBackend
+from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.prompts import Message
 
 

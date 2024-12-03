@@ -1,5 +1,5 @@
 from dynamiq.memory import Memory
-from dynamiq.memory.backend import InMemory
+from dynamiq.memory.backends import InMemory
 from dynamiq.prompts import MessageRole
 
 # Create a memory instance with InMemory backend

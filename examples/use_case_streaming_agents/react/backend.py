@@ -1,7 +1,7 @@
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import E2B, ScaleSerp
 from dynamiq.memory import Memory
-from dynamiq.memory.backend.in_memory import InMemory
+from dynamiq.memory.backends.in_memory import InMemory
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool

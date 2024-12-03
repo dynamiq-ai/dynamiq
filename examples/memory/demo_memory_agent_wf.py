@@ -4,7 +4,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.memory import Memory
-from dynamiq.memory.backend.in_memory import InMemory
+from dynamiq.memory.backends.in_memory import InMemory
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.prompts import MessageRole
 from dynamiq.runnables import RunnableConfig

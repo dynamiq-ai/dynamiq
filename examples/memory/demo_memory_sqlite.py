@@ -1,4 +1,4 @@
-from dynamiq.memory.backend import SQLite
+from dynamiq.memory.backends import SQLite
 from dynamiq.memory.memory import Memory
 from dynamiq.prompts import MessageRole
 

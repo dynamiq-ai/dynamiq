@@ -2,7 +2,7 @@ import re
 
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.memory import Memory
-from dynamiq.memory.backend.in_memory import InMemory
+from dynamiq.memory.backends.in_memory import InMemory
 from dynamiq.nodes.agents.reflection import ReflectionAgent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode

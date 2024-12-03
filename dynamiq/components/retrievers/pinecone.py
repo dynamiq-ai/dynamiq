@@ -44,6 +44,7 @@ class PineconeDocumentRetriever:
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
+        content_key: str | None = None,
     ):
         """
         Retrieves documents from the PineconeDocumentStore that are similar to the provided query embedding.
@@ -55,6 +56,7 @@ class PineconeDocumentRetriever:
             documents from the output.
             top_k (int, optional): The maximum number of documents to return. Defaults to None.
             filters (Optional[dict[str, Any]]): Filters to apply for retrieving specific documents. Defaults to None.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             List[Document]: A list of Document instances sorted by their relevance to the query_embedding.
@@ -67,6 +69,7 @@ class PineconeDocumentRetriever:
             filters=filters,
             top_k=top_k,
             exclude_document_embeddings=exclude_document_embeddings,
+            content_key=content_key,
         )
         logger.debug(f"Retrieved {len(docs)} documents from Pinecone Vector Store.")
 

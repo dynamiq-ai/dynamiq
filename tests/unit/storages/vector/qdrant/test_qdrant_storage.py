@@ -16,7 +16,7 @@ def mock_qdrant_client():
 @pytest.fixture
 def qdrant_vector_store(mock_qdrant_client):
     with patch("qdrant_client.QdrantClient", return_value=mock_qdrant_client):
-        return QdrantVectorStore()
+        return QdrantVectorStore(content_key="content")
 
 
 def test_initialization(qdrant_vector_store):

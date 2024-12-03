@@ -134,10 +134,7 @@ class NodeDependency(BaseModel):
         Returns:
             dict: A dictionary representation of the instance.
         """
-        return {
-            "node": self.node.to_dict(**kwargs),
-            "option": self.option,
-        }
+        return {"node": self.node.to_dict(**kwargs), "option": self.option}
 
 
 class NodeMetadata(BaseModel):
@@ -201,12 +198,12 @@ class Node(BaseModel, Runnable, ABC):
     name: str | None = None
     description: str | None = None
     group: NodeGroup
-    error_handling: ErrorHandling = ErrorHandling()
-    input_transformer: InputTransformer = InputTransformer()
+    error_handling: ErrorHandling = Field(default_factory=ErrorHandling)
+    input_transformer: InputTransformer = Field(default_factory=InputTransformer)
     input_mapping: dict[str, Any] = {}
-    output_transformer: OutputTransformer = OutputTransformer()
-    caching: CachingConfig = CachingConfig()
-    streaming: StreamingConfig = StreamingConfig()
+    output_transformer: OutputTransformer = Field(default_factory=OutputTransformer)
+    caching: CachingConfig = Field(default_factory=CachingConfig)
+    streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     depends: list[NodeDependency] = []
     metadata: NodeMetadata | None = None
 
@@ -339,6 +336,7 @@ class Node(BaseModel, Runnable, ABC):
             NodeException: If input data does not match the input schema.
         """
         from dynamiq.nodes.agents.exceptions import RecoverableAgentException
+
         if self.input_schema:
             try:
                 return self.input_schema(**input_data)
@@ -391,15 +389,12 @@ class Node(BaseModel, Runnable, ABC):
 
         return inputs
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize node components.
 
         Args:
-            connection_manager (ConnectionManager, optional): Connection manager instance.
-                Defaults to ConnectionManager().
+            connection_manager (ConnectionManager, optional): The connection manager.
         """
         self.is_postponed_component_init = False
 
@@ -482,6 +477,7 @@ class Node(BaseModel, Runnable, ABC):
         time_start = datetime.now()
 
         config = ensure_config(config)
+
         run_id = uuid4()
         merged_kwargs = merge(kwargs, {"run_id": run_id, "parent_run_id": kwargs.get("parent_run_id", run_id)})
         if depends_result is None:
@@ -501,11 +497,7 @@ class Node(BaseModel, Runnable, ABC):
                 **merged_kwargs,
             )
             logger.info(f"Node {self.name} - {self.id}: execution skipped.")
-            return RunnableResult(
-                status=RunnableStatus.SKIP,
-                input=transformed_input,
-                output=format_value(e),
-            )
+            return RunnableResult(status=RunnableStatus.SKIP, input=transformed_input, output=format_value(e))
 
         try:
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
@@ -530,11 +522,7 @@ class Node(BaseModel, Runnable, ABC):
                 f"Node {self.name} - {self.id}: execution succeeded in "
                 f"{format_duration(time_start, datetime.now())}."
             )
-            return RunnableResult(
-                status=RunnableStatus.SUCCESS,
-                input=transformed_input,
-                output=transformed_output,
-            )
+            return RunnableResult(status=RunnableStatus.SUCCESS, input=transformed_input, output=transformed_output)
         except Exception as e:
             self.run_on_node_error(config.callbacks, e, **merged_kwargs)
             logger.error(
@@ -981,15 +969,14 @@ class ConnectionNode(Node, ABC):
             raise ValueError("'connection' or 'client' should be specified")
         return self
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize components for the node.
 
         Args:
-            connection_manager (ConnectionManager): The connection manager to use.
+            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.client is None:
             self.client = connection_manager.get_connection_client(
@@ -1029,15 +1016,14 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
 
         return vector_store
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize components for the node.
 
         Args:
-            connection_manager (ConnectionManager): The connection manager to use.
+            connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
         """
+        connection_manager = connection_manager or ConnectionManager()
         # Use vector_store client if it is already initialized
         if self.vector_store:
             self.client = self.vector_store.client

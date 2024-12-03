@@ -57,9 +57,7 @@ class OpenAIDocumentEmbedder(ConnectionNode):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"document_embedder": True}
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initializes the components of the OpenAIDocumentEmbedder.
 
@@ -69,6 +67,7 @@ class OpenAIDocumentEmbedder(ConnectionNode):
             connection_manager (ConnectionManager): The connection manager to use. Defaults to a new
                 ConnectionManager instance.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.document_embedder is None:
             self.document_embedder = OpenAIEmbedderComponent(
@@ -155,9 +154,7 @@ class OpenAITextEmbedder(ConnectionNode):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"text_embedder": True}
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the OpenAITextEmbedder.
 
@@ -167,6 +164,7 @@ class OpenAITextEmbedder(ConnectionNode):
             connection_manager (ConnectionManager): The connection manager to use. Defaults to a new
                 ConnectionManager instance.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.text_embedder is None:
             self.text_embedder = OpenAIEmbedderComponent(

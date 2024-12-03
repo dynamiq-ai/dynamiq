@@ -64,9 +64,7 @@ class PineconeDocumentRetriever(VectorStoreNode, PineconeVectorStoreParams):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"document_retriever": True}
 
-    def init_components(
-        self, connection_manager: ConnectionManager = ConnectionManager()
-    ):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the PineconeDocumentRetriever.
 
@@ -76,6 +74,7 @@ class PineconeDocumentRetriever(VectorStoreNode, PineconeVectorStoreParams):
             connection_manager (ConnectionManager): The connection manager to use.
                 Defaults to a new ConnectionManager instance.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.document_retriever is None:
             self.document_retriever = PineconeDocumentRetrieverComponent(
@@ -102,10 +101,11 @@ class PineconeDocumentRetriever(VectorStoreNode, PineconeVectorStoreParams):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         query_embedding = input_data["embedding"]
+        content_key = input_data.get("content_key")
         filters = input_data.get("filters") or self.filters
         top_k = input_data.get("top_k") or self.top_k
 
-        output = self.document_retriever.run(query_embedding, filters=filters, top_k=top_k)
+        output = self.document_retriever.run(query_embedding, filters=filters, top_k=top_k, content_key=content_key)
 
         return {
             "documents": output["documents"],

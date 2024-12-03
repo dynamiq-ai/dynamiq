@@ -6,9 +6,10 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import MilvusVectorStore
+from dynamiq.storages.vector.milvus.milvus import MilvusVectorStoreParams
 
 
-class MilvusDocumentRetriever(VectorStoreNode):
+class MilvusDocumentRetriever(VectorStoreNode, MilvusVectorStoreParams):
     """
     Document Retriever using Milvus.
 
@@ -54,10 +55,17 @@ class MilvusDocumentRetriever(VectorStoreNode):
         return MilvusVectorStore
 
     @property
+    def vector_store_params(self):
+        return self.model_dump(include=set(MilvusVectorStoreParams.model_fields)) | {
+            "connection": self.connection,
+            "client": self.client,
+        }
+
+    @property
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"document_retriever": True}
 
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the MilvusDocumentRetriever.
 
@@ -67,6 +75,7 @@ class MilvusDocumentRetriever(VectorStoreNode):
             connection_manager (ConnectionManager): The connection manager to use.
                 Defaults to a new ConnectionManager instance.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.document_retriever is None:
             self.document_retriever = MilvusDocumentRetrieverComponent(
@@ -92,10 +101,14 @@ class MilvusDocumentRetriever(VectorStoreNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         query_embedding = input_data["embedding"]
+        content_key = input_data.get("content_key")
+        embedding_key = input_data.get("embedding_key")
         filters = input_data.get("filters") or self.filters
         top_k = input_data.get("top_k") or self.top_k
 
-        output = self.document_retriever.run(query_embedding, filters=filters, top_k=top_k)
+        output = self.document_retriever.run(
+            query_embedding, filters=filters, top_k=top_k, content_key=content_key, embedding_key=embedding_key
+        )
 
         return {
             "documents": output["documents"],

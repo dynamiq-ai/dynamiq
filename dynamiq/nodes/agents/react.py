@@ -287,10 +287,6 @@ class ReActAgent(Agent):
             ),
         ).model_dump()
 
-    def convert_string_to_dict(string: str) -> dict:
-        string = re.sub(r'\\+', r'\\', string)
-        return json.loads(string)
-
     def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """
         Executes the ReAct strategy by iterating through thought, action, and observation cycles.
@@ -313,7 +309,7 @@ class ReActAgent(Agent):
                 tools_desc=self.tool_description,
                 tools_name=self.tool_names,
                 context="\n".join(previous_responses),
-                input_formats=self.generate_input_formats(self.tools)
+                input_formats=self.generate_input_formats(self.tools),
             )
             logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1} started.")
 

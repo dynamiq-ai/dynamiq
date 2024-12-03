@@ -24,7 +24,11 @@ class TestMilvusDocumentRetriever:
         )
 
         mock_vector_store.search_embeddings.assert_called_once_with(
-            query_embeddings=[[0.1, 0.2, 0.3]], filters={"new_field": "new_value"}, top_k=2
+            query_embeddings=[[0.1, 0.2, 0.3]],
+            filters={"new_field": "new_value"},
+            top_k=2,
+            content_key=None,
+            embedding_key=None,
         )
 
         expected_documents = [
@@ -48,7 +52,7 @@ class TestMilvusDocumentRetriever:
         result = retriever.run(query_embedding=[0.1, 0.2, 0.3])
 
         mock_vector_store.search_embeddings.assert_called_once_with(
-            query_embeddings=[[0.1, 0.2, 0.3]], filters=mock_filters, top_k=5
+            query_embeddings=[[0.1, 0.2, 0.3]], filters=mock_filters, top_k=5, content_key=None, embedding_key=None
         )
 
         expected_documents = [
