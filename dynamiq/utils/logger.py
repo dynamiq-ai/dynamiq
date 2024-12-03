@@ -9,6 +9,7 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+
 litellm_logger = logging.getLogger("LiteLLM")
 litellm_logger.setLevel(logging.ERROR)
 

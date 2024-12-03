@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import re
 import textwrap
 from datetime import datetime
@@ -87,16 +88,25 @@ class Agent(Node):
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    verbose: bool = Field(False, description="Enable verbose logging")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._intermediate_steps: dict[int, dict] = {}
         self._run_depends: list[dict] = []
         self._init_prompt_blocks()
+        if self.verbose:
+            logger.setLevel(logging.DEBUG)
 
     @property
     def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"llm": True, "tools": True, "memory": True, "files": True}
+        return super().to_dict_exclude_params | {
+            "llm": True,
+            "tools": True,
+            "memory": True,
+            "files": True,
+            "verbose": True,
+        }
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
@@ -170,7 +180,9 @@ class Agent(Node):
         """
         Executes the agent with the given input data.
         """
-        logger.debug(f"Agent {self.name} - {self.id}: started with input {input_data}")
+        if self.verbose:
+            logger.debug(f"Agent {self.name} - {self.id}: started with input:\n{input_data}")
+
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -184,11 +196,11 @@ class Agent(Node):
 
         if chat_history:
             try:
-                logger.debug(f"Agent {self.name} - {self.id}: Chat history provided")
                 chat_history = TypeAdapter(list[Message]).validate_python(chat_history)
                 chat_history = self._retrieve_chat_history(chat_history)
-                logger.debug(f"Agent {self.name} - {self.id}: Chat history: {len(chat_history)}")
                 self._prompt_variables["conversation_history"] = chat_history
+                if self.verbose:
+                    logger.debug(f"Agent {self.name} - {self.id}: Provided chat history:\n{chat_history}")
 
             except ValidationError as e:
                 raise TypeError(f"Invalid chat history: {e}")
@@ -244,7 +256,8 @@ class Agent(Node):
 
     def _run_llm(self, prompt: str, config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and handles streaming or full responses."""
-        logger.debug(f"Agent {self.name} - {self.id}: Running LLM with prompt:\n{prompt}")
+        if self.verbose:
+            logger.debug(f"Agent {self.name} - {self.id}: Running LLM {self.llm.name} with prompt:\n{prompt}")
         try:
             llm_result = self.llm.run(
                 input_data={},
@@ -254,14 +267,15 @@ class Agent(Node):
                 **kwargs,
             )
             self._run_depends = [NodeDependency(node=self.llm).to_dict()]
-            logger.debug(f"Agent {self.name} - {self.id}: RAW LLM result:\n{llm_result.output['content']}")
+            if self.verbose:
+                logger.debug(f"Agent {self.name} - {self.id}: LLM result:\n{llm_result.output['content']}")
             if llm_result.status != RunnableStatus.SUCCESS:
                 raise ValueError("LLM execution failed")
 
             return llm_result.output["content"]
 
         except Exception as e:
-            logger.error(f"Agent {self.name} - {self.id}: LLM execution failed: {str(e)}")
+            logger.error(f"Agent {self.name} - {self.id}: LLM execution failed, error is:\n{str(e)}")
             raise
 
     def stream_content(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
@@ -306,7 +320,8 @@ class Agent(Node):
         """Runs the agent with the generated prompt and handles exceptions."""
         formatted_prompt = self.generate_prompt()
         try:
-            logger.info(f"Streaming config  {self.streaming}")
+            if self.verbose:
+                logger.debug(f"Agent {self.name} - {self.id}: Streaming config  {self.streaming}")
             llm_result = self._run_llm(formatted_prompt, config=config, **kwargs)
             if self.streaming.enabled:
                 return self.stream_content(
@@ -341,7 +356,10 @@ class Agent(Node):
             else:
                 raise ActionParsingException()
         except Exception as e:
-            logger.error(f"Error parsing action: {e}")
+            logger.error(
+                f"Agent {self.name} - {self.id}: failed to parse action and action input, "
+                f"raw input here:\n{output}\nerror: {str(e)}"
+            )
             raise ActionParsingException(
                 (
                     "Error: Unable to parse action and action input."
@@ -355,6 +373,10 @@ class Agent(Node):
     def _extract_final_answer(self, output: str) -> str:
         """Extracts the final answer from the output string."""
         match = re.search(r"Answer:\s*(.*)", output, re.DOTALL)
+        if self.verbose:
+            logger.debug(
+                f"Agent {self.name} - {self.id}: Extracting final answer from output:\n{output},\nmatch: {match}"
+            )
         return match.group(1).strip() if match else ""
 
     def _get_tool(self, action: str) -> Node:
@@ -371,7 +393,8 @@ class Agent(Node):
 
     def _run_tool(self, tool: Node, tool_input: str, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
-        logger.debug(f"Agent {self.name} - {self.id}: Running tool '{tool.name}'")
+        if self.verbose:
+            logger.debug(f"Agent {self.name} - {self.id}: Running tool {tool.name} with input: {tool_input}")
         if self.files:
             if tool.is_files_allowed is True:
                 tool_input["files"] = self.files
@@ -482,9 +505,8 @@ class AgentManager(Agent):
         self.reset_run_state()
         config = config or RunnableConfig()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(
-            f"AgentManager {self.name} - {self.id}: started with input {input_data}"
-        )
+        if self.verbose:
+            logger.debug(f"AgentManager {self.name} - {self.id}: started with input:\n{input_data}")
 
         action = input_data.get("action")
         if not action or action not in self._actions:
@@ -505,9 +527,8 @@ class AgentManager(Agent):
             "intermediate_steps": self._intermediate_steps,
         }
 
-        logger.debug(
-            f"AgentManager {self.name} - {self.id}: finished with result {result}"
-        )
+        if self.verbose:
+            logger.debug(f"AgentManager {self.name} - {self.id}: finished with result:\n{result}")
         return execution_result
 
     def _plan(self, config: RunnableConfig, **kwargs) -> str:

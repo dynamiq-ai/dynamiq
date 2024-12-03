@@ -7,9 +7,13 @@ from dynamiq import Workflow
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_parent_run_id, get_run_id
 from dynamiq.callbacks.tracing import RunType
+from dynamiq.connections import Exa
 from dynamiq.flows import Flow
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents import SimpleAgent
+from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.tools.exa_search import ExaTool
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import format_value, generate_uuid
 from dynamiq.utils.env import get_env_var
@@ -105,19 +109,37 @@ class AgentOpsCallbackHandler(BaseCallbackHandler):
         return self.ao_client.current_session_ids
 
 
-if __name__ == "__main__":
+def get_react_agent():
+    llm = setup_llm()
+    connection_exa = Exa()
+    tool_search = ExaTool(connection=connection_exa)
+    agent = ReActAgent(
+        name="Agent",
+        id="Agent",
+        llm=llm,
+        tools=[tool_search],
+        inference_mode=InferenceMode.XML,
+    )
+    return agent
+
+
+def get_simple_agent():
     llm = setup_llm()
     agent = SimpleAgent(
         name="Agent",
         llm=llm,
         role="Agent, goal to provide information based on the user input",
     )
+    return agent
 
+
+if __name__ == "__main__":
+    agent = get_react_agent()
     workflow = Workflow(
         flow=Flow(nodes=[agent]),
     )
     agentops_tracing = AgentOpsCallbackHandler(api_key=get_env_var("AGENTOPS_API_KEY"))
     workflow.run(
-        {"input": "explain the concept of quantum mechanics"},
+        {"input": "who win euro 2024"},
         config=RunnableConfig(callbacks=[agentops_tracing]),
     )

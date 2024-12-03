@@ -38,16 +38,14 @@ Here is how you will think about the user's request
 </output>
 
 REMEMBER:
-* Inside 'action' provide just name of one tool from this list: [{tools_name}]. Don't wrap it wit <>.
+* Inside 'action' provide just name of one tool from this list: [{tools_name}]. Don't wrap it with <>.
 * Each 'action' has its own input format strictly adhere to it.
 Input formats for tools:
 {input_formats}
 
 After each action, the user will provide an "Observation" with the result.
 Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
-
 When you have sufficient information, provide your final answer in one of these two formats:
-
 If you can answer the request:
 <output>
     <thought>
@@ -256,6 +254,7 @@ class ReActAgent(Agent):
         try:
             action_input = json.loads(action_input_text)
         except json.JSONDecodeError:
+            logger.error(f"Agent {self.name} - {self.id}: Error parsing action input: {action_input_text}")
             raise ActionParsingException(
                 (
                     "Error: Unable to parse action and action input. "
@@ -270,10 +269,8 @@ class ReActAgent(Agent):
         """Extract output and answer from XML-like structure."""
         output = self.parse_xml_content(text, "output")
         answer = self.parse_xml_content(text, "answer")
-
-        logger.debug(f"Extracted output: {output}")
-        logger.debug(f"Extracted answer: {answer}")
-
+        if self.verbose:
+            logger.debug(f"Agent {self.name} - {self.id}: Extraction from\n{text},\noutput: {output}, answer: {answer}")
         return {"output": output, "answer": answer}
 
     def tracing_final(self, loop_num, final_answer, config, kwargs):
@@ -312,9 +309,11 @@ class ReActAgent(Agent):
                 input_formats=self.generate_input_formats(self.tools),
             )
             logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1} started.")
-
-            logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}. Prompt:\n{formatted_prompt}")
-
+            if self.verbose:
+                logger.debug(
+                    f"Agent {self.name} - {self.id}: Loop {loop_num + 1}."
+                    f"Call to LLM {self.llm.name} with prompt: \n {formatted_prompt}"
+                )
             try:
 
                 llm_result = self.llm.run(
@@ -341,10 +340,11 @@ class ReActAgent(Agent):
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
                         llm_generated_output = llm_result.output["content"]
-                        logger.debug(
-                            f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. "
-                            f"RAW LLM output:n{llm_generated_output}"
-                        )
+                        if self.verbose:
+                            logger.debug(
+                                f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. "
+                                f"RAW LLM output:\n{llm_generated_output}"
+                            )
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
 
@@ -400,10 +400,11 @@ class ReActAgent(Agent):
                             return final_answer
 
                         action_input = llm_generated_output_json["action_input"]
-                        logger.debug(
-                            f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. "
-                            f"RAW LLM output:n{llm_generated_output}"
-                        )
+                        if self.verbose:
+                            logger.debug(
+                                f"Agent {self.name} - {self.id}:Loop {loop_num + 1}.\n"
+                                f"RAW LLM output:n{llm_generated_output}"
+                            )
                     case InferenceMode.STRUCTURED_OUTPUT:
                         llm_generated_output_json = json.loads(llm_result.output["content"])
                         action = llm_generated_output_json["action"]
@@ -460,17 +461,21 @@ class ReActAgent(Agent):
                         action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
 
                 if action:
-                    logger.debug(f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Action:\n{action}")
-                    logger.debug(f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Action Input:\n{action_input}")
+                    if self.verbose:
+                        logger.debug(f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Action:\n{action}")
+                        logger.debug(
+                            f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Action Input:\n{action_input}"
+                        )
 
                     if self.tools:
                         try:
                             tool = self._get_tool(action)
                             tool_result = self._run_tool(tool, action_input, config, **kwargs)
-
-                            logger.debug(
-                                f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Tool Result:\n{tool_result}"
-                            )
+                            if self.verbose:
+                                logger.debug(
+                                    f"Agent {self.name} - {self.id}:Loop {loop_num + 1}."
+                                    f"Tool {tool.name} Result:\n{tool_result}"
+                                )
 
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
@@ -536,7 +541,6 @@ class ReActAgent(Agent):
     def _extract_final_answer_xml(self, llm_output: str) -> str:
         """Extract the final answer from the LLM output."""
         final_answer = self.extract_output_and_answer_xml(llm_output)
-        logger.info(f"Agent {self.name} - {self.id}: Final answer found: {final_answer['answer']}")
         return final_answer["answer"]
 
     def generate_input_formats(self, tools: list[Node]) -> str:
@@ -546,7 +550,6 @@ class ReActAgent(Agent):
             params = []
             for name, field in tool.input_schema.model_fields.items():
                 if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
-                    # Handle Union types
                     if get_origin(field.annotation) in (Union, types.UnionType):
                         type_str = str(field.annotation)
                     else:
