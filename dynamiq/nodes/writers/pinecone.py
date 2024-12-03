@@ -96,8 +96,9 @@ class PineconeDocumentWriter(VectorStoreNode, PineconeWriterVectorStoreParams):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = input_data["documents"]
+        content_key = input_data.get("content_key")
 
-        upserted_count = self.vector_store.write_documents(documents)
+        upserted_count = self.vector_store.write_documents(documents, content_key=content_key)
         logger.debug(f"Upserted {upserted_count} documents to Pinecone Vector Store.")
 
         return {

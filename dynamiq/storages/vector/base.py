@@ -8,6 +8,7 @@ class BaseVectorStoreParams(BaseModel):
         index_name (str): Name of the index. Defaults to "default".
     """
     index_name: str = "default"
+    content_key: str = "content"
 
 
 class BaseWriterVectorStoreParams(BaseVectorStoreParams):
