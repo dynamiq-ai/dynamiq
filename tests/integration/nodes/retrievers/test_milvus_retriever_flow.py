@@ -110,4 +110,6 @@ def test_milvus_retrieve_workflow(
         query_embeddings=[input_data["embedding"]],
         filters=mock_filters,
         top_k=input_data["top_k"],
+        content_key=None,
+        embedding_key=None,
     )

@@ -56,6 +56,13 @@ class ChromaDocumentRetriever(VectorStoreNode):
         return ChromaVectorStore
 
     @property
+    def vector_store_params(self):
+        return self.model_dump(include={"index_name"}) | {
+            "connection": self.connection,
+            "client": self.client,
+        }
+
+    @property
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"document_retriever": True}
 

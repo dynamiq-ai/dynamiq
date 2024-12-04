@@ -23,6 +23,7 @@ class TestWeaviateDocumentRetriever:
             filters={"new_field": "new_value"},
             top_k=2,
             exclude_document_embeddings=True,
+            content_key=None,
         )
 
         assert result == {"documents": mock_documents}
@@ -36,7 +37,11 @@ class TestWeaviateDocumentRetriever:
         result = retriever.run(query_embedding=[0.1, 0.2, 0.3])
 
         mock_vector_store._embedding_retrieval.assert_called_once_with(
-            query_embedding=[0.1, 0.2, 0.3], filters=mock_filters, top_k=5, exclude_document_embeddings=True
+            query_embedding=[0.1, 0.2, 0.3],
+            filters=mock_filters,
+            top_k=5,
+            exclude_document_embeddings=True,
+            content_key=None,
         )
 
         assert result == {"documents": mock_documents}

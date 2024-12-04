@@ -23,7 +23,7 @@ def test_point_to_document_reverts_proper_structure_from_record_without_sparse()
         },
         vector=[0.5, 0.5, 0.5, 0.5],
     )
-    document = convert_qdrant_point_to_dynamiq_document(point)
+    document = convert_qdrant_point_to_dynamiq_document(point, content_key="content")
     assert "new-id" == document.id
     assert "New content" == document.content
     assert {"new_field": 42} == document.metadata
