@@ -31,12 +31,9 @@ class Qdrant(MemoryBackend):
 
     def model_post_init(self, __context) -> None:
         """Initialize the vector store after model initialization."""
-        try:
-            self._client = self.vector_store._client
-            if not self.client:
-                raise QdrantError("Failed to initialize Qdrant client")
-        except Exception as e:
-            raise QdrantError(f"Failed to connect to Qdrant: {e}") from e
+        self._client = self.vector_store._client
+        if not self._client:
+            raise QdrantError("Failed to initialize Qdrant client")
 
     def _message_to_document(self, message: Message) -> Document:
         """Converts a Message object to a Document object."""
@@ -51,7 +48,7 @@ class Qdrant(MemoryBackend):
         """Converts a Document object to a Message object."""
         metadata = dict(document.metadata)
         role = metadata.pop("role")
-        return Message(content=document.content, role=role, metadata=metadata, score=document.score)
+        return Message(content=document.content, role=role, metadata=metadata)
 
     def add(self, message: Message) -> None:
         """Stores a message in Qdrant."""

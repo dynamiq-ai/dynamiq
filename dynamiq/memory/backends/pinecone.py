@@ -28,11 +28,8 @@ class Pinecone(MemoryBackend):
 
     def model_post_init(self, __context) -> None:
         """Verify connection after model initialization."""
-        try:
-            if not self.vector_store._index:
-                raise PineconeError("Failed to initialize Pinecone index")
-        except Exception as e:
-            raise PineconeError(f"Failed to initialize Pinecone vector store: {e}")
+        if not self.vector_store._index:
+            raise PineconeError("Failed to initialize Pinecone index")
 
     def _message_to_document(self, message: Message) -> Document:
         """Converts a Message object to a Document object."""
@@ -47,7 +44,7 @@ class Pinecone(MemoryBackend):
         """Converts a Document object to a Message object."""
         metadata = dict(document.metadata)
         role = metadata.pop("role")
-        return Message(content=document.content, role=role, metadata=metadata, score=document.score)
+        return Message(content=document.content, role=role, metadata=metadata)
 
     def add(self, message: Message) -> None:
         """Stores a message in Pinecone."""

@@ -130,10 +130,7 @@ class SQLite(MemoryBackend):
                 cursor = conn.cursor()
                 cursor.execute(query)
                 rows = cursor.fetchall()
-            return [
-                Message(role=row[1], content=row[2], metadata=json.loads(row[3] or "{}"), timestamp=row[4])
-                for row in rows
-            ]
+            return [Message(role=row[1], content=row[2], metadata=json.loads(row[3] or "{}")) for row in rows]
 
         except sqlite3.Error as e:
             raise SQLiteError(f"Error retrieving messages from database: {e}") from e
