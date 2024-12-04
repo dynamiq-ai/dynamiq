@@ -3,11 +3,11 @@ from dynamiq.prompts import Prompt
 
 
 def run_perplexity_node(prompt: Prompt):
-    openai_node = Perplexity(
+    perplexity_node = Perplexity(
         model="llama-3.1-sonar-small-128k-online",
         return_citations=True,
     )
-    response = openai_node.run(input_data={}, prompt=prompt)
+    response = perplexity_node.run(input_data={}, prompt=prompt)
     return response
 
 

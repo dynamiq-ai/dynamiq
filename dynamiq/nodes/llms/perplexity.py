@@ -1,11 +1,13 @@
-from typing import Union
+from typing import TYPE_CHECKING, Union
 
-from litellm import CustomStreamWrapper, ModelResponse
 from pydantic import Field
 
 from dynamiq.connections import Perplexity as PerplexityConnection
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.runnables import RunnableConfig
+
+if TYPE_CHECKING:
+    from litellm import CustomStreamWrapper, ModelResponse
 
 
 class Perplexity(BaseLLM):
