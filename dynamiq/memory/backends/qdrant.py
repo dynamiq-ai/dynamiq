@@ -4,9 +4,15 @@ from pydantic import ConfigDict, Field
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 
-from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Qdrant as QdrantConnection
 from dynamiq.memory.backends.base import MemoryBackend
+from dynamiq.nodes.embedders import (
+    BedrockDocumentEmbedder,
+    CohereDocumentEmbedder,
+    HuggingFaceDocumentEmbedder,
+    MistralDocumentEmbedder,
+    OpenAIDocumentEmbedder,
+)
 from dynamiq.prompts import Message
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.storages.vector.qdrant import QdrantVectorStore
@@ -25,7 +31,13 @@ class Qdrant(MemoryBackend):
 
     name: str = "Qdrant"
     connection: QdrantConnection
-    embedder: BaseEmbedder
+    embedder: (
+        BedrockDocumentEmbedder
+        | CohereDocumentEmbedder
+        | HuggingFaceDocumentEmbedder
+        | MistralDocumentEmbedder
+        | OpenAIDocumentEmbedder
+    )
     index_name: str = Field(default="conversations")
     metric: str = Field(default="cosine")
     on_disk: bool = Field(default=False)
@@ -40,7 +52,6 @@ class Qdrant(MemoryBackend):
             self.vector_store = QdrantVectorStore(
                 connection=self.connection,
                 index_name=self.index_name,
-                dimension=self.embedder.dimensions,
                 create_if_not_exist=self.create_if_not_exist,
                 metric=self.metric,
                 on_disk=self.on_disk,
@@ -69,8 +80,8 @@ class Qdrant(MemoryBackend):
         """Stores a message in Qdrant."""
         try:
             document = self._message_to_document(message)
-            embedding_result = self.embedder.embed_text(document.content)
-            document.embedding = embedding_result["embedding"]
+            embedding_result = self.embedder.execute(input_data={"documents": [document]}).get("documents")[0].embedding
+            document.embedding = embedding_result
 
             self.vector_store.write_documents(documents=[document], policy=DuplicatePolicy.SKIP)
         except Exception as e:
@@ -90,9 +101,13 @@ class Qdrant(MemoryBackend):
         try:
             qdrant_filters = self._prepare_filters(filters)
             if query:
-                embedding_result = self.embedder.embed_text(query)
+                embedding_result = (
+                    self.embedder.execute(input_data={"documents": [Document(id="query", content=query)]})
+                    .get("documents")[0]
+                    .embedding
+                )
                 documents = self.vector_store._query_by_embedding(
-                    query_embedding=embedding_result["embedding"],
+                    query_embedding=embedding_result,
                     filters=qdrant_filters,
                     top_k=limit,
                     return_embedding=False,

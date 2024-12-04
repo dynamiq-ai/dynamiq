@@ -2,9 +2,15 @@ import uuid
 
 from pydantic import ConfigDict, Field
 
-from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory.backends.base import MemoryBackend
+from dynamiq.nodes.embedders import (
+    BedrockDocumentEmbedder,
+    CohereDocumentEmbedder,
+    HuggingFaceDocumentEmbedder,
+    MistralDocumentEmbedder,
+    OpenAIDocumentEmbedder,
+)
 from dynamiq.prompts import Message
 from dynamiq.storages.vector.pinecone import PineconeVectorStore
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
@@ -23,7 +29,13 @@ class Pinecone(MemoryBackend):
 
     name: str = "Pinecone"
     connection: PineconeConnection
-    embedder: BaseEmbedder
+    embedder: (
+        BedrockDocumentEmbedder
+        | CohereDocumentEmbedder
+        | HuggingFaceDocumentEmbedder
+        | MistralDocumentEmbedder
+        | OpenAIDocumentEmbedder
+    )
     index_type: PineconeIndexType
     index_name: str = Field(default="conversations")
     create_if_not_exist: bool = Field(default=True)
@@ -42,7 +54,6 @@ class Pinecone(MemoryBackend):
                 connection=self.connection,
                 index_name=self.index_name,
                 namespace=self.namespace,
-                dimension=self.embedder.dimensions,
                 create_if_not_exist=self.create_if_not_exist,
                 index_type=self.index_type,
                 cloud=self.cloud,
@@ -73,9 +84,8 @@ class Pinecone(MemoryBackend):
         """Stores a message in Pinecone."""
         try:
             document = self._message_to_document(message)
-            embedding_result = self.embedder.embed_text(document.content)
-            document.embedding = embedding_result["embedding"]
-
+            embedding_result = self.embedder.execute(input_data={"documents": [document]}).get("documents")[0].embedding
+            document.embedding = embedding_result
             self.vector_store.write_documents([document])
 
         except Exception as e:
@@ -108,16 +118,20 @@ class Pinecone(MemoryBackend):
             normalized_filters = self._prepare_filters(filters)
 
             if query:
-                embedding_result = self.embedder.embed_text(query)
+                embedding_result = (
+                    self.embedder.execute(input_data={"documents": [Document(id="query", content=query)]})
+                    .get("documents")[0]
+                    .embedding
+                )
                 documents = self.vector_store._embedding_retrieval(
-                    query_embedding=embedding_result["embedding"],
+                    query_embedding=embedding_result,
                     namespace=self.namespace,
                     filters=normalized_filters,
                     top_k=limit,
                     exclude_document_embeddings=True,
                 )
             elif normalized_filters:
-                dummy_vector = [0.0] * self.embedder.dimensions
+                dummy_vector = [0.0] * self.vector_store.dimension
                 documents = self.vector_store._embedding_retrieval(
                     query_embedding=dummy_vector,
                     namespace=self.namespace,
