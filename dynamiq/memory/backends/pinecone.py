@@ -84,8 +84,9 @@ class Pinecone(MemoryBackend):
         """Stores a message in Pinecone."""
         try:
             document = self._message_to_document(message)
-            embedding_result = self.embedder.execute(input_data={"documents": [document]}).get("documents")[0].embedding
-            document.embedding = embedding_result
+            embedding_result = self.embedder.execute(input_data={"documents": [document]})
+            document_embedding = embedding_result.get("documents")[0].embedding
+            document.embedding = document_embedding
             self.vector_store.write_documents([document])
 
         except Exception as e:
@@ -119,7 +120,7 @@ class Pinecone(MemoryBackend):
 
             if query:
                 embedding_result = (
-                    self.embedder.execute(input_data={"documents": [Document(id="query", content=query)]})
+                    self.embedder.execute(input_data={"documents": [Document(id=str(uuid.uuid4()), content=query)]})
                     .get("documents")[0]
                     .embedding
                 )
