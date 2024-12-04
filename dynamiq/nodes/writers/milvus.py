@@ -4,11 +4,11 @@ from dynamiq.connections import Milvus
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import MilvusVectorStore
-from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
+from dynamiq.storages.vector.milvus.milvus import MilvusVectorStoreParams
 from dynamiq.utils.logger import logger
 
 
-class MilvusDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
+class MilvusDocumentWriter(VectorStoreNode, MilvusVectorStoreParams):
     """
     Document Writer Node using Milvus Vector Store.
 
@@ -45,7 +45,7 @@ class MilvusDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
 
     @property
     def vector_store_params(self):
-        return self.model_dump(include=set(BaseWriterVectorStoreParams.model_fields)) | {
+        return self.model_dump(include=set(MilvusVectorStoreParams.model_fields)) | {
             "connection": self.connection,
             "client": self.client,
         }
@@ -72,9 +72,13 @@ class MilvusDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         documents = input_data["documents"]
+        content_key = input_data.get("content_key")
+        embedding_key = input_data.get("embedding_key")
 
         # Write documents to Milvus
-        upserted_count = self.vector_store.write_documents(documents)
+        upserted_count = self.vector_store.write_documents(
+            documents, content_key=content_key, embedding_key=embedding_key
+        )
         logger.debug(f"Upserted {upserted_count} documents to Milvus Vector Store.")
 
         return {
