@@ -35,7 +35,6 @@ def get_perplexity_workflow(
             ],
         ),
     )
-
     return wf
 
 

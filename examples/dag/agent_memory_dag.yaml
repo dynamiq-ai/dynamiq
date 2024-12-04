@@ -1,6 +1,9 @@
 connections:
   openai-conn:
     type: dynamiq.connections.OpenAI
+  pinecone-conn:
+    type: dynamiq.connections.Pinecone
+    api_key: ${oc.env:PINECONE_API_KEY}
 
 nodes:
   memory-agent:
@@ -12,7 +15,15 @@ nodes:
       model: gpt-3.5-turbo
     memory:
       backend:
-        type: dynamiq.memory.backends.InMemory
+        type: dynamiq.memory.backends.Pinecone
+        connection: pinecone-conn
+        index_type: serverless
+        cloud: ${oc.env:PINECONE_CLOUD}
+        region: ${oc.env:PINECONE_REGION}
+        embedder:
+          type: dynamiq.nodes.embedders.OpenAIDocumentEmbedder
+          connection: openai-conn
+          model: text-embedding-3-small
       search_limit: 3
     role: "a helpful assistant capable of retaining context and answering questions effectively"
 

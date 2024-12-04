@@ -1,6 +1,5 @@
 import math
 from collections import Counter
-from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -62,7 +61,7 @@ class InMemory(MemoryBackend):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    name: ClassVar[str] = "InMemory"
+    name: str = "InMemory"
     messages: list[Message] = Field(default_factory=list)
 
     def add(self, message: Message) -> None:
