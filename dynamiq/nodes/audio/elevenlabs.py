@@ -1,9 +1,10 @@
 import enum
+import io
 import json
-from typing import Any, Literal
+from typing import ClassVar, Literal
 from urllib.parse import urljoin
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import ElevenLabs as ElevenLabsConnection
 from dynamiq.nodes import ErrorHandling
@@ -48,6 +49,10 @@ def format_url(method: str, url: str, voice_id: str) -> str:
     return url
 
 
+class ElevenLabsTTSInputSchema(BaseModel):
+    text: str = Field(..., description="Parameter to provide text for vocalization.")
+
+
 class ElevenLabsTTS(ConnectionNode):
     """
     A component for vocalizing text using the ElevenLabs API.
@@ -78,6 +83,7 @@ class ElevenLabsTTS(ConnectionNode):
     similarity_boost: float = 0.5
     style: float = 0
     use_speaker_boost: bool = True
+    input_schema: ClassVar[type[ElevenLabsTTSInputSchema]] = ElevenLabsTTSInputSchema
 
     def __init__(self, **kwargs):
         """Initialize the ElevenLabs audio generation.
@@ -92,14 +98,14 @@ class ElevenLabsTTS(ConnectionNode):
         super().__init__(**kwargs)
 
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+        self, input_data: ElevenLabsTTSInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, bytes]:
         """Execute the audio generation process.
 
         This method takes input data and returns the result.
 
         Args:
-            input_data (dict[str, Any]): The input data containing the query to embed.
+            input_data (ElevenLabsTTSInputSchema): The input data containing the text.
             config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
             **kwargs: Additional keyword arguments.
 
@@ -109,7 +115,7 @@ class ElevenLabsTTS(ConnectionNode):
         """
         input_dict = {
             "model_id": self.model,
-            "text": input_data["text"],
+            "text": input_data.text,
             "voice_settings": {
                 "stability": self.stability,
                 "similarity_boost": self.similarity_boost,
@@ -130,6 +136,11 @@ class ElevenLabsTTS(ConnectionNode):
         return {
             "content": response.content,
         }
+
+
+class ElevenLabsSTSInputSchema(BaseModel):
+    audio: io.BytesIO | bytes = Field(..., description="Parameter to provide input audio for audio generation.")
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ElevenLabsSTS(ConnectionNode):
@@ -161,6 +172,7 @@ class ElevenLabsSTS(ConnectionNode):
     similarity_boost: float = 0.5
     style: float = 0
     use_speaker_boost: bool = True
+    input_schema: ClassVar[type[ElevenLabsSTSInputSchema]] = ElevenLabsSTSInputSchema
 
     def __init__(self, **kwargs):
         """Initialize the ElevenLabs audio generation.
@@ -175,7 +187,7 @@ class ElevenLabsSTS(ConnectionNode):
         super().__init__(**kwargs)
 
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+        self, input_data: ElevenLabsSTSInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, bytes]:
         """Execute the audio generation process.
 
@@ -202,7 +214,7 @@ class ElevenLabsSTS(ConnectionNode):
                 }
             ),
         }
-        audio = input_data["audio"]
+        audio = input_data.audio
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         response = self.client.request(

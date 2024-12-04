@@ -1,16 +1,10 @@
-from typing import Any, Literal
-
-from dynamiq.components.embedders.bedrock import (
-    BedrockEmbedder as BedrockEmbedderComponent,
-)
+from dynamiq.components.embedders.bedrock import BedrockEmbedder as BedrockEmbedderComponent
 from dynamiq.connections import AWS as BedrockConnection
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
-from dynamiq.runnables import RunnableConfig
-from dynamiq.utils.logger import logger
+from dynamiq.nodes.embedders.base import DocumentEmbedder, TextEmbedder
 
 
-class BedrockDocumentEmbedder(ConnectionNode):
+class BedrockDocumentEmbedder(DocumentEmbedder):
     """
     Provides functionality to compute embeddings for documents using Bedrock models.
 
@@ -29,7 +23,6 @@ class BedrockDocumentEmbedder(ConnectionNode):
         model (str): The model name to use for embedding. Defaults to 'amazon.titan-embed-text-v1'.
     """
 
-    group: Literal[NodeGroup.EMBEDDERS] = NodeGroup.EMBEDDERS
     name: str = "AmazonBedrockDocumentEmbedder"
     connection: BedrockConnection | None = None
     model: str = "amazon.titan-embed-text-v1"
@@ -48,10 +41,6 @@ class BedrockDocumentEmbedder(ConnectionNode):
             kwargs["connection"] = BedrockConnection()
         super().__init__(**kwargs)
 
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"document_embedder": True}
-
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initializes the components of the BedrockDocumentEmbedder.
@@ -69,33 +58,8 @@ class BedrockDocumentEmbedder(ConnectionNode):
                 connection=self.connection, model=self.model, client=self.client
             )
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
-        """
-        Executes the document embedding process.
 
-        This method takes input documents, computes their embeddings using the Bedrock API, and returns the result.
-
-        Args:
-            input_data (dict[str, Any]): A dictionary containing the input data. Expected to have a
-                'documents' key with the documents to embed.
-            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            The output from the document_embedder component, typically the computed embeddings.
-        """
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        output = self.document_embedder.embed_documents(input_data["documents"])
-        logger.debug("BedrockDocumentEmbedder executed successfully.")
-
-        return output
-
-
-class BedrockTextEmbedder(ConnectionNode):
+class BedrockTextEmbedder(TextEmbedder):
     """
     A component designed to embed strings using specified Cohere models.
 
@@ -116,7 +80,6 @@ class BedrockTextEmbedder(ConnectionNode):
 
     """
 
-    group: Literal[NodeGroup.EMBEDDERS] = NodeGroup.EMBEDDERS
     name: str = "BedrockTextEmbedder"
     connection: BedrockConnection | None = None
     model: str = "amazon.titan-embed-text-v1"
@@ -134,10 +97,6 @@ class BedrockTextEmbedder(ConnectionNode):
             kwargs["connection"] = BedrockConnection()
         super().__init__(**kwargs)
 
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"text_embedder": True}
-
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the BedrockTextEmbedder.
@@ -154,29 +113,3 @@ class BedrockTextEmbedder(ConnectionNode):
             self.text_embedder = BedrockEmbedderComponent(
                 connection=self.connection, model=self.model, client=self.client
             )
-
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
-        """
-        Execute the text embedding process.
-
-        This method takes input data, runs the text embedding, and returns the result.
-
-        Args:
-            input_data (dict[str, Any]): The input data containing the query to embed.
-            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            dict: A dictionary containing the embedding and the original query.
-        """
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        output = self.text_embedder.embed_text(input_data["query"])
-        logger.debug(f"BedrockTextEmbedder: {output['meta']}")
-        return {
-            "embedding": output["embedding"],
-            "query": input_data["query"],
-        }

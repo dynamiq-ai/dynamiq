@@ -1,8 +1,8 @@
 import io
-from typing import Any, Literal
+from typing import ClassVar, Literal
 from urllib.parse import urljoin
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import Whisper as WhisperConnection
@@ -12,6 +12,11 @@ from dynamiq.runnables import RunnableConfig
 
 DEFAULT_FILE_NAME = "temp.wav"
 DEFAULT_CONTENT_TYPE = "audio/wav"
+
+
+class WhisperSTTInputSchema(BaseModel):
+    audio: io.BytesIO | bytes = Field(..., description="Parameter to provide audio for transcribing.")
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class WhisperSTT(ConnectionNode):
@@ -35,6 +40,7 @@ class WhisperSTT(ConnectionNode):
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     default_file_name: str = DEFAULT_FILE_NAME
     default_content_type: str = DEFAULT_CONTENT_TYPE
+    input_schema: ClassVar[type[WhisperSTTInputSchema]] = WhisperSTTInputSchema
 
     def __init__(self, **kwargs):
         """Initialize the Whisper transcriber.
@@ -48,15 +54,13 @@ class WhisperSTT(ConnectionNode):
             kwargs["connection"] = WhisperConnection()
         super().__init__(**kwargs)
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
+    def execute(self, input_data: WhisperSTTInputSchema, config: RunnableConfig = None, **kwargs):
         """Execute the audio transcribing process.
 
         This method takes input data, modifies it(if necessary), and returns the result.
 
         Args:
-            input_data (dict[str, Any]): The input data containing the query to embed.
+            input_data (WhisperSTTInputSchema): The input data containing the audio.
             config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
             **kwargs: Additional keyword arguments.
 
@@ -66,7 +70,7 @@ class WhisperSTT(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        audio = input_data["audio"]
+        audio = input_data.audio
         if isinstance(audio, bytes):
             audio = io.BytesIO(audio)
 

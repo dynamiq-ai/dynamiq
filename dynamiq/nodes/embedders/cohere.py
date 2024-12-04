@@ -1,16 +1,10 @@
-from typing import Any, Literal
-
-from dynamiq.components.embedders.cohere import (
-    CohereEmbedder as CohereEmbedderComponent,
-)
+from dynamiq.components.embedders.cohere import CohereEmbedder as CohereEmbedderComponent
 from dynamiq.connections import Cohere as CohereConnection
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
-from dynamiq.runnables import RunnableConfig
-from dynamiq.utils.logger import logger
+from dynamiq.nodes.embedders.base import DocumentEmbedder, TextEmbedder
 
 
-class CohereDocumentEmbedder(ConnectionNode):
+class CohereDocumentEmbedder(DocumentEmbedder):
     """
     Provides functionality to compute embeddings for documents using Cohere models.
 
@@ -29,7 +23,6 @@ class CohereDocumentEmbedder(ConnectionNode):
         model (str): The model name to use for embedding. Defaults to 'cohere/embed-english-v2.0'.
     """
 
-    group: Literal[NodeGroup.EMBEDDERS] = NodeGroup.EMBEDDERS
     name: str = "CohereDocumentEmbedder"
     connection: CohereConnection | None = None
     model: str = "cohere/embed-english-v2.0"
@@ -48,10 +41,6 @@ class CohereDocumentEmbedder(ConnectionNode):
             kwargs["connection"] = CohereConnection()
         super().__init__(**kwargs)
 
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"document_embedder": True}
-
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initializes the components of the CohereDocumentEmbedder.
@@ -69,33 +58,8 @@ class CohereDocumentEmbedder(ConnectionNode):
                 connection=self.connection, model=self.model, client=self.client
             )
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
-        """
-        Executes the document embedding process.
 
-        This method takes input documents, computes their embeddings using the Cohere API, and returns the result.
-
-        Args:
-            input_data (dict[str, Any]): A dictionary containing the input data. Expected to have a
-                'documents' key with the documents to embed.
-            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            The output from the document_embedder component, typically the computed embeddings.
-        """
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        output = self.document_embedder.embed_documents(input_data["documents"])
-        logger.debug("CohereDocumentEmbedder executed successfully.")
-
-        return output
-
-
-class CohereTextEmbedder(ConnectionNode):
+class CohereTextEmbedder(TextEmbedder):
     """
     A component designed to embed strings using specified Cohere models.
 
@@ -116,7 +80,6 @@ class CohereTextEmbedder(ConnectionNode):
 
     """
 
-    group: Literal[NodeGroup.EMBEDDERS] = NodeGroup.EMBEDDERS
     name: str = "CohereTextEmbedder"
     connection: CohereConnection | None = None
     model: str = "cohere/embed-english-v2.0"
@@ -135,10 +98,6 @@ class CohereTextEmbedder(ConnectionNode):
             kwargs["connection"] = CohereConnection()
         super().__init__(**kwargs)
 
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"text_embedder": True}
-
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the CohereTextEmbedder.
@@ -155,29 +114,3 @@ class CohereTextEmbedder(ConnectionNode):
             self.text_embedder = CohereEmbedderComponent(
                 connection=self.connection, model=self.model, client=self.client
             )
-
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
-        """
-        Execute the text embedding process.
-
-        This method takes input data, runs the text embedding, and returns the result.
-
-        Args:
-            input_data (dict[str, Any]): The input data containing the query to embed.
-            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            dict: A dictionary containing the embedding and the original query.
-        """
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        output = self.text_embedder.embed_text(input_data["query"])
-        logger.debug(f"CohereTextEmbedder: {output['meta']}")
-        return {
-            "embedding": output["embedding"],
-            "query": input_data["query"],
-        }

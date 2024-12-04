@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError, model_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
@@ -64,6 +64,18 @@ class AgentIntermediateStep(BaseModel):
     final_answer: str | dict | None = None
 
 
+class AgentInputSchema(BaseModel):
+    input: str = Field(..., description="Parameter to provide input to the agent.")
+    files: list[io.BytesIO | bytes] = Field(default=[], description="Parameter to provide files to the agent.")
+
+    user_id: str = Field(default=None, description="Parameter to provide user ID.")
+    session_id: str = Field(default=None, description="Parameter to provide session ID.")
+    metadata: dict = Field(default={}, description="Parameter to provide metadata.")
+    chat_history: list[Message] = Field(default=None, description="Parameter to provide chat history.")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
 class Agent(Node):
     """Base class for an AI Agent that interacts with a Language Model and tools."""
 
@@ -87,6 +99,7 @@ class Agent(Node):
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -164,23 +177,20 @@ class Agent(Node):
         """Converts a list of messages to a formatted string."""
         return "\n".join([f"**{msg.role.value}:** {msg.content}" for msg in messages])
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs
-    ) -> dict[str, Any]:
+    def execute(self, input_data: AgentInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
         Executes the agent with the given input data.
         """
-        logger.debug(f"Agent {self.name} - {self.id}: started with input {input_data}")
+        logger.debug(f"Agent {self.name} - {self.id}: started with input {dict(input_data)}")
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        user_id = input_data.get("user_id", None)
-        session_id = input_data.get("session_id", None)
-        custom_metadata = input_data.get("metadata", {}).copy()
-        custom_metadata.update({k: v for k, v in input_data.items() if k not in ["user_id", "session_id", "input"]})
+        user_id = input_data.user_id
+        session_id = input_data.session_id
+        custom_metadata = input_data.metadata.copy()
         metadata = {**custom_metadata, "user_id": user_id, "session_id": session_id}
-        chat_history = input_data.get("chat_history", None)
+        chat_history = input_data.chat_history
 
         if chat_history:
             try:
@@ -194,15 +204,15 @@ class Agent(Node):
                 raise TypeError(f"Invalid chat history: {e}")
 
         if self.memory:
-            self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
-            self._retrieve_memory(input_data)
+            self.memory.add(role=MessageRole.USER, content=input_data.input, metadata=metadata)
+            self._retrieve_memory(dict(input_data))
 
-        files = input_data.get("files", [])
+        files = input_data.files
         if files:
             self.files = files
             self._prompt_variables["file_description"] = self.file_description
 
-        self._prompt_variables.update(input_data)
+        self._prompt_variables.update(dict(input_data))
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
@@ -448,11 +458,27 @@ class Agent(Node):
         return prompt
 
 
+class AgentManagerInputSchema(BaseModel):
+    action: str = Field(..., description="Parameter to provide action to the manager")
+    model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def validate_action(self, context):
+        action = self.action
+        if not action or action not in context.context.get("actions"):
+            raise InvalidActionException(
+                f"Invalid or missing action: {action}. Please select an action from \
+                    {context.context.get("actions")}."  # nosec: B608
+            )
+        return self
+
+
 class AgentManager(Agent):
     """Manager class that extends the Agent class to include specific actions."""
 
     _actions: dict[str, Callable] = PrivateAttr(default_factory=dict)
     name: str = "Manager Agent"
+    input_schema: ClassVar[type[AgentManagerInputSchema]] = AgentManagerInputSchema
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -475,28 +501,25 @@ class AgentManager(Agent):
         """Adds a custom action to the manager."""
         self._actions[name] = action
 
+    def get_context_for_input_schema(self) -> dict:
+        """Provides context for input schema that is required for proper validation."""
+        return {"actions": list(self._actions.keys())}
+
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs
+        self, input_data: AgentManagerInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Executes the manager agent with the given input data and action."""
         self.reset_run_state()
         config = config or RunnableConfig()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(
-            f"AgentManager {self.name} - {self.id}: started with input {input_data}"
-        )
+        logger.info(f"AgentManager {self.name} - {self.id}: started with input {dict(input_data)}")
 
-        action = input_data.get("action")
-        if not action or action not in self._actions:
-            raise InvalidActionException(
-                f"Invalid or missing action: {action}. Please select an action from {self._actions}."  # nosec: B608
-            )
+        action = input_data.action
 
-        self._prompt_variables.update(input_data)
+        self._prompt_variables.update(dict(input_data))
 
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
-
         _result_llm = self._actions[action](config=config, **kwargs)
         result = {"action": action, "result": _result_llm}
 
