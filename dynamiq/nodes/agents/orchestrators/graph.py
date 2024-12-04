@@ -218,15 +218,18 @@ class GraphOrchestrator(Orchestrator):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            logger.error(f"GraphOrchestrator {self.id}: Error generating final answer")
-            raise OrchestratorError("Failed to generate final answer")
+            logger.error(
+                f"GraphOrchestrator {self.id}: Error generating final answer."
+                f"Error: {manager_result.output.get("content")}"
+            )
+            raise OrchestratorError(f"Failed to generate final answer. Error: {manager_result.output.get("content")}")
 
         try:
             next_state = json.loads(
                 manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
             )["state"]
         except Exception as e:
-            logger.error("GraphOrchestrator: Error when parsing response about next state.")
+            logger.error(f"GraphOrchestrator: Error when parsing response about next state. {e}")
             raise OrchestratorError(f"Error when parsing response about next state {e}")
 
         if next_state in self._state_by_id:
@@ -265,7 +268,7 @@ class GraphOrchestrator(Orchestrator):
 
                 if not isinstance(next_state, str):
                     raise OrchestratorError(
-                        f"Error: Condition return invalid type. Expected a string got {type(next_state)} "
+                        f"Error: Condition returns invalid type. Expected a string got {type(next_state)} "
                     )
 
                 if next_state not in self._state_by_id:

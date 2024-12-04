@@ -8,7 +8,7 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-from dynamiq.nodes.agents.orchestrators.orchestrator import Orchestrator
+from dynamiq.nodes.agents.orchestrators.orchestrator import Orchestrator, OrchestratorError
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
@@ -115,14 +115,11 @@ class LinearOrchestrator(Orchestrator):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            raise ValueError("Agent LLM failed to generate tasks")
+            logger.error(f"LinearOrchestrator {self.id}: Manager failed to generate subtasks.")
+            raise OrchestratorError("Failed to generate subtasks.\n" f"Error: {manager_result.output.get('content')}")
 
         manager_result_content = manager_result.output.get("content").get("result")
-        logger.debug(f"LinearOrchestrator {self.id}: Manager plan result content: {manager_result_content}")
-
         tasks = self.parse_tasks_from_output(manager_result_content)
-        logger.debug(f"LinearOrchestrator {self.id}: Task list JSON: {tasks}")
-
         return tasks
 
     def parse_tasks_from_output(self, output: str) -> list[Task]:
@@ -161,7 +158,7 @@ class LinearOrchestrator(Orchestrator):
 
         return dependencies_formatted.strip()
 
-    def run_tasks(self, tasks: list[Task], config: RunnableConfig = None, **kwargs) -> None:
+    def run_tasks(self, input_task: str, tasks: list[Task], config: RunnableConfig = None, **kwargs) -> None:
         """Execute the tasks using appropriate agents."""
         logger.debug(f"LinearOrchestrator {self.id}: Assigning and executing tasks. Agents: {self.agents_descriptions}")
 
@@ -190,7 +187,7 @@ class LinearOrchestrator(Orchestrator):
                 manager_result = self.manager.run(
                     input_data={
                         "action": "assign",
-                        "input_task": self.input_task,
+                        "input_task": input_task,
                         "task": task_per_llm,
                         "agents": self.agents_descriptions,
                     },
@@ -236,8 +233,8 @@ class LinearOrchestrator(Orchestrator):
                         self._run_depends = [NodeDependency(node=assigned_agent).to_dict()]
                         if result.status != RunnableStatus.SUCCESS:
                             raise ValueError(
-                                f"Failed to execute task {task.id}.{task.name} "
-                                f"by agent {assigned_agent_index}.{assigned_agent.name}"
+                                f"Failed to execute task {task.name} "
+                                f"by agent {assigned_agent.name}. Error: {result.output["content"]}"
                             )
 
                         self._results[task.id] = {
@@ -260,7 +257,7 @@ class LinearOrchestrator(Orchestrator):
                 continue
 
             else:
-                raise ValueError(f"Failed to assign task {task.id}.{task.name} by Manager Agent")
+                raise ValueError(f"Failed to assign task {task.id}.{task.name} by Manager Agent.")
 
     def generate_final_answer(self, task: str, config: RunnableConfig, **kwargs) -> str:
         """
@@ -307,10 +304,11 @@ class LinearOrchestrator(Orchestrator):
         Returns:
             str: The final answer generated after processing the task.
         """
+        input_task = input_task or self.objective
         tasks = self.get_tasks(input_task, config=config, **kwargs)
-        logger.debug(f"LinearOrchestrator {self.id}: tasks initialized:\n '{tasks}'")
-        self.run_tasks(tasks=tasks, config=config, **kwargs)
-        logger.debug(f"LinearOrchestrator {self.id}: tasks assigned and executed.")
+        logger.debug(f"LinearOrchestrator {self.id}: Task list: {tasks}")
+        self.run_tasks(input_task, tasks=tasks, config=config, **kwargs)
+        logger.debug(f"LinearOrchestrator {self.id}: Tasks have been assigned and executed.")
         return self.generate_final_answer(input_task, config, **kwargs)
 
     def setup_streaming(self) -> None:

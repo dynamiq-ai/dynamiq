@@ -313,7 +313,7 @@ class ReActAgent(Agent):
             )
             logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1} started.")
 
-            logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}. Prompt:\n{formatted_prompt}")
+            logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}. Input prompt:\n{formatted_prompt}")
 
             try:
 
@@ -331,7 +331,7 @@ class ReActAgent(Agent):
                 if llm_result.status != RunnableStatus.SUCCESS:
                     logger.error(
                         f"Agent {self.name} - {self.id}: Loop {loop_num + 1} LLM execution failed. "
-                        f"Error output: {llm_result.output}"
+                        f"Error: {llm_result.output["content"]}"
                     )
                     previous_responses.append(llm_result.output["content"])
                     continue
@@ -341,10 +341,6 @@ class ReActAgent(Agent):
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
                         llm_generated_output = llm_result.output["content"]
-                        logger.debug(
-                            f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. "
-                            f"RAW LLM output:n{llm_generated_output}"
-                        )
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
 
@@ -400,10 +396,7 @@ class ReActAgent(Agent):
                             return final_answer
 
                         action_input = llm_generated_output_json["action_input"]
-                        logger.debug(
-                            f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. "
-                            f"RAW LLM output:n{llm_generated_output}"
-                        )
+
                     case InferenceMode.STRUCTURED_OUTPUT:
                         llm_generated_output_json = json.loads(llm_result.output["content"])
                         action = llm_generated_output_json["action"]
@@ -460,17 +453,13 @@ class ReActAgent(Agent):
                         action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
 
                 if action:
-                    logger.debug(f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Action:\n{action}")
-                    logger.debug(f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Action Input:\n{action_input}")
+                    logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}. Action:\n{action}")
+                    logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}. Action Input:\n{action_input}")
 
                     if self.tools:
                         try:
                             tool = self._get_tool(action)
                             tool_result = self._run_tool(tool, action_input, config, **kwargs)
-
-                            logger.debug(
-                                f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Tool Result:\n{tool_result}"
-                            )
 
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
@@ -494,11 +483,14 @@ class ReActAgent(Agent):
                                 updated=llm_generated_output,
                             ).model_dump()
                         )
-
+                logger.debug(
+                    f"Agent {self.name} - {self.id}: Loop {loop_num + 1} finished with result:"
+                    f"{llm_generated_output}"
+                )
                 previous_responses.append(llm_generated_output)
 
             except ActionParsingException as e:
-                logger.error(f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. failed with error: {str(e)}")
+                logger.error(f"Agent {self.name} - {self.id} : Loop {loop_num + 1}. failed with error: {str(e)}")
                 previous_responses.append(f"{type(e).__name__}: {e}")
                 continue
         logger.warning(f"Agent {self.name} - {self.id}: Maximum number of loops reached.")

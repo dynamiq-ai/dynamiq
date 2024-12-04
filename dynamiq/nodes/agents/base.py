@@ -215,7 +215,7 @@ class Agent(Node):
             "intermediate_steps": self._intermediate_steps,
         }
 
-        logger.debug(f"Agent {self.name} - {self.id}: finished with result {result}")
+        logger.debug(f"Agent {self.name} - {self.id}: Finished with result: {result}")
         return execution_result
 
     def _retrieve_memory(self, input_data):
@@ -344,9 +344,9 @@ class Agent(Node):
             logger.error(f"Error parsing action: {e}")
             raise ActionParsingException(
                 (
-                    "Error: Unable to parse action and action input."
-                    "Please rewrite using the correct Action/Action Input format"
-                    "with action input as a valid dictionary."
+                    "Error: Unable to parse action and action input. "
+                    "Please rewrite using the correct Action/Action Input format "
+                    "with action input as a valid dictionary. "
                     "Ensure all quotes are included."
                 ),
                 recoverable=True,
@@ -482,15 +482,15 @@ class AgentManager(Agent):
         self.reset_run_state()
         config = config or RunnableConfig()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        logger.info(
-            f"AgentManager {self.name} - {self.id}: started with input {input_data}"
-        )
 
         action = input_data.get("action")
         if not action or action not in self._actions:
             raise InvalidActionException(
-                f"Invalid or missing action: {action}. Please select an action from {self._actions}."  # nosec: B608
+                f"Invalid or missing action: '{action}'.\n"
+                f"Please select an action from {list(self._actions.keys())}."  # nosec: B608
             )
+
+        logger.info(f"AgentManager {self.name} - {self.id}: started with input {input_data}")
 
         self._prompt_variables.update(input_data)
 

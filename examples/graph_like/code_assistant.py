@@ -121,8 +121,7 @@ def create_orchestrator() -> GraphOrchestrator:
                 Message(
                     role="user",
                     content=(
-                        f"Your solution failed the code execution test: {result.output['content']}."
-                        " Reflect on possible errors."
+                        f"Your solution failed to execute: {result.output['content']}." " Reflect on possible errors."
                     ),
                 )
             ]

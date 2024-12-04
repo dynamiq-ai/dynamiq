@@ -76,8 +76,10 @@ class Orchestrator(Node, ABC):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            logger.error(f"GraphOrchestrator {self.id}: Error generating final answer")
-            raise OrchestratorError("Failed to generate final answer")
+            logger.error(
+                f"{self.name} {self.id}: Error generating final answer. {manager_result.output.get("content")}"
+            )
+            raise OrchestratorError(f"Failed to generate final answer. Error: {manager_result.output.get("content")}")
 
         return manager_result.output.get("content").get("result")
 
@@ -137,5 +139,5 @@ class Orchestrator(Node, ABC):
             **kwargs,
         )
 
-        logger.debug(f"{self.name} {self.id}: output collected")
+        logger.debug(f"{self.name} {self.id}: output collected.")
         return {"content": result}

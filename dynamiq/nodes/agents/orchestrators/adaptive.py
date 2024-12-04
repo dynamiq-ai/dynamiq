@@ -110,8 +110,6 @@ class AdaptiveOrchestrator(Orchestrator):
         """
         prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self._chat_history])
 
-        logger.debug(f"AdaptiveOrchestrator {self.id}: PROMPT {prompt}")
-
         manager_result = self.manager.run(
             input_data={
                 "action": "plan",
@@ -124,11 +122,13 @@ class AdaptiveOrchestrator(Orchestrator):
         )
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
-        logger.debug(f"AdaptiveOrchestrator {self.id}: LLM response: {manager_result.output.get('content')}")
-
         if manager_result.status != RunnableStatus.SUCCESS:
             logger.error(f"AdaptiveOrchestrator {self.id}: Error getting next action from Manager")
-            raise ActionParseError("Unable to retrieve the next action from Manager.")
+            raise ActionParseError(
+                "Unable to retrieve the next action from Manager.\n" f"Error: {manager_result.output.get('content')}"
+            )
+
+        logger.debug(f"AdaptiveOrchestrator {self.id}: Manager response: {manager_result.output.get('content')}")
 
         manager_result = (
             manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
@@ -136,11 +136,8 @@ class AdaptiveOrchestrator(Orchestrator):
         try:
             return Action.model_validate_json(manager_result)
         except ValidationError as e:
-            logger.error(
-                f"AdaptiveOrchestrator {self.id}: Error creation Agent based on LLM output. "
-                f"Raw LLM output: {manager_result}. Error: {e}"
-            )
-            raise ActionParseError("Unable to create Action from LLM output.")
+            logger.error(f"AdaptiveOrchestrator {self.id}: Error creation Action based on LLM output. " f"Error: {e}")
+            raise ActionParseError(f"Unable to create Action from LLM output. Error: {e}")
 
     def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
         """
@@ -157,10 +154,9 @@ class AdaptiveOrchestrator(Orchestrator):
 
         for _ in range(self.max_loops):
             action = self.get_next_action(config=config, **kwargs)
-            logger.debug(f"AdaptiveOrchestrator {self.id}: chat history: {self._chat_history}")
-            logger.debug(f"AdaptiveOrchestrator {self.id}: Next action: {action.model_dump()}")
 
             if action.command == ActionCommand.DELEGATE:
+                logger.debug(f"AdaptiveOrchestrator {self.id}: Delegating to: {action.agent}")
                 self._handle_delegation(action=action, config=config, **kwargs)
             elif action.command == ActionCommand.FINAL_ANSWER:
                 return self.get_final_result(
