@@ -60,12 +60,10 @@ class ReflectionAgent(Agent):
         Returns:
             List[str]: A list of content found within <output> tags.
         """
-        logger.debug("Extracting content from <output> tags.")
         pattern = r"<output>(.*?)</output>"
         output_content = re.findall(pattern, text, re.DOTALL)
 
         if not output_content:
-            logger.warning("No closed </output> tags found. Checking for unclosed tags.")
             pattern = r"<output>(.*)"
             output_content = re.findall(pattern, text, re.DOTALL)
 
@@ -78,11 +76,11 @@ class ReflectionAgent(Agent):
             )
             result = self._run_llm(formatted_prompt, config=config, **kwargs)
             output_content = self.extract_output_content(result)
+            if self.verbose:
+                logger.info(f"Agent {self.name} - {self.id}: LLM output by REFLECTION prompt:\n{result[:200]}...")
             if self.streaming.enabled:
                 if self.streaming.mode == StreamingMode.FINAL:
-                    logger.debug("Streaming mode set to FINAL. Returning final output.")
                     if not output_content:
-                        logger.warning("No output content extracted.")
                         return ""
                     return self.stream_content(
                         content=output_content[-1],
@@ -92,16 +90,13 @@ class ReflectionAgent(Agent):
                         **kwargs,
                     )
                 elif self.streaming.mode == StreamingMode.ALL:
-                    logger.debug("Streaming mode set to ALL. Returning all output.")
                     return self.stream_content(
                         content=result, step="reasoning", source=self.name, config=config, **kwargs
                     )
 
             if not output_content:
-                logger.warning("No output content extracted.")
                 return ""
 
             return output_content[-1]
         except Exception as e:
-            logger.error(f"Agent {self.name} - {self.id}: failed with error: {str(e)}")
-            raise
+            raise e

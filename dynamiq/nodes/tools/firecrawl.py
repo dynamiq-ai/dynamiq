@@ -83,7 +83,7 @@ class FirecrawlTool(ConnectionNode):
         self, input_data: FirecrawlInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Execute the scraping tool with the provided input data."""
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
+        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -105,9 +105,6 @@ class FirecrawlTool(ConnectionNode):
         }
 
         connection_url = self.connection.url + "scrape/"
-        logger.debug(
-            f"Tool {self.name} - {self.id}: sending request to {connection_url}"
-        )
 
         try:
             response = self.client.request(
@@ -123,8 +120,6 @@ class FirecrawlTool(ConnectionNode):
                 f"Tool {self.name} - {self.id}: failed to get results. Error: {e}"
             )
             raise
-
-        logger.debug(f"Tool {self.name} - {self.id}: scrape result {scrape_result}")
 
         if self.is_optimized_for_agents:
             result = f"<Source URL>\n{url}\n<\\Source URL>"
@@ -149,6 +144,6 @@ class FirecrawlTool(ConnectionNode):
                 "warning": scrape_result.get("data", {}).get("warning"),
             }
 
-        logger.debug(f"Tool {self.name} - {self.id}: finished with result {str(result)[:200]}...")
+        logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
         return {"content": result}
