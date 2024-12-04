@@ -20,8 +20,9 @@ class Perplexity(BaseLLM):
     """
 
     connection: PerplexityConnection
-    MODEL_PREFIX = "perplexity/"
     return_citations: bool = Field(default=False, description="Whether to return citations in the response")
+
+    MODEL_PREFIX = "perplexity/"
 
     def __init__(self, **kwargs):
         """Initialize the Perplexity LLM node.
