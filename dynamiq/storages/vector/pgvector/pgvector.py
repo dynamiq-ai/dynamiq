@@ -51,11 +51,14 @@ VECTOR_FUNCTION_TO_POSTGRESQL_OPS = {
 }
 
 VECTOR_FUNCTION_TO_SCORE_DEFINITION = {
-    PGVectorVectorFunction.COSINE_SIMILARITY: "1 - (embedding <=> {query_embedding})",
-    PGVectorVectorFunction.INNER_PRODUCT: "(embedding <#> {query_embedding}) * -1",
-    PGVectorVectorFunction.L2_DISTANCE: "embedding <-> {query_embedding}",
-    PGVectorVectorFunction.L1_DISTANCE: "embedding <+> {query_embedding}",
+    PGVectorVectorFunction.COSINE_SIMILARITY: "1 - ({embedding_key} <=> {query_embedding})",
+    PGVectorVectorFunction.INNER_PRODUCT: "({embedding_key} <#> {query_embedding}) * -1",
+    PGVectorVectorFunction.L2_DISTANCE: "{embedding_key} <-> {query_embedding}",
+    PGVectorVectorFunction.L1_DISTANCE: "{embedding_key} <+> {query_embedding}",
 }
+
+DEFAULT_TABLE_NAME = "dynamiq_vector_store"
+DEFAULT_SCHEMA_NAME = "public"
 
 
 class PGVectorStore:
@@ -66,14 +69,35 @@ class PGVectorStore:
         connection: PGVector | str | None = None,
         client: Optional["PGVector"] = None,
         create_extension: bool = True,
-        table_name: str = "dynamiq_vector_store",
-        schema_name: str = "public",
+        table_name: str | None = None,
+        schema_name: str | None = None,
         dimension: int = 1536,
         vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY,
         index_method: PGVectorIndexMethod = PGVectorIndexMethod.EXACT,
         index_name: str | None = None,
         create_if_not_exist: bool = True,
+        content_key: str = "content",
+        embedding_key: str = "embedding",
     ):
+        """
+        Initialize a PGVectorStore instance.
+
+        Args:
+            connection (PGVector | str): PGVector connection instance. Defaults to None.
+            client (Optional[PGVector]): PGVector client instance. Defaults to None.
+            create_extension (bool): Whether to create the vector extension (if it does not exist). Defaults to True.
+            table_name (str): Name of the table in the database. Defaults to None.
+            schema_name (str): Name of the schema in the database. Defaults to None.
+            dimension (int): Dimension of the embeddings. Defaults to 1536.
+            vector_function (PGVectorVectorFunction): The vector function to use for similarity calculations.
+                Defaults to 'cosine_similarity'.
+            index_method (PGVectorIndexMethod): The index method to use for the vector store.
+                Defaults to 'exact_nearest_neighbor_search'.
+            index_name (str): Name of the index to create. Defaults to None.
+            create_if_not_exist (bool): Whether to create the table and index if they do not exist. Defaults to True.
+            content_key (Optional[str]): The field used to store content in the storage. Defaults to 'content'.
+            embedding_key (Optional[str]): The field used to store embeddings in the storage. Defaults to 'embedding'.
+        """
         if vector_function not in PGVectorVectorFunction:
             raise ValueError(f"vector_function must be one of {PGVectorVectorFunction.list()}")
         if index_method is not None and index_method not in PGVectorIndexMethod:
@@ -84,7 +108,7 @@ class PGVectorStore:
             self._conn = psycopg.connect(self.connection_string)
         elif isinstance(connection, PGVector):
             self._conn = connection.connect()
-            self.connection_string = str(connection)
+            self.connection_string = connection.conn_params
         else:
             raise ValueError("connection must be a string or PGVector object")
 
@@ -97,11 +121,18 @@ class PGVectorStore:
 
         self.client = client if client else self._conn
 
-        self.table_name = table_name
-        self.schema_name = schema_name
+        self.table_name = table_name if table_name else DEFAULT_TABLE_NAME
+        self.schema_name = schema_name if schema_name else DEFAULT_SCHEMA_NAME
         self.dimension = dimension
         self.index_method = index_method
         self.vector_function = vector_function
+
+        self.content_key = content_key
+        self.embedding_key = embedding_key
+
+        if self.index_method == PGVectorIndexMethod.IVFFLAT and self.vector_function == PGVectorVectorFunction.L1_DISTANCE:
+            msg = "IVFFLAT index does not support L1 distance metric"
+            raise VectorStoreException(msg)
 
         if create_if_not_exist:
             with self._get_connection() as conn:
@@ -126,16 +157,14 @@ class PGVectorStore:
             self._conn.rollback()
             raise e
 
-    def _execute_sql_query(
-        self, sql_query: Any, params: tuple | None = None, cursor: Cursor | None | None = None
-    ) -> Any:
+    def _execute_sql_query(self, sql_query: Any, params: tuple | None = None, cursor: Cursor | None = None) -> Any:
         """
         Internal method to execute a SQL query.
 
         Args:
             sql_query (Any): The SQL query to execute.
             params (tuple | None): The parameters to pass to the query. Defaults to None.
-            cursor (Optional[Cursor] | None): The cursor to use for the query. Defaults to None.
+            cursor (Cursor | None): The cursor to use for the query. Defaults to None.
 
         Raises:
             VectorStoreException: If an error occurs while executing the query.
@@ -157,26 +186,38 @@ class PGVectorStore:
 
         return result
 
-    def _create_tables(self, conn) -> None:
+    def _create_tables(
+        self,
+        conn: psycopg.Connection,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+    ) -> None:
         """
         Internal method to create the tables in the database (if they do not exist).
 
         Args:
-            conn: The connection to the database.
+            conn (psycopg.Connection): The connection to the database.
+            content_key (str | None): The field used to store content in the storage. Defaults to None.
+            embedding_key (str | None): The field used to store embeddings in the storage. Defaults to None.
         """
+
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
 
         query = SQL(
             """
             CREATE TABLE IF NOT EXISTS {schema_name}.{table_name} (
                 id VARCHAR(128) PRIMARY KEY,
-                content TEXT,
+                {content_key} TEXT,
                 metadata JSONB,
-                embedding vector({dimension})
+                {embedding_key} vector({dimension})
             );
             """
         ).format(
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
+            content_key=Identifier(content_key),
+            embedding_key=Identifier(embedding_key),
             dimension=self.dimension,
         )
 
@@ -184,12 +225,12 @@ class PGVectorStore:
             self._execute_sql_query(query, cursor=cur)
             conn.commit()
 
-    def _drop_tables(self, conn) -> None:
+    def _drop_tables(self, conn: psycopg.Connection) -> None:
         """
         Internal method to drop the tables in the database (if they exist).
 
         Args:
-            conn: The connection to the database.
+            conn (psycopg.Connection): The connection to the database.
         """
 
         query = SQL(
@@ -205,17 +246,25 @@ class PGVectorStore:
             self._execute_sql_query(query, cursor=cur)
             conn.commit()
 
-    def _create_index(self, conn) -> None:
+    def _create_index(
+        self,
+        conn: psycopg.Connection,
+        embedding_key: str | None = None,
+    ) -> None:
         """
         Internal method to create the index in the database (if it does not exist).
         Should only be called if the index method is either `ivfflat` or `hnsw`.
 
         Args:
-            conn: The connection to the database.
+            conn (psycopg.Connection): The connection to the database.
+            embedding_key (str | None): The field used to store embeddings in the storage. Defaults to None.
 
         Raises:
             ValueError: If the index method is not valid.
         """
+
+        embedding_key = embedding_key or self.embedding_key
+
         if self.index_method not in PGVectorIndexMethod.values():
             msg = f"Invalid index method: {self.index_method}"
             raise ValueError(msg)
@@ -224,7 +273,7 @@ class PGVectorStore:
         query = SQL(
             """
             CREATE INDEX IF NOT EXISTS {index_name}
-            ON {schema_name}.{table_name} USING {index_method} (embedding {vector_ops});
+            ON {schema_name}.{table_name} USING {index_method} ({embedding} {vector_ops});
             """
         ).format(
             index_name=Identifier(f"{self.table_name}_{self.index_method}_index"),
@@ -232,19 +281,20 @@ class PGVectorStore:
             table_name=Identifier(self.table_name),
             index_method=Identifier(self.index_method),
             vector_ops=Identifier(vector_ops),
+            embedding=Identifier(embedding_key),
         )
 
         with conn.cursor() as cur:
             self._execute_sql_query(query, cursor=cur)
             conn.commit()
 
-    def _drop_index(self, conn) -> None:
+    def _drop_index(self, conn: psycopg.Connection) -> None:
         """
         Internal method to drop the index in the database (if it exists).
         Should only be called if the index method is either `ivfflat` or `hnsw`.
 
         Args:
-            conn: The connection to the database.
+            conn (psycopg.Connection): The connection to the database.
 
         Raises:
             ValueError: If the index method is not valid.
@@ -281,7 +331,9 @@ class PGVectorStore:
                 result = self._execute_sql_query(query, cursor=cur)
                 return result.fetchone()[0]
 
-    def write_documents(self, documents: list[Document]) -> int:
+    def write_documents(
+        self, documents: list[Document], content_key: str | None = None, embedding_key: str | None = None
+    ) -> int:
         """
         Write documents to the pgvector vector store.
 
@@ -302,20 +354,28 @@ class PGVectorStore:
             msg = "param 'documents' must contain a list of objects of type Document"
             raise ValueError(msg)
 
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
+
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 written = 0
                 for doc in documents:
                     query = SQL(
                         """
-                        INSERT INTO {schema_name}.{table_name} (id, content, metadata, embedding)
+                        INSERT INTO {schema_name}.{table_name} (id, {content_key}, metadata, {embedding_key})
                         VALUES (%s, %s, %s, %s)
                         ON CONFLICT (id) DO UPDATE
-                        SET content = EXCLUDED.content,
+                        SET {content_key} = EXCLUDED.{content_key},
                         metadata = EXCLUDED.metadata,
-                        embedding = EXCLUDED.embedding;
+                        {embedding_key} = EXCLUDED.{embedding_key};
                         """
-                    ).format(schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name))
+                    ).format(
+                        schema_name=Identifier(self.schema_name),
+                        table_name=Identifier(self.table_name),
+                        content_key=Identifier(content_key),
+                        embedding_key=Identifier(embedding_key),
+                    )
                     self._execute_sql_query(
                         query, (doc.id, doc.content, Jsonb(doc.metadata), doc.embedding), cursor=cur
                     )
@@ -368,6 +428,12 @@ class PGVectorStore:
                 self.delete_documents_by_file_id(document_ids)
 
     def delete_documents_by_file_id(self, document_ids: list[str]) -> None:
+        """
+        Delete documents from the pgvector vector store by document IDs.
+
+        Args:
+            document_ids (list[str]): List of document IDs to delete.
+        """
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 query = SQL("DELETE FROM {schema_name}.{table_name} WHERE id = ANY(%s::text[])").format(
@@ -376,17 +442,24 @@ class PGVectorStore:
                 self._execute_sql_query(query, (document_ids,), cursor=cur)
                 conn.commit()
 
-    def list_documents(self, include_embeddings: bool = False) -> list[Document]:
+    def list_documents(
+        self, include_embeddings: bool = False, content_key: str | None = None, embedding_key: str | None = None
+    ) -> list[Document]:
         """
         List documents in the pgvector vector store.
 
         Args:
             include_embeddings (bool): Whether to include embeddings in the results. Defaults to False.
+            content_key (str): The field used to store content in the storage. Defaults to None.
+            embedding_key (str): The field used to store embeddings in the storage. Defaults to None.
 
         Returns:
             list[Document]: List of Document objects retrieved.
         """
-        select_fields = "id, content, metadata" + (", embedding" if include_embeddings else "")
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
+
+        select_fields = f"id, {content_key}, metadata" + (f", {embedding_key}" if include_embeddings else "")
         with self._get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 query = SQL("SELECT {select_fields} FROM {schema_name}.{table_name}").format(
@@ -403,26 +476,34 @@ class PGVectorStore:
     def _convert_query_result_to_documents(
         self,
         query_result: dict[str, Any],
+        content_key: str | None = None,
+        embedding_key: str | None = None,
     ) -> list[Document]:
         """
         Convert pgvector query results to Document objects.
 
         Args:
             query_result (dict[str, Any]): The query result from pgvector.
+            content_key (str): The field used to store content in the storage. Defaults to None.
+            embedding_key (str): The field used to store embeddings in the storage. Defaults to None.
 
         Returns:
             list[Document]: List of Document objects created from the query result.
         """
         documents = []
+
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
+
         for doc in query_result:
             document = Document(
                 id=doc["id"],
-                content=doc["content"],
+                content=doc[content_key],
                 metadata=doc["metadata"],
             )
 
-            if doc.get("embedding") is not None:
-                document.embedding = self._convert_pg_embedding_to_list(doc["embedding"])
+            if doc.get(embedding_key) is not None:
+                document.embedding = self._convert_pg_embedding_to_list(doc[embedding_key])
             else:
                 document.embedding = None
 
@@ -469,6 +550,8 @@ class PGVectorStore:
         top_k: int = 10,
         exclude_document_embeddings: bool = True,
         filters: dict[str, Any] | None = None,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
     ) -> list[Document]:
         """
         Retrieve documents similar to the given query embedding.
@@ -478,6 +561,8 @@ class PGVectorStore:
             filters (dict[str, Any] | None): Filters for the query. Defaults to None.
             top_k (int): Maximum number of documents to retrieve. Defaults to 10.
             exclude_document_embeddings (bool): Whether to exclude embeddings in results. Defaults to True.
+            content_key (str): The field used to store content in the storage. Defaults to None.
+            embedding_key (str): The field used to store embeddings in the storage. Defaults to None.
 
         Returns:
             list[Document]: List of retrieved Document objects.
@@ -494,6 +579,8 @@ class PGVectorStore:
             raise ValueError(msg)
 
         vector_function = self.vector_function
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
 
         if vector_function not in PGVectorVectorFunction:
             msg = f"Invalid vector function: {vector_function}"
@@ -502,11 +589,13 @@ class PGVectorStore:
         query_embedding = self._convert_query_embedding_to_pgvector_format(query_embedding)
 
         # Generate the score calculation based on the vector function
-        score_definition = VECTOR_FUNCTION_TO_SCORE_DEFINITION[vector_function].format(query_embedding=query_embedding)
+        score_definition = VECTOR_FUNCTION_TO_SCORE_DEFINITION[vector_function].format(
+            embedding_key=embedding_key, query_embedding=query_embedding
+        )
         score_definition = f"{score_definition} AS score"
 
         # Do not select the embeddings if exclude_document_embeddings is True
-        select_fields = "id, content, metadata" if exclude_document_embeddings else "*"
+        select_fields = f"id, {content_key}, metadata" if exclude_document_embeddings else "*"
 
         # Build the base SELECT query with score
         base_select = SQL("SELECT {fields}, {score} FROM {schema_name}.{table_name}").format(
