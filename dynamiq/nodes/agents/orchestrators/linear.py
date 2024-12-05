@@ -115,7 +115,8 @@ class LinearOrchestrator(Orchestrator):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            raise ValueError("Agent LLM failed to generate tasks")
+            error_message = f"LLM '{self.manager.name}' failed: {manager_result.output.get('content')}"
+            raise ValueError(f"Failed to generate tasks: {error_message}")
 
         manager_result_content = manager_result.output.get("content").get("result")
         logger.info(
@@ -138,14 +139,18 @@ class LinearOrchestrator(Orchestrator):
             output = output.replace("```", "").replace("json", "")
         except AttributeError as e:
             logger.warning(
-                f"LinearOrchestrator {self.id}: Failed to remove code block markers and 'json' keyword from output {e}"
+                f"Orchestrator {self.name} - {self.id}: "
+                f"Failed to remove code block markers and 'json' keyword "
+                f"from output {output} due to error: {e}"
             )
 
         # Parse the JSON string
         try:
             task_list_json = output.strip()
         except AttributeError as e:
-            logger.warning(f"LinearOrchestrator {self.id}: Failed to strip the output string: {e}")
+            logger.warning(
+                f"Orchestrator {self.name} - {self.id}: Failed to strip the output {output} due to error: {e}"
+            )
             task_list_json = output
         return TypeAdapter(list[Task]).validate_json(task_list_json)
 
@@ -194,7 +199,7 @@ class LinearOrchestrator(Orchestrator):
 
                     except ValueError:
                         logger.warning(
-                            f"LinearOrchestrator {self.id}: Invalid agent index: {manager_result.output.get('content').get('result', -1)}"  # noqa: E501
+                            f"Orchestrator {self.name} - {self.id}: Invalid agent index: {manager_result.output.get('content').get('result', -1)}"  # noqa: E501
                         )
                         try:
                             match = re.match(
@@ -203,7 +208,7 @@ class LinearOrchestrator(Orchestrator):
                             )
                             assigned_agent_index = int(match.group())
                         except Exception as e:
-                            logger.error(f"LinearOrchestrator {self.id}: Failed to extract agent index: {e}")
+                            logger.error(f"Orchestrator {self.name} - {self.id}: Failed to extract agent index: {e}")
                             assigned_agent_index = -1
 
                     if 0 <= assigned_agent_index < len(self.agents):
@@ -223,6 +228,7 @@ class LinearOrchestrator(Orchestrator):
                             raise ValueError(
                                 f"Failed to execute task {task.id}.{task.name} "
                                 f"by agent {assigned_agent_index}.{assigned_agent.name}"
+                                f"due to error: {result.output.get('content')}"
                             )
 
                         self._results[task.id] = {
@@ -232,13 +238,17 @@ class LinearOrchestrator(Orchestrator):
 
                         success_flag = True
                         break
-                task_per_llm += f"Error occured {manager_result.output}"
+                task_per_llm += f"Error is occured:{manager_result.output}"
 
             if success_flag:
                 continue
 
             else:
-                raise ValueError(f"Failed to assign task {task.id}.{task.name} by Manager Agent")
+                raise ValueError(
+                    f"Orchestrator {self.name} - {self.id}: "
+                    f"Failed to assign task {task.id}.{task.name} "
+                    f"by Manager Agent due to error: {manager_result.output}"
+                )
 
     def generate_final_answer(self, task: str, config: RunnableConfig, **kwargs) -> str:
         """
@@ -261,7 +271,7 @@ class LinearOrchestrator(Orchestrator):
 
                 if final_task_id is not None:
                     final_task_output = self._results[final_task_id].get("result", "")
-                    logger.debug(f"LinearOrchestrator {self.id}: Final task output: {final_task_output}")
+                    logger.debug(f"Orchestrator {self.name} - {self.id}: Final task output: {final_task_output}")
 
             self.get_final_result(
                 {"input_task": task, "chat_history": self._chat_history, "tasks_outputs": tasks_outputs},

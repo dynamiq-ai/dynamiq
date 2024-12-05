@@ -482,6 +482,7 @@ class ReActAgent(Agent):
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
                 f"Agent {self.name} (ID: {self.id}) has reached the maximum loop limit of {self.max_loops} without finding a final answer. "  # noqa: E501
+                f"Last response: {previous_responses[-1]}\n"
                 f"Consider increasing the maximum number of loops or reviewing the task complexity to ensure completion."  # noqa: E501
             )
             raise MaxLoopsExceededException(message=error_message)

@@ -123,7 +123,8 @@ class AdaptiveOrchestrator(Orchestrator):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            raise ActionParseError("Unable to retrieve the next action from Manager.")
+            error_message = f"Agent '{self.manager.name}' failed: {manager_result.output.get('content')}"
+            raise ActionParseError(f"Unable to retrieve the next action from Agent Manager, Error: {error_message}")
 
         manager_result = (
             manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
@@ -131,7 +132,9 @@ class AdaptiveOrchestrator(Orchestrator):
         try:
             return Action.model_validate_json(manager_result)
         except ValidationError as e:
-            raise ActionParseError(f"Unable to create Action from LLM output, Error: {e}")
+            raise ActionParseError(
+                f"Unable to create Action from Agent Manager output, due to Validation JSON Error: {e}"
+            )
 
     def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
         """
@@ -179,9 +182,8 @@ class AdaptiveOrchestrator(Orchestrator):
             )
             self._run_depends = [NodeDependency(node=agent).to_dict()]
             if result.status != RunnableStatus.SUCCESS:
-                raise OrchestratorError(
-                    f"Failed to execute Agent {agent.name} with Error: {result.output.get('content')}"
-                )
+                error_message = f"Agent '{agent.name}' failed: {result.output.get('content')}"
+                raise OrchestratorError(f"Failed to execute Agent {agent.name}, due to error: {error_message}")
 
             self._chat_history.append(
                 {
@@ -198,7 +200,11 @@ class AdaptiveOrchestrator(Orchestrator):
             )
             self._run_depends = [NodeDependency(node=self.manager).to_dict()]
             if result.status != RunnableStatus.SUCCESS:
-                logger.error(f"AdaptiveOrchestrator {self.id}: Error executing LLM: {result.output.get('content')}")
+                logger.error(
+                    f"Orchestrator {self.name} - {self.id}: "
+                    f"Error executing {self.manager.name}:"
+                    f"{result.output.get('content')}"
+                )
 
             self._chat_history.append(
                 {
