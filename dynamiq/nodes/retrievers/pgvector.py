@@ -54,6 +54,13 @@ class PGVectorDocumentRetriever(VectorStoreNode):
         return PGVectorStore
 
     @property
+    def vector_store_params(self):
+        return self.model_dump(include={"index_name"}) | {
+            "connection": self.connection,
+            "client": self.client,
+        }
+
+    @property
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"document_retriever": True}
 
@@ -92,10 +99,14 @@ class PGVectorDocumentRetriever(VectorStoreNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         query_embedding = input_data["embedding"]
+        content_key = input_data.get("content_key")
+        embedding_key = input_data.get("embedding_key")
         filters = input_data.get("filters") or self.filters
         top_k = input_data.get("top_k") or self.top_k
 
-        output = self.document_retriever.run(query_embedding, filters=filters, top_k=top_k)
+        output = self.document_retriever.run(
+            query_embedding, filters=filters, top_k=top_k, content_key=content_key, embedding_key=embedding_key
+        )
 
         return {
             "documents": output["documents"],
