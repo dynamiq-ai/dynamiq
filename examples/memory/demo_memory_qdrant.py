@@ -7,8 +7,6 @@ from dynamiq.prompts import MessageRole
 
 INDEX_NAME = "conversations"
 qdrant_connection = QdrantConnection(
-    api_key="VpZFKICUAqWc8QrM9bjUhZ_1Rcowz68p_4P-QhcIX7Ua1_5hRrTkoA",
-    url="https://b5933e17-450f-410c-b82f-1f8facb74b83.eu-central-1-0.aws.cloud.qdrant.io:6333",
 )
 openai_connection = OpenAIConnection()
 embedder = OpenAIDocumentEmbedder(connection=openai_connection)
