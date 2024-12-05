@@ -72,7 +72,11 @@ def test_execute(pgvector_document_retriever):
     result = pgvector_document_retriever.execute(input_data, config)
 
     pgvector_document_retriever.document_retriever.run.assert_called_once_with(
-        input_data["embedding"], filters=input_data["filters"], top_k=input_data["top_k"]
+        input_data["embedding"],
+        filters=input_data["filters"],
+        top_k=input_data["top_k"],
+        content_key=None,
+        embedding_key=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -97,7 +101,11 @@ def test_execute_with_default_filters_and_top_k(pgvector_document_retriever):
     result = pgvector_document_retriever.execute(input_data, config)
 
     pgvector_document_retriever.document_retriever.run.assert_called_once_with(
-        input_data["embedding"], filters=pgvector_document_retriever.filters, top_k=pgvector_document_retriever.top_k
+        input_data["embedding"],
+        filters=pgvector_document_retriever.filters,
+        top_k=pgvector_document_retriever.top_k,
+        content_key=None,
+        embedding_key=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
