@@ -77,12 +77,11 @@ class Agent(Node):
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
-    name: str = "AI Agent"
+    name: str = "Agent"
     role: str | None = None
     max_loops: int = 1
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.ALL
-    verbose: bool = Field(False, description="Whether to log verbose output.")
 
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -176,7 +175,7 @@ class Agent(Node):
         """
         Executes the agent with the given input data.
         """
-        logger.info(f"Agent {self.name} - {self.id}: started with INPUT DATA:\n{input_data}")
+        logger.info(f"Agent {self.name} - {self.id}: started with input:\n{input_data}")
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -218,7 +217,7 @@ class Agent(Node):
             "content": result,
             "intermediate_steps": self._intermediate_steps,
         }
-        logger.info(f"Agent {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
+        logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
         return execution_result
 
@@ -379,10 +378,11 @@ class Agent(Node):
         )
         self._run_depends = [NodeDependency(node=tool).to_dict()]
         if tool_result.status != RunnableStatus.SUCCESS:
+            error_message = f"Tool '{tool.name}' failed: {tool_result.output}"
             if tool_result.output["recoverable"]:
-                raise ToolExecutionException({tool_result.output["content"]})
+                raise ToolExecutionException({error_message})
             else:
-                raise ValueError({tool_result.output["content"]})
+                raise ValueError({error_message})
         return tool_result.output["content"]
 
     @property
@@ -446,7 +446,7 @@ class AgentManager(Agent):
     """Manager class that extends the Agent class to include specific actions."""
 
     _actions: dict[str, Callable] = PrivateAttr(default_factory=dict)
-    name: str = "Manager Agent"
+    name: str = "Agent Manager"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

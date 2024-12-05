@@ -13,6 +13,12 @@ logging.basicConfig(
 litellm_logger = logging.getLogger("LiteLLM")
 litellm_logger.setLevel(logging.ERROR)
 
+e2b_logger = logging.getLogger("e2b")
+e2b_logger.setLevel(logging.ERROR)
+
+httpx_logger = logging.getLogger("httpx")
+httpx_logger.setLevel(logging.ERROR)
+
 loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
 openai_loggers = [logger.setLevel(logging.ERROR) for logger in loggers]
 

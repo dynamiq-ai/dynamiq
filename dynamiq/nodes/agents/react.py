@@ -216,7 +216,7 @@ final_answer_function_schema = {
 class ReActAgent(Agent):
     """Agent that uses the ReAct strategy for processing tasks by interacting with tools in a loop."""
 
-    name: str = "React"
+    name: str = "React Agent"
     max_loops: int = Field(default=15, ge=2)
     inference_mode: InferenceMode = InferenceMode.DEFAULT
     behaviour_on_max_loops: Behavior = Field(

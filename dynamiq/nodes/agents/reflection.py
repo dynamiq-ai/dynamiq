@@ -36,7 +36,7 @@ REFLECTION_REFLECT_PROMPT: str = (
 
 
 class ReflectionAgent(Agent):
-    name: str = "Reflection Agent"
+    name: str = "Agent Reflection"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
