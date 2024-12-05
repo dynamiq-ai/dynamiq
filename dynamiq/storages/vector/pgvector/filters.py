@@ -221,7 +221,7 @@ def _validate_comparison_value(value: Any) -> None:
         except (ValueError, TypeError) as exc:
             msg = "Can't compare strings using operators '>', '>=', '<', '<='. "
             raise VectorStoreFilterException(msg) from exc
-    if type(value) in [list, Jsonb]:
+    if isinstance(value, (list, Jsonb)):
         msg = f"Filter value can't be of type {type(value)} using operators '>', '>=', '<', '<='"
         raise VectorStoreFilterException(msg)
 
