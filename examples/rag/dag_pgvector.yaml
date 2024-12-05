@@ -9,11 +9,11 @@ connections:
 
   pgvector-conn:  # id
     type: dynamiq.connections.PostgreSQL
-    host: ${oc.env:PGVECTOR_HOST}
-    port: ${oc.env:PGVECTOR_PORT}
-    database: ${oc.env:PGVECTOR_DATABASE}
-    user: ${oc.env:PGVECTOR_USER}
-    password: ${oc.env:PGVECTOR_PASSWORD}
+    host: ${oc.env:POSTGRESQL_HOST}
+    port: ${oc.env:POSTGRESQL_PORT}
+    database: ${oc.env:POSTGRESQL_DATABASE}
+    user: ${oc.env:POSTGRESQL_USER}
+    password: ${oc.env:POSTGRESQL_PASSWORD}
 
 
 prompt_template: |

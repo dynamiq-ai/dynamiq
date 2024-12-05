@@ -935,11 +935,11 @@ class DeepSeek(BaseApiKeyConnection):
 
 class PostgreSQL(BaseConnection):
     type: Literal[ConnectionType.PostgreSQL] = ConnectionType.PostgreSQL
-    host: str = Field(default_factory=partial(get_env_var, "PGVECTOR_HOST", "localhost"))
-    port: int = Field(default_factory=partial(get_env_var, "PGVECTOR_PORT", 5432))
-    database: str = Field(default_factory=partial(get_env_var, "PGVECTOR_DATABASE", "db"))
-    user: str = Field(default_factory=partial(get_env_var, "PGVECTOR_USER", "postgres"))
-    password: str = Field(default_factory=partial(get_env_var, "PGVECTOR_PASSWORD", "password"))
+    host: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_HOST", "localhost"))
+    port: int = Field(default_factory=partial(get_env_var, "POSTGRESQL_PORT", 5432))
+    database: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_DATABASE", "db"))
+    user: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_USER", "postgres"))
+    password: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_PASSWORD", "password"))
 
     def connect(self):
         try:
