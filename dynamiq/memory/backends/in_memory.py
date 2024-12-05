@@ -1,27 +1,32 @@
 import math
 from collections import Counter
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.prompts import Message
 
 
 class InMemoryError(Exception):
     """Base exception class for InMemory backend errors."""
-
     pass
 
 
-class BM25DocumentRanker:
+class BM25DocumentRanker(BaseModel):
     """BM25 implementation for scoring documents."""
 
-    def __init__(self, documents: list[str], k1: float = 1.5, b: float = 0.75):
-        """Initialize with a list of documents and parameters for BM25."""
-        self.documents = documents
-        self.k1 = k1
-        self.b = b
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    documents: list[str]
+    k1: float = 1.5
+    b: float = 0.75
+    avg_dl: float = 0.0
+
+    def model_post_init(self, __context) -> None:
+        """Initialize average document length after model creation."""
         self.avg_dl = self._calculate_avg_dl()
 
-    def _calculate_avg_dl(self):
+    def _calculate_avg_dl(self) -> float:
         """Calculates the average document length (number of terms per document)."""
         total_length = sum(len(doc.lower().split()) for doc in self.documents)
         return total_length / len(self.documents) if self.documents else 0
@@ -54,13 +59,12 @@ class BM25DocumentRanker:
 class InMemory(MemoryBackend):
     """In-memory implementation of the memory storage backend."""
 
-    name = "InMemory"
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __init__(self):
-        """Initializes the in-memory storage."""
-        self.messages: list[Message] = []
+    name: str = "InMemory"
+    messages: list[Message] = Field(default_factory=list)
 
-    def add(self, message: Message):
+    def add(self, message: Message) -> None:
         """Adds a message to the in-memory list."""
         try:
             self.messages.append(message)
@@ -69,9 +73,9 @@ class InMemory(MemoryBackend):
 
     def get_all(self) -> list[Message]:
         """Retrieves all messages from the in-memory list."""
-        return sorted(self.messages, key=lambda msg: msg.metadata.get("timestamp", 0))  # Sort by timestamp
+        return sorted(self.messages, key=lambda msg: msg.metadata.get("timestamp", 0))
 
-    def _apply_filters(self, messages: list[Message], filters: dict) -> list[Message]:
+    def _apply_filters(self, messages: list[Message], filters: dict | None = None) -> list[Message]:
         """Applies metadata filters to the list of messages."""
         if not filters:
             return messages
@@ -83,7 +87,7 @@ class InMemory(MemoryBackend):
                 filtered_messages = [msg for msg in filtered_messages if value == msg.metadata.get(key)]
         return filtered_messages
 
-    def search(self, query: str = None, limit: int = 10, filters: dict = None) -> list[Message]:
+    def search(self, query: str | None = None, limit: int = 10, filters: dict | None = None) -> list[Message]:
         """Searches for messages using BM25 scoring, with optional filters."""
         if not query and not filters:
             return self.get_all()[:limit]
@@ -91,18 +95,23 @@ class InMemory(MemoryBackend):
         filtered_messages = self._apply_filters(self.messages, filters)
         if not query:
             return filtered_messages[:limit]
+
         query_terms = query.lower().split()
         document_texts = [msg.content for msg in filtered_messages]
-        bm25 = BM25DocumentRanker(document_texts)
-        scored_messages = [(msg, bm25.score(query_terms, msg.content)) for msg in filtered_messages]
+
+        bm25 = BM25DocumentRanker(documents=document_texts)
+        scored_messages: list[tuple[Message, float]] = [
+            (msg, bm25.score(query_terms, msg.content)) for msg in filtered_messages
+        ]
         scored_messages = [(msg, score) for msg, score in scored_messages if score > 0]
         scored_messages.sort(key=lambda x: x[1], reverse=True)
+
         return [msg for msg, _ in scored_messages][:limit]
 
     def is_empty(self) -> bool:
         """Checks if the in-memory list is empty."""
         return len(self.messages) == 0
 
-    def clear(self):
+    def clear(self) -> None:
         """Clears the in-memory list."""
         self.messages = []

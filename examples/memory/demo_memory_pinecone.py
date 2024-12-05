@@ -1,15 +1,22 @@
-from dynamiq.components.embedders.openai import OpenAIEmbedder
+from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory import Memory
 from dynamiq.memory.backends import Pinecone
+from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.prompts import MessageRole
+from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 
 pinecone_connection = PineconeConnection()
-embedder = OpenAIEmbedder(dimensions=1536)
+openai_connection = OpenAIConnection()
+embedder = OpenAIDocumentEmbedder(connection=openai_connection)
 
 backend = Pinecone(
+    index_name="test-conv",
     connection=pinecone_connection,
     embedder=embedder,
+    index_type=PineconeIndexType.SERVERLESS,
+    cloud="aws",
+    region="us-east-1",
 )
 
 memory = Memory(backend=backend)

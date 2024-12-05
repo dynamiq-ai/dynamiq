@@ -335,6 +335,21 @@ class QdrantVectorStore:
         Returns:
             The number of documents written to the document store.
         """
+        if not self.client.collection_exists(self.index_name):
+            if self.create_if_not_exist:
+                logger.info(f"Collection {self.index_name} doesn't exist. Creating...")
+                self._set_up_collection(
+                    collection_name=self.index_name,
+                    embedding_dim=self.dimension,
+                    create_if_not_exist=True,
+                    recreate_collection=self.recreate_index,
+                    similarity=self.metric,
+                    use_sparse_embeddings=self.use_sparse_embeddings,
+                    sparse_idf=self.sparse_idf,
+                    on_disk=self.on_disk,
+                )
+            else:
+                raise QdrantStoreError(f"Collection {self.index_name} doesn't exist")
         for doc in documents:
             if not isinstance(doc, Document):
                 msg = f"DocumentStore.write_documents() expects a list of Documents but got an element of {type(doc)}."
@@ -775,22 +790,26 @@ class QdrantVectorStore:
             ValueError: If the collection exists with a different similarity measure or embedding dimension.
         """
         distance = self.get_distance(similarity)
-
         collection_exists = self.client.collection_exists(collection_name)
 
-        if not create_if_not_exist and not collection_exists:
+        should_create = (not collection_exists and create_if_not_exist) or recreate_collection
+
+        if not collection_exists and not create_if_not_exist:
             msg = f"Collection '{collection_name}' does not exist in Qdrant."
             raise QdrantStoreError(msg)
 
-        if recreate_collection or not collection_exists:
-            # There is no need to verify the current configuration of that
-            # collection. It might be just recreated again or does not exist yet.
+        if should_create:
+            logger.info(f"{'Creating' if not collection_exists else 'Recreating'} collection {collection_name}")
             self.recreate_collection(
-                collection_name, distance, embedding_dim, on_disk, use_sparse_embeddings, sparse_idf
+                collection_name=collection_name,
+                distance=distance,
+                embedding_dim=embedding_dim,
+                on_disk=on_disk,
+                use_sparse_embeddings=use_sparse_embeddings,
+                sparse_idf=sparse_idf,
             )
-            # Create Payload index if payload_fields_to_index is provided
-            self._create_payload_index(collection_name, payload_fields_to_index)
-            logger.debug(f"Index {self.index_name} does not exist. Creating a new index.")
+            if payload_fields_to_index:
+                self._create_payload_index(collection_name, payload_fields_to_index)
             return
 
         collection_info = self.client.get_collection(collection_name)

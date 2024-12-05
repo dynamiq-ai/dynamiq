@@ -1,4 +1,3 @@
-import copy
 from os import PathLike
 from typing import Any
 
@@ -358,7 +357,7 @@ class WorkflowYAMLLoader:
         init_components: bool = False,
     ):
         """
-        Get node init data with initialized nodes components (llms, agents, etc)
+        Get node init data with initialized nodes components recursively (llms, agents, etc)
 
         Args:
             node_init_data: Dictionary containing node data.
@@ -373,47 +372,58 @@ class WorkflowYAMLLoader:
         Returns:
             A dictionary of newly created nodes with dependencies.
         """
-        updated_node_init_data = copy.deepcopy(node_init_data)
+        updated_node_init_data = {}
+        kwargs = dict(
+            nodes=nodes,
+            flows=flows,
+            connections=connections,
+            prompts=prompts,
+            registry=registry,
+            connection_manager=connection_manager,
+            init_components=init_components,
+        )
         for param_name, param_data in node_init_data.items():
             # TODO: dummy fix, revisit this!
             # We had to add this condition because both input and output nodes have a `schema` param,
             # which has a `type` field that contains types supported by JSON schema (e.g., string, object).
             if param_name == "schema":
-                continue
+                updated_node_init_data[param_name] = param_data
 
-            if isinstance(param_data, dict) and param_data.get("type"):
-                param_id = param_data.get("id")
+            elif isinstance(param_data, dict):
+                updated_param_data = {}
+                for param_name_inner, param_data_inner in param_data.items():
+                    if isinstance(param_data_inner, (dict, list)):
+                        param_id = None
+                        updated_param_data[param_name_inner] = cls.get_updated_node_init_data_with_initialized_nodes(
+                            {param_id: param_data_inner}, **kwargs
+                        )[param_id]
+                    else:
+                        updated_param_data[param_name_inner] = param_data_inner
 
-                updated_node_init_data[param_name] = cls.get_nodes_without_depends(
-                    data={param_id: param_data},
-                    nodes=nodes,
-                    flows=flows,
-                    connections=connections,
-                    prompts=prompts,
-                    registry=registry,
-                    connection_manager=connection_manager,
-                    init_components=init_components,
-                )[param_id]
+                if "type" in updated_param_data:
+                    param_id = updated_param_data.get("id")
+                    updated_param_data = cls.get_nodes_without_depends({param_id: updated_param_data}, **kwargs)[
+                        param_id
+                    ]
 
-            if isinstance(param_data, list):
+                updated_node_init_data[param_name] = updated_param_data
+
+            elif isinstance(param_data, list):
                 updated_items = []
                 for item in param_data:
-                    if isinstance(item, dict) and (item_id := item.get("id")):
+                    if isinstance(item, (dict, list)):
+                        param_id = None
                         updated_items.append(
                             cls.get_updated_node_init_data_with_initialized_nodes(
-                                node_init_data={item_id: item},
-                                nodes=nodes,
-                                flows=flows,
-                                connections=connections,
-                                prompts=prompts,
-                                registry=registry,
-                                connection_manager=connection_manager,
-                                init_components=init_components,
-                            )[item_id]
+                                node_init_data={param_id: item}, **kwargs
+                            )[param_id]
                         )
                     else:
                         updated_items.append(item)
                 updated_node_init_data[param_name] = updated_items
+
+            else:
+                updated_node_init_data[param_name] = param_data
 
         return updated_node_init_data
 
@@ -466,14 +476,14 @@ class WorkflowYAMLLoader:
             )
 
             # Init node params
-            node_init_data = copy.deepcopy(node_data) | {
-                "id": node_id,
-                "is_postponed_component_init": node_data.get(
-                    "is_postponed_component_init", True
-                ),
-            }
+            node_init_data = node_data.copy()
+            if node_id:
+                node_init_data["id"] = node_id
             node_init_data.pop("type", None)
             node_init_data.pop("depends", None)
+
+            if "is_postponed_component_init" not in node_init_data:
+                node_init_data["is_postponed_component_init"] = True
 
             if "connection" in node_init_data:
                 get_node_conn = (
@@ -513,7 +523,7 @@ class WorkflowYAMLLoader:
 
                 node = node_cls(**node_init_data)
 
-                if init_components:
+                if init_components and getattr(node, "init_components", False):
                     node.init_components(connection_manager=connection_manager)
                     node.is_postponed_component_init = False
 
