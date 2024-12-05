@@ -100,14 +100,19 @@ class PGVectorStore:
         if index_method is not None and index_method not in PGVectorIndexMethod:
             raise ValueError(f"index_method must be one of {list(PGVectorIndexMethod)}")
 
-        if isinstance(connection, str):
-            self.connection_string = connection
-            self._conn = psycopg.connect(self.connection_string)
-        elif isinstance(connection, PostgreSQL):
-            self._conn = connection.connect()
-            self.connection_string = connection.conn_params
+        if client is None:
+            if isinstance(connection, str):
+                self.connection_string = connection
+                self._conn = psycopg.connect(self.connection_string)
+                self.client = self._conn
+            elif isinstance(connection, PostgreSQL):
+                self._conn = connection.connect()
+                self.connection_string = connection.conn_params
+                self.client = self._conn
+            else:
+                raise ValueError("connection must be a string or PostgreSQL object")
         else:
-            raise ValueError("connection must be a string or PostgreSQL object")
+            self._conn = client
 
         self.create_extension = create_extension
         if self.create_extension:
@@ -115,8 +120,6 @@ class PGVectorStore:
             self._conn.commit()
 
         register_vector(self._conn)
-
-        self.client = client if client else self._conn
 
         self.table_name = table_name
         self.schema_name = schema_name
@@ -151,7 +154,10 @@ class PGVectorStore:
         import psycopg
 
         if self._conn is None or self._conn.closed:
-            self._conn = psycopg.connect(self.connection_string)
+            if self.client is None:
+                self._conn = psycopg.connect(self.connection_string)
+            else:
+                self._conn = self.client
         try:
             yield self._conn
         except Exception as e:
