@@ -3,12 +3,12 @@ from typing import Any, Literal
 from dynamiq.connections import PGVector
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
-from dynamiq.storages.vector.pgvector.pgvector import PGVectorStore
+from dynamiq.storages.vector import PGVectorStore
+from dynamiq.storages.vector.pgvector.pgvector import PGVectorStoreParams
 from dynamiq.utils.logger import logger
 
 
-class PGVectorDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
+class PGVectorDocumentWriter(VectorStoreNode, PGVectorStoreParams):
     """
     Document Writer Node using PGVector Vector Store.
 
@@ -45,7 +45,7 @@ class PGVectorDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
 
     @property
     def vector_store_params(self):
-        return self.model_dump(include=set(BaseWriterVectorStoreParams.model_fields)) | {
+        return self.model_dump(include=set(PGVectorStoreParams.model_fields)) | {
             "connection": self.connection,
             "client": self.client,
         }

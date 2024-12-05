@@ -6,9 +6,10 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PGVectorStore
+from dynamiq.storages.vector.pgvector.pgvector import PGVectorStoreParams
 
 
-class PGVectorDocumentRetriever(VectorStoreNode):
+class PGVectorDocumentRetriever(VectorStoreNode, PGVectorStoreParams):
     """
     Document Retriever using PGVector.
 
@@ -55,7 +56,7 @@ class PGVectorDocumentRetriever(VectorStoreNode):
 
     @property
     def vector_store_params(self):
-        return self.model_dump(include={"index_name"}) | {
+        return self.model_dump(include=set(PGVectorStoreParams.model_fields)) | {
             "connection": self.connection,
             "client": self.client,
         }

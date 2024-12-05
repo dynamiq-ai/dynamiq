@@ -15,6 +15,7 @@ from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
+from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
 
 
 class PGVectorEnum(str, Enum):
@@ -60,6 +61,8 @@ VECTOR_FUNCTION_TO_SCORE_DEFINITION = {
 DEFAULT_TABLE_NAME = "dynamiq_vector_store"
 DEFAULT_SCHEMA_NAME = "public"
 
+class PGVectorStoreParams(BaseWriterVectorStoreParams): 
+     embedding_key: str = "embedding" 
 
 class PGVectorStore:
     """Vector store using pgvector."""
