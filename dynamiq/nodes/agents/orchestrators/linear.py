@@ -161,7 +161,7 @@ class LinearOrchestrator(Orchestrator):
 
         return dependencies_formatted.strip()
 
-    def run_tasks(self, tasks: list[Task], config: RunnableConfig = None, **kwargs) -> None:
+    def run_tasks(self, tasks: list[Task], input_task: Task, config: RunnableConfig = None, **kwargs) -> None:
         """Execute the tasks using appropriate agents."""
         logger.debug(f"LinearOrchestrator {self.id}: Assigning and executing tasks. Agents: {self.agents_descriptions}")
 
@@ -190,7 +190,7 @@ class LinearOrchestrator(Orchestrator):
                 manager_result = self.manager.run(
                     input_data={
                         "action": "assign",
-                        "input_task": self.input_task,
+                        "input_task": input_task,
                         "task": task_per_llm,
                         "agents": self.agents_descriptions,
                     },
@@ -309,7 +309,7 @@ class LinearOrchestrator(Orchestrator):
         """
         tasks = self.get_tasks(input_task, config=config, **kwargs)
         logger.debug(f"LinearOrchestrator {self.id}: tasks initialized:\n '{tasks}'")
-        self.run_tasks(tasks=tasks, config=config, **kwargs)
+        self.run_tasks(tasks=tasks, input_task=input_task, config=config, **kwargs)
         logger.debug(f"LinearOrchestrator {self.id}: tasks assigned and executed.")
         return self.generate_final_answer(input_task, config, **kwargs)
 
