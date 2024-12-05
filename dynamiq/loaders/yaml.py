@@ -387,9 +387,9 @@ class WorkflowYAMLLoader:
             # We had to add this condition because both input and output nodes have a `schema` param,
             # which has a `type` field that contains types supported by JSON schema (e.g., string, object).
             if param_name == "schema":
-                continue
+                updated_node_init_data[param_name] = param_data
 
-            if isinstance(param_data, dict):
+            elif isinstance(param_data, dict):
                 updated_param_data = {}
                 for param_name_inner, param_data_inner in param_data.items():
                     if isinstance(param_data_inner, (dict, list)):

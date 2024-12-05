@@ -1,6 +1,6 @@
 import uuid
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, PrivateAttr
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 
@@ -44,7 +44,7 @@ class Qdrant(MemoryBackend):
     create_if_not_exist: bool = Field(default=True)
     recreate_index: bool = Field(default=False)
     vector_store: QdrantVectorStore | None = None
-    _client: QdrantClient | None = None
+    _client: QdrantClient | None = PrivateAttr(default=None)
 
     def model_post_init(self, __context) -> None:
         """Initialize the vector store after model initialization."""
@@ -57,7 +57,7 @@ class Qdrant(MemoryBackend):
                 on_disk=self.on_disk,
                 recreate_index=self.recreate_index,
             )
-            self._client = self.vector_store._client
+        self._client = self.vector_store._client
         if not self._client:
             raise QdrantError("Failed to initialize Qdrant client")
 
