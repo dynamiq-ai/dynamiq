@@ -41,6 +41,7 @@ class QdrantDocumentRetriever:
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
+        content_key: str | None = None,
     ):
         """
         Retrieves documents from the QdrantDocumentStore that are similar to the provided query embedding.
@@ -52,6 +53,8 @@ class QdrantDocumentRetriever:
             top_k (Optional[int], optional): The maximum number of documents to return. Defaults to None.
             filters (Optional[dict[str, Any]], optional): Filters to apply
                 for retrieving specific documents. Defaults to None.
+            content_key (Optional[str]): The field used to store content in the storage.
+
         Returns:
             List[Document]: A list of Document instances sorted by their relevance to the query_embedding.
         """
@@ -63,6 +66,7 @@ class QdrantDocumentRetriever:
             filters=filters,
             top_k=top_k,
             return_embedding=not exclude_document_embeddings,
+            content_key=content_key,
         )
         logger.debug(f"Retrieved {len(docs)} documents from Qdrant Vector Store.")
 

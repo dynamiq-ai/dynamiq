@@ -77,9 +77,7 @@ class WeaviateDocumentRetriever(VectorStoreNode):
                 vector_store=self.vector_store, filters=self.filters, top_k=self.top_k
             )
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ) -> dict[str, Any]:
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Execute the document retrieval process.
 
@@ -97,10 +95,11 @@ class WeaviateDocumentRetriever(VectorStoreNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         query_embedding = input_data["embedding"]
+        content_key = input_data.get("content_key")
         filters = input_data.get("filters") or self.filters
         top_k = input_data.get("top_k") or self.top_k
 
-        output = self.document_retriever.run(query_embedding, filters=filters, top_k=top_k)
+        output = self.document_retriever.run(query_embedding, filters=filters, top_k=top_k, content_key=content_key)
 
         return {
             "documents": output["documents"],

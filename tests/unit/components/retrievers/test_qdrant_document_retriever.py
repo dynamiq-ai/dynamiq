@@ -20,7 +20,11 @@ class TestQdrantDocumentRetriever:
         )
 
         mock_vector_store._query_by_embedding.assert_called_once_with(
-            query_embedding=[0.1, 0.2, 0.3], filters={"new_field": "new_value"}, top_k=2, return_embedding=False
+            query_embedding=[0.1, 0.2, 0.3],
+            filters={"new_field": "new_value"},
+            top_k=2,
+            return_embedding=False,
+            content_key=None,
         )
 
         assert result == {"documents": mock_documents}
@@ -34,7 +38,7 @@ class TestQdrantDocumentRetriever:
         result = retriever.run(query_embedding=[0.1, 0.2, 0.3])
 
         mock_vector_store._query_by_embedding.assert_called_once_with(
-            query_embedding=[0.1, 0.2, 0.3], filters=mock_filters, top_k=5, return_embedding=False
+            query_embedding=[0.1, 0.2, 0.3], filters=mock_filters, top_k=5, return_embedding=False, content_key=None
         )
 
         assert result == {"documents": mock_documents}

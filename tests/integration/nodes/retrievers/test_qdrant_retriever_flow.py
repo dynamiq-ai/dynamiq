@@ -101,6 +101,7 @@ def test_retrieve_workflow(
         filters=mock_filters,
         top_k=input_data["top_k"],
         return_embedding=False,
+        content_key=None,
     )
 
     mock_set_up_collection.assert_not_called()
