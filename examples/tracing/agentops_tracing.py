@@ -140,6 +140,6 @@ if __name__ == "__main__":
     )
     agentops_tracing = AgentOpsCallbackHandler(api_key=get_env_var("AGENTOPS_API_KEY"))
     workflow.run(
-        {"input": "who win euro 2024"},
+        {"input": "who won euro 2024"},
         config=RunnableConfig(callbacks=[agentops_tracing]),
     )
