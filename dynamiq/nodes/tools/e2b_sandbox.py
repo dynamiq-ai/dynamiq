@@ -189,7 +189,7 @@ class E2BInterpreterTool(ConnectionNode):
 
     def _initialize_persistent_sandbox(self):
         """Initializes the persistent sandbox, installs packages, and uploads initial files."""
-        logger.info(f"Tool {self.name} - {self.id}: Initializing Persistent Sandbox")
+        logger.debug(f"Tool {self.name} - {self.id}: Initializing Persistent Sandbox")
         self._sandbox = Sandbox(api_key=self.connection.api_key)
         self._install_default_packages(self._sandbox)
         if self.files:
@@ -219,8 +219,6 @@ class E2BInterpreterTool(ConnectionNode):
                     "uploaded_path": uploaded_path,
                 }
             )
-            logger.debug(f"Tool {self.name} - {self.id}: Uploaded file '{file.name}' to {uploaded_path}")
-
         self._update_description_with_files(upload_details)
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
@@ -284,13 +282,13 @@ class E2BInterpreterTool(ConnectionNode):
         self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Executes the requested action based on the input data."""
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         if self.persistent_sandbox:
             sandbox = self._sandbox
         else:
-            logger.info(f"Tool {self.name} - {self.id}: Initializing Sandbox for this execution")
             sandbox = Sandbox(api_key=self.connection.api_key)
             self._install_default_packages(sandbox)
             if self.files:
@@ -330,7 +328,7 @@ class E2BInterpreterTool(ConnectionNode):
                 result += "<Code execution>\n" + code_execution + "\n</Code execution>"
             content = result
 
-        logger.debug(f"Tool {self.name} - {self.id}: finished with result {str(content)[:50]}...")
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
         return {"content": content}
 
     def close(self) -> None:
