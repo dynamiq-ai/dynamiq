@@ -53,7 +53,7 @@ class PGVectorStoreParams(BaseWriterVectorStoreParams):
     table_name: str = DEFAULT_TABLE_NAME
     schema_name: str = DEFAULT_SCHEMA_NAME
     create_if_not_exist: bool = True
-    dimenstion: int = 1536
+    dimension: int = 1536
     vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY
     embedding_key: str = "embedding"
 
