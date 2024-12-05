@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 import psycopg
 from pgvector.psycopg import register_vector
@@ -10,35 +10,22 @@ from psycopg.sql import SQL, Identifier
 from psycopg.sql import Literal as SQLLiteral
 from psycopg.types.json import Jsonb
 
-from dynamiq.connections import PGVector
+from dynamiq.connections import PostgreSQL
+from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
-from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
 
 
-class PGVectorEnum(str, Enum):
-    def __contains__(cls, item: str) -> bool:
-        return item in [e.value for e in cls]
-
-    @classmethod
-    def list(cls):
-        return list(map(lambda c: c.value, cls))
-
-    @classmethod
-    def values(cls):
-        return list(cls)
-
-
-class PGVectorVectorFunction(PGVectorEnum):
+class PGVectorVectorFunction(str, Enum):
     COSINE_SIMILARITY = "cosine_similarity"
     INNER_PRODUCT = "inner_product"
     L2_DISTANCE = "l2_distance"
     L1_DISTANCE = "l1_distance"
 
 
-class PGVectorIndexMethod(PGVectorEnum):
+class PGVectorIndexMethod(str, Enum):
     EXACT = "exact_nearest_neighbor_search"
     IVFFLAT = "ivfflat"
     HNSW = "hnsw"
@@ -63,6 +50,11 @@ DEFAULT_SCHEMA_NAME = "public"
 
 
 class PGVectorStoreParams(BaseWriterVectorStoreParams):
+    table_name: str = DEFAULT_TABLE_NAME
+    schema_name: str = DEFAULT_SCHEMA_NAME
+    create_if_not_exist: bool = True
+    dimenstion: int = 1536
+    vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY
     embedding_key: str = "embedding"
 
 
@@ -71,11 +63,11 @@ class PGVectorStore:
 
     def __init__(
         self,
-        connection: PGVector | str | None = None,
-        client: Optional["PGVector"] = None,
+        connection: PostgreSQL | str | None = None,
+        client: PostgreSQL | None = None,
         create_extension: bool = True,
-        table_name: str | None = None,
-        schema_name: str | None = None,
+        table_name: str = DEFAULT_TABLE_NAME,
+        schema_name: str = DEFAULT_SCHEMA_NAME,
         dimension: int = 1536,
         vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY,
         index_method: PGVectorIndexMethod = PGVectorIndexMethod.EXACT,
@@ -88,8 +80,8 @@ class PGVectorStore:
         Initialize a PGVectorStore instance.
 
         Args:
-            connection (PGVector | str): PGVector connection instance. Defaults to None.
-            client (Optional[PGVector]): PGVector client instance. Defaults to None.
+            connection (PostgreSQL | str): PostgreSQL connection instance. Defaults to None.
+            client (Optional[PostgreSQL]): PostgreSQL client instance. Defaults to None.
             create_extension (bool): Whether to create the vector extension (if it does not exist). Defaults to True.
             table_name (str): Name of the table in the database. Defaults to None.
             schema_name (str): Name of the schema in the database. Defaults to None.
@@ -104,18 +96,18 @@ class PGVectorStore:
             embedding_key (Optional[str]): The field used to store embeddings in the storage. Defaults to 'embedding'.
         """
         if vector_function not in PGVectorVectorFunction:
-            raise ValueError(f"vector_function must be one of {PGVectorVectorFunction.list()}")
+            raise ValueError(f"vector_function must be one of {list(PGVectorVectorFunction)}")
         if index_method is not None and index_method not in PGVectorIndexMethod:
-            raise ValueError(f"index_method must be one of {PGVectorIndexMethod.list()}")
+            raise ValueError(f"index_method must be one of {list(PGVectorIndexMethod)}")
 
         if isinstance(connection, str):
             self.connection_string = connection
             self._conn = psycopg.connect(self.connection_string)
-        elif isinstance(connection, PGVector):
+        elif isinstance(connection, PostgreSQL):
             self._conn = connection.connect()
             self.connection_string = connection.conn_params
         else:
-            raise ValueError("connection must be a string or PGVector object")
+            raise ValueError("connection must be a string or PostgreSQL object")
 
         self.create_extension = create_extension
         if self.create_extension:
@@ -126,8 +118,8 @@ class PGVectorStore:
 
         self.client = client if client else self._conn
 
-        self.table_name = table_name if table_name else DEFAULT_TABLE_NAME
-        self.schema_name = schema_name if schema_name else DEFAULT_SCHEMA_NAME
+        self.table_name = table_name
+        self.schema_name = schema_name
         self.dimension = dimension
         self.index_method = index_method
         self.vector_function = vector_function
@@ -144,6 +136,7 @@ class PGVectorStore:
 
         if create_if_not_exist:
             with self._get_connection() as conn:
+                self._create_schema(conn)
                 self._create_tables(conn)
                 if self.index_method in [PGVectorIndexMethod.IVFFLAT, PGVectorIndexMethod.HNSW]:
                     self.index_name = index_name or f"{self.index_method}_index"
@@ -273,7 +266,7 @@ class PGVectorStore:
 
         embedding_key = embedding_key or self.embedding_key
 
-        if self.index_method not in PGVectorIndexMethod.values():
+        if self.index_method not in PGVectorIndexMethod:
             msg = f"Invalid index method: {self.index_method}"
             raise ValueError(msg)
 
@@ -307,7 +300,7 @@ class PGVectorStore:
         Raises:
             ValueError: If the index method is not valid.
         """
-        if self.index_method not in PGVectorIndexMethod.values():
+        if self.index_method not in PGVectorIndexMethod:
             msg = f"Invalid index method: {self.index_method}"
             raise ValueError(msg)
 
@@ -317,6 +310,46 @@ class PGVectorStore:
             """
         ).format(
             index_name=Identifier(f"{self.table_name}_{self.index_method}_index"),
+        )
+
+        with conn.cursor() as cur:
+            self._execute_sql_query(query, cursor=cur)
+            conn.commit()
+
+    def _create_schema(self, conn: psycopg.Connection) -> None:
+        """
+        Internal method to create the schema in the database (if it does not exist).
+
+        Args:
+            conn (psycopg.Connection): The connection to the database.
+        """
+
+        query = SQL(
+            """
+            CREATE SCHEMA IF NOT EXISTS {schema_name};
+            """
+        ).format(
+            schema_name=Identifier(self.schema_name),
+        )
+
+        with conn.cursor() as cur:
+            self._execute_sql_query(query, cursor=cur)
+            conn.commit()
+
+    def _drop_schema(self, conn: psycopg.Connection) -> None:
+        """
+        Internal method to drop the schema in the database (if it exists).
+
+        Args:
+            conn (psycopg.Connection): The connection to the database.
+        """
+
+        query = SQL(
+            """
+            DROP SCHEMA IF EXISTS {schema_name} CASCADE;
+            """
+        ).format(
+            schema_name=Identifier(self.schema_name),
         )
 
         with conn.cursor() as cur:
