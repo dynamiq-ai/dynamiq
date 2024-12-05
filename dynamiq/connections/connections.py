@@ -948,7 +948,11 @@ class PGVector(BaseConnection):
             conn = psycopg.connect(
                 host=self.host, port=self.port, dbname=self.database, user=self.user, password=self.password
             )
-            logger.debug(f"Connected to PGVector with host={self.host} and port={str(self.port)}")
+            logger.debug(
+                f"Connected to PGVector with host={self.host}, "
+                f"port={str(self.port)}, user={self.user}, "
+                f"database={self.database}."
+            )
             return conn
         except ImportError:
             raise ImportError("Please install psycopg to use PGVector connection")
@@ -956,32 +960,14 @@ class PGVector(BaseConnection):
             raise ConnectionError(f"Failed to connect to PGVector: {str(e)}")
 
     @property
-    def conn_params(self) -> dict:
+    def conn_params(self) -> str:
         """
         Returns the parameters required for connection.
 
         Returns:
-            dict: A dictionary containing
-
-                -the host with the key 'host'.
-
-                -the port with the key 'port'.
-
-                -the database with the key 'database'.
-
-                -the user with the key 'user'.
-
-                -the password with the key 'password'.
+            dict: A string containing the host, the port, the database,
+            the user, and the password for the connection.
         """
-        return {
-            "host": self.host,
-            "port": self.port,
-            "database": self.database,
-            "user": self.user,
-            "password": self.password,
-        }
-
-    def __str__(self):
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
 
 
