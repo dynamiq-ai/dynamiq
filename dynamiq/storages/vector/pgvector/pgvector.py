@@ -130,7 +130,10 @@ class PGVectorStore:
         self.content_key = content_key
         self.embedding_key = embedding_key
 
-        if self.index_method == PGVectorIndexMethod.IVFFLAT and self.vector_function == PGVectorVectorFunction.L1_DISTANCE:
+        if (
+            self.index_method == PGVectorIndexMethod.IVFFLAT
+            and self.vector_function == PGVectorVectorFunction.L1_DISTANCE
+        ):
             msg = "IVFFLAT index does not support L1 distance metric"
             raise VectorStoreException(msg)
 
