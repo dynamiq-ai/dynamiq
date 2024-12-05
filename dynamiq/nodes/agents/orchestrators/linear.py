@@ -163,7 +163,7 @@ class LinearOrchestrator(Orchestrator):
 
         return dependencies_formatted.strip()
 
-    def run_tasks(self, tasks: list[Task], input_task: Task, config: RunnableConfig = None, **kwargs) -> None:
+    def run_tasks(self, tasks: list[Task], input_task: str, config: RunnableConfig = None, **kwargs) -> None:
         """Execute the tasks using appropriate agents."""
 
         for count, task in enumerate(tasks, start=1):
