@@ -61,6 +61,19 @@ class Qdrant(MemoryBackend):
         if not self._client:
             raise QdrantError("Failed to initialize Qdrant client")
 
+            # Ensure collection exists before any operations
+            if self.create_if_not_exist and not self._client.collection_exists(self.index_name):
+                self.vector_store._set_up_collection(
+                    collection_name=self.index_name,
+                    embedding_dim=1536,
+                    create_if_not_exist=True,
+                    recreate_collection=self.recreate_index,
+                    similarity=self.metric,
+                    use_sparse_embeddings=False,
+                    sparse_idf=False,
+                    on_disk=self.on_disk,
+                )
+
     def _message_to_document(self, message: Message) -> Document:
         """Converts a Message object to a Document object."""
         return Document(
