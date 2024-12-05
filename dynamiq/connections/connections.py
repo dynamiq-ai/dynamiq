@@ -58,7 +58,7 @@ class ConnectionType(str, enum.Enum):
     Milvus = "Milvus"
     Perplexity = "Perplexity"
     DeepSeek = "DeepSeek"
-    PGVector = "PGVector"
+    PostgreSQL = "PostgreSQL"
     Exa = "Exa"
 
 
@@ -933,10 +933,10 @@ class DeepSeek(BaseApiKeyConnection):
         pass
 
 
-class PGVector(BaseConnection):
-    type: Literal[ConnectionType.PGVector] = ConnectionType.PGVector
+class PostgreSQL(BaseConnection):
+    type: Literal[ConnectionType.PostgreSQL] = ConnectionType.PostgreSQL
     host: str = Field(default_factory=partial(get_env_var, "PGVECTOR_HOST", "localhost"))
-    port: str | int = Field(default_factory=partial(get_env_var, "PGVECTOR_PORT", "5432"))
+    port: int = Field(default_factory=partial(get_env_var, "PGVECTOR_PORT", 5432))
     database: str = Field(default_factory=partial(get_env_var, "PGVECTOR_DATABASE", "db"))
     user: str = Field(default_factory=partial(get_env_var, "PGVECTOR_USER", "postgres"))
     password: str = Field(default_factory=partial(get_env_var, "PGVECTOR_PASSWORD", "password"))
