@@ -102,7 +102,7 @@ class ScaleSerpTool(ConnectionNode):
         Returns:
             dict[str, Any]: A dictionary containing the search results and metadata.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -166,6 +166,6 @@ class ScaleSerpTool(ConnectionNode):
                 "raw_response": search_result,
             }
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
         return {"content": result}

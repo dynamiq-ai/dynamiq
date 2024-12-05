@@ -49,7 +49,7 @@ class ZenRowsTool(ConnectionNode):
         Returns:
             dict[str, Any]: A dictionary containing the URL and the scraped content.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         # Ensure the config is set up correctly
         config = ensure_config(config)
@@ -81,6 +81,5 @@ class ZenRowsTool(ConnectionNode):
             )
         else:
             result = {"url": input_data.url, "content": scrape_result}
-        logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
-
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
         return {"content": result}

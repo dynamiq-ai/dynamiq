@@ -282,7 +282,7 @@ class E2BInterpreterTool(ConnectionNode):
         self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Executes the requested action based on the input data."""
-        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -328,7 +328,7 @@ class E2BInterpreterTool(ConnectionNode):
                 result += "<Code execution>\n" + code_execution + "\n</Code execution>"
             content = result
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
         return {"content": content}
 
     def close(self) -> None:
