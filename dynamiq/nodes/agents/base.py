@@ -89,7 +89,6 @@ class Agent(Node):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._intermediate_steps: dict[int, dict] = {}
