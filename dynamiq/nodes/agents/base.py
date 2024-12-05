@@ -82,11 +82,13 @@ class Agent(Node):
     max_loops: int = 1
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.ALL
+    verbose: bool = Field(False, description="Whether to print verbose logs.")
 
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
