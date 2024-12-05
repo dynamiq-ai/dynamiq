@@ -67,5 +67,6 @@ if __name__ == "__main__":
         config=None,
     )
 
-    print("Result:")
-    print(result.output.get("content"))
+    output_content = result.output.get("content")
+    print("RESULT")
+    print(output_content)
