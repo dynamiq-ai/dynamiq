@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from dynamiq.connections import PGVector
+from dynamiq.connections import PostgreSQL
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PGVectorStore
@@ -17,26 +17,26 @@ class PGVectorDocumentWriter(VectorStoreNode, PGVectorStoreParams):
     Attributes:
         group (Literal[NodeGroup.WRITERS]): The group the node belongs to.
         name (str): The name of the node.
-        connection (PGVector | None): The PGVector connection.
+        connection (PostgreSQL | None): The PostgreSQL connection.
         vector_store (PGVectorStore | None): The PGVector Vector Store instance.
     """
 
     group: Literal[NodeGroup.WRITERS] = NodeGroup.WRITERS
     name: str = "PGVectorDocumentWriter"
-    connection: PGVector | str | None = None
+    connection: PostgreSQL | str | None = None
     vector_store: PGVectorStore | None = None
 
     def __init__(self, **kwargs):
         """
         Initialize the PGVectorDocumentWriter.
 
-        If neither vector_store nor connection is provided in kwargs, a default PGVector connection is created.
+        If neither vector_store nor connection is provided in kwargs, a default PostgreSQL connection is created.
 
         Args:
             **kwargs: Arbitrary keyword arguments.
         """
         if kwargs.get("vector_store") is None and kwargs.get("connection") is None:
-            kwargs["connection"] = PGVector()
+            kwargs["connection"] = PostgreSQL()
         super().__init__(**kwargs)
 
     @property

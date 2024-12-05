@@ -18,7 +18,7 @@ def mock_pg_vector_store():
 
 @pytest.fixture(autouse=True)
 def mock_pgvector_connect():
-    with patch("dynamiq.connections.connections.PGVector.connect", return_value=MagicMock()) as mock_connect:
+    with patch("dynamiq.connections.connections.PostgreSQL.connect", return_value=MagicMock()) as mock_connect:
         yield mock_connect
 
 

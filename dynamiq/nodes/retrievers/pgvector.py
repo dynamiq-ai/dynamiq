@@ -1,7 +1,7 @@
 from typing import Any, Literal
 
 from dynamiq.components.retrievers.pgvector import PGVectorDocumentRetriever as PGVectorDocumentRetrieverComponent
-from dynamiq.connections import PGVector
+from dynamiq.connections import PostgreSQL
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
@@ -31,7 +31,7 @@ class PGVectorDocumentRetriever(VectorStoreNode, PGVectorStoreParams):
 
     group: Literal[NodeGroup.RETRIEVERS] = NodeGroup.RETRIEVERS
     name: str = "PGVectorDocumentRetriever"
-    connection: PGVector | None = None
+    connection: PostgreSQL | None = None
     vector_store: PGVectorStore | None = None
     filters: dict[str, Any] | None = None
     top_k: int = 10
@@ -41,13 +41,13 @@ class PGVectorDocumentRetriever(VectorStoreNode, PGVectorStoreParams):
         """
         Initialize the PGVectorDocumentRetriever.
 
-        If neither vector_store nor connection is provided in kwargs, a default PGVector connection will be created.
+        If neither vector_store nor connection is provided in kwargs, a default PostgreSQL connection will be created.
 
         Args:
             **kwargs: Keyword arguments for initializing the node.
         """
         if kwargs.get("vector_store") is None and kwargs.get("connection") is None:
-            kwargs["connection"] = PGVector()
+            kwargs["connection"] = PostgreSQL()
         super().__init__(**kwargs)
 
     @property
