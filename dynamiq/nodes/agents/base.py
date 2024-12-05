@@ -170,6 +170,32 @@ class Agent(Node):
         """Converts a list of messages to a formatted string."""
         return "\n".join([f"**{msg.role.value}:** {msg.content}" for msg in messages])
 
+    def _prepare_metadata(self, input_data: dict) -> dict:
+        """
+        Prepare metadata from input data.
+
+        Args:
+            input_data (dict): Input data containing user information
+
+        Returns:
+            dict: Processed metadata
+        """
+        EXCLUDED_KEYS = {"user_id", "session_id", "input"}
+
+        custom_metadata = input_data.get("metadata", {}).copy()
+        custom_metadata.update({k: v for k, v in input_data.items() if k not in EXCLUDED_KEYS})
+
+        # Add user and session IDs if present
+        user_id = input_data.get("user_id")
+        session_id = input_data.get("session_id")
+
+        if user_id:
+            custom_metadata["user_id"] = user_id
+        if session_id:
+            custom_metadata["session_id"] = session_id
+
+        return custom_metadata
+
     def execute(
         self, input_data: dict[str, Any], config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -181,11 +207,8 @@ class Agent(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        user_id = input_data.get("user_id", None)
-        session_id = input_data.get("session_id", None)
-        custom_metadata = input_data.get("metadata", {}).copy()
-        custom_metadata.update({k: v for k, v in input_data.items() if k not in ["user_id", "session_id", "input"]})
-        metadata = {**custom_metadata, "user_id": user_id, "session_id": session_id}
+        custom_metadata = self._prepare_metadata(input_data)
+
         chat_history = input_data.get("chat_history", None)
 
         if chat_history:
@@ -198,7 +221,7 @@ class Agent(Node):
                 raise TypeError(f"Invalid chat history: {e}")
 
         if self.memory:
-            self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=metadata)
+            self.memory.add(role=MessageRole.USER, content=input_data.get("input"), metadata=custom_metadata)
             self._retrieve_memory(input_data)
 
         files = input_data.get("files", [])
@@ -212,7 +235,7 @@ class Agent(Node):
 
         result = self._run_agent(config=config, **kwargs)
         if self.memory:
-            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=metadata)
+            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
 
         execution_result = {
             "content": result,
