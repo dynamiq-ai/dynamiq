@@ -5,6 +5,8 @@ from warnings import warn
 from dynamiq.nodes import Node
 from dynamiq.prompts import Message, Prompt
 
+LLM_EVALUATOR_OUTPUT_STRINGS_TO_OMIT = ("```json", "```")
+
 
 class LLMEvaluator:
     """
@@ -58,6 +60,7 @@ class LLMEvaluator:
         *,
         raise_on_failure: bool = True,
         llm: Node,
+        llm_output_strings_to_omit: tuple[str] = LLM_EVALUATOR_OUTPUT_STRINGS_TO_OMIT,
     ):
         """
         Initializes an instance of LLMEvaluator.
@@ -77,6 +80,7 @@ class LLMEvaluator:
             raise_on_failure (bool): If True, the component will raise an exception on an
                 unsuccessful API call.
             llm (Node): The LLM node to use for evaluation.
+            llm_output_strings_to_omit (Tuple[str]): A tuple of strings to omit from the LLM output.
         """
         self.validate_init_parameters(inputs, outputs, examples)
         self.raise_on_failure = raise_on_failure
@@ -103,6 +107,7 @@ class LLMEvaluator:
         self.prompt = Prompt(messages=[message])
 
         self.llm = llm
+        self.llm_output_omit_strings = llm_output_strings_to_omit
 
     @staticmethod
     def validate_init_parameters(
@@ -206,8 +211,10 @@ class LLMEvaluator:
                 continue
 
             expected_output_keys = [outp["name"] for outp in self.outputs]
-            if self.is_valid_json_and_has_expected_keys(expected=expected_output_keys, received=result["content"]):
-                parsed_result = json.loads(result["content"])
+            content = self.cleanup_output_content(result["content"])
+
+            if self.is_valid_json_and_has_expected_keys(expected=expected_output_keys, received=content):
+                parsed_result = json.loads(content)
                 results.append(parsed_result)
             else:
                 results.append(None)
@@ -342,3 +349,14 @@ class LLMEvaluator:
             return False
 
         return True
+
+    def cleanup_output_content(self, content: str):
+        """
+        Cleans up the output content by removing unwanted strings.
+
+        Args:
+            content (str): The content to clean up.
+        """
+        for omit_string in self.llm_output_omit_strings:
+            content = content.replace(omit_string, "")
+        return content.strip()
