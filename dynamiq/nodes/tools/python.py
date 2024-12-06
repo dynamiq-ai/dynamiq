@@ -47,7 +47,7 @@ def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
         raise ImportError(f"Import of '{root_module_name}' is not allowed")
     try:
         module = importlib.import_module(name)
-        logger.info(f"Successfully imported {name}")
+        logger.debug(f"Successfully imported {name}")
         return module
     except ImportError as e:
         logger.error(f"Failed to import {name}: {str(e)}")
@@ -91,7 +91,7 @@ class Python(Node):
         Returns:
             Any: Result of the code execution.
         """
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {dict(input_data)}")
+        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -175,6 +175,8 @@ class Python(Node):
             error_msg = f"Code execution error: {str(e)}"
             logger.error(error_msg)
             raise ToolExecutionException(error_msg, recoverable=True)
+
+        logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
         return {"content": result}
 

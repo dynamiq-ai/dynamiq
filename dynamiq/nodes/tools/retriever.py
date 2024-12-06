@@ -106,7 +106,7 @@ class RetrievalTool(Node):
             dict[str, Any]: Result of the retrieval.
         """
 
-        logger.debug(f"Tool {self.name} - {self.id}: started with query '{input_data.model_dump()}'")
+        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
 
         if not self.text_embedder:
             raise ValueError(f"{self.name}: Text embedder is not initialized.")
@@ -119,12 +119,12 @@ class RetrievalTool(Node):
 
             document_retriever_output = self.document_retriever.run(input_data={"embedding": embedding})
             retrieved_documents = document_retriever_output.output.get("documents", [])
-            logger.info(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")
+            logger.debug(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")
 
-            formatted_content = self.format_content(retrieved_documents)
-            logger.debug(f"Tool {self.name} - {self.id}: finished retrieval. Content: {formatted_content[:100]}...")
+            result = self.format_content(retrieved_documents)
+            logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
-            return {"content": formatted_content}
+            return {"content": result}
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
             raise

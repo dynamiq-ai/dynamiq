@@ -58,6 +58,7 @@ class ConnectionType(str, enum.Enum):
     Milvus = "Milvus"
     Perplexity = "Perplexity"
     DeepSeek = "DeepSeek"
+    PostgreSQL = "PostgreSQL"
     Exa = "Exa"
     Ollama = "Ollama"
 
@@ -931,6 +932,44 @@ class DeepSeek(BaseApiKeyConnection):
 
     def connect(self):
         pass
+
+
+class PostgreSQL(BaseConnection):
+    type: Literal[ConnectionType.PostgreSQL] = ConnectionType.PostgreSQL
+    host: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_HOST", "localhost"))
+    port: int = Field(default_factory=partial(get_env_var, "POSTGRESQL_PORT", 5432))
+    database: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_DATABASE", "db"))
+    user: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_USER", "postgres"))
+    password: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_PASSWORD", "password"))
+
+    def connect(self):
+        try:
+            import psycopg
+
+            conn = psycopg.connect(
+                host=self.host, port=self.port, dbname=self.database, user=self.user, password=self.password
+            )
+            logger.debug(
+                f"Connected to PGVector with host={self.host}, "
+                f"port={str(self.port)}, user={self.user}, "
+                f"database={self.database}."
+            )
+            return conn
+        except ImportError:
+            raise ImportError("Please install psycopg to use PGVector connection")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to PGVector: {str(e)}")
+
+    @property
+    def conn_params(self) -> str:
+        """
+        Returns the parameters required for connection.
+
+        Returns:
+            dict: A string containing the host, the port, the database,
+            the user, and the password for the connection.
+        """
+        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
 
 
 class Exa(Http):

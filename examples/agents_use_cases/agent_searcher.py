@@ -16,7 +16,7 @@ if __name__ == "__main__":
         tools=[tool_search],
         inference_mode=InferenceMode.XML,
     )
-    result = agent.run(input_data={"input": "Who won Euro 2024?"})
+    result = agent.run(input_data={"input": "Who won USA elections 2024?"})
     output_content = result.output.get("content")
     logger.info("RESULT")
     logger.info(output_content)
