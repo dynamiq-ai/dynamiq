@@ -4,11 +4,11 @@ from dynamiq.connections import PostgreSQL
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PGVectorStore
-from dynamiq.storages.vector.pgvector.pgvector import PGVectorStoreParams
+from dynamiq.storages.vector.pgvector.pgvector import PGVectorStoreWriterParams
 from dynamiq.utils.logger import logger
 
 
-class PGVectorDocumentWriter(VectorStoreNode, PGVectorStoreParams):
+class PGVectorDocumentWriter(VectorStoreNode, PGVectorStoreWriterParams):
     """
     Document Writer Node using PGVector Vector Store.
 
@@ -45,7 +45,7 @@ class PGVectorDocumentWriter(VectorStoreNode, PGVectorStoreParams):
 
     @property
     def vector_store_params(self):
-        return self.model_dump(include=set(PGVectorStoreParams.model_fields)) | {
+        return self.model_dump(include=set(PGVectorStoreWriterParams.model_fields)) | {
             "connection": self.connection,
             "client": self.client,
         }
