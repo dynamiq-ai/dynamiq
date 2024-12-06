@@ -11,7 +11,7 @@ from psycopg.sql import Literal as SQLLiteral
 from psycopg.types.json import Jsonb
 
 from dynamiq.connections import PostgreSQL
-from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
 from dynamiq.types import Document
@@ -49,13 +49,16 @@ DEFAULT_TABLE_NAME = "dynamiq_vector_store"
 DEFAULT_SCHEMA_NAME = "public"
 
 
-class PGVectorStoreParams(BaseWriterVectorStoreParams):
+class PGVectorStoreParams(BaseVectorStoreParams):
     table_name: str = DEFAULT_TABLE_NAME
     schema_name: str = DEFAULT_SCHEMA_NAME
-    create_if_not_exist: bool = True
     dimension: int = 1536
     vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY
     embedding_key: str = "embedding"
+
+
+class PGVectorStoreWriterParams(PGVectorStoreParams, BaseWriterVectorStoreParams):
+    create_if_not_exist: bool = False
 
 
 class PGVectorStore:
@@ -72,7 +75,7 @@ class PGVectorStore:
         vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY,
         index_method: PGVectorIndexMethod = PGVectorIndexMethod.EXACT,
         index_name: str | None = None,
-        create_if_not_exist: bool = True,
+        create_if_not_exist: bool = False,
         content_key: str = "content",
         embedding_key: str = "embedding",
     ):
@@ -91,7 +94,7 @@ class PGVectorStore:
             index_method (PGVectorIndexMethod): The index method to use for the vector store.
                 Defaults to 'exact_nearest_neighbor_search'.
             index_name (str): Name of the index to create. Defaults to None.
-            create_if_not_exist (bool): Whether to create the table and index if they do not exist. Defaults to True.
+            create_if_not_exist (bool): Whether to create the table and index if they do not exist. Defaults to False.
             content_key (Optional[str]): The field used to store content in the storage. Defaults to 'content'.
             embedding_key (Optional[str]): The field used to store embeddings in the storage. Defaults to 'embedding'.
         """
@@ -144,6 +147,13 @@ class PGVectorStore:
                 if self.index_method in [PGVectorIndexMethod.IVFFLAT, PGVectorIndexMethod.HNSW]:
                     self.index_name = index_name or f"{self.index_method}_index"
                     self._create_index(conn)
+        else:
+            if not self._check_if_schema_exists(self._conn):
+                msg = f"Schema '{self.schema_name}' does not exist"
+                raise VectorStoreException(msg)
+            if not self._check_if_table_exists(self._conn):
+                msg = f"Table '{self.table_name}' does not exist"
+                raise VectorStoreException(msg)
 
         logger.debug(f"PGVectorStore initialized with table_name: {self.table_name}")
 
@@ -163,6 +173,57 @@ class PGVectorStore:
         except Exception as e:
             self._conn.rollback()
             raise e
+
+    def _check_if_schema_exists(self, conn: psycopg.Connection) -> bool:
+        """
+        Check if the schema exists in the database.
+
+        Args:
+            conn (psycopg.Connection): The connection to the database.
+
+        Returns:
+            bool: True if the schema exists, False otherwise.
+        """
+
+        query = SQL(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.schemata
+                WHERE schema_name = %s
+            );
+            """
+        )
+
+        with conn.cursor() as cur:
+            self._execute_sql_query(query, (self.schema_name,), cursor=cur)
+            return cur.fetchone()[0]
+
+    def _check_if_table_exists(self, conn: psycopg.Connection) -> bool:
+        """
+        Check if the table exists in the database.
+
+        Args:
+            conn (psycopg.Connection): The connection to the database.
+
+        Returns:
+            bool: True if the table exists, False otherwise.
+        """
+
+        query = SQL(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = %s
+                AND table_name = %s
+            );
+            """
+        )
+
+        with conn.cursor() as cur:
+            self._execute_sql_query(query, (self.schema_name, self.table_name), cursor=cur)
+            return cur.fetchone()[0]
 
     def _execute_sql_query(self, sql_query: Any, params: tuple | None = None, cursor: Cursor | None = None) -> Any:
         """
