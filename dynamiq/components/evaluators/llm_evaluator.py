@@ -5,7 +5,7 @@ from warnings import warn
 from dynamiq.nodes import Node
 from dynamiq.prompts import Message, Prompt
 
-LLM_EVALUATOR_OUTPUT_STRINGS_TO_OMIT = ("```json", "```")
+STRINGS_TO_OMIT_FROM_LLM_EVALUATOR_OUTPUT = ("```json", "```")
 
 
 class LLMEvaluator:
@@ -60,7 +60,7 @@ class LLMEvaluator:
         *,
         raise_on_failure: bool = True,
         llm: Node,
-        llm_output_strings_to_omit: tuple[str] = LLM_EVALUATOR_OUTPUT_STRINGS_TO_OMIT,
+        strings_to_omit_from_llm_output: tuple[str] = STRINGS_TO_OMIT_FROM_LLM_EVALUATOR_OUTPUT,
     ):
         """
         Initializes an instance of LLMEvaluator.
@@ -80,7 +80,7 @@ class LLMEvaluator:
             raise_on_failure (bool): If True, the component will raise an exception on an
                 unsuccessful API call.
             llm (Node): The LLM node to use for evaluation.
-            llm_output_strings_to_omit (Tuple[str]): A tuple of strings to omit from the LLM output.
+            strings_to_omit_from_llm_output (Tuple[str]): A tuple of strings to omit from the LLM output.
         """
         self.validate_init_parameters(inputs, outputs, examples)
         self.raise_on_failure = raise_on_failure
@@ -107,7 +107,7 @@ class LLMEvaluator:
         self.prompt = Prompt(messages=[message])
 
         self.llm = llm
-        self.llm_output_omit_strings = llm_output_strings_to_omit
+        self.strings_to_omit_from_llm_output = strings_to_omit_from_llm_output
 
     @staticmethod
     def validate_init_parameters(
@@ -357,6 +357,6 @@ class LLMEvaluator:
         Args:
             content (str): The content to clean up.
         """
-        for omit_string in self.llm_output_omit_strings:
+        for omit_string in self.strings_to_omit_from_llm_output:
             content = content.replace(omit_string, "")
         return content.strip()
