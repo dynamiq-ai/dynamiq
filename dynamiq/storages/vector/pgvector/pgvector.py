@@ -742,7 +742,11 @@ class PGVectorStore:
                 documents = self._convert_query_result_to_documents(records)
                 return documents
 
-    def __del__(self):
-        """Close the connection when the object is deleted."""
+    def close(self):
+        """Close the connection to the PostgreSQL database."""
         if hasattr(self, "_conn") and self._conn is not None and not self._conn.closed:
             self._conn.close()
+
+    def __del__(self):
+        """Close the connection when the object is deleted."""
+        self.close()
