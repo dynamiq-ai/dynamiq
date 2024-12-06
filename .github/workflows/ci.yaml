@@ -128,7 +128,7 @@ jobs:
         with:
           pytest-xml-coverage-path: ./reports/coverage.xml
           junitxml-path: ./reports/test-results.xml
-          create-new-comment: true
+          report-only-changed-files: true
 
   build-mkdocs:
     runs-on: ubuntu-latest
