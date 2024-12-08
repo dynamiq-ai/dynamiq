@@ -54,9 +54,9 @@ def create_vision_prompt_template() -> Prompt:
 
 
 class LLMImageConverterInputSchema(BaseModel):
-    file_paths: list[str] = Field(default=[], description="Parameter to provide paths to files.")
-    files: list[BytesIO | bytes] = Field(default=[], description="Parameter to provide files.")
-    metadata: dict = Field(default={}, description="Parameter to provide metadata.")
+    file_paths: list[str] = Field(default=None, description="Parameter to provide paths to files.")
+    files: list[BytesIO | bytes] = Field(default=None, description="Parameter to provide files.")
+    metadata: dict | list = Field(default=None, description="Parameter to provide metadata.")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -459,9 +459,9 @@ class LLMImageConverter(Node):
 
 
 class LLMPDFConverterInputSchema(BaseModel):
-    file_paths: list[str] = Field(default=[], description="Parameter to provide path to files.")
-    files: list[BytesIO | bytes] = Field(default=[], description="Parameter to provide files.")
-    metadata: dict = Field(default={}, description="Parameter to provide metadata.")
+    file_paths: list[str] = Field(default=None, description="Parameter to provide path to files.")
+    files: list[BytesIO | bytes] = Field(default=None, description="Parameter to provide files.")
+    metadata: dict | list = Field(default=None, description="Parameter to provide metadata.")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
