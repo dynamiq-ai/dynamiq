@@ -50,9 +50,7 @@ class PGVectorDocumentWriter(VectorStoreNode, PGVectorStoreWriterParams):
             "client": self.client,
         }
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
         """
         Execute the document writing operation.
 

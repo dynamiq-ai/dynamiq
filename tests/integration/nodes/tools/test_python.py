@@ -34,7 +34,7 @@ def run(input_data):
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
     assert result.output == {"content": expected_output}
-    assert result.input.model_dump() == input_data
+    assert result.input == input_data
 
 
 def test_python_node_with_default_values():
@@ -59,7 +59,7 @@ def run(input_data):
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
     assert result.output == {"content": expected_output}
-    assert result.input.model_dump() == input_data
+    assert result.input == input_data
 
 
 def test_python_node_without_input():
@@ -107,7 +107,7 @@ def run(input_data):
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
     assert result.output == {"content": expected_output}
-    assert result.input.model_dump() == input_data
+    assert result.input == input_data
 
 
 def test_python_node_with_random_import():
@@ -135,7 +135,7 @@ def run(input_data):
     assert isinstance(result.output["content"]["random_number"], int)
     assert 1 <= result.output["content"]["random_number"] <= 10
     assert result.output["content"]["range"] == "1 to 10"
-    assert result.input.model_dump() == input_data
+    assert result.input == input_data
 
 
 def test_python_node_with_dynamiq_import():
@@ -167,7 +167,7 @@ def run(input_data):
     assert isinstance(result.output["content"]["documents"][0], Document)
     assert result.output["content"]["documents"][0].content == "Document content"
     assert result.output["content"]["documents"][0].metadata == input_data["metadata"]
-    assert result.input.model_dump() == input_data
+    assert result.input == input_data
 
 
 def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mock_llm_response_text):

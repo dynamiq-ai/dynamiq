@@ -1,16 +1,10 @@
-from typing import Any, Literal
-
-from dynamiq.components.embedders.openai import (
-    OpenAIEmbedder as OpenAIEmbedderComponent,
-)
+from dynamiq.components.embedders.openai import OpenAIEmbedder as OpenAIEmbedderComponent
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
-from dynamiq.runnables import RunnableConfig
-from dynamiq.utils.logger import logger
+from dynamiq.nodes.embedders.base import DocumentEmbedder, TextEmbedder
 
 
-class OpenAIDocumentEmbedder(ConnectionNode):
+class OpenAIDocumentEmbedder(DocumentEmbedder):
     """
     Provides functionality to compute embeddings for documents using OpenAI's models.
 
@@ -33,7 +27,6 @@ class OpenAIDocumentEmbedder(ConnectionNode):
             only by 'text-embedding-3' and later models. Defaults to None.
     """
 
-    group: Literal[NodeGroup.EMBEDDERS] = NodeGroup.EMBEDDERS
     name: str = "OpenAIDocumentEmbedder"
     connection: OpenAIConnection | None = None
     model: str = "text-embedding-3-small"
@@ -52,10 +45,6 @@ class OpenAIDocumentEmbedder(ConnectionNode):
         if kwargs.get("client") is None and kwargs.get("connection") is None:
             kwargs["connection"] = OpenAIConnection()
         super().__init__(**kwargs)
-
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"document_embedder": True}
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
@@ -77,34 +66,8 @@ class OpenAIDocumentEmbedder(ConnectionNode):
                 client=self.client,
             )
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
-        """
-        Executes the document embedding process.
 
-        This method takes input documents, computes their embeddings using the OpenAI API, and
-        returns the result.
-
-        Args:
-            input_data (dict[str, Any]): A dictionary containing the input data. Expected to have a
-                'documents' key with the documents to embed.
-            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            The output from the document_embedder component, typically the computed embeddings.
-        """
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        output = self.document_embedder.embed_documents(input_data["documents"])
-        logger.debug("OpenAIDocumentEmbedder executed successfully.")
-
-        return output
-
-
-class OpenAITextEmbedder(ConnectionNode):
+class OpenAITextEmbedder(TextEmbedder):
     """
     A component designed to embed strings using specified OpenAI models.
 
@@ -131,7 +94,6 @@ class OpenAITextEmbedder(ConnectionNode):
         The `dimensions` parameter is model-dependent and may not be supported by all models.
     """
 
-    group: Literal[NodeGroup.EMBEDDERS] = NodeGroup.EMBEDDERS
     name: str = "OpenAITextEmbedder"
     connection: OpenAIConnection | None = None
     model: str = "text-embedding-3-small"
@@ -149,10 +111,6 @@ class OpenAITextEmbedder(ConnectionNode):
         if kwargs.get("client") is None and kwargs.get("connection") is None:
             kwargs["connection"] = OpenAIConnection()
         super().__init__(**kwargs)
-
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"text_embedder": True}
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
@@ -173,29 +131,3 @@ class OpenAITextEmbedder(ConnectionNode):
                 dimensions=self.dimensions,
                 client=self.client,
             )
-
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
-        """
-        Execute the text embedding process.
-
-        This method takes input data, runs the text embedding, and returns the result.
-
-        Args:
-            input_data (dict[str, Any]): The input data containing the query to embed.
-            config (RunnableConfig, optional): Configuration for the execution. Defaults to None.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            dict: A dictionary containing the embedding and the original query.
-        """
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        output = self.text_embedder.embed_text(input_data["query"])
-        logger.debug(f"OpenAITextEmbedder: {output['meta']}")
-        return {
-            "embedding": output["embedding"],
-            "query": input_data["query"],
-        }
