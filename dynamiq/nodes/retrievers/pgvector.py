@@ -1,15 +1,16 @@
-from typing import Any, Literal
+from typing import Any
 
 from dynamiq.components.retrievers.pgvector import PGVectorDocumentRetriever as PGVectorDocumentRetrieverComponent
 from dynamiq.connections import PostgreSQL
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
+from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.retrievers.base import Retriever, RetrieverInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PGVectorStore
 from dynamiq.storages.vector.pgvector.pgvector import PGVectorStoreParams
 
 
-class PGVectorDocumentRetriever(VectorStoreNode, PGVectorStoreParams):
+class PGVectorDocumentRetriever(Retriever, PGVectorStoreParams):
     """
     Document Retriever using PGVector.
 
@@ -29,12 +30,9 @@ class PGVectorDocumentRetriever(VectorStoreNode, PGVectorStoreParams):
         **kwargs: Keyword arguments for initializing the node.
     """
 
-    group: Literal[NodeGroup.RETRIEVERS] = NodeGroup.RETRIEVERS
     name: str = "PGVectorDocumentRetriever"
     connection: PostgreSQL | None = None
     vector_store: PGVectorStore | None = None
-    filters: dict[str, Any] | None = None
-    top_k: int = 10
     document_retriever: PGVectorDocumentRetrieverComponent = None
 
     def __init__(self, **kwargs):
@@ -81,7 +79,7 @@ class PGVectorDocumentRetriever(VectorStoreNode, PGVectorStoreParams):
                 vector_store=self.vector_store, filters=self.filters, top_k=self.top_k
             )
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+    def execute(self, input_data: RetrieverInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Execute the document retrieval process.
 
@@ -89,7 +87,7 @@ class PGVectorDocumentRetriever(VectorStoreNode, PGVectorStoreParams):
         document retriever component, and returns the retrieved documents.
 
         Args:
-            input_data (dict[str, Any]): The input data containing the query embedding.
+            input_data (RetrieverInputSchema): The input data containing the query embedding.
             config (RunnableConfig, optional): The configuration for the execution.
             **kwargs: Additional keyword arguments.
 
@@ -99,11 +97,11 @@ class PGVectorDocumentRetriever(VectorStoreNode, PGVectorStoreParams):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        query_embedding = input_data["embedding"]
-        content_key = input_data.get("content_key")
-        embedding_key = input_data.get("embedding_key")
-        filters = input_data.get("filters") or self.filters
-        top_k = input_data.get("top_k") or self.top_k
+        query_embedding = input_data.embedding
+        content_key = input_data.content_key
+        embedding_key = input_data.embedding_key
+        filters = input_data.filters or self.filters
+        top_k = input_data.top_k or self.top_k
 
         output = self.document_retriever.run(
             query_embedding, filters=filters, top_k=top_k, content_key=content_key, embedding_key=embedding_key
