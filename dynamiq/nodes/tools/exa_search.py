@@ -115,7 +115,7 @@ class ExaTool(ConnectionNode):
         """
         Executes the search using the Exa API and returns the formatted results.
         """
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -153,8 +153,6 @@ class ExaTool(ConnectionNode):
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
             raise
 
-        logger.debug(f"Tool {self.name} - {self.id}: search result {search_result}")
-
         results = search_result.get("results", [])
         formatted_results = self._format_search_results(results)
 
@@ -175,6 +173,6 @@ class ExaTool(ConnectionNode):
                 "raw_response": search_result,
             }
 
-        logger.debug(f"Tool {self.name} - {self.id}: finished with result {str(result)[:200]}...")
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
         return {"content": result}

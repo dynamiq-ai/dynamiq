@@ -5,8 +5,8 @@ from dynamiq.nodes.llms import BaseLLM, OpenAI
 def run_example_without_ground_truth(llm: BaseLLM):
     evaluator = LLMEvaluator(
         instructions="Is this answer problematic for children?",
-        inputs=[("answers", list[str])],
-        outputs=["score"],
+        inputs=[{"name": "answers", "type": list[str]}],
+        outputs=[{"name": "score", "type": int}],
         examples=[
             {
                 "inputs": {"answers": "Damn, this is straight outta hell!!!"},
@@ -32,8 +32,8 @@ def run_example_without_ground_truth(llm: BaseLLM):
 def run_example_with_ground_truth(llm: BaseLLM):
     evaluator = LLMEvaluator(
         instructions="Is the answer correct compared to the ground truth answer?",
-        inputs=[("answers", list[str]), ("ground_truth", list[str])],
-        outputs=["score"],
+        inputs=[{"name": "answers", "type": list[str]}, {"name": "ground_truth", "type": list[str]}],
+        outputs=[{"name": "score", "type": int}],
         examples=[
             {
                 "inputs": {
@@ -68,38 +68,37 @@ def run_example_with_ground_truth(llm: BaseLLM):
 
 
 def run_example_with_answer_correctness(llm: BaseLLM):
-
     instruction_text = """
-        Evaluate the "Answer Correctness". Firstly, read the <question> and <ground_truth_answer> and <answer_by_llm>.
-        Then analyze both answers and evaluate if the answers are similar.
+        Evaluate the 'Answer Correctness'. Firstly, read the <question>, <ground_truth_answer>, and <answer_by_llm>.
+        Then analyze both answers and evaluate if they are similar.
         - Score this metric from 0 to 1.
-        - Use 1 if the score is positive, if the <answer_by_llm> can answer the <question> as <ground_truth_answer>
-        - Use 0 if the <answer_by_llm> is very different than <ground_truth_answer> and
-            the <question> cannot be answered completely only by <answer_by_llm>
+        - Use 1 if the <answer_by_llm> adequately answers the <question> as well as the <ground_truth_answer>.
+        - Use 0 if the <answer_by_llm> is very different from the <ground_truth_answer> and
+          the <question> cannot be answered completely by the <answer_by_llm>.
     """
 
     evaluator = LLMEvaluator(
-        instructions=instruction_text,
+        instructions=instruction_text.strip(),
         inputs=[
-            ("question", list[str]),
-            ("ground_truth_answer", list[str]),
-            ("answer_by_llm", list[str]),
+            {"name": "question", "type": list[str]},
+            {"name": "ground_truth_answer", "type": list[str]},
+            {"name": "answer_by_llm", "type": list[str]},
         ],
-        outputs=["score"],
+        outputs=[{"name": "score", "type": int}],
         examples=[
             {
                 "inputs": {
                     "question": "What is the capital of Ukraine?",
-                    "answer_by_llm": "Lviv is a capital of Ukraine",
-                    "ground_truth_answer": "Kyiv is the capital of Ukraine",
+                    "answer_by_llm": "Lviv is the capital of Ukraine.",
+                    "ground_truth_answer": "Kyiv is the capital of Ukraine.",
                 },
                 "outputs": {"score": 0},
             },
             {
                 "inputs": {
                     "question": "What is the capital of Ukraine?",
-                    "answer_by_llm": "Kyiv is a capital of Ukraine",
-                    "ground_truth_answer": "Kyiv is the capital of Ukraine",
+                    "answer_by_llm": "Kyiv is the capital of Ukraine.",
+                    "ground_truth_answer": "Kyiv is the capital of Ukraine.",
                 },
                 "outputs": {"score": 1},
             },
@@ -109,16 +108,16 @@ def run_example_with_answer_correctness(llm: BaseLLM):
 
     questions = [
         "What is the capital of Ukraine?",
-        "Who created the Python language?",
+        "Who created the Python programming language?",
     ]
 
     answers = [
-        "Berlin is the capital of Great Britain",
+        "Berlin is the capital of Great Britain.",
         "Python language was created by Guido van Rossum.",
     ]
 
     ground_truth = [
-        "London is the capital of Great Britain",
+        "London is the capital of Great Britain.",
         "Python language was created by Guido van Rossum.",
     ]
 
@@ -129,18 +128,24 @@ def run_example_with_answer_correctness(llm: BaseLLM):
 
 
 def main():
+    # Initialize the LLM (provide your LLM configuration)
     llm = OpenAI(
         name="OpenAI",
         model="gpt-4o-mini",
-        postponned_init=True,
+        postponed_init=True,  # Corrected spelling from 'postponned' to 'postponed'
     )
-    withouth_ground_truth_results = run_example_without_ground_truth(llm)
-    print(withouth_ground_truth_results)
+
+    # Run the examples
+    without_ground_truth_results = run_example_without_ground_truth(llm)
+    print("Results without ground truth:")
+    print(without_ground_truth_results)
 
     with_ground_truth_results = run_example_with_ground_truth(llm)
+    print("\nResults with ground truth:")
     print(with_ground_truth_results)
 
     answer_correctness_results = run_example_with_answer_correctness(llm)
+    print("\nAnswer correctness results:")
     print(answer_correctness_results)
 
 

@@ -44,7 +44,7 @@ class ChromaDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
 
     @property
     def vector_store_params(self):
-        return self.model_dump(include=set(BaseWriterVectorStoreParams.model_fields)) | {
+        return self.model_dump(include={"index_name", "create_if_not_exist"}) | {
             "connection": self.connection,
             "client": self.client,
         }

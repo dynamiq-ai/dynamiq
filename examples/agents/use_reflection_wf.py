@@ -34,6 +34,7 @@ def run_workflow() -> tuple[str, dict]:
         llm=llm,
         role=AGENT_ROLE,
         id="agent",
+        verbose=True,
     )
 
     # Set up tracing and create the workflow

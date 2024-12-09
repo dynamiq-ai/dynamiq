@@ -2,6 +2,10 @@ import json
 import re
 import sqlite3
 import uuid
+from typing import ClassVar
+
+from pydantic import ConfigDict, Field
+from typing_extensions import Annotated
 
 from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.prompts import Message
@@ -16,10 +20,16 @@ class SQLiteError(Exception):
 class SQLite(MemoryBackend):
     """SQLite implementation of the memory storage backend."""
 
-    name = "SQLite"
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    # Define constants for the SQL queries
-    CREATE_TABLE_QUERY = """
+    name: str = "SQLite"
+    db_path: Annotated[str, Field(default="conversations.db")]
+    index_name: Annotated[str, Field(default="conversations")]
+
+    # SQL Query Constants
+    CREATE_TABLE_QUERY: ClassVar[
+        str
+    ] = """
         CREATE TABLE IF NOT EXISTS {index_name} (
             id TEXT PRIMARY KEY,
             role TEXT NOT NULL,
@@ -27,36 +37,39 @@ class SQLite(MemoryBackend):
             metadata TEXT,
             timestamp REAL
         )
-    """  # nosec B608
+    """
 
-    VALIDATE_TABLE_QUERY = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
-    INSERT_MESSAGE_QUERY = """
+    VALIDATE_TABLE_QUERY: ClassVar[str] = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+    INSERT_MESSAGE_QUERY: ClassVar[
+        str
+    ] = """
         INSERT INTO {index_name} (id, role, content, metadata, timestamp)
         VALUES (?, ?, ?, ?, ?)
-    """  # nosec B608
-    SELECT_ALL_MESSAGES_QUERY = """
+    """
+    SELECT_ALL_MESSAGES_QUERY: ClassVar[
+        str
+    ] = """
         SELECT id, role, content, metadata, timestamp
         FROM {index_name}
         ORDER BY timestamp ASC
-    """  # nosec B608
-    CHECK_IF_EMPTY_QUERY = "SELECT COUNT(*) FROM {index_name}"  # nosec B608
-    CLEAR_TABLE_QUERY = "DELETE FROM {index_name}"  # nosec B608
-    SEARCH_MESSAGES_QUERY = """
+    """
+    CHECK_IF_EMPTY_QUERY: ClassVar[str] = "SELECT COUNT(*) FROM {index_name}"
+    CLEAR_TABLE_QUERY: ClassVar[str] = "DELETE FROM {index_name}"
+    SEARCH_MESSAGES_QUERY: ClassVar[
+        str
+    ] = """
         SELECT id, role, content, metadata
         FROM {index_name}
-    """  # nosec B608
+    """
 
-    def __init__(self, db_path: str = "conversations.db", index_name: str = "conversations"):
-        """Initializes the SQLite memory storage."""
-        self.db_path = db_path
-        self.index_name = index_name
-
+    def model_post_init(self, __context) -> None:
+        """Initialize the SQLite database after model initialization."""
         try:
             self._validate_table_name(create_if_not_exists=True)
         except Exception as e:
             raise SQLiteError(f"Error initializing SQLite backend: {e}") from e
 
-    def _validate_table_name(self, create_if_not_exists: bool = False):
+    def _validate_table_name(self, create_if_not_exists: bool = False) -> None:
         """Validates the table name to prevent SQL injection and optionally creates it."""
         if not re.match(r"^[A-Za-z0-9_]+$", self.index_name):
             raise SQLiteError(f"Invalid table name: '{self.index_name}'")
@@ -64,7 +77,7 @@ class SQLite(MemoryBackend):
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(self.VALIDATE_TABLE_QUERY, (self.index_name,))  # nosec B608
+                cursor.execute(self.VALIDATE_TABLE_QUERY, (self.index_name,))
                 result = cursor.fetchone()
 
                 if result is None:
@@ -76,18 +89,18 @@ class SQLite(MemoryBackend):
         except sqlite3.Error as e:
             raise SQLiteError(f"Error validating or creating table: {e}") from e
 
-    def _create_table(self):
+    def _create_table(self) -> None:
         """Creates the messages table."""
         query = self.CREATE_TABLE_QUERY.format(index_name=self.index_name)
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(query)  # nosec B608
+                cursor.execute(query)
                 conn.commit()
         except sqlite3.Error as e:
             raise SQLiteError(f"Error creating table: {e}") from e
 
-    def add(self, message: Message):
+    def add(self, message: Message) -> None:
         """Stores a message in the SQLite database."""
         try:
             query = self.INSERT_MESSAGE_QUERY.format(index_name=self.index_name)
@@ -103,7 +116,7 @@ class SQLite(MemoryBackend):
                         json.dumps(message.metadata),
                         message.metadata.get("timestamp", 0),
                     ),
-                )  # nosec B608
+                )
                 conn.commit()
 
         except sqlite3.Error as e:
@@ -115,12 +128,9 @@ class SQLite(MemoryBackend):
             query = self.SELECT_ALL_MESSAGES_QUERY.format(index_name=self.index_name)
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(query)  # nosec B608
+                cursor.execute(query)
                 rows = cursor.fetchall()
-            return [
-                Message(role=row[1], content=row[2], metadata=json.loads(row[3] or "{}"), timestamp=row[4])
-                for row in rows
-            ]
+            return [Message(role=row[1], content=row[2], metadata=json.loads(row[3] or "{}")) for row in rows]
 
         except sqlite3.Error as e:
             raise SQLiteError(f"Error retrieving messages from database: {e}") from e
@@ -131,27 +141,26 @@ class SQLite(MemoryBackend):
             query = self.CHECK_IF_EMPTY_QUERY.format(index_name=self.index_name)
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(query)  # nosec B608
+                cursor.execute(query)
                 count = cursor.fetchone()[0]
             return count == 0
 
         except sqlite3.Error as e:
             raise SQLiteError(f"Error checking if database is empty: {e}") from e
 
-    def clear(self):
+    def clear(self) -> None:
         """Clears the SQLite database by deleting all rows in the table."""
         try:
             query = self.CLEAR_TABLE_QUERY.format(index_name=self.index_name)
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute(query)  # nosec B608
+                cursor.execute(query)
                 conn.commit()
         except sqlite3.Error as e:
             raise SQLiteError(f"Error clearing database: {e}") from e
 
-    def search(self, query: str = None, limit: int = 10, filters: dict = None) -> list[Message]:
+    def search(self, query: str | None = None, limit: int = 10, filters: dict | None = None) -> list[Message]:
         """Searches for messages in SQLite based on the query and/or filters."""
-        limit = limit or self.config.search_limit  # Use default if not provided
         try:
             where_clauses = []
             params = []
@@ -163,12 +172,10 @@ class SQLite(MemoryBackend):
             if filters:
                 for key, value in filters.items():
                     if isinstance(value, list):
-                        # Use IN for list-based filters
                         placeholders = ",".join("?" for _ in value)
                         where_clauses.append(f"json_extract(metadata, '$.{key}') IN ({placeholders})")
                         params.extend(value)
                     else:
-                        # Use LIKE for string matching, otherwise use = for exact match
                         if isinstance(value, str) and "%" in value:
                             where_clauses.append(f"json_extract(metadata, '$.{key}') LIKE ?")
                             params.append(value)
@@ -188,9 +195,6 @@ class SQLite(MemoryBackend):
                 rows = cursor.fetchall()
 
             return [Message(role=row[1], content=row[2], metadata=json.loads(row[3] or "{}")) for row in rows]
-
-        except sqlite3.Error as e:
-            raise SQLiteError(f"Error searching in database: {e}") from e
 
         except sqlite3.Error as e:
             raise SQLiteError(f"Error searching in database: {e}") from e

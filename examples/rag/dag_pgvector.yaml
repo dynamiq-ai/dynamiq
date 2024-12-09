@@ -1,0 +1,169 @@
+connections:
+  openai-conn:  # id
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+  unstructured-conn:  # id
+    type: dynamiq.connections.Unstructured
+    api_key: ${oc.env:UNSTRUCTURED_API_KEY}
+
+  pgvector-conn:  # id
+    type: dynamiq.connections.PostgreSQL
+    host: ${oc.env:POSTGRESQL_HOST}
+    port: ${oc.env:POSTGRESQL_PORT}
+    database: ${oc.env:POSTGRESQL_DATABASE}
+    user: ${oc.env:POSTGRESQL_USER}
+    password: ${oc.env:POSTGRESQL_PASSWORD}
+
+
+prompt_template: |
+  Please answer the following question based on the information found
+  within the sections enclosed by triplet quotes (\`\`\`).
+  Your response should be concise, well-written, and follow markdown formatting guidelines:
+
+  - Use bullet points for list items.
+  - Use **bold** text for emphasis where necessary.
+
+  **Question:** {{query}}
+
+  Thank you for your detailed attention to the request
+  **Context information**:
+  ```
+  {% for document in documents %}
+      ---
+      Document title: {{ document.metadata["title"] }}
+      Document information: {{ document.content }}
+      ---
+  {% endfor %}
+  ```
+
+  **User Question:** {{query}}
+  Answer:
+
+prompts:
+  openai-ai-prompt:
+    messages:
+      - role: user
+        content: ${prompt_template}
+
+
+nodes:
+  unstructured-file-converter-1:
+    type: dynamiq.nodes.converters.UnstructuredFileConverter
+    name: Unstructured File Converter
+    connection: unstructured-conn
+    strategy: hi_res
+
+  document-splitter-1:
+    type: dynamiq.nodes.splitters.DocumentSplitter
+    name: Document Splitter
+    split_by: passage
+    depends:
+      - node: unstructured-file-converter-1
+    input_transformer:
+      path: null
+      selector:
+        "documents": "$.unstructured-file-converter-1.output.documents"
+
+  document-embedder-node-1:
+    type: dynamiq.nodes.embedders.OpenAIDocumentEmbedder
+    name: OpenAI Document Embedder
+    connection: openai-conn
+    depends:
+      - node: document-splitter-1
+    input_transformer:
+      path: null
+      selector:
+        "documents": "$.document-splitter-1.output.documents"
+
+  document-writer-node-1:
+    type: dynamiq.nodes.writers.PGVectorDocumentWriter
+    name: PGVector Document Writer
+    connection: pgvector-conn
+    vector_function: cosine_similarity
+    table_name: documents-test-1
+    dimension: 1536
+    depends:
+      - node: document-embedder-node-1
+    input_transformer:
+      path: null
+      selector:
+        "documents": "$.document-embedder-node-1.output.documents"
+
+
+  openai-text-embedder-1:
+    type: dynamiq.nodes.embedders.OpenAITextEmbedder
+    name: OpenAI Text Embedder
+    connection: openai-conn
+    model: text-embedding-3-small
+
+  document-retriever-node-1:
+    type: dynamiq.nodes.retrievers.PGVectorDocumentRetriever
+    name: PGVector Document Retriever
+    connection: pgvector-conn
+    table_name: documents-test-1
+    vector_function: cosine_similarity
+    depends:
+      - node: openai-text-embedder-1
+    input_transformer:
+      path: null
+      selector:
+        "embedding": "$.openai-text-embedder-1.output.embedding"
+    output_transformer:
+      path: null
+      selector:
+        "documents": "$.documents"
+
+  openai-1:  # id
+    type: dynamiq.nodes.llms.OpenAI
+    name: OpenAI-1
+    model: gpt-3.5-turbo
+    connection: openai-conn
+    prompt: openai-ai-prompt
+    error_handling:
+      timeout_seconds: 60
+      retry_interval_seconds: 1
+      max_retries: 0
+      backoff_rate: 1
+    depends:
+      - node: document-retriever-node-1
+    input_transformer:
+      path: null
+      selector:
+        "query": "$.query"
+        "documents": "$.document-retriever-node-1.output.documents"
+    output_transformer:
+      path: null
+      selector:
+        "answer": "$.content"
+    caching:
+      enabled: false
+    streaming:
+      enabled: false
+
+
+flows:
+  indexing-flow:  # id
+    name: RAG Document Indexing Flow
+    nodes:
+      - unstructured-file-converter-1
+      - document-splitter-1
+      - document-embedder-node-1
+      - document-writer-node-1
+
+
+  retrieval-flow:  # id
+    name: RAG Document Retrieval Flow
+    nodes:
+      - openai-text-embedder-1
+      - document-retriever-node-1
+      - openai-1
+
+
+# Could specify multiple workflows in single yaml
+workflows:
+  indexing-workflow:  # id
+    flow: indexing-flow
+
+  retrieval-workflow:  # id
+    flow: retrieval-flow
