@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from pymilvus import DataType
 
 from dynamiq.connections import Milvus
+from dynamiq.storages.vector.base import BaseVectorStore
 from dynamiq.storages.vector.milvus.filter import Filter
 from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
     from pymilvus import MilvusClient
 
 
-class MilvusVectorStore:
+class MilvusVectorStore(BaseVectorStore):
     """
     Vector store using Milvus.
 

@@ -2,6 +2,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Optional
 
 from dynamiq.connections import Chroma
+from dynamiq.storages.vector.base import BaseVectorStore
 from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
@@ -23,7 +24,7 @@ CHROMA_OPERATOR_MAPPING = {
 }
 
 
-class ChromaVectorStore:
+class ChromaVectorStore(BaseVectorStore):
     """
     Vector store using Chroma.
 
@@ -127,9 +128,7 @@ class ChromaVectorStore:
             else:
                 self._collection.delete(ids=document_ids)
 
-    def delete_documents_by_filters(
-        self, filters: dict[str, Any] | None = None
-    ) -> None:
+    def delete_documents_by_filters(self, filters: dict[str, Any] | None = None) -> None:
         """
         Delete documents from the vector store based on the provided filters.
 

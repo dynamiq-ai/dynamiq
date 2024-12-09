@@ -1,10 +1,12 @@
 from typing import Any
 
+from dynamiq.components.retrievers.base import DocumentRetriever
 from dynamiq.storages.vector.weaviate import WeaviateVectorStore
+from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
-class WeaviateDocumentRetriever:
+class WeaviateDocumentRetriever(DocumentRetriever):
     """
     Document Retriever using Weaviate
     """
@@ -41,7 +43,7 @@ class WeaviateDocumentRetriever:
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
-    ):
+    ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the WeaviateDocumentStore that are similar to the provided query embedding.
         Args:

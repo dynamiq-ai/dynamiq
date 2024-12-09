@@ -1,10 +1,12 @@
 from typing import Any
 
+from dynamiq.components.retrievers.base import DocumentRetriever
 from dynamiq.storages.vector.qdrant import QdrantVectorStore
+from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
-class QdrantDocumentRetriever:
+class QdrantDocumentRetriever(DocumentRetriever):
     """
     Document Retriever using Qdrant
     """
@@ -41,7 +43,7 @@ class QdrantDocumentRetriever:
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
-    ):
+    ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the QdrantDocumentStore that are similar to the provided query embedding.
         Args:

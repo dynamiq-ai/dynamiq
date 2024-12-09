@@ -1,10 +1,12 @@
 from typing import Any
 
+from dynamiq.components.retrievers.base import DocumentRetriever
 from dynamiq.storages.vector import PineconeVectorStore
+from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
-class PineconeDocumentRetriever:
+class PineconeDocumentRetriever(DocumentRetriever):
     """
     Document Retriever using Pinecone.
     """
@@ -44,7 +46,7 @@ class PineconeDocumentRetriever:
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
-    ):
+    ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the PineconeDocumentStore that are similar to the provided query embedding.
 

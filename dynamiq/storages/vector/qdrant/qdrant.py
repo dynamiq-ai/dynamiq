@@ -10,7 +10,7 @@ from qdrant_client.http import models as rest
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from dynamiq.connections import Qdrant as QdrantConnection
-from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException as DuplicateDocumentError
 from dynamiq.storages.vector.exceptions import VectorStoreException as DocumentStoreError
 from dynamiq.storages.vector.policies import DuplicatePolicy
@@ -73,7 +73,7 @@ class QdrantWriterVectorStoreParams(BaseWriterVectorStoreParams):
     metric: QdrantSimilarityMetric = QdrantSimilarityMetric.COSINE
 
 
-class QdrantVectorStore:
+class QdrantVectorStore(BaseVectorStore):
     """QdrantVectorStore a Document Store for Qdrant.
 
     Usage example:

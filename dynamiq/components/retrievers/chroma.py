@@ -1,9 +1,11 @@
 from typing import Any
 
+from dynamiq.components.retrievers.base import DocumentRetriever
 from dynamiq.storages.vector import ChromaVectorStore
+from dynamiq.types import Document
 
 
-class ChromaDocumentRetriever:
+class ChromaDocumentRetriever(DocumentRetriever):
     """
     Document Retriever using Chroma.
     """
@@ -43,7 +45,7 @@ class ChromaDocumentRetriever:
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
-    ):
+    ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the ChromaVectorStore that are similar to the provided query embedding.
 

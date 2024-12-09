@@ -1,13 +1,18 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
+
+from pydantic import BaseModel, Field
 
 from dynamiq.components.splitters.document import DocumentSplitBy
-from dynamiq.components.splitters.document import (
-    DocumentSplitter as DocumentSplitterComponent,
-)
+from dynamiq.components.splitters.document import DocumentSplitter as DocumentSplitterComponent
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types import Document
 from dynamiq.utils.logger import logger
+
+
+class DocumentSplitterInputSchema(BaseModel):
+    documents: list[Document] = Field(..., description="Parameter to provide documents to split.")
 
 
 class DocumentSplitter(Node):
@@ -40,6 +45,7 @@ class DocumentSplitter(Node):
     split_length: int = 10
     split_overlap: int = 0
     document_splitter: DocumentSplitterComponent = None
+    input_schema: ClassVar[type[DocumentSplitterInputSchema]] = DocumentSplitterInputSchema
 
     @property
     def to_dict_exclude_params(self):
@@ -62,12 +68,12 @@ class DocumentSplitter(Node):
             )
 
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+        self, input_data: DocumentSplitterInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """Executes the document splitting process.
 
         Args:
-            input_data (dict[str, Any]): The input data containing the documents to split.
+            input_data (DocumentSplitterInputSchema): The input data containing the documents to split.
             config (RunnableConfig, optional): The configuration for the execution. Defaults to None.
             **kwargs: Additional keyword arguments.
 
@@ -77,7 +83,7 @@ class DocumentSplitter(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        documents = input_data["documents"]
+        documents = input_data.documents
         logger.debug(f"Splitting {len(documents)} documents")
         output = self.document_splitter.run(documents=documents)
 

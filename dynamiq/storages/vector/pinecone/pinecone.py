@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from pydantic import Field
 
 from dynamiq.connections import Pinecone
-from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.pinecone.filters import _normalize_filters
 from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
@@ -42,7 +42,7 @@ class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVecto
     pods: int = 1
 
 
-class PineconeVectorStore:
+class PineconeVectorStore(BaseVectorStore):
     """Vector store using Pinecone."""
 
     def __init__(

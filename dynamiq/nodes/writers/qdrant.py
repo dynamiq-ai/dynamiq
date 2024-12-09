@@ -1,13 +1,9 @@
-from typing import Any, Literal
-
 from dynamiq.connections import Qdrant as QdrantConnection
-from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
-from dynamiq.runnables import RunnableConfig
+from dynamiq.nodes.writers.base import Writer
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore, QdrantWriterVectorStoreParams
-from dynamiq.utils.logger import logger
 
 
-class QdrantDocumentWriter(VectorStoreNode, QdrantWriterVectorStoreParams):
+class QdrantDocumentWriter(Writer, QdrantWriterVectorStoreParams):
     """
     Document Writer Node using Qdrant Vector Store.
 
@@ -20,7 +16,6 @@ class QdrantDocumentWriter(VectorStoreNode, QdrantWriterVectorStoreParams):
         vector_store (QdrantVectorStore | None): The Qdrant Vector Store instance.
     """
 
-    group: Literal[NodeGroup.WRITERS] = NodeGroup.WRITERS
     name: str = "QdrantDocumentWriter"
     connection: QdrantConnection | None = None
     vector_store: QdrantVectorStore | None = None
@@ -47,30 +42,4 @@ class QdrantDocumentWriter(VectorStoreNode, QdrantWriterVectorStoreParams):
         return self.model_dump(include=set(QdrantWriterVectorStoreParams.model_fields)) | {
             "connection": self.connection,
             "client": self.client,
-        }
-
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
-        """
-        Execute the document writing operation.
-
-        This method writes the input documents to the Qdrant Vector Store.
-
-        Args:
-            input_data (dict[str, Any]): Input data containing the documents to be written.
-            config (RunnableConfig, optional): Configuration for the execution.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            dict: A dictionary containing the count of upserted documents.
-        """
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        documents = input_data["documents"]
-
-        upserted_count = self.vector_store.write_documents(documents)
-        logger.debug(f"Upserted {upserted_count} documents to Qdrant Vector Store.")
-
-        return {
-            "upserted_count": upserted_count,
         }

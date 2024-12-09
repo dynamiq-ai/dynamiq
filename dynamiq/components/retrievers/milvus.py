@@ -1,10 +1,11 @@
 from typing import Any
 
+from dynamiq.components.retrievers.base import DocumentRetriever
 from dynamiq.storages.vector import MilvusVectorStore
 from dynamiq.types import Document
 
 
-class MilvusDocumentRetriever:
+class MilvusDocumentRetriever(DocumentRetriever):
     """
     Document Retriever using Milvus.
     """

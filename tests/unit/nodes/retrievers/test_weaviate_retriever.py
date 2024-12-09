@@ -1,11 +1,13 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from dynamiq.components.retrievers.weaviate import WeaviateDocumentRetriever as WeaviateDocumentRetrieverComponent
 from dynamiq.connections import Weaviate
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.retrievers import WeaviateDocumentRetriever
+from dynamiq.nodes.retrievers.base import RetrieverInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import WeaviateVectorStore
 
@@ -52,7 +54,7 @@ def test_init_components(weaviate_document_retriever, mock_weaviate_vector_store
 
 
 def test_execute(weaviate_document_retriever):
-    input_data = {"embedding": [0.1, 0.2, 0.3], "filters": {"field": "value"}, "top_k": 5}
+    input_data = RetrieverInputSchema(embedding=[0.1, 0.2, 0.3], filters={"field": "value"}, top_k=5)
     config = RunnableConfig(callbacks=[])
 
     mock_output = {"documents": [{"id": "1", "content": "Document 1"}]}
@@ -62,22 +64,21 @@ def test_execute(weaviate_document_retriever):
     result = weaviate_document_retriever.execute(input_data, config)
 
     weaviate_document_retriever.document_retriever.run.assert_called_once_with(
-        input_data["embedding"], filters=input_data["filters"], top_k=input_data["top_k"]
+        input_data.embedding, filters=input_data.filters, top_k=input_data.top_k
     )
 
     assert result == {"documents": mock_output["documents"]}
 
 
 def test_execute_with_missing_embedding_key(weaviate_document_retriever):
-    input_data = {}
     config = RunnableConfig(callbacks=[])
 
-    with pytest.raises(KeyError):
-        weaviate_document_retriever.execute(input_data, config)
+    with pytest.raises(ValidationError):
+        weaviate_document_retriever.execute(RetrieverInputSchema(), config)
 
 
 def test_execute_with_default_filters_and_top_k(weaviate_document_retriever):
-    input_data = {"embedding": [0.1, 0.2, 0.3]}
+    input_data = RetrieverInputSchema(embedding=[0.1, 0.2, 0.3])
     config = RunnableConfig(callbacks=[])
 
     mock_output = {"documents": [{"id": "1", "content": "Document 1"}]}
@@ -87,7 +88,7 @@ def test_execute_with_default_filters_and_top_k(weaviate_document_retriever):
     result = weaviate_document_retriever.execute(input_data, config)
 
     weaviate_document_retriever.document_retriever.run.assert_called_once_with(
-        input_data["embedding"], filters=weaviate_document_retriever.filters, top_k=weaviate_document_retriever.top_k
+        input_data.embedding, filters=weaviate_document_retriever.filters, top_k=weaviate_document_retriever.top_k
     )
 
     assert result == {"documents": mock_output["documents"]}

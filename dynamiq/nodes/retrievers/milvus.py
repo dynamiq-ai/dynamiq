@@ -1,14 +1,11 @@
-from typing import Any, Literal
-
 from dynamiq.components.retrievers.milvus import MilvusDocumentRetriever as MilvusDocumentRetrieverComponent
 from dynamiq.connections import Milvus
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
-from dynamiq.runnables import RunnableConfig
+from dynamiq.nodes.retrievers.base import Retriever
 from dynamiq.storages.vector import MilvusVectorStore
 
 
-class MilvusDocumentRetriever(VectorStoreNode):
+class MilvusDocumentRetriever(Retriever):
     """
     Document Retriever using Milvus.
 
@@ -28,12 +25,9 @@ class MilvusDocumentRetriever(VectorStoreNode):
         **kwargs: Keyword arguments for initializing the node.
     """
 
-    group: Literal[NodeGroup.RETRIEVERS] = NodeGroup.RETRIEVERS
     name: str = "MilvusDocumentRetriever"
     connection: Milvus | None = None
     vector_store: MilvusVectorStore | None = None
-    filters: dict[str, Any] | None = None
-    top_k: int = 10
     document_retriever: MilvusDocumentRetrieverComponent = None
 
     def __init__(self, **kwargs):
@@ -53,10 +47,6 @@ class MilvusDocumentRetriever(VectorStoreNode):
     def vector_store_cls(self):
         return MilvusVectorStore
 
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"document_retriever": True}
-
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the MilvusDocumentRetriever.
@@ -73,31 +63,3 @@ class MilvusDocumentRetriever(VectorStoreNode):
             self.document_retriever = MilvusDocumentRetrieverComponent(
                 vector_store=self.vector_store, filters=self.filters, top_k=self.top_k
             )
-
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
-        """
-        Execute the document retrieval process.
-
-        This method takes an input embedding, retrieves similar documents using the
-        document retriever component, and returns the retrieved documents.
-
-        Args:
-            input_data (dict[str, Any]): The input data containing the query embedding.
-            config (RunnableConfig, optional): The configuration for the execution.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            dict[str, Any]: A dictionary containing the retrieved documents.
-        """
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        query_embedding = input_data["embedding"]
-        filters = input_data.get("filters") or self.filters
-        top_k = input_data.get("top_k") or self.top_k
-
-        output = self.document_retriever.run(query_embedding, filters=filters, top_k=top_k)
-
-        return {
-            "documents": output["documents"],
-        }
