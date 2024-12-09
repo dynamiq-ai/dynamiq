@@ -60,6 +60,7 @@ class ConnectionType(str, enum.Enum):
     DeepSeek = "DeepSeek"
     PostgreSQL = "PostgreSQL"
     Exa = "Exa"
+    Ollama = "Ollama"
 
 
 class HTTPMethod(str, enum.Enum):
@@ -996,3 +997,36 @@ class Exa(Http):
         """
         self.headers.update({"x-api-key": self.api_key, "Content-Type": "application/json"})
         return super().connect()
+
+
+class Ollama(BaseConnection):
+    """Represents a connection to Ollama API.
+
+    Attributes:
+        type (Literal[ConnectionType.HttpApiKey]): The type of connection, always 'HttpApiKey'.
+        url (str): The URL of the Ollama API, defaults to "http://localhost:11434".
+    """
+
+    type: Literal[ConnectionType.Ollama] = ConnectionType.Ollama
+    url: str = Field(default="http://localhost:11434")
+
+    def connect(self):
+        """Connects to the Ollama API.
+
+        Returns:
+            requests: A requests module for making HTTP requests to the API.
+        """
+        import requests
+
+        return requests
+
+    @property
+    def conn_params(self) -> dict:
+        """Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing the base url with the key 'api_base'.
+        """
+        return {
+            "api_base": self.url,
+        }
