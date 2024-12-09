@@ -311,7 +311,35 @@ class LLMEvaluator:
             raise ValueError(msg)
 
     @staticmethod
-    def parse_llm_json_output(response):
+    def _extract_json_string(s: str) -> str:
+        """
+        Extract the first JSON object from the string by balancing braces.
+
+        Args:
+            s (str): The input string containing the JSON object.
+
+        Returns:
+            str: The extracted JSON string.
+
+        Raises:
+            ValueError: If no JSON object can be found.
+        """
+        stack = []
+        start = None
+        for i, char in enumerate(s):
+            if char == "{":
+                if not stack:
+                    start = i
+                stack.append(char)
+            elif char == "}":
+                if stack:
+                    stack.pop()
+                    if not stack:
+                        return s[start : i + 1]
+        return None
+
+    @staticmethod
+    def parse_llm_json_output(response: str) -> dict[str, Any]:
         """
         Attempt to parse the received LLM output into a JSON object.
 
@@ -319,7 +347,7 @@ class LLMEvaluator:
             response (str): The raw output from the LLM.
 
         Returns:
-            dict: The parsed JSON object.
+            Dict[str, Any]: The parsed JSON object.
 
         Raises:
             ValueError: If the output cannot be parsed into valid JSON.
@@ -328,31 +356,32 @@ class LLMEvaluator:
             # First, try to parse the received string directly.
             return json.loads(response)
         except json.JSONDecodeError:
-            # If direct parsing fails, attempt to extract JSON content.
+            pass
 
-            # Use a regular expression to find the first JSON object in the string.
-            json_pattern = re.compile(r"\{.*?\}", re.DOTALL)
-            match = json_pattern.search(response)
-
-            if match:
-                json_str = match.group()
-
-                # Replace single quotes with double quotes to correct common mistakes.
-                json_str_corrected = json_str.replace("'", '"')
-
-                try:
-                    return json.loads(json_str_corrected)
-                except json.JSONDecodeError:
-                    # Attempt to fix common JSON issues, like trailing commas.
-                    json_str_no_trailing_commas = re.sub(r",\s*}", "}", json_str_corrected)
-                    json_str_no_trailing_commas = re.sub(r",\s*]", "]", json_str_no_trailing_commas)
-                    try:
-                        return json.loads(json_str_no_trailing_commas)
-                    except json.JSONDecodeError as e:
-                        raise ValueError(f"Failed to parse JSON after corrections: {e}")
-
-            # If we can't find a JSON object, raise an error.
+        # Extract JSON string
+        json_str = LLMEvaluator._extract_json_string(response)
+        if not json_str:
             raise ValueError(f"Response from LLM is not valid JSON: {response}")
+
+        # Remove comments
+        json_str_no_comments = re.sub(r"//.*?$|/\*.*?\*/", "", json_str, flags=re.DOTALL | re.MULTILINE)
+
+        # Replace single quotes with double quotes
+        json_str_corrected = json_str_no_comments.replace("'", '"')
+
+        # Replace Python literals with JSON equivalents
+        json_str_corrected = re.sub(r"\bTrue\b", "true", json_str_corrected)
+        json_str_corrected = re.sub(r"\bFalse\b", "false", json_str_corrected)
+        json_str_corrected = re.sub(r"\bNone\b", "null", json_str_corrected)
+
+        # Remove trailing commas
+        json_str_no_trailing_commas = re.sub(r",\s*([\]}\)])", r"\1", json_str_corrected)
+
+        # Try parsing the cleaned JSON string
+        try:
+            return json.loads(json_str_no_trailing_commas)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse JSON after corrections: {e}")
 
     def is_valid_json_and_has_expected_keys(
         self, expected: list[str], received: str
