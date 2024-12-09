@@ -58,7 +58,9 @@ class ConnectionType(str, enum.Enum):
     Milvus = "Milvus"
     Perplexity = "Perplexity"
     DeepSeek = "DeepSeek"
+    PostgreSQL = "PostgreSQL"
     Exa = "Exa"
+    Ollama = "Ollama"
 
 
 class HTTPMethod(str, enum.Enum):
@@ -932,6 +934,44 @@ class DeepSeek(BaseApiKeyConnection):
         pass
 
 
+class PostgreSQL(BaseConnection):
+    type: Literal[ConnectionType.PostgreSQL] = ConnectionType.PostgreSQL
+    host: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_HOST", "localhost"))
+    port: int = Field(default_factory=partial(get_env_var, "POSTGRESQL_PORT", 5432))
+    database: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_DATABASE", "db"))
+    user: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_USER", "postgres"))
+    password: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_PASSWORD", "password"))
+
+    def connect(self):
+        try:
+            import psycopg
+
+            conn = psycopg.connect(
+                host=self.host, port=self.port, dbname=self.database, user=self.user, password=self.password
+            )
+            logger.debug(
+                f"Connected to PGVector with host={self.host}, "
+                f"port={str(self.port)}, user={self.user}, "
+                f"database={self.database}."
+            )
+            return conn
+        except ImportError:
+            raise ImportError("Please install psycopg to use PGVector connection")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to PGVector: {str(e)}")
+
+    @property
+    def conn_params(self) -> str:
+        """
+        Returns the parameters required for connection.
+
+        Returns:
+            dict: A string containing the host, the port, the database,
+            the user, and the password for the connection.
+        """
+        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+
+
 class Exa(Http):
     """
     Represents a connection to the Exa AI Search API.
@@ -957,3 +997,36 @@ class Exa(Http):
         """
         self.headers.update({"x-api-key": self.api_key, "Content-Type": "application/json"})
         return super().connect()
+
+
+class Ollama(BaseConnection):
+    """Represents a connection to Ollama API.
+
+    Attributes:
+        type (Literal[ConnectionType.HttpApiKey]): The type of connection, always 'HttpApiKey'.
+        url (str): The URL of the Ollama API, defaults to "http://localhost:11434".
+    """
+
+    type: Literal[ConnectionType.Ollama] = ConnectionType.Ollama
+    url: str = Field(default="http://localhost:11434")
+
+    def connect(self):
+        """Connects to the Ollama API.
+
+        Returns:
+            requests: A requests module for making HTTP requests to the API.
+        """
+        import requests
+
+        return requests
+
+    @property
+    def conn_params(self) -> dict:
+        """Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing the base url with the key 'api_base'.
+        """
+        return {
+            "api_base": self.url,
+        }

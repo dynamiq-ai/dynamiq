@@ -62,7 +62,7 @@ def test_execute(qdrant_document_retriever):
     result = qdrant_document_retriever.execute(input_data, config)
 
     qdrant_document_retriever.document_retriever.run.assert_called_once_with(
-        input_data.embedding, filters=input_data.filters, top_k=input_data.top_k
+        input_data.embedding, filters=input_data.filters, top_k=input_data.top_k, content_key=None
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -86,7 +86,10 @@ def test_execute_with_default_filters_and_top_k(qdrant_document_retriever):
     result = qdrant_document_retriever.execute(input_data, config)
 
     qdrant_document_retriever.document_retriever.run.assert_called_once_with(
-        input_data.embedding, filters=qdrant_document_retriever.filters, top_k=qdrant_document_retriever.top_k
+        input_data.embedding,
+        filters=qdrant_document_retriever.filters,
+        top_k=qdrant_document_retriever.top_k,
+        content_key=None,
     )
 
     assert result == {"documents": mock_output["documents"]}

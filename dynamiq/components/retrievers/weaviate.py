@@ -1,12 +1,11 @@
 from typing import Any
 
-from dynamiq.components.retrievers.base import DocumentRetriever
 from dynamiq.storages.vector.weaviate import WeaviateVectorStore
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
-class WeaviateDocumentRetriever(DocumentRetriever):
+class WeaviateDocumentRetriever:
     """
     Document Retriever using Weaviate
     """
@@ -43,6 +42,7 @@ class WeaviateDocumentRetriever(DocumentRetriever):
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
+        content_key: str | None = None,
     ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the WeaviateDocumentStore that are similar to the provided query embedding.
@@ -53,6 +53,7 @@ class WeaviateDocumentRetriever(DocumentRetriever):
             documents from the output.
             top_k (int, optional): The maximum number of documents to return. Defaults to None.
             filters (Optional[dict[str, Any]]): Filters to apply for retrieving specific documents. Defaults to None.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             List[Document]: A list of Document instances sorted by their relevance to the query_embedding.
@@ -65,6 +66,7 @@ class WeaviateDocumentRetriever(DocumentRetriever):
             filters=filters,
             top_k=top_k,
             exclude_document_embeddings=exclude_document_embeddings,
+            content_key=content_key,
         )
         logger.debug(f"Retrieved {len(docs)} documents from Weaviate Vector Store.")
 

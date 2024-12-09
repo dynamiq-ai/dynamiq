@@ -44,12 +44,13 @@ class FunctionTool(Node, Generic[T]):
         :param config: Optional configuration for the runnable instance.
         :return: Dictionary with the execution result.
         """
+        logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         result = self.run_func(input_data)
 
-        logger.debug(f"Tool {self.name} - {self.id}: finished with result {result}")
+        logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
         return {"content": result}
 
     def get_schema(self):

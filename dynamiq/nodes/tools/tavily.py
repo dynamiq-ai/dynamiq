@@ -104,7 +104,7 @@ class TavilyTool(ConnectionNode):
         Returns:
             dict[str, Any]: The result of the search operation.
         """
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -139,10 +139,7 @@ class TavilyTool(ConnectionNode):
             )
             raise
 
-        logger.debug(f"Tool {self.name} - {self.id}: search result {search_result}")
-
         formatted_results = self._format_search_results(search_result)
-
         sources_with_url = [
             f"[{result.get('title')}]({result.get('url')})"
             for result in search_result.get("results", [])
@@ -169,6 +166,6 @@ class TavilyTool(ConnectionNode):
                 "response_time": search_result.get("response_time", 0),
             }
 
-        logger.debug(f"Tool {self.name} - {self.id}: finished with result {str(result)[:200]}...")
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
         return {"content": result}

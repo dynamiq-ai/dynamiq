@@ -1,8 +1,12 @@
 from pydantic import model_validator
+
 from dynamiq.connections import Pinecone
-from dynamiq.nodes.writers.base import Writer
+from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.writers.base import Writer, WriterInputSchema
+from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PineconeVectorStore
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType, PineconeWriterVectorStoreParams
+from dynamiq.utils.logger import logger
 
 
 class PineconeDocumentWriter(Writer, PineconeWriterVectorStoreParams):
@@ -64,4 +68,35 @@ class PineconeDocumentWriter(Writer, PineconeWriterVectorStoreParams):
         return self.model_dump(include=set(PineconeWriterVectorStoreParams.model_fields)) | {
             "connection": self.connection,
             "client": self.client,
+        }
+
+    def execute(self, input_data: WriterInputSchema, config: RunnableConfig = None, **kwargs):
+        """
+        Execute the document writing process.
+
+        This method writes the input documents to the Pinecone Vector Store.
+
+        Args:
+            input_data (WriterInputSchema): An instance containing the input data.
+                Expected to have a 'documents' key with the documents to be written.
+            config (RunnableConfig, optional): Configuration for the execution.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict: A dictionary containing the number of upserted documents.
+
+        Raises:
+            Any exceptions raised by the vector store's write_documents method.
+        """
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        documents = input_data.documents
+        content_key = input_data.content_key
+
+        upserted_count = self.vector_store.write_documents(documents, content_key=content_key)
+        logger.debug(f"Upserted {upserted_count} documents to Pinecone Vector Store.")
+
+        return {
+            "upserted_count": upserted_count,
         }

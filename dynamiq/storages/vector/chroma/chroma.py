@@ -2,7 +2,6 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Optional
 
 from dynamiq.connections import Chroma
-from dynamiq.storages.vector.base import BaseVectorStore
 from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
@@ -24,7 +23,7 @@ CHROMA_OPERATOR_MAPPING = {
 }
 
 
-class ChromaVectorStore(BaseVectorStore):
+class ChromaVectorStore:
     """
     Vector store using Chroma.
 

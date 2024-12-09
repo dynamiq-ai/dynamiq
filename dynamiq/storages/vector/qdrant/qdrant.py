@@ -10,7 +10,7 @@ from qdrant_client.http import models as rest
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from dynamiq.connections import Qdrant as QdrantConnection
-from dynamiq.storages.vector.base import BaseVectorStore, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException as DuplicateDocumentError
 from dynamiq.storages.vector.exceptions import VectorStoreException as DocumentStoreError
 from dynamiq.storages.vector.policies import DuplicatePolicy
@@ -73,7 +73,7 @@ class QdrantWriterVectorStoreParams(BaseWriterVectorStoreParams):
     metric: QdrantSimilarityMetric = QdrantSimilarityMetric.COSINE
 
 
-class QdrantVectorStore(BaseVectorStore):
+class QdrantVectorStore:
     """QdrantVectorStore a Document Store for Qdrant.
 
     Usage example:
@@ -139,6 +139,7 @@ class QdrantVectorStore(BaseVectorStore):
         write_batch_size: int = 100,
         scroll_size: int = 10_000,
         payload_fields_to_index: list[dict] | None = None,
+        content_key: str = "content",
     ):
         """Initializes the QdrantDocumentStore.
 
@@ -187,6 +188,7 @@ class QdrantVectorStore(BaseVectorStore):
             write_batch_size: The batch size for writing documents.
             scroll_size: The scroll size for reading documents.
             payload_fields_to_index: List of payload fields to index.
+            content_key (Optional[str]): The field used to store content in the storage.
         """
 
         self._client = client
@@ -233,6 +235,7 @@ class QdrantVectorStore(BaseVectorStore):
         self.return_embedding = return_embedding
         self.write_batch_size = write_batch_size
         self.scroll_size = scroll_size
+        self.content_key = content_key
 
     @property
     def client(self):
@@ -315,6 +318,7 @@ class QdrantVectorStore(BaseVectorStore):
         self,
         documents: list[Document],
         policy: DuplicatePolicy = DuplicatePolicy.FAIL,
+        content_key: str | None = None,
     ) -> int:
         """Writes documents to Qdrant using the specified policy.
 
@@ -326,10 +330,26 @@ class QdrantVectorStore(BaseVectorStore):
         Args:
             documents: A list of Document objects to write to Qdrant.
             policy: The policy for handling duplicate documents.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             The number of documents written to the document store.
         """
+        if not self.client.collection_exists(self.index_name):
+            if self.create_if_not_exist:
+                logger.info(f"Collection {self.index_name} doesn't exist. Creating...")
+                self._set_up_collection(
+                    collection_name=self.index_name,
+                    embedding_dim=self.dimension,
+                    create_if_not_exist=True,
+                    recreate_collection=self.recreate_index,
+                    similarity=self.metric,
+                    use_sparse_embeddings=self.use_sparse_embeddings,
+                    sparse_idf=self.sparse_idf,
+                    on_disk=self.on_disk,
+                )
+            else:
+                raise QdrantStoreError(f"Collection {self.index_name} doesn't exist")
         for doc in documents:
             if not isinstance(doc, Document):
                 msg = f"DocumentStore.write_documents() expects a list of Documents but got an element of {type(doc)}."
@@ -350,6 +370,7 @@ class QdrantVectorStore(BaseVectorStore):
             batch = convert_dynamiq_documents_to_qdrant_points(
                 document_batch,
                 use_sparse_embeddings=self.use_sparse_embeddings,
+                content_key=content_key or self.content_key,
             )
 
             self.client.upsert(
@@ -412,12 +433,14 @@ class QdrantVectorStore(BaseVectorStore):
         self,
         filters: dict[str, Any] | rest.Filter | None = None,
         include_embeddings: bool = False,
+        content_key: str | None = None,
     ) -> Generator[Document, None, None]:
         """Returns a generator that yields documents from Qdrant based on the provided filters.
 
         Args:
             filters: Filters applied to the retrieved documents.
             include_embeddings: Whether to include the embeddings of the retrieved documents.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             A generator that yields documents retrieved from Qdrant.
@@ -442,29 +465,37 @@ class QdrantVectorStore(BaseVectorStore):
             )
 
             for record in records:
-                yield convert_qdrant_point_to_dynamiq_document(record, use_sparse_embeddings=self.use_sparse_embeddings)
+                yield convert_qdrant_point_to_dynamiq_document(
+                    record,
+                    use_sparse_embeddings=self.use_sparse_embeddings,
+                    content_key=content_key or self.content_key,
+                )
 
-    def list_documents(self, include_embeddings: bool = False) -> list[Document]:
+    def list_documents(self, include_embeddings: bool = False, content_key: str | None = None) -> list[Document]:
         """Returns a list of all documents in the Document Store.
 
         Args:
             include_embeddings: Whether to include the embeddings of the retrieved documents.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             A list of all documents in the Document Store.
         """
-        return list(self.get_documents_generator(include_embeddings=include_embeddings))
+        return list(
+            self.get_documents_generator(
+                include_embeddings=include_embeddings, content_key=content_key or self.content_key
+            )
+        )
 
     def get_documents_by_id(
-        self,
-        ids: list[str],
-        index: str | None = None,
+        self, ids: list[str], index: str | None = None, content_key: str | None = None
     ) -> list[Document]:
         """Retrieves documents from Qdrant by their IDs.
 
         Args:
             ids: A list of document IDs to retrieve.
             index: The name of the index to retrieve documents from.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             A list of documents.
@@ -483,7 +514,11 @@ class QdrantVectorStore(BaseVectorStore):
 
         for record in records:
             documents.append(
-                convert_qdrant_point_to_dynamiq_document(record, use_sparse_embeddings=self.use_sparse_embeddings)
+                convert_qdrant_point_to_dynamiq_document(
+                    record,
+                    use_sparse_embeddings=self.use_sparse_embeddings,
+                    content_key=content_key or self.content_key,
+                )
             )
         return documents
 
@@ -495,6 +530,7 @@ class QdrantVectorStore(BaseVectorStore):
         scale_score: bool = False,
         return_embedding: bool = False,
         score_threshold: float | None = None,
+        content_key: str | None = None,
     ) -> list[Document]:
         """Queries Qdrant using a sparse embedding and returns the most relevant documents.
 
@@ -507,6 +543,7 @@ class QdrantVectorStore(BaseVectorStore):
             score_threshold: A minimal score threshold for the result. Score of the returned result might be higher or
                 smaller than the threshold depending on the Distance function used. E.g. for cosine similarity only
                 higher scores will be returned.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             List of documents that are most similar to `query_sparse_embedding`.
@@ -538,7 +575,9 @@ class QdrantVectorStore(BaseVectorStore):
             score_threshold=score_threshold,
         ).points
         results = [
-            convert_qdrant_point_to_dynamiq_document(point, use_sparse_embeddings=self.use_sparse_embeddings)
+            convert_qdrant_point_to_dynamiq_document(
+                point, use_sparse_embeddings=self.use_sparse_embeddings, content_key=content_key or self.content_key
+            )
             for point in points
         ]
         if scale_score:
@@ -556,6 +595,7 @@ class QdrantVectorStore(BaseVectorStore):
         scale_score: bool = False,
         return_embedding: bool = False,
         score_threshold: float | None = None,
+        content_key: str | None = None,
     ) -> list[Document]:
         """Queries Qdrant using a dense embedding and returns the most relevant documents.
 
@@ -568,6 +608,7 @@ class QdrantVectorStore(BaseVectorStore):
             score_threshold: A minimal score threshold for the result. Score of the returned result might be higher or
                 smaller than the threshold depending on the Distance function used. E.g. for cosine similarity only
                 higher scores will be returned.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             List of documents that are most similar to `query_embedding`.
@@ -584,7 +625,9 @@ class QdrantVectorStore(BaseVectorStore):
             score_threshold=score_threshold,
         ).points
         results = [
-            convert_qdrant_point_to_dynamiq_document(point, use_sparse_embeddings=self.use_sparse_embeddings)
+            convert_qdrant_point_to_dynamiq_document(
+                point, use_sparse_embeddings=self.use_sparse_embeddings, content_key=content_key or self.content_key
+            )
             for point in points
         ]
         if scale_score:
@@ -605,6 +648,7 @@ class QdrantVectorStore(BaseVectorStore):
         top_k: int = 10,
         return_embedding: bool = False,
         score_threshold: float | None = None,
+        content_key: str | None = None,
     ) -> list[Document]:
         """Retrieves documents based on dense and sparse embeddings and fuses the results using Reciprocal Rank Fusion.
 
@@ -620,6 +664,7 @@ class QdrantVectorStore(BaseVectorStore):
             score_threshold: A minimal score threshold for the result. Score of the returned result might be higher or
                 smaller than the threshold depending on the Distance function used. E.g. for cosine similarity only
                 higher scores will be returned.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             List of Document that are most similar to `query_embedding` and `query_sparse_embedding`.
@@ -667,7 +712,12 @@ class QdrantVectorStore(BaseVectorStore):
             msg = "Error during hybrid search"
             raise QdrantStoreError(msg) from e
 
-        results = [convert_qdrant_point_to_dynamiq_document(point, use_sparse_embeddings=True) for point in points]
+        results = [
+            convert_qdrant_point_to_dynamiq_document(
+                point, use_sparse_embeddings=True, content_key=content_key or self.content_key
+            )
+            for point in points
+        ]
 
         return results
 
@@ -740,22 +790,26 @@ class QdrantVectorStore(BaseVectorStore):
             ValueError: If the collection exists with a different similarity measure or embedding dimension.
         """
         distance = self.get_distance(similarity)
-
         collection_exists = self.client.collection_exists(collection_name)
 
-        if not create_if_not_exist and not collection_exists:
+        should_create = (not collection_exists and create_if_not_exist) or recreate_collection
+
+        if not collection_exists and not create_if_not_exist:
             msg = f"Collection '{collection_name}' does not exist in Qdrant."
             raise QdrantStoreError(msg)
 
-        if recreate_collection or not collection_exists:
-            # There is no need to verify the current configuration of that
-            # collection. It might be just recreated again or does not exist yet.
+        if should_create:
+            logger.info(f"{'Creating' if not collection_exists else 'Recreating'} collection {collection_name}")
             self.recreate_collection(
-                collection_name, distance, embedding_dim, on_disk, use_sparse_embeddings, sparse_idf
+                collection_name=collection_name,
+                distance=distance,
+                embedding_dim=embedding_dim,
+                on_disk=on_disk,
+                use_sparse_embeddings=use_sparse_embeddings,
+                sparse_idf=sparse_idf,
             )
-            # Create Payload index if payload_fields_to_index is provided
-            self._create_payload_index(collection_name, payload_fields_to_index)
-            logger.debug(f"Index {self.index_name} does not exist. Creating a new index.")
+            if payload_fields_to_index:
+                self._create_payload_index(collection_name, payload_fields_to_index)
             return
 
         collection_info = self.client.get_collection(collection_name)

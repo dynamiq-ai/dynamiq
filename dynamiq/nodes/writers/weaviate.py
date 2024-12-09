@@ -1,7 +1,10 @@
 from dynamiq.connections import Weaviate
-from dynamiq.nodes.writers.base import Writer
+from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.writers.base import Writer, WriterInputSchema
+from dynamiq.runnables import RunnableConfig
+from dynamiq.storages.vector import WeaviateVectorStore
 from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
-from dynamiq.storages.vector.weaviate.weaviate import WeaviateVectorStore
+from dynamiq.utils.logger import logger
 
 
 class WeaviateDocumentWriter(Writer, BaseWriterVectorStoreParams):
@@ -43,4 +46,31 @@ class WeaviateDocumentWriter(Writer, BaseWriterVectorStoreParams):
         return self.model_dump(include=set(BaseWriterVectorStoreParams.model_fields)) | {
             "connection": self.connection,
             "client": self.client,
+        }
+
+    def execute(self, input_data: WriterInputSchema, config: RunnableConfig = None, **kwargs):
+        """
+        Execute the document writing operation.
+
+        This method writes the input documents to the Weaviate Vector Store.
+
+        Args:
+            input_data (WriterInputSchema): Input data containing the documents to be written.
+            config (RunnableConfig, optional): Configuration for the execution.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict: A dictionary containing the count of upserted documents.
+        """
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        documents = input_data.documents
+        content_key = input_data.content_key
+
+        upserted_count = self.vector_store.write_documents(documents, content_key=content_key)
+        logger.debug(f"Upserted {upserted_count} documents to Weaviate Vector Store.")
+
+        return {
+            "upserted_count": upserted_count,
         }

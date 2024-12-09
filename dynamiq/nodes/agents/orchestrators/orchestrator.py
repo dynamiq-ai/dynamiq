@@ -116,7 +116,7 @@ class Orchestrator(Node, ABC):
         Returns:
             dict[str, Any]: The result of the orchestration process.
         """
-
+        logger.info(f"Orchestrator {self.name} - {self.id}: started with INPUT DATA:\n{input_data}")
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -137,5 +137,5 @@ class Orchestrator(Node, ABC):
             **kwargs,
         )
 
-        logger.debug(f"{self.name} {self.id}: output collected")
+        logger.info(f"Orchestrator {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
         return {"content": result}

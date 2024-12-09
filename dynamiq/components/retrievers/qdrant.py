@@ -1,12 +1,11 @@
 from typing import Any
 
-from dynamiq.components.retrievers.base import DocumentRetriever
 from dynamiq.storages.vector.qdrant import QdrantVectorStore
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
-class QdrantDocumentRetriever(DocumentRetriever):
+class QdrantDocumentRetriever:
     """
     Document Retriever using Qdrant
     """
@@ -43,6 +42,7 @@ class QdrantDocumentRetriever(DocumentRetriever):
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
+        content_key: str | None = None,
     ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the QdrantDocumentStore that are similar to the provided query embedding.
@@ -54,6 +54,8 @@ class QdrantDocumentRetriever(DocumentRetriever):
             top_k (Optional[int], optional): The maximum number of documents to return. Defaults to None.
             filters (Optional[dict[str, Any]], optional): Filters to apply
                 for retrieving specific documents. Defaults to None.
+            content_key (Optional[str]): The field used to store content in the storage.
+
         Returns:
             List[Document]: A list of Document instances sorted by their relevance to the query_embedding.
         """
@@ -65,6 +67,7 @@ class QdrantDocumentRetriever(DocumentRetriever):
             filters=filters,
             top_k=top_k,
             return_embedding=not exclude_document_embeddings,
+            content_key=content_key,
         )
         logger.debug(f"Retrieved {len(docs)} documents from Qdrant Vector Store.")
 

@@ -1,35 +1,4 @@
-from abc import ABC, abstractmethod
-
 from pydantic import BaseModel
-
-from dynamiq.types import Document
-
-
-class BaseVectorStore(ABC):
-
-    @abstractmethod
-    def count_documents() -> int:
-        pass
-
-    @abstractmethod
-    def list_documents() -> list[Document]:
-        pass
-
-    @abstractmethod
-    def write_documents() -> int:
-        pass
-
-    @abstractmethod
-    def delete_documents() -> None:
-        pass
-
-    @abstractmethod
-    def delete_documents_by_filters() -> None:
-        pass
-
-    @abstractmethod
-    def delete_documents_by_file_id() -> None:
-        pass
 
 
 class BaseVectorStoreParams(BaseModel):
@@ -39,6 +8,7 @@ class BaseVectorStoreParams(BaseModel):
         index_name (str): Name of the index. Defaults to "default".
     """
     index_name: str = "default"
+    content_key: str = "content"
 
 
 class BaseWriterVectorStoreParams(BaseVectorStoreParams):

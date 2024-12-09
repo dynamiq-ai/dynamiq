@@ -1,7 +1,11 @@
+from typing import Any
+
 from dynamiq.components.retrievers.qdrant import QdrantDocumentRetriever as QdrantDocumentRetrieverComponent
 from dynamiq.connections import Qdrant
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.retrievers.base import Retriever
+from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.retrievers.base import Retriever, RetrieverInputSchema
+from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import QdrantVectorStore
 
 
@@ -64,3 +68,31 @@ class QdrantDocumentRetriever(Retriever):
             self.document_retriever = QdrantDocumentRetrieverComponent(
                 vector_store=self.vector_store, filters=self.filters, top_k=self.top_k
             )
+
+    def execute(self, input_data: RetrieverInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+        """
+        Execute the document retrieval process.
+
+        This method retrieves documents based on the input embedding.
+
+        Args:
+            input_data (RetrieverInputSchema): The input data containing the query embedding.
+            config (RunnableConfig, optional): The configuration for the execution. Defaults to None.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict[str, Any]: A dictionary containing the retrieved documents.
+        """
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        query_embedding = input_data.embedding
+        content_key = input_data.content_key
+        filters = input_data.filters or self.filters
+        top_k = input_data.top_k or self.top_k
+
+        output = self.document_retriever.run(query_embedding, filters=filters, top_k=top_k, content_key=content_key)
+
+        return {
+            "documents": output["documents"],
+        }

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from pydantic import Field
 
 from dynamiq.connections import Pinecone
-from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.pinecone.filters import _normalize_filters
 from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
@@ -42,7 +42,7 @@ class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVecto
     pods: int = 1
 
 
-class PineconeVectorStore(BaseVectorStore):
+class PineconeVectorStore:
     """Vector store using Pinecone."""
 
     def __init__(
@@ -61,6 +61,7 @@ class PineconeVectorStore(BaseVectorStore):
         environment: str | None = None,
         pod_type: str | None = None,
         pods: int = 1,
+        content_key: str = "content",
         **index_creation_kwargs,
     ):
         """
@@ -74,6 +75,7 @@ class PineconeVectorStore(BaseVectorStore):
             batch_size (int): Size of batches for operations. Defaults to 100.
             dimension (int): Number of dimensions for vectors. Defaults to 1536.
             metric (str): Metric for calculating vector similarity. Defaults to 'cosine'.
+            content_key (Optional[str]): The field used to store content in the storage. Defaults to 'content'.
             **index_creation_kwargs: Additional arguments for index creation.
         """
         self.client = client
@@ -85,6 +87,7 @@ class PineconeVectorStore(BaseVectorStore):
         self.index_name = index_name
         self.namespace = namespace
         self.index_type = index_type
+        self.content_key = content_key
 
         self.create_if_not_exist = create_if_not_exist
 
@@ -220,9 +223,7 @@ class PineconeVectorStore(BaseVectorStore):
             else:
                 self._index.delete(ids=document_ids, namespace=self.namespace)
 
-    def delete_documents_by_filters(
-        self, filters: dict[str, Any], top_k: int = 1000
-    ) -> None:
+    def delete_documents_by_filters(self, filters: dict[str, Any], top_k: int = 1000) -> None:
         """
         Delete documents from the Pinecone vector store using filters.
 
@@ -257,12 +258,13 @@ class PineconeVectorStore(BaseVectorStore):
         filters = create_file_id_filter(file_id)
         self.delete_documents_by_filters(filters)
 
-    def list_documents(self, include_embeddings: bool = False) -> list[Document]:
+    def list_documents(self, include_embeddings: bool = False, content_key: str | None = None) -> list[Document]:
         """
         List documents in the Pinecone vector store.
 
         Args:
             include_embeddings (bool): Whether to include embeddings in the results. Defaults to False.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: List of Document objects retrieved.
@@ -274,7 +276,7 @@ class PineconeVectorStore(BaseVectorStore):
 
             documents = []
             for pinecone_doc in response["vectors"].values():
-                content = pinecone_doc["metadata"].pop("content", None)
+                content = pinecone_doc["metadata"].pop(content_key or self.content_key, "")
 
                 embedding = None
                 if include_embeddings and pinecone_doc["values"] != self._dummy_vector:
@@ -307,12 +309,13 @@ class PineconeVectorStore(BaseVectorStore):
             count = 0
         return count
 
-    def write_documents(self, documents: list[Document]) -> int:
+    def write_documents(self, documents: list[Document], content_key: str | None = None) -> int:
         """
         Write documents to the Pinecone vector store.
 
         Args:
             documents (list[Document]): List of Document objects to write.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             int: Number of documents successfully written.
@@ -324,7 +327,9 @@ class PineconeVectorStore(BaseVectorStore):
             msg = "param 'documents' must contain a list of objects of type Document"
             raise ValueError(msg)
 
-        documents_for_pinecone = self._convert_documents_to_pinecone_format(documents)
+        documents_for_pinecone = self._convert_documents_to_pinecone_format(
+            documents, content_key=content_key or self.content_key
+        )
 
         result = self._index.upsert(
             vectors=documents_for_pinecone,
@@ -336,13 +341,16 @@ class PineconeVectorStore(BaseVectorStore):
         return written_docs
 
     def _convert_documents_to_pinecone_format(
-        self, documents: list[Document]
+        self,
+        documents: list[Document],
+        content_key: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Convert Document objects to Pinecone-compatible format.
 
         Args:
             documents (list[Document]): List of Document objects to convert.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[dict[str, Any]]: List of documents in Pinecone-compatible format.
@@ -362,7 +370,7 @@ class PineconeVectorStore(BaseVectorStore):
             }
 
             if document.content is not None:
-                doc_for_pinecone["metadata"]["content"] = document.content
+                doc_for_pinecone["metadata"][content_key] = document.content
 
             documents_for_pinecone.append(doc_for_pinecone)
         return documents_for_pinecone
@@ -375,6 +383,7 @@ class PineconeVectorStore(BaseVectorStore):
         filters: dict[str, Any] | None = None,
         top_k: int = 10,
         exclude_document_embeddings: bool = True,
+        content_key: str | None = None,
     ) -> list[Document]:
         """
         Retrieve documents similar to the given query embedding.
@@ -385,6 +394,7 @@ class PineconeVectorStore(BaseVectorStore):
             filters (dict[str, Any] | None): Filters for the query. Defaults to None.
             top_k (int): Maximum number of documents to retrieve. Defaults to 10.
             exclude_document_embeddings (bool): Whether to exclude embeddings in results. Defaults to True.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: List of retrieved Document objects.
@@ -407,16 +417,17 @@ class PineconeVectorStore(BaseVectorStore):
             include_metadata=True,
         )
 
-        return self._convert_query_result_to_documents(result)
+        return self._convert_query_result_to_documents(result, content_key=content_key or self.content_key)
 
     def _convert_query_result_to_documents(
-        self, query_result: dict[str, Any]
+        self, query_result: dict[str, Any], content_key: str | None = None
     ) -> list[Document]:
         """
         Convert Pinecone query results to Document objects.
 
         Args:
             query_result (dict[str, Any]): The query result from Pinecone.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: List of Document objects created from the query result.
@@ -424,7 +435,7 @@ class PineconeVectorStore(BaseVectorStore):
         pinecone_docs = query_result["matches"]
         documents = []
         for pinecone_doc in pinecone_docs:
-            content = pinecone_doc["metadata"].pop("content", None)
+            content = pinecone_doc["metadata"].pop(content_key, "")
 
             embedding = None
             if pinecone_doc["values"] != self._dummy_vector:

@@ -1,8 +1,9 @@
-from dynamiq.components.embedders.openai import OpenAIEmbedder
+from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import Qdrant as QdrantConnection
-from dynamiq.memory import Memory
-from dynamiq.memory.backends import Qdrant
+from dynamiq.memory.backends.qdrant import Qdrant
+from dynamiq.memory.memory import Memory
 from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.prompts import MessageRole
 from examples.llm_setup import setup_llm
 
@@ -14,7 +15,8 @@ AGENT_ROLE = "friendly helpful assistant"
 def setup_agent():
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.5)
     qdrant_connection = QdrantConnection()
-    embedder = OpenAIEmbedder(dimensions=1536)
+    openai_connection = OpenAIConnection()
+    embedder = OpenAIDocumentEmbedder(connection=openai_connection)
 
     # Create a memory instance with Qdrant storage
     backend = Qdrant(connection=qdrant_connection, embedder=embedder, index_name=MEMORY_NAME)

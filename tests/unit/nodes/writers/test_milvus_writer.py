@@ -54,7 +54,9 @@ def test_execute(milvus_document_writer, mock_milvus_vector_store):
 
     result = milvus_document_writer.execute(input_data, config)
 
-    mock_milvus_vector_store.write_documents.assert_called_once_with(input_data.documents)
+    mock_milvus_vector_store.write_documents.assert_called_once_with(
+        input_data.documents, content_key=None, embedding_key=None
+    )
 
     assert result == {"upserted_count": 2}
 

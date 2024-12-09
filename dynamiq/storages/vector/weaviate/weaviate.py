@@ -5,7 +5,6 @@ from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateQueryError
 from weaviate.util import generate_uuid5
 
 from dynamiq.connections import Weaviate
-from dynamiq.storages.vector.base import BaseVectorStore
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.storages.vector.utils import create_file_id_filter
@@ -18,7 +17,6 @@ if TYPE_CHECKING:
     from weaviate import WeaviateClient
     from weaviate.collections.classes.data import DataObject
 
-
 DOCUMENT_COLLECTION_PROPERTIES = [
     {"name": "_original_id", "dataType": ["text"]},
     {"name": "content", "dataType": ["text"]},
@@ -27,11 +25,10 @@ DOCUMENT_COLLECTION_PROPERTIES = [
     {"name": "score", "dataType": ["number"]},
 ]
 
-
 DEFAULT_QUERY_LIMIT = 9999
 
 
-class WeaviateVectorStore(BaseVectorStore):
+class WeaviateVectorStore:
     """
     A Document Store for Weaviate.
 
@@ -44,6 +41,7 @@ class WeaviateVectorStore(BaseVectorStore):
         client: Optional["WeaviateClient"] = None,
         index_name: str = "default",
         create_if_not_exist: bool = False,
+        content_key: str = "content",
     ):
         """
         Initialize a new instance of WeaviateDocumentStore and connect to the Weaviate instance.
@@ -52,6 +50,7 @@ class WeaviateVectorStore(BaseVectorStore):
             connection (Weaviate | None): A Weaviate connection object. If None, a new one is created.
             client (Optional[WeaviateClient]): A Weaviate client. If None, one is created from the connection.
             index_name (str): The name of the index to use. Defaults to "default".
+            content_key (Optional[str]): The field used to store content in the storage.
         """
         self.client = client
         if self.client is None:
@@ -74,6 +73,7 @@ class WeaviateVectorStore(BaseVectorStore):
                 )
 
         self._collection_settings = collection_settings
+        self.content_key = content_key
         self._collection = self.client.collections.get(collection_settings["class"])
 
     def close(self):
@@ -91,17 +91,19 @@ class WeaviateVectorStore(BaseVectorStore):
         total = self._collection.aggregate.over_all(total_count=True).total_count
         return total if total else 0
 
-    def _to_data_object(self, document: Document) -> dict[str, Any]:
+    def _to_data_object(self, document: Document, content_key: str | None = None) -> dict[str, Any]:
         """
         Convert a Document to a Weaviate data object ready to be saved.
 
         Args:
             document (Document): The document to convert.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             dict[str, Any]: A dictionary representing the Weaviate data object.
         """
         data = document.to_dict()
+        data[content_key or self.content_key] = data.pop("content", "")
         data["_original_id"] = data.pop("id")
         metadata = data.get("metadata", {})
 
@@ -113,12 +115,17 @@ class WeaviateVectorStore(BaseVectorStore):
 
         return data
 
-    def _to_document(self, data: "DataObject[dict[str, Any], None]") -> Document:
+    def _to_document(
+        self,
+        data: "DataObject[dict[str, Any], None]",
+        content_key: str | None = None,
+    ) -> Document:
         """
         Convert a data object read from Weaviate into a Document.
 
         Args:
             data (DataObject[dict[str, Any], None]): The data object from Weaviate.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             Document: The converted Document object.
@@ -126,7 +133,7 @@ class WeaviateVectorStore(BaseVectorStore):
         document_data = data.properties
         document_id = document_data.pop("_original_id")
 
-        content = document_data.pop("content")
+        content = document_data.pop(content_key or self.content_key) or ""
 
         if isinstance(data.vector, list):
             document_data["embedding"] = data.vector
@@ -198,9 +205,7 @@ class WeaviateVectorStore(BaseVectorStore):
         offset = 0
         partial_result = None
         result = []
-        while (
-            partial_result is None or len(partial_result.objects) == DEFAULT_QUERY_LIMIT
-        ):
+        while partial_result is None or len(partial_result.objects) == DEFAULT_QUERY_LIMIT:
             try:
                 partial_result = self._collection.query.fetch_objects(
                     filters=convert_filters(filters),
@@ -216,12 +221,13 @@ class WeaviateVectorStore(BaseVectorStore):
             offset += DEFAULT_QUERY_LIMIT
         return result
 
-    def filter_documents(self, filters: dict[str, Any] | None = None) -> list[Document]:
+    def filter_documents(self, filters: dict[str, Any] | None = None, content_key: str | None = None) -> list[Document]:
         """
         Filter documents based on the provided filters.
 
         Args:
             filters (dict[str, Any] | None): The filters to apply to the document list.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: A list of Documents that match the given filters.
@@ -230,14 +236,15 @@ class WeaviateVectorStore(BaseVectorStore):
             result = self._query_with_filters(filters)
         else:
             result = self._query()
-        return [self._to_document(doc) for doc in result]
+        return [self._to_document(doc, content_key=content_key) for doc in result]
 
-    def list_documents(self, include_embeddings: bool = False) -> list[Document]:
+    def list_documents(self, include_embeddings: bool = False, content_key: str | None = None) -> list[Document]:
         """
         List all documents in the DocumentStore.
 
         Args:
             include_embeddings (bool): Whether to include document embeddings in the result.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: A list of all documents in the store.
@@ -247,16 +254,17 @@ class WeaviateVectorStore(BaseVectorStore):
             include_vector=include_embeddings
             # If using named vectors, you can specify ones to include e.g. ['title', 'body'], or True to include all
         ):
-            document = self._to_document(item)
+            document = self._to_document(item, content_key=content_key or self.content_key)
             documents.append(document)
         return documents
 
-    def _batch_write(self, documents: list[Document]) -> int:
+    def _batch_write(self, documents: list[Document], content_key: str | None = None) -> int:
         """
         Write documents to Weaviate in batches.
 
         Args:
             documents (list[Document]): The list of documents to write.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             int: The number of documents written.
@@ -272,7 +280,7 @@ class WeaviateVectorStore(BaseVectorStore):
                     raise ValueError(msg)
 
                 batch.add_object(
-                    properties=self._to_data_object(doc),
+                    properties=self._to_data_object(doc, content_key=content_key),
                     collection=self._collection.name,
                     uuid=generate_uuid5(doc.id),
                     vector=doc.embedding,
@@ -294,13 +302,15 @@ class WeaviateVectorStore(BaseVectorStore):
 
         return len(documents)
 
-    def _write(self, documents: list[Document], policy: DuplicatePolicy) -> int:
+    def _write(self, documents: list[Document], policy: DuplicatePolicy, content_key: str | None = None) -> int:
         """
         Write documents to Weaviate using the specified policy.
 
         Args:
             documents (list[Document]): The list of documents to write.
             policy (DuplicatePolicy): The policy to use for handling duplicates.
+            content_key (Optional[str]): The field used to store content in the storage.
+
 
         Returns:
             int: The number of documents written.
@@ -316,15 +326,13 @@ class WeaviateVectorStore(BaseVectorStore):
                 msg = f"Expected a Document, got '{type(doc)}' instead."
                 raise ValueError(msg)
 
-            if policy == DuplicatePolicy.SKIP and self._collection.data.exists(
-                uuid=generate_uuid5(doc.id)
-            ):
+            if policy == DuplicatePolicy.SKIP and self._collection.data.exists(uuid=generate_uuid5(doc.id)):
                 continue
 
             try:
                 self._collection.data.insert(
                     uuid=generate_uuid5(doc.id),
-                    properties=self._to_data_object(doc),
+                    properties=self._to_data_object(doc, content_key=content_key),
                     vector=doc.embedding,
                 )
 
@@ -338,7 +346,7 @@ class WeaviateVectorStore(BaseVectorStore):
         return written
 
     def write_documents(
-        self, documents: list[Document], policy: DuplicatePolicy = DuplicatePolicy.NONE
+        self, documents: list[Document], policy: DuplicatePolicy = DuplicatePolicy.NONE, content_key: str | None = None
     ) -> int:
         """
         Write documents to Weaviate using the specified policy.
@@ -346,12 +354,13 @@ class WeaviateVectorStore(BaseVectorStore):
         Args:
             documents (list[Document]): The list of documents to write.
             policy (DuplicatePolicy): The policy to use for handling duplicates.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             int: The number of documents written.
         """
         if policy in [DuplicatePolicy.NONE, DuplicatePolicy.OVERWRITE]:
-            return self._batch_write(documents)
+            return self._batch_write(documents, content_key=content_key)
 
         return self._write(documents, policy)
 
@@ -437,6 +446,7 @@ class WeaviateVectorStore(BaseVectorStore):
         exclude_document_embeddings=True,
         distance: float | None = None,
         certainty: float | None = None,
+        content_key: str | None = None,
     ) -> list[Document]:
         """
         Perform embedding-based retrieval on the documents.
@@ -448,6 +458,7 @@ class WeaviateVectorStore(BaseVectorStore):
             exclude_document_embeddings (bool): Whether to exclude document embeddings in the result.
             distance (float | None): The maximum distance for retrieval.
             certainty (float | None): The minimum certainty for retrieval.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             list[Document]: A list of retrieved documents.
@@ -471,4 +482,4 @@ class WeaviateVectorStore(BaseVectorStore):
             return_metadata=["certainty"],
         )
 
-        return [self._to_document(doc) for doc in result.objects]
+        return [self._to_document(doc, content_key=content_key) for doc in result.objects]

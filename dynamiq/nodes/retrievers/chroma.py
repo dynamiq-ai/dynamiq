@@ -1,7 +1,11 @@
+from typing import Any
+
 from dynamiq.components.retrievers.chroma import ChromaDocumentRetriever as ChromaDocumentRetrieverComponent
 from dynamiq.connections import Chroma
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.retrievers.base import Retriever
+from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.retrievers.base import Retriever, RetrieverInputSchema
+from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import ChromaVectorStore
 
 
@@ -47,6 +51,13 @@ class ChromaDocumentRetriever(Retriever):
     def vector_store_cls(self):
         return ChromaVectorStore
 
+    @property
+    def vector_store_params(self):
+        return self.model_dump(include={"index_name"}) | {
+            "connection": self.connection,
+            "client": self.client,
+        }
+
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the ChromaDocumentRetriever.
@@ -63,3 +74,31 @@ class ChromaDocumentRetriever(Retriever):
             self.document_retriever = ChromaDocumentRetrieverComponent(
                 vector_store=self.vector_store, filters=self.filters, top_k=self.top_k
             )
+
+    def execute(self, input_data: RetrieverInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+        """
+        Execute the document retrieval process.
+
+        This method takes an input embedding, retrieves similar documents using the
+        document retriever component, and returns the retrieved documents.
+
+        Args:
+            input_data (RetrieverInputSchema): The input data containing the query embedding.
+            config (RunnableConfig, optional): The configuration for the execution.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict[str, Any]: A dictionary containing the retrieved documents.
+        """
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        query_embedding = input_data.embedding
+        filters = input_data.filters or self.filters
+        top_k = input_data.top_k or self.top_k
+
+        output = self.document_retriever.run(query_embedding, filters=filters, top_k=top_k)
+
+        return {
+            "documents": output["documents"],
+        }

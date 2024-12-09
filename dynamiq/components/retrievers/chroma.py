@@ -1,11 +1,10 @@
 from typing import Any
 
-from dynamiq.components.retrievers.base import DocumentRetriever
 from dynamiq.storages.vector import ChromaVectorStore
 from dynamiq.types import Document
 
 
-class ChromaDocumentRetriever(DocumentRetriever):
+class ChromaDocumentRetriever:
     """
     Document Retriever using Chroma.
     """

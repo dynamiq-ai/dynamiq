@@ -30,6 +30,7 @@ def run_simple_workflow() -> tuple[str, dict]:
         llm=llm,
         role=AGENT_ROLE,
         id="agent",
+        verbose=True,
     )
     tracing = TracingCallbackHandler()
     wf = Workflow(flow=Flow(nodes=[agent]))
@@ -104,6 +105,7 @@ def run_simple_custom_workflow() -> tuple[str, dict]:
 
 
 if __name__ == "__main__":
+
     output, traces = run_simple_workflow()
     print(output)
 

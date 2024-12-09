@@ -18,10 +18,12 @@ def convert_dynamiq_documents_to_qdrant_points(
     documents: list[Document],
     *,
     use_sparse_embeddings: bool,
+    content_key: str | None = None,
 ) -> list[rest.PointStruct]:
     points = []
     for document in documents:
         payload = document.to_dict()
+        payload[content_key] = payload.pop("content", "")
         if use_sparse_embeddings:
             vector = {}
 
@@ -58,9 +60,12 @@ def convert_id(_id: str) -> str:
     return uuid.uuid5(UUID_NAMESPACE, _id).hex
 
 
-def convert_qdrant_point_to_dynamiq_document(point: QdrantPoint, use_sparse_embeddings: bool = False) -> Document:
+def convert_qdrant_point_to_dynamiq_document(
+    point: QdrantPoint, use_sparse_embeddings: bool = False, content_key: str | None = None
+) -> Document:
     payload = {**point.payload}
     payload["score"] = point.score if hasattr(point, "score") else None
+    payload["content"] = payload.pop(content_key, "")
 
     if not use_sparse_embeddings:
         payload["embedding"] = point.vector if hasattr(point, "vector") else None

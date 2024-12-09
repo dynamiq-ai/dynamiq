@@ -70,6 +70,7 @@ if __name__ == "__main__":
             "dag_pinecone.yaml",
             # "dag_weaviate_custom.yaml",
             "dag_weaviate.yaml",
+            "dag_pgvector.yaml",
         ):
             dag_yaml_file_path = os.path.join(os.path.dirname(__file__), yaml_file_name)
             result_indexing, dumped_traces_indexing_wf = indexing_flow(

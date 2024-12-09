@@ -38,16 +38,14 @@ Here is how you will think about the user's request
 </output>
 
 REMEMBER:
-* Inside 'action' provide just name of one tool from this list: [{tools_name}]. Don't wrap it wit <>.
+* Inside 'action' provide just name of one tool from this list: [{tools_name}]. Don't wrap it with <>.
 * Each 'action' has its own input format strictly adhere to it.
 Input formats for tools:
 {input_formats}
 
 After each action, the user will provide an "Observation" with the result.
 Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
-
 When you have sufficient information, provide your final answer in one of these two formats:
-
 If you can answer the request:
 <output>
     <thought>
@@ -218,7 +216,7 @@ final_answer_function_schema = {
 class ReActAgent(Agent):
     """Agent that uses the ReAct strategy for processing tasks by interacting with tools in a loop."""
 
-    name: str = "React"
+    name: str = "React Agent"
     max_loops: int = Field(default=15, ge=2)
     inference_mode: InferenceMode = InferenceMode.DEFAULT
     behaviour_on_max_loops: Behavior = Field(
@@ -270,10 +268,6 @@ class ReActAgent(Agent):
         """Extract output and answer from XML-like structure."""
         output = self.parse_xml_content(text, "output")
         answer = self.parse_xml_content(text, "answer")
-
-        logger.debug(f"Extracted output: {output}")
-        logger.debug(f"Extracted answer: {answer}")
-
         return {"output": output, "answer": answer}
 
     def tracing_final(self, loop_num, final_answer, config, kwargs):
@@ -299,10 +293,9 @@ class ReActAgent(Agent):
             RuntimeError: If the maximum number of loops is reached without finding a final answer.
             Exception: If an error occurs during execution.
         """
-
-        logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
+        if self.verbose:
+            logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
         previous_responses = []
-
         for loop_num in range(self.max_loops):
             formatted_prompt = self.generate_prompt(
                 user_request=kwargs.get("input", ""),
@@ -311,10 +304,6 @@ class ReActAgent(Agent):
                 context="\n".join(previous_responses),
                 input_formats=self.generate_input_formats(self.tools),
             )
-            logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1} started.")
-
-            logger.debug(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}. Prompt:\n{formatted_prompt}")
-
             try:
 
                 llm_result = self.llm.run(
@@ -329,25 +318,20 @@ class ReActAgent(Agent):
                 self._run_depends = [NodeDependency(node=self.llm).to_dict()]
 
                 if llm_result.status != RunnableStatus.SUCCESS:
-                    logger.error(
-                        f"Agent {self.name} - {self.id}: Loop {loop_num + 1} LLM execution failed. "
-                        f"Error output: {llm_result.output}"
-                    )
                     previous_responses.append(llm_result.output["content"])
                     continue
 
                 action, action_input = None, None
                 llm_generated_output = ""
+                logger.info(
+                    f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, reasoning:\n{llm_result.output['content']}"
+                )
+
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
                         llm_generated_output = llm_result.output["content"]
-                        logger.debug(
-                            f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. "
-                            f"RAW LLM output:n{llm_generated_output}"
-                        )
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-
                             self.stream_content(
                                 content=llm_generated_output,
                                 source=self.name,
@@ -371,10 +355,12 @@ class ReActAgent(Agent):
                         action, action_input = self._parse_action(llm_generated_output)
 
                     case InferenceMode.FUNCTION_CALLING:
+
                         action = llm_result.output["tool_calls"][0]["function"]["name"].strip()
                         llm_generated_output_json = json.loads(
                             llm_result.output["tool_calls"][0]["function"]["arguments"]
                         )
+
                         llm_generated_output = json.dumps(llm_generated_output_json)
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
@@ -400,11 +386,9 @@ class ReActAgent(Agent):
                             return final_answer
 
                         action_input = llm_generated_output_json["action_input"]
-                        logger.debug(
-                            f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. "
-                            f"RAW LLM output:n{llm_generated_output}"
-                        )
                     case InferenceMode.STRUCTURED_OUTPUT:
+                        if self.verbose:
+                            logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
                         llm_generated_output_json = json.loads(llm_result.output["content"])
                         action = llm_generated_output_json["action"]
 
@@ -435,6 +419,8 @@ class ReActAgent(Agent):
                         llm_generated_output = json.dumps(llm_generated_output_json)
 
                     case InferenceMode.XML:
+                        if self.verbose:
+                            logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
@@ -460,17 +446,10 @@ class ReActAgent(Agent):
                         action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
 
                 if action:
-                    logger.debug(f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Action:\n{action}")
-                    logger.debug(f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Action Input:\n{action_input}")
-
                     if self.tools:
                         try:
                             tool = self._get_tool(action)
                             tool_result = self._run_tool(tool, action_input, config, **kwargs)
-
-                            logger.debug(
-                                f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. Tool Result:\n{tool_result}"
-                            )
 
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
@@ -498,13 +477,12 @@ class ReActAgent(Agent):
                 previous_responses.append(llm_generated_output)
 
             except ActionParsingException as e:
-                logger.error(f"Agent {self.name} - {self.id}:Loop {loop_num + 1}. failed with error: {str(e)}")
                 previous_responses.append(f"{type(e).__name__}: {e}")
                 continue
-        logger.warning(f"Agent {self.name} - {self.id}: Maximum number of loops reached.")
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
                 f"Agent {self.name} (ID: {self.id}) has reached the maximum loop limit of {self.max_loops} without finding a final answer. "  # noqa: E501
+                f"Last response: {previous_responses[-1]}\n"
                 f"Consider increasing the maximum number of loops or reviewing the task complexity to ensure completion."  # noqa: E501
             )
             raise MaxLoopsExceededException(message=error_message)
@@ -536,7 +514,6 @@ class ReActAgent(Agent):
     def _extract_final_answer_xml(self, llm_output: str) -> str:
         """Extract the final answer from the LLM output."""
         final_answer = self.extract_output_and_answer_xml(llm_output)
-        logger.info(f"Agent {self.name} - {self.id}: Final answer found: {final_answer['answer']}")
         return final_answer["answer"]
 
     def generate_input_formats(self, tools: list[Node]) -> str:
@@ -546,7 +523,6 @@ class ReActAgent(Agent):
             params = []
             for name, field in tool.input_schema.model_fields.items():
                 if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
-                    # Handle Union types
                     if get_origin(field.annotation) in (Union, types.UnionType):
                         type_str = str(field.annotation)
                     else:
