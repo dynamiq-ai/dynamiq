@@ -1,9 +1,17 @@
+import json
+
 import pytest
 from pydantic import ConfigDict
 
+from dynamiq import Workflow
+from dynamiq.callbacks import TracingCallbackHandler
+from dynamiq.callbacks.tracing import RunStatus
 from dynamiq.connections import Exa
+from dynamiq.flows import Flow
+from dynamiq.nodes.agents.exceptions import RecoverableAgentException
 from dynamiq.nodes.tools.exa_search import ExaTool
-from dynamiq.runnables import RunnableResult, RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.utils import JsonWorkflowEncoder
 
 
 @pytest.fixture
@@ -99,3 +107,42 @@ def test_exa_search_agent_optimized(mock_requests, mock_exa_response):
             assert any(highlight in content for highlight in result["highlights"])
         if "summary" in result:
             assert result["summary"] in content
+
+
+def test_exa_with_invalid_input_schema(mock_requests, mock_exa_response):
+    exa_connection = Exa(api_key="test_key")
+    exa_tool = ExaTool(connection=exa_connection, model_config=ConfigDict())
+
+    wf = Workflow(flow=Flow(nodes=[exa_tool]))
+    input_data = {}
+    tracing = TracingCallbackHandler()
+    result = wf.run(
+        input_data=input_data,
+        config=RunnableConfig(callbacks=[tracing]),
+    )
+
+    result_exa = result.output[exa_tool.id]
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.input == input_data
+    assert result_exa["status"] == RunnableStatus.FAILURE.value
+    assert result_exa["input"] == input_data
+    assert result_exa["output"]["error_type"] == RecoverableAgentException.__name__
+
+    tracing_runs = list(tracing.runs.values())
+    assert len(tracing_runs) == 3
+    wf_run = tracing_runs[0]
+    assert wf_run.metadata["workflow"]["id"] == wf.id
+    assert wf_run.output
+    assert wf_run.status == RunStatus.SUCCEEDED
+    flow_run = tracing_runs[1]
+    assert flow_run.metadata["flow"]["id"] == wf.flow.id
+    assert flow_run.parent_run_id == wf_run.id
+    assert flow_run.output
+    assert flow_run.status == RunStatus.SUCCEEDED
+    exa_tool_run = tracing_runs[2]
+    assert exa_tool_run.metadata["node"]["id"] == exa_tool.id
+    assert exa_tool_run.parent_run_id == flow_run.id
+    assert exa_tool_run.input == input_data
+    assert exa_tool_run.output is None
+    assert exa_tool_run.error
+    assert json.dumps({"runs": [run.to_dict() for run in tracing.runs.values()]}, cls=JsonWorkflowEncoder)
