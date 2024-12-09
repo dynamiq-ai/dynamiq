@@ -1,8 +1,8 @@
 import enum
-import re
 from abc import ABC, abstractmethod
 from typing import Any
 
+from jinja2 import Environment, meta
 from pydantic import BaseModel, Field, PrivateAttr
 
 from dynamiq.utils import generate_uuid
@@ -176,26 +176,28 @@ class Prompt(BasePrompt):
 
         self._Template = Template
 
-    def get_required_parameters(self) -> list[str]:
+    def get_required_parameters(self) -> set[str]:
         """Extracts list of parameters required for messages.
 
         Returns:
-            list[str]: List of parameter names
+            set[str]: Set of parameter names.
         """
-        parameters = []
-        pattern = r"\{\{(.*?)\}\}"
+        parameters = set()
+
+        env = Environment(autoescape=True)
 
         for msg in self.messages:
             if isinstance(msg, Message):
-                parameters.extend(re.findall(pattern, msg.content))
+                ast = env.parse(msg.content)
+                parameters |= meta.find_undeclared_variables(ast)
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
-                        parameters.extend(re.findall(pattern, content.text))
-
+                        ast = env.parse(content.text)
+                        parameters |= meta.find_undeclared_variables(ast)
                     elif isinstance(content, VisionMessageImageContent):
-                        parameters.extend(re.findall(pattern, content.image_url.url))
-
+                        ast = env.parse(content.image_url.url)
+                        parameters |= meta.find_undeclared_variables(ast)
                     else:
                         raise ValueError(f"Invalid content type: {content.type}")
             else:

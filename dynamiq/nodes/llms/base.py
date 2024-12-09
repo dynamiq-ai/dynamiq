@@ -40,11 +40,11 @@ class BaseLLMInputSchema(BaseModel):
         prompt = context.context.get("prompt") or context.context.get("instance_prompt")
         if prompt:
             required_parameters = prompt.get_required_parameters()
-            provided_parameters = list(self.model_dump().keys())
+            provided_parameters = set(self.model_dump().keys())
 
-            if not set(required_parameters).issubset(set(provided_parameters)):
+            if not required_parameters.issubset(provided_parameters):
                 raise ValueError(
-                    f"Error: Invalid parameters were provided. Expected: {required_parameters}."
+                    f"Error: Invalid parameters were provided. Expected: {required_parameters}. "
                     f"Got: {provided_parameters}"
                 )
             return self
