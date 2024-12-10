@@ -231,7 +231,7 @@ class Map(Node):
         data["node"] = self.node.to_dict(**kwargs)
         return data
 
-    def execute(self, input_data: ChoiceInputSchema, config: RunnableConfig = None, **kwargs):
+    def execute(self, input_data: MapInputSchema, config: RunnableConfig = None, **kwargs):
         """
         Executes the map node.
 
@@ -246,8 +246,7 @@ class Map(Node):
         Raises:
             Exception: If the input is not a list or if any flow execution fails.
         """
-        if isinstance(input_data, dict):
-            input_data = input_data.input
+        input_data = input_data.input
 
         output = []
         run_id = kwargs.get("run_id", uuid4())
@@ -267,16 +266,11 @@ class Map(Node):
         return {"output": output}
 
 
-class PassInputSchema(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
-
-
 class Pass(Node):
     """Represents a pass node in a flow."""
 
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
     transformers: list[Transformer] = []
-    input_schema: ClassVar[type[PassInputSchema]] = PassInputSchema
 
     def execute_with_retry(
         self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
@@ -297,7 +291,7 @@ class Pass(Node):
 
         return input_data
 
-    def execute(self, input_data: PassInputSchema, config: RunnableConfig = None, **kwargs):
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
         """
         Executes the pass node.
 
@@ -309,7 +303,7 @@ class Pass(Node):
         Returns:
             The input data if no transformers are present, otherwise the transformed data.
         """
-        output = input_data.model_dump()
+        output = input_data
         if self.transformers:
             run_id = kwargs.get("run_id", uuid4())
             config = ensure_config(config)
