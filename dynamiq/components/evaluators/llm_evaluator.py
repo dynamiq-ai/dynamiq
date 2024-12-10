@@ -318,37 +318,58 @@ class LLMEvaluator:
             raise ValueError(msg)
 
     @staticmethod
-    def _extract_json_string(s: str) -> str:
-        """
-        Extract the first JSON object from the string by balancing braces.
+    def _extract_json_string(s: str) -> str | None:
+        """Extract the first JSON object from the string by balancing braces.
 
         Args:
             s (str): The input string containing the JSON object.
 
         Returns:
-            str: The extracted JSON string.
-
-        Raises:
-            ValueError: If no JSON object can be found.
+            Optional[str]: The extracted JSON string, or None if not found.
         """
-        stack = []
+        nesting = 0
         start = None
         for i, char in enumerate(s):
             if char == "{":
-                if not stack:
+                if nesting == 0:
                     start = i
-                stack.append(char)
+                nesting += 1
             elif char == "}":
-                if stack:
-                    stack.pop()
-                    if not stack:
+                if nesting > 0:
+                    nesting -= 1
+                    if nesting == 0 and start is not None:
                         return s[start : i + 1]
         return None
 
     @staticmethod
-    def parse_llm_json_output(response: str) -> dict[str, Any]:
+    def _clean_json_string(json_str: str) -> str:
+        """Clean the JSON string to make it parseable by the json module.
+
+        Args:
+            json_str (str): The JSON string to clean.
+
+        Returns:
+            str: The cleaned JSON string.
         """
-        Attempt to parse the received LLM output into a JSON object.
+        # Remove comments (single-line // and multi-line /* */)
+        json_str = re.sub(r"//.*?$|/\*.*?\*/", "", json_str, flags=re.DOTALL | re.MULTILINE)
+
+        # Replace single quotes with double quotes
+        json_str = re.sub(r"(?<!\\)'", '"', json_str)
+
+        # Replace Python literals with JSON equivalents
+        json_str = re.sub(r"\bTrue\b", "true", json_str)
+        json_str = re.sub(r"\bFalse\b", "false", json_str)
+        json_str = re.sub(r"\bNone\b", "null", json_str)
+
+        # Remove trailing commas
+        json_str = re.sub(r",\s*(\]|\})", r"\1", json_str)
+
+        return json_str
+
+    @staticmethod
+    def parse_llm_json_output(response: str) -> dict[str, Any]:
+        """Attempt to parse the received LLM output into a JSON object.
 
         Args:
             response (str): The raw output from the LLM.
@@ -370,23 +391,12 @@ class LLMEvaluator:
         if not json_str:
             raise ValueError(f"Response from LLM is not valid JSON: {response}")
 
-        # Remove comments
-        json_str_no_comments = re.sub(r"//.*?$|/\*.*?\*/", "", json_str, flags=re.DOTALL | re.MULTILINE)
-
-        # Replace single quotes with double quotes
-        json_str_corrected = json_str_no_comments.replace("'", '"')
-
-        # Replace Python literals with JSON equivalents
-        json_str_corrected = re.sub(r"\bTrue\b", "true", json_str_corrected)
-        json_str_corrected = re.sub(r"\bFalse\b", "false", json_str_corrected)
-        json_str_corrected = re.sub(r"\bNone\b", "null", json_str_corrected)
-
-        # Remove trailing commas
-        json_str_no_trailing_commas = re.sub(r",\s*([\]}\)])", r"\1", json_str_corrected)
+        # Clean the JSON string
+        cleaned_json_str = LLMEvaluator._clean_json_string(json_str)
 
         # Try parsing the cleaned JSON string
         try:
-            return json.loads(json_str_no_trailing_commas)
+            return json.loads(cleaned_json_str)
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse JSON after corrections: {e}")
 
