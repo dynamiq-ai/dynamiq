@@ -194,6 +194,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             parent_run_id=parent_run_id,
             metadata={"node": serialized, "run_depends": kwargs.get("run_depends", []), "host": self.host},
             tags=self.tags,
+            input=format_value(kwargs.get("input_data")),
         )
         return run
 
@@ -360,7 +361,11 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             error (BaseException): Error encountered.
             **kwargs (Any): Additional arguments.
         """
-        run = ensure_run(get_run_id(kwargs), self.runs)
+        run_id = get_run_id(kwargs)
+        if (run := self.runs.get(run_id)) is None:
+            run = self._get_node_base_run(serialized, **kwargs)
+            self.runs[run_id] = run
+
         run.end_time = datetime.now(UTC)
         run.status = RunStatus.FAILED
         run.error = {

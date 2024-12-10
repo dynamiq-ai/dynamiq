@@ -476,6 +476,7 @@ class Node(BaseModel, Runnable, ABC):
         from dynamiq.nodes.agents.exceptions import RecoverableAgentException
 
         logger.info(f"Node {self.name} - {self.id}: execution started.")
+        transformed_input = input_data
         time_start = datetime.now()
 
         config = ensure_config(config)
@@ -486,22 +487,22 @@ class Node(BaseModel, Runnable, ABC):
             depends_result = {}
 
         try:
-            self.validate_depends(depends_result)
-        except NodeException as e:
-            transformed_input = input_data | {
-                k: result.to_tracing_depend_dict() for k, result in depends_result.items()
-            }
-            skip_data = {"failed_dependency": e.failed_depend.to_dict()}
-            self.run_on_node_skip(
-                callbacks=config.callbacks,
-                skip_data=skip_data,
-                input_data=transformed_input,
-                **merged_kwargs,
-            )
-            logger.info(f"Node {self.name} - {self.id}: execution skipped.")
-            return RunnableResult(status=RunnableStatus.SKIP, input=transformed_input, output=format_value(e))
+            try:
+                self.validate_depends(depends_result)
+            except NodeException as e:
+                transformed_input = input_data | {
+                    k: result.to_tracing_depend_dict() for k, result in depends_result.items()
+                }
+                skip_data = {"failed_dependency": e.failed_depend.to_dict()}
+                self.run_on_node_skip(
+                    callbacks=config.callbacks,
+                    skip_data=skip_data,
+                    input_data=transformed_input,
+                    **merged_kwargs,
+                )
+                logger.info(f"Node {self.name} - {self.id}: execution skipped.")
+                return RunnableResult(status=RunnableStatus.SKIP, input=transformed_input, output=format_value(e))
 
-        try:
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
 
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
@@ -526,7 +527,7 @@ class Node(BaseModel, Runnable, ABC):
             )
             return RunnableResult(status=RunnableStatus.SUCCESS, input=transformed_input, output=transformed_output)
         except Exception as e:
-            self.run_on_node_error(config.callbacks, e, **merged_kwargs)
+            self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
             logger.error(
                 f"Node {self.name} - {self.id}: execution failed in "
                 f"{format_duration(time_start, datetime.now())}."
