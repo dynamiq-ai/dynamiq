@@ -4,13 +4,7 @@ from pydantic import ConfigDict, Field
 
 from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory.backends.base import MemoryBackend
-from dynamiq.nodes.embedders import (
-    BedrockDocumentEmbedder,
-    CohereDocumentEmbedder,
-    HuggingFaceDocumentEmbedder,
-    MistralDocumentEmbedder,
-    OpenAIDocumentEmbedder,
-)
+from dynamiq.nodes.embedders.base import DocumentEmbedder, DocumentEmbedderInputSchema
 from dynamiq.prompts import Message
 from dynamiq.storages.vector.pinecone import PineconeVectorStore
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
@@ -30,13 +24,7 @@ class Pinecone(MemoryBackend):
 
     name: str = "Pinecone"
     connection: PineconeConnection
-    embedder: (
-        BedrockDocumentEmbedder
-        | CohereDocumentEmbedder
-        | HuggingFaceDocumentEmbedder
-        | MistralDocumentEmbedder
-        | OpenAIDocumentEmbedder
-    )
+    embedder: DocumentEmbedder
     index_type: PineconeIndexType
     index_name: str = Field(default="conversations")
     create_if_not_exist: bool = Field(default=True)
@@ -85,7 +73,7 @@ class Pinecone(MemoryBackend):
         """Stores a message in Pinecone."""
         try:
             document = self._message_to_document(message)
-            embedding_result = self.embedder.execute(input_data={"documents": [document]})
+            embedding_result = self.embedder.execute(input_data=DocumentEmbedderInputSchema(documents=[document]))
             document_embedding = embedding_result.get("documents")[0].embedding
             document.embedding = document_embedding
             self.vector_store.write_documents([document])
@@ -121,7 +109,11 @@ class Pinecone(MemoryBackend):
 
             if query:
                 embedding_result = (
-                    self.embedder.execute(input_data={"documents": [Document(id=str(uuid.uuid4()), content=query)]})
+                    self.embedder.execute(
+                        input_data=DocumentEmbedderInputSchema(
+                            documents=[Document(id=str(uuid.uuid4()), content=query)]
+                        )
+                    )
                     .get("documents")[0]
                     .embedding
                 )
