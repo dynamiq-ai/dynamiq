@@ -15,6 +15,7 @@ from dynamiq.utils.logger import logger
 
 class StateNotFoundError(OrchestratorError):
     """Raised when next state was not found."""
+
     pass
 
 

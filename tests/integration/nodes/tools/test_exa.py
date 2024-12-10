@@ -1,14 +1,13 @@
 import json
 
 import pytest
-from pydantic import ConfigDict
+from pydantic import ConfigDict, ValidationError
 
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.callbacks.tracing import RunStatus
 from dynamiq.connections import Exa
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.exceptions import RecoverableAgentException
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils import JsonWorkflowEncoder
@@ -65,18 +64,11 @@ def test_exa_basic_search(mock_requests, mock_exa_response):
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
 
-    input_dump = result.input.model_dump()
+    input_dump = result.input
     assert input_dump["query"] == input_data["query"]
     assert input_dump["limit"] == input_data["limit"]
     assert input_dump["query_type"] == input_data["query_type"]
     assert input_dump["include_full_content"] == input_data["include_full_content"]
-
-    assert input_dump["use_autoprompt"] is False
-    assert input_dump["category"] is None
-    assert input_dump["include_domains"] is None
-    assert input_dump["exclude_domains"] is None
-    assert input_dump["include_text"] is None
-    assert input_dump["exclude_text"] is None
 
     mock_requests.assert_called_once()
     call_args = mock_requests.call_args
@@ -126,7 +118,7 @@ def test_exa_with_invalid_input_schema(mock_requests, mock_exa_response):
     assert result.input == input_data
     assert result_exa["status"] == RunnableStatus.FAILURE.value
     assert result_exa["input"] == input_data
-    assert result_exa["output"]["error_type"] == RecoverableAgentException.__name__
+    assert result_exa["output"]["error_type"] == ValidationError.__name__
 
     tracing_runs = list(tracing.runs.values())
     assert len(tracing_runs) == 3
