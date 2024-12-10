@@ -343,7 +343,9 @@ class Node(BaseModel, Runnable, ABC):
                     input_data, context=kwargs | self.get_context_for_input_schema()
                 )
             except Exception as e:
-                raise RecoverableAgentException(f"Input data validation failed: {e}")
+                if kwargs.get("recoverable_error", False):
+                    raise RecoverableAgentException(f"Input data validation failed: {e}")
+                raise e
 
         return input_data
 

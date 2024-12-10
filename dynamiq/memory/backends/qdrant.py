@@ -6,13 +6,7 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 
 from dynamiq.connections import Qdrant as QdrantConnection
 from dynamiq.memory.backends.base import MemoryBackend
-from dynamiq.nodes.embedders import (
-    BedrockDocumentEmbedder,
-    CohereDocumentEmbedder,
-    HuggingFaceDocumentEmbedder,
-    MistralDocumentEmbedder,
-    OpenAIDocumentEmbedder,
-)
+from dynamiq.nodes.embedders.base import DocumentEmbedder, DocumentEmbedderInputSchema
 from dynamiq.prompts import Message
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.storages.vector.qdrant import QdrantVectorStore
@@ -31,13 +25,7 @@ class Qdrant(MemoryBackend):
 
     name: str = "Qdrant"
     connection: QdrantConnection
-    embedder: (
-        BedrockDocumentEmbedder
-        | CohereDocumentEmbedder
-        | HuggingFaceDocumentEmbedder
-        | MistralDocumentEmbedder
-        | OpenAIDocumentEmbedder
-    )
+    embedder: DocumentEmbedder
     index_name: str = Field(default="conversations")
     metric: str = Field(default="cosine")
     on_disk: bool = Field(default=False)
@@ -93,7 +81,11 @@ class Qdrant(MemoryBackend):
         """Stores a message in Qdrant."""
         try:
             document = self._message_to_document(message)
-            embedding_result = self.embedder.execute(input_data={"documents": [document]}).get("documents")[0].embedding
+            embedding_result = (
+                self.embedder.execute(input_data=DocumentEmbedderInputSchema(documents=[document]))
+                .get("documents")[0]
+                .embedding
+            )
             document.embedding = embedding_result
 
             self.vector_store.write_documents(documents=[document], policy=DuplicatePolicy.SKIP)
@@ -115,7 +107,9 @@ class Qdrant(MemoryBackend):
             qdrant_filters = self._prepare_filters(filters)
             if query:
                 embedding_result = (
-                    self.embedder.execute(input_data={"documents": [Document(id="query", content=query)]})
+                    self.embedder.execute(
+                        input_data=DocumentEmbedderInputSchema(documents=[Document(id="query", content=query)])
+                    )
                     .get("documents")[0]
                     .embedding
                 )
