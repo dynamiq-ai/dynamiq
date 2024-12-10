@@ -164,3 +164,56 @@ def test_llm_evaluator_with_answer_correctness():
     expected_results = {"results": [{"score": 0}, {"score": "1"}]}
 
     assert results == expected_results
+
+
+def test_llm_evaluator_with_placeholders_no_inputs_with_examples():
+    # Mock LLM
+    mock_llm = MagicMock(spec=BaseLLM)
+    mock_llm.execute.return_value = {"content": '{"quote": "Believe in yourself and all that you are."}'}
+
+    instructions = "Please provide a motivational quote: '{{ quote_placeholder }}'"
+
+    # Instantiate LLMEvaluator without inputs
+    evaluator = LLMEvaluator(
+        instructions=instructions,
+        outputs=[{"name": "quote", "type": str}],
+        examples=[
+            {
+                "inputs": {},
+                "outputs": {
+                    "quote": (
+                        "Hard times don't create heroes."
+                        " It is during the hard times when the 'hero' within us is revealed."
+                    )
+                },
+            }
+        ],
+        llm=mock_llm,
+    )
+
+    # Run the evaluator without inputs
+    results = evaluator.run()
+    expected_results = {"results": [{"quote": "Believe in yourself and all that you are."}]}
+
+    assert results == expected_results
+
+
+def test_llm_evaluator_with_placeholders_no_inputs_without_examples():
+    # Mock LLM
+    mock_llm = MagicMock(spec=BaseLLM)
+    mock_llm.execute.return_value = {"content": '{"quote": "Believe in yourself and all that you are."}'}
+
+    instructions = "Please provide a motivational quote: '{{ quote_placeholder }}'"
+
+    # Instantiate LLMEvaluator without inputs
+    evaluator = LLMEvaluator(
+        instructions=instructions,
+        outputs=[{"name": "quote", "type": str}],
+        llm=mock_llm,
+    )
+
+    # Run the evaluator without inputs
+    results = evaluator.run()
+    expected_results = {"results": [{"quote": "Believe in yourself and all that you are."}]}
+
+    assert results == expected_results
