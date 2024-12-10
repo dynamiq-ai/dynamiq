@@ -27,15 +27,15 @@ class LLMEvaluator:
 
     evaluator = LLMEvaluator(
         instructions="Is this answer problematic for children?",
-        inputs=[{"name": "predicted_answers", "type": List[str]}],
+        inputs=[{"name": "answer", "type": str}],
         outputs=[{"name": "score", "type": int}],
         examples=[
             {
-                "inputs": {"predicted_answers": "Damn, this is straight outta hell!!!"},
+                "inputs": {"answer": "Damn, this is straight outta hell!!!"},
                 "outputs": {"score": 1},
             },
             {
-                "inputs": {"predicted_answers": "Football is the most popular sport."},
+                "inputs": {answer": "Football is the most popular sport."},
                 "outputs": {"score": 0},
             },
         ],
@@ -46,7 +46,7 @@ class LLMEvaluator:
         "Football is the most popular sport with around 4 billion followers worldwide",
         "Python language was created by Guido van Rossum.",
     ]
-    results = evaluator.run(predicted_answers=predicted_answers)
+    results = evaluator.run(answer=predicted_answers)
     print(results)
     # Output: {'results': [{'score': 0}, {'score': 0}]}
     ```
@@ -55,9 +55,9 @@ class LLMEvaluator:
     def __init__(
         self,
         instructions: str,
-        inputs: list[dict[str, Any]],
         outputs: list[dict[str, Any]],
         examples: list[dict[str, Any]],
+        inputs: list[dict[str, Any]] | None = None,
         *,
         raise_on_failure: bool = True,
         llm: Node,
@@ -68,9 +68,6 @@ class LLMEvaluator:
 
         Args:
             instructions (str): The prompt instructions to use for evaluation.
-            inputs (List[Dict[str, Any]]): A list of dictionaries defining the inputs.
-                Each input dict should have keys "name" and "type", where "name" is the
-                input name and "type" is its type.
             outputs (List[Dict[str, Any]]): A list of dictionaries defining the outputs.
                 Each output dict should have keys "name" and "type", where "name" is the
                 output name and "type" is its type.
@@ -78,11 +75,16 @@ class LLMEvaluator:
                 output format as defined in the `inputs` and `outputs` parameters. Each example is a
                 dictionary with keys "inputs" and "outputs". They contain the input and output as
                 dictionaries respectively.
+            inputs (Optional[List[Dict[str, Any]]]): A list of dictionaries defining the inputs.
+                Each input dict should have keys "name" and "type", where "name" is the
+                input name and "type" is its type. Defaults to None.
             raise_on_failure (bool): If True, the component will raise an exception on an
                 unsuccessful API call.
             llm (Node): The LLM node to use for evaluation.
             strings_to_omit_from_llm_output (Tuple[str]): A tuple of strings to omit from the LLM output.
         """
+        if inputs is None:
+            inputs = []
         self._validate_init_parameters(inputs, outputs, examples)
         self.raise_on_failure = raise_on_failure
         self.instructions = instructions
@@ -192,9 +194,13 @@ class LLMEvaluator:
         expected_inputs = {inp["name"]: inp["type"] for inp in self.inputs}
         self._validate_input_parameters(expected=expected_inputs, received=inputs)
 
-        input_names = list(inputs.keys())
-        values = list(zip(*inputs.values()))
-        list_of_input_data = [dict(zip(input_names, v)) for v in values]
+        if self.inputs:
+            input_names = list(inputs.keys())
+            values = list(zip(*inputs.values()))
+            list_of_input_data = [dict(zip(input_names, v)) for v in values]
+        else:
+            # If no inputs are provided, create a list with a single empty dictionary
+            list_of_input_data = [{}]
 
         results: list[dict[str, Any]] = []
         errors = 0
@@ -338,26 +344,31 @@ class LLMEvaluator:
         Raises:
             ValueError: If input parameters are invalid.
         """
-        for param in expected.keys():
-            if param not in received:
-                msg = f"LLM evaluator expected input parameter '{param}' but received {list(received.keys())}."
+        if expected:
+            for param in expected.keys():
+                if param not in received:
+                    msg = f"LLM evaluator expected input parameter '{param}' but received {list(received.keys())}."
+                    raise ValueError(msg)
+
+            if not all(isinstance(value, list) for value in received.values()):
+                msg = (
+                    "LLM evaluator expects all input values to be lists but received "
+                    f"{[type(value) for value in received.values()]}."
+                )
                 raise ValueError(msg)
 
-        if not all(isinstance(value, list) for value in received.values()):
-            msg = (
-                "LLM evaluator expects all input values to be lists but received "
-                f"{[type(value) for value in received.values()]}."
-            )
-            raise ValueError(msg)
-
-        inputs = received.values()
-        length = len(next(iter(inputs)))
-        if not all(len(value) == length for value in inputs):
-            msg = (
-                f"LLM evaluator expects all input lists to have the same length but received input lengths "
-                f"{[len(value) for value in inputs]}."
-            )
-            raise ValueError(msg)
+            inputs = received.values()
+            length = len(next(iter(inputs)))
+            if not all(len(value) == length for value in inputs):
+                msg = (
+                    "LLM evaluator expects all input lists to have the same length but received input lengths "
+                    f"{[len(value) for value in inputs]}."
+                )
+                raise ValueError(msg)
+        else:
+            if received:
+                msg = f"LLM evaluator does not expect any input parameters but received {list(received.keys())}."
+                raise ValueError(msg)
 
     def _parse_and_validate_json_output(self, expected_keys: list[str], content: str) -> dict[str, Any]:
         """
