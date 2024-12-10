@@ -1,10 +1,10 @@
 import json
-import re
 from typing import Any
 from warnings import warn
 
 from dynamiq.nodes import Node
 from dynamiq.prompts import Message, Prompt
+from dynamiq.utils.json_parser import parse_llm_json_output
 
 STRINGS_TO_OMIT_FROM_LLM_EVALUATOR_OUTPUT = ("```json", "```")
 
@@ -61,7 +61,7 @@ class LLMEvaluator:
         *,
         raise_on_failure: bool = True,
         llm: Node,
-        strings_to_omit_from_llm_output: tuple[str] = STRINGS_TO_OMIT_FROM_LLM_EVALUATOR_OUTPUT,
+        strings_to_omit_from_llm_output: tuple = STRINGS_TO_OMIT_FROM_LLM_EVALUATOR_OUTPUT,
     ):
         """
         Initializes an instance of LLMEvaluator.
@@ -83,7 +83,7 @@ class LLMEvaluator:
             llm (Node): The LLM node to use for evaluation.
             strings_to_omit_from_llm_output (Tuple[str]): A tuple of strings to omit from the LLM output.
         """
-        self.validate_init_parameters(inputs, outputs, examples)
+        self._validate_init_parameters(inputs, outputs, examples)
         self.raise_on_failure = raise_on_failure
         self.instructions = instructions
         self.inputs = inputs
@@ -103,7 +103,7 @@ class LLMEvaluator:
         self.api_params["generation_kwargs"] = merged_generation_kwargs
 
         # Prepare the prompt with placeholders
-        template = self.prepare_template()
+        template = self._prepare_prompt_template()
         message = Message(role="user", content=template)
         self.prompt = Prompt(messages=[message])
 
@@ -111,7 +111,7 @@ class LLMEvaluator:
         self.strings_to_omit_from_llm_output = strings_to_omit_from_llm_output
 
     @staticmethod
-    def validate_init_parameters(
+    def _validate_init_parameters(
         inputs: list[dict[str, Any]],
         outputs: list[dict[str, Any]],
         examples: list[dict[str, Any]],
@@ -190,20 +190,21 @@ class LLMEvaluator:
             ValueError: If input parameters are invalid or LLM execution fails.
         """
         expected_inputs = {inp["name"]: inp["type"] for inp in self.inputs}
-        self.validate_input_parameters(expected=expected_inputs, received=inputs)
+        self._validate_input_parameters(expected=expected_inputs, received=inputs)
 
         input_names = list(inputs.keys())
         values = list(zip(*inputs.values()))
-        list_of_input_names_to_values = [dict(zip(input_names, v)) for v in values]
+        list_of_input_data = [dict(zip(input_names, v)) for v in values]
 
         results: list[dict[str, Any]] = []
         errors = 0
-        for input_data in list_of_input_names_to_values:
+
+        for input_data in list_of_input_data:
             # Pass the prompt and input_data to LLM
             try:
                 result = self.llm.execute(input_data=input_data, prompt=self.prompt)
             except Exception as e:
-                msg = f"Error while generating response for prompt: {self.prompt}. Error: {e}"
+                msg = f"Error while generating response for input {input_data}: {e}"
                 if self.raise_on_failure:
                     raise ValueError(msg)
                 warn(msg)
@@ -212,24 +213,24 @@ class LLMEvaluator:
                 continue
 
             expected_output_keys = [outp["name"] for outp in self.outputs]
-            content = self.cleanup_output_content(result["content"])
+            content = self._cleanup_output_content(result["content"])
 
-            if self.is_valid_json_and_has_expected_keys(expected=expected_output_keys, received=content):
-                parsed_result = json.loads(content)
+            parsed_result = self._parse_and_validate_json_output(expected_keys=expected_output_keys, content=content)
+            if parsed_result is not None:
                 results.append(parsed_result)
             else:
                 results.append(None)
                 errors += 1
 
         if errors > 0:
-            msg = f"LLM evaluator failed for {errors} out of {len(list_of_input_names_to_values)} inputs."
+            msg = f"LLM evaluator failed for {errors} out of {len(list_of_input_data)} inputs."
             warn(msg)
 
         return {"results": results}
 
-    def prepare_template(self) -> str:
+    def _prepare_prompt_template(self) -> str:
         """
-        Prepare the prompt template.
+        Prepares the prompt template.
 
         Returns:
             str: The prompt template.
@@ -283,9 +284,7 @@ class LLMEvaluator:
         return "\n".join(prompt_parts)
 
     @staticmethod
-    def validate_input_parameters(
-        expected: dict[str, Any], received: dict[str, Any]
-    ) -> None:
+    def _validate_input_parameters(expected: dict[str, Any], received: dict[str, Any]) -> None:
         """
         Validates the input parameters.
 
@@ -298,7 +297,7 @@ class LLMEvaluator:
         """
         for param in expected.keys():
             if param not in received:
-                msg = f"LLM evaluator expected input parameter '{param}' but received only {list(received.keys())}."
+                msg = f"LLM evaluator expected input parameter '{param}' but received {list(received.keys())}."
                 raise ValueError(msg)
 
         if not all(isinstance(value, list) for value in received.values()):
@@ -317,129 +316,50 @@ class LLMEvaluator:
             )
             raise ValueError(msg)
 
-    @staticmethod
-    def _extract_json_string(s: str) -> str | None:
-        """Extract the first JSON object from the string by balancing braces.
-
-        Args:
-            s (str): The input string containing the JSON object.
-
-        Returns:
-            Optional[str]: The extracted JSON string, or None if not found.
+    def _parse_and_validate_json_output(self, expected_keys: list[str], content: str) -> dict[str, Any]:
         """
-        nesting = 0
-        start = None
-        for i, char in enumerate(s):
-            if char == "{":
-                if nesting == 0:
-                    start = i
-                nesting += 1
-            elif char == "}":
-                if nesting > 0:
-                    nesting -= 1
-                    if nesting == 0 and start is not None:
-                        return s[start : i + 1]
-        return None
-
-    @staticmethod
-    def _clean_json_string(json_str: str) -> str:
-        """Clean the JSON string to make it parseable by the json module.
+        Parses the LLM output content as JSON and validates that it contains the expected keys.
 
         Args:
-            json_str (str): The JSON string to clean.
+            expected_keys (List[str]): Expected output keys.
+            content (str): The received output as a JSON string.
 
         Returns:
-            str: The cleaned JSON string.
-        """
-        # Remove comments (single-line // and multi-line /* */)
-        json_str = re.sub(r"//.*?$|/\*.*?\*/", "", json_str, flags=re.DOTALL | re.MULTILINE)
-
-        # Replace single quotes with double quotes
-        json_str = re.sub(r"(?<!\\)'", '"', json_str)
-
-        # Replace Python literals with JSON equivalents
-        json_str = re.sub(r"\bTrue\b", "true", json_str)
-        json_str = re.sub(r"\bFalse\b", "false", json_str)
-        json_str = re.sub(r"\bNone\b", "null", json_str)
-
-        # Remove trailing commas
-        json_str = re.sub(r",\s*(\]|\})", r"\1", json_str)
-
-        return json_str
-
-    @staticmethod
-    def parse_llm_json_output(response: str) -> dict[str, Any]:
-        """Attempt to parse the received LLM output into a JSON object.
-
-        Args:
-            response (str): The raw output from the LLM.
-
-        Returns:
-            Dict[str, Any]: The parsed JSON object.
+            Dict[str, Any]: The parsed JSON output if valid, otherwise None.
 
         Raises:
-            ValueError: If the output cannot be parsed into valid JSON.
+            ValueError: If the output is invalid and raise_on_failure is True.
         """
         try:
-            # First, try to parse the received string directly.
-            return json.loads(response)
+            parsed_output = parse_llm_json_output(content)
         except json.JSONDecodeError:
-            pass
-
-        # Extract JSON string
-        json_str = LLMEvaluator._extract_json_string(response)
-        if not json_str:
-            raise ValueError(f"Response from LLM is not valid JSON: {response}")
-
-        # Clean the JSON string
-        cleaned_json_str = LLMEvaluator._clean_json_string(json_str)
-
-        # Try parsing the cleaned JSON string
-        try:
-            return json.loads(cleaned_json_str)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to parse JSON after corrections: {e}")
-
-    def is_valid_json_and_has_expected_keys(
-        self, expected: list[str], received: str
-    ) -> bool:
-        """
-        Ensures the output is a valid JSON with the expected keys.
-
-        Args:
-            expected (List[str]): Expected output keys.
-            received (str): The received output as a JSON string.
-
-        Raises:
-            ValueError: If the output is invalid.
-
-        Returns:
-            bool: True if valid, False otherwise.
-        """
-        try:
-            parsed_output = self.parse_llm_json_output(received)
-        except json.JSONDecodeError:
-            msg = f"Response from LLM evaluator is not a valid JSON: {received}."
+            msg = f"Response from LLM evaluator is not a valid JSON: {content}."
             if self.raise_on_failure:
                 raise ValueError(msg)
             warn(msg)
-            return False
+            return None
 
-        if not all(output in parsed_output for output in expected):
-            msg = f"Expected response from LLM evaluator to have keys {expected}, but got {list(parsed_output.keys())}."
+        if not all(key in parsed_output for key in expected_keys):
+            msg = (
+                f"Expected response from LLM evaluator to have keys {expected_keys}, "
+                f"but got {list(parsed_output.keys())}."
+            )
             if self.raise_on_failure:
                 raise ValueError(msg)
             warn(msg)
-            return False
+            return None
 
-        return True
+        return parsed_output
 
-    def cleanup_output_content(self, content: str):
+    def _cleanup_output_content(self, content: str) -> str:
         """
         Cleans up the output content by removing unwanted strings.
 
         Args:
             content (str): The content to clean up.
+
+        Returns:
+            str: The cleaned content.
         """
         for omit_string in self.strings_to_omit_from_llm_output:
             content = content.replace(omit_string, "")
