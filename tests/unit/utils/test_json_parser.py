@@ -128,3 +128,20 @@ def test_json_with_multiple_objects():
     """
     expected_output = {"score": 1.0}
     assert parse_llm_json_output(response) == expected_output
+
+
+def test_parse_llm_json_output_with_nested_objects():
+    response = """
+    {
+        "user": {
+            "id": 123,
+            "name": "Alice",
+            "preferences": {
+                "notifications": true,
+                "theme": "dark"
+            }
+        }
+    }
+    """
+    expected_output = {"user": {"id": 123, "name": "Alice", "preferences": {"notifications": True, "theme": "dark"}}}
+    assert parse_llm_json_output(response) == expected_output
