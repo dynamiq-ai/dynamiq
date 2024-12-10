@@ -39,8 +39,6 @@ class BaseConverter(BaseModel):
             ValueError: If neither paths nor files provided, or if metadata is a list with
                 directory paths.
         """
-        if file_paths is None and files is None:
-            raise ValueError("Either `file_paths` or `files` must be provided.")
 
         documents = []
 
