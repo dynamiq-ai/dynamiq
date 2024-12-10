@@ -235,39 +235,49 @@ class LLMEvaluator:
         Returns:
             str: The prompt template.
         """
-        # Prepare inputs_section with placeholders using {{ variable_name }}
-        inputs_dict = {inp["name"]: f"{{{{ {inp['name']} }}}}" for inp in self.inputs}
-        inputs_section = json.dumps(inputs_dict, indent=2)
-
-        # Prepare examples_section with explicit labels
-        examples_parts = []
-        for idx, example in enumerate(self.examples, start=1):
-            example_input = json.dumps(example["inputs"], indent=2)
-            example_output = json.dumps(example["outputs"], indent=2)
-            example_text = f"Example {idx}:\n" f"Input:\n{example_input}\n" f"Expected Output:\n{example_output}"
-            examples_parts.append(example_text)
-        examples_section = "\n\n".join(examples_parts)
-
-        # Prepare expected_output_section
-        expected_output_dict = {outp["name"]: self._get_placeholder_for_type(outp["type"]) for outp in self.outputs}
-        expected_output = json.dumps(expected_output_dict, indent=2)
-
         prompt_parts = [
             "Instructions:",
             self.instructions.strip(),
-            "\nYour task is to generate a JSON object that contains the following keys and their corresponding values.",
-            "The output must be a valid JSON object and should exactly match the specified structure.",
-            "Do not include any additional text, explanations, or markdown.",
-            "Expected JSON format:",
-            expected_output,
         ]
 
+        # Check if outputs are provided
+        if self.outputs:
+            # Prepare expected_output_section
+            expected_output_dict = {outp["name"]: self._get_placeholder_for_type(outp["type"]) for outp in self.outputs}
+            expected_output = json.dumps(expected_output_dict, indent=2)
+            prompt_parts.extend(
+                [
+                    (
+                        "\nYour task is to generate a JSON object that contains the following keys "
+                        "and their corresponding values."
+                    ),
+                    "The output must be a valid JSON object and should exactly match the specified structure.",
+                    "Do not include any additional text, explanations, or markdown.",
+                    "Expected JSON format:",
+                    expected_output,
+                ]
+            )
+
         if self.examples:
+            # Prepare examples_section with explicit labels
+            examples_parts = []
+            for idx, example in enumerate(self.examples, start=1):
+                example_input = json.dumps(example["inputs"], indent=2)
+                example_output = json.dumps(example["outputs"], indent=2)
+                example_text = f"Example {idx}:\n" f"Input:\n{example_input}\n" f"Expected Output:\n{example_output}"
+                examples_parts.append(example_text)
+            examples_section = "\n\n".join(examples_parts)
             prompt_parts.append("\nHere are some examples:")
             prompt_parts.append(examples_section)
 
-        prompt_parts.append("\nNow, process the following input:")
-        prompt_parts.append(inputs_section)
+        if self.inputs:
+            # Prepare inputs_section with placeholders using {{ variable_name }}
+            inputs_section = (
+                "{\n" + ",\n".join([f'  "{inp["name"]}": {{{{ {inp["name"]} }}}}' for inp in self.inputs]) + "\n}"
+            )
+            prompt_parts.append("\nNow, process the following input:")
+            prompt_parts.append(inputs_section)
+
         prompt_parts.append("\nProvide the output as per the format specified above.")
 
         return "\n".join(prompt_parts)
