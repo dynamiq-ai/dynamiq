@@ -56,7 +56,7 @@ class LLMEvaluator:
         self,
         instructions: str,
         outputs: list[dict[str, Any]],
-        examples: list[dict[str, Any]],
+        examples: list[dict[str, Any]] | None = None,
         inputs: list[dict[str, Any]] | None = None,
         *,
         raise_on_failure: bool = True,
@@ -85,6 +85,8 @@ class LLMEvaluator:
         """
         if inputs is None:
             inputs = []
+        if examples is None:
+            examples = []
         self._validate_init_parameters(inputs, outputs, examples)
         self.raise_on_failure = raise_on_failure
         self.instructions = instructions
