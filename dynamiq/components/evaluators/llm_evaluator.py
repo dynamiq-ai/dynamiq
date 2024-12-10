@@ -71,7 +71,7 @@ class LLMEvaluator:
             outputs (List[Dict[str, Any]]): A list of dictionaries defining the outputs.
                 Each output dict should have keys "name" and "type", where "name" is the
                 output name and "type" is its type.
-            examples (List[Dict[str, Any]]): Few-shot examples conforming to the expected input and
+            examples (Optional[List[Dict[str, Any]]]): Few-shot examples conforming to the expected input and
                 output format as defined in the `inputs` and `outputs` parameters. Each example is a
                 dictionary with keys "inputs" and "outputs". They contain the input and output as
                 dictionaries respectively.
