@@ -61,7 +61,7 @@ class LLMEvaluator:
         *,
         raise_on_failure: bool = True,
         llm: Node,
-        strings_to_omit_from_llm_output: tuple = STRINGS_TO_OMIT_FROM_LLM_EVALUATOR_OUTPUT,
+        strings_to_omit_from_llm_output: tuple[str] = STRINGS_TO_OMIT_FROM_LLM_EVALUATOR_OUTPUT,
     ):
         """
         Initializes an instance of LLMEvaluator.
@@ -252,17 +252,7 @@ class LLMEvaluator:
         )
 
         # Prepare output descriptions
-        def get_type_name(tp):
-            """Helper function to get the name of a type, including typing types."""
-            if hasattr(tp, "__name__"):
-                return tp.__name__
-            elif hasattr(tp, "_name") and tp._name:
-                args = ", ".join(get_type_name(arg) for arg in tp.__args__)
-                return f"{tp._name}[{args}]"
-            else:
-                return str(tp)
-
-        output_descriptions = [f'  "{outp["name"]}": {get_type_name(outp["type"])}' for outp in self.outputs]
+        output_descriptions = [f'  "{outp["name"]}": {self._get_type_name(outp["type"])}' for outp in self.outputs]
         output_section = "{\n" + ",\n".join(output_descriptions) + "\n}"
 
         prompt_parts = [
@@ -282,6 +272,25 @@ class LLMEvaluator:
         prompt_parts.append("Outputs:")
 
         return "\n".join(prompt_parts)
+
+    @staticmethod
+    def _get_type_name(tp):
+        """
+        Helper function to get the name of a type, including typing types.
+
+        Args:
+            tp: The type to get the name of.
+
+        Returns:
+            str: The name of the type.
+        """
+        if hasattr(tp, "__name__"):
+            return tp.__name__
+        elif hasattr(tp, "_name") and tp._name:
+            args = ", ".join(LLMEvaluator._get_type_name(arg) for arg in tp.__args__)
+            return f"{tp._name}[{args}]"
+        else:
+            return str(tp)
 
     @staticmethod
     def _validate_input_parameters(expected: dict[str, Any], received: dict[str, Any]) -> None:
