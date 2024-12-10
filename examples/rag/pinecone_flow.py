@@ -151,6 +151,7 @@ def create_retrieval_flow(index_name: str = "default"):
         ],
         input_transformer=InputTransformer(
             selector={
+                "query": "$.query",
                 "documents": f"${[document_retriever_node.id]}.output.documents",
             },
         ),
