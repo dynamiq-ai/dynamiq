@@ -213,7 +213,7 @@ class Agent(Node):
         """
         Executes the agent with the given input data.
         """
-        logger.debug(f"Agent {self.name} - {self.id}: started with input {dict(input_data)}")
+        logger.info(f"Agent {self.name} - {self.id}: started with input {dict(input_data)}")
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
