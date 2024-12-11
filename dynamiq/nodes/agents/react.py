@@ -349,16 +349,13 @@ class ReActAgent(Agent):
                                     **kwargs,
                                 )
                             return final_answer
-
                         action, action_input = self._parse_action(llm_generated_output)
 
                     case InferenceMode.FUNCTION_CALLING:
-
                         action = llm_result.output["tool_calls"][0]["function"]["name"].strip()
                         llm_generated_output_json = json.loads(
                             llm_result.output["tool_calls"][0]["function"]["arguments"]
                         )
-
                         llm_generated_output = json.dumps(llm_generated_output_json)
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
@@ -369,7 +366,6 @@ class ReActAgent(Agent):
                                 config=config,
                                 **kwargs,
                             )
-
                         if action == "provide_final_answer":
                             final_answer = llm_generated_output_json["answer"]
                             self.tracing_final(loop_num, final_answer, config, kwargs)
@@ -382,7 +378,6 @@ class ReActAgent(Agent):
                                     **kwargs,
                                 )
                             return final_answer
-
                         action_input = llm_generated_output_json["action_input"]
 
                     case InferenceMode.STRUCTURED_OUTPUT:
@@ -390,7 +385,6 @@ class ReActAgent(Agent):
                             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
                         llm_generated_output_json = json.loads(llm_result.output["content"])
                         action = llm_generated_output_json["action"]
-
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
@@ -400,7 +394,6 @@ class ReActAgent(Agent):
                                 config=config,
                                 **kwargs,
                             )
-
                         if action == "finish":
                             final_answer = llm_generated_output_json["action_input"]
                             self.tracing_final(loop_num, final_answer, config, kwargs)
@@ -413,7 +406,6 @@ class ReActAgent(Agent):
                                     **kwargs,
                                 )
                             return final_answer
-
                         action_input = json.loads(llm_generated_output_json["action_input"])
                         llm_generated_output = json.dumps(llm_generated_output_json)
 
