@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from pydantic import ConfigDict
+from pydantic import ConfigDict, ValidationError
 
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
@@ -11,7 +11,6 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils import JsonWorkflowEncoder
-from pydantic import ValidationError
 
 
 @pytest.fixture
