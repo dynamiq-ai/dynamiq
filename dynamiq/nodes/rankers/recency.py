@@ -1,10 +1,16 @@
 import math
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
+
+from pydantic import BaseModel, Field
 
 from dynamiq.nodes.node import Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
+
+
+class TimeWeightedDocumentRankerInputSchema(BaseModel):
+    documents: list[Document] = Field(..., description="Parameter to provide list of documents.")
 
 
 class TimeWeightedDocumentRanker(Node):
@@ -74,15 +80,16 @@ class TimeWeightedDocumentRanker(Node):
     min_coefficient: float = 0.9
     date_field: str = "date"
     date_format: str = "%d %B, %Y"
+    input_schema: ClassVar[type[TimeWeightedDocumentRankerInputSchema]] = TimeWeightedDocumentRankerInputSchema
 
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+        self, input_data: TimeWeightedDocumentRankerInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """
         Execute the document ranking process.
 
         Args:
-            input_data (dict[str, Any]): The input data containing documents and query.
+            input_data (TimeWeightedDocumentRankerInputSchema): The input data containing documents and query.
             config (RunnableConfig, optional): Configuration for the runnable.
             **kwargs: Additional keyword arguments.
 
@@ -105,7 +112,7 @@ class TimeWeightedDocumentRanker(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        documents = input_data["documents"]
+        documents = input_data.documents
 
         ranked_documents = self.adjust_similarity_scores(
             documents,

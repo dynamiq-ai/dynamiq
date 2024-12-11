@@ -127,9 +127,7 @@ class ChromaVectorStore:
             else:
                 self._collection.delete(ids=document_ids)
 
-    def delete_documents_by_filters(
-        self, filters: dict[str, Any] | None = None
-    ) -> None:
+    def delete_documents_by_filters(self, filters: dict[str, Any] | None = None) -> None:
         """
         Delete documents from the vector store based on the provided filters.
 
