@@ -16,6 +16,12 @@ class OrchestratorError(Exception):
     pass
 
 
+class ActionParseError(OrchestratorError):
+    """Exception raised when an error occurs during action parsing."""
+
+    pass
+
+
 class OrchestratorInputSchema(BaseModel):
     input: str = Field(default="", description="The main objective of the orchestration.")
 
@@ -66,7 +72,7 @@ class Orchestrator(Node, ABC):
         Raises:
             OrchestratorError: If an error occurs while generating the final answer.
         """
-        logger.debug(f"{self.name} {self.id}: Running final summarizer")
+        logger.debug(f"Orchestrator {self.name} - {self.id}: Running final summarizer")
         manager_result = self.manager.run(
             input_data={"action": "final", **input_data},
             config=config,
@@ -76,8 +82,11 @@ class Orchestrator(Node, ABC):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            logger.error(f"GraphOrchestrator {self.id}: Error generating final answer")
-            raise OrchestratorError("Failed to generate final answer")
+            error_message = f"Manager '{self.manager.name}' failed: {manager_result.output.get('content')}"
+            logger.error(f"Orchestrator {self.name} - {self.id}: Error generating final, due to error: {error_message}")
+            raise OrchestratorError(
+                f"Orchestrator {self.name} - {self.id}: Error generating final, due to error: {error_message}"
+            )
 
         return manager_result.output.get("content").get("result")
 
@@ -122,8 +131,6 @@ class Orchestrator(Node, ABC):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         input_task = input_data.input or self.objective
-
-        logger.debug(f"{self.name} {self.id}: starting the flow with input_task:\n```{input_task}```")
 
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)

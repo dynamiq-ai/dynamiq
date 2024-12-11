@@ -1,7 +1,7 @@
 from dynamiq import Workflow
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.connections import ScaleSerp, ZenRows
+from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
@@ -10,7 +10,7 @@ from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
-from dynamiq.nodes.tools.zenrows import ZenRowsTool
+from dynamiq.nodes.types import Behavior
 from dynamiq.utils.logger import logger
 from examples.trip_planner.prompts import generate_customer_prompt, generate_simple_customer_prompt
 
@@ -62,9 +62,7 @@ def choose_provider(model_type, model_name):
 def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini", use_advanced_prompt=False) -> dict:
     llm_agent = choose_provider(model_type, model_name)
     search_connection = ScaleSerp()
-    zenrows_connection = ZenRows()
     tool_search = ScaleSerpTool(connection=search_connection)
-    tool_scrape = ZenRowsTool(connection=zenrows_connection)
 
     # Create agents
     agent_selection_city = ReActAgent(
@@ -73,14 +71,16 @@ def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini", use_
         llm=llm_agent,
         tools=[tool_search],
         max_loops=10,
+        behavior_on_max_loops=Behavior.RETURN,
     )
 
     agent_city_guide = ReActAgent(
         name="City Guide Expert",
         role=AGENT_CITY_GUIDE_ROLE,
         llm=llm_agent,
-        tools=[tool_search, tool_scrape],
+        tools=[tool_search],
         max_loops=10,
+        behavior_on_max_loops=Behavior.RETURN,
     )
 
     agent_writer = Agent(

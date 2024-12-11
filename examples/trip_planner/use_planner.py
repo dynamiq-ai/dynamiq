@@ -1,7 +1,7 @@
 from dynamiq import Workflow
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.connections import ScaleSerp  # ZenRows
+from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators import LinearOrchestrator
