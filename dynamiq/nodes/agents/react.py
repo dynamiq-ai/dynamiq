@@ -305,7 +305,6 @@ class ReActAgent(Agent):
                 input_formats=self.generate_input_formats(self.tools),
             )
             try:
-
                 llm_result = self.llm.run(
                     input_data={},
                     config=config,
@@ -326,7 +325,6 @@ class ReActAgent(Agent):
                 logger.info(
                     f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, reasoning:\n{llm_result.output['content']}"
                 )
-
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
                         llm_generated_output = llm_result.output["content"]
@@ -386,6 +384,7 @@ class ReActAgent(Agent):
                             return final_answer
 
                         action_input = llm_generated_output_json["action_input"]
+
                     case InferenceMode.STRUCTURED_OUTPUT:
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
@@ -444,7 +443,6 @@ class ReActAgent(Agent):
                                 )
                             return final_answer
                         action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
-
                 if action:
                     if self.tools:
                         try:
