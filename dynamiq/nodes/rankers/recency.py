@@ -73,7 +73,6 @@ class TimeWeightedDocumentRanker(Node):
     max_days: int = 3600
     min_coefficient: float = 0.9
     date_field: str = "date"
-    default_date: str = "01 January, 2022"
     date_format: str = "%d %B, %Y"
 
     def execute(
@@ -111,7 +110,6 @@ class TimeWeightedDocumentRanker(Node):
         ranked_documents = self.adjust_similarity_scores(
             documents,
             date_field=self.date_field,
-            default_date=self.default_date,
             max_days=self.max_days,
             min_coefficient=self.min_coefficient,
             date_format=self.date_format,
@@ -190,7 +188,6 @@ class TimeWeightedDocumentRanker(Node):
     def adjust_similarity_scores(
         candidates: list[Document],
         date_field: str = "date",
-        default_date="01 January, 2022",
         max_days: int = 3600,
         min_coefficient: float = 0.9,
         date_format: str = "%d %B, %Y",
@@ -220,14 +217,15 @@ class TimeWeightedDocumentRanker(Node):
             # adjusted_candidates will be sorted by adjusted scores
         """
         for candidate in candidates:
-            days = TimeWeightedDocumentRanker.date_to_days(
-                candidate.metadata.get(date_field, default_date),
-                date_format=date_format,
-            )
-            coefficient = TimeWeightedDocumentRanker.days_to_coefficient(
-                days, max_days=max_days, min_coefficient=min_coefficient
-            )
-            candidate.score = candidate.score * coefficient
+            if date := candidate.metadata.get(date_field):
+                days = TimeWeightedDocumentRanker.date_to_days(
+                    date,
+                    date_format=date_format,
+                )
+                coefficient = TimeWeightedDocumentRanker.days_to_coefficient(
+                    days, max_days=max_days, min_coefficient=min_coefficient
+                )
+                candidate.score = candidate.score * coefficient
 
         documents = [
             {"score": candidate.score, "document": candidate}
