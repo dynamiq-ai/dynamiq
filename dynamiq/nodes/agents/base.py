@@ -70,8 +70,8 @@ class AgentInputSchema(BaseModel):
 
     user_id: str = Field(default=None, description="Parameter to provide user ID.")
     session_id: str = Field(default=None, description="Parameter to provide session ID.")
-    metadata: dict = Field(default={}, description="Parameter to provide metadata.")
-    chat_history: list[Message] = Field(default=None, description="Parameter to provide chat history.")
+    metadata: dict | list = Field(default={}, description="Parameter to provide metadata.")
+    chat_history: list[Message] = Field(default=[], description="Parameter to provide chat history.")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -193,7 +193,7 @@ class Agent(Node):
         Returns:
             dict: Processed metadata
         """
-        EXCLUDED_KEYS = {"user_id", "session_id", "input"}
+        EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata"}
 
         custom_metadata = input_data.get("metadata", {}).copy()
         custom_metadata.update({k: v for k, v in input_data.items() if k not in EXCLUDED_KEYS})
@@ -410,7 +410,7 @@ class Agent(Node):
             input_data=tool_input,
             config=config,
             run_depends=self._run_depends,
-            **kwargs,
+            **(kwargs | {"recoverable_error": True}),
         )
         self._run_depends = [NodeDependency(node=tool).to_dict()]
         if tool_result.status != RunnableStatus.SUCCESS:
