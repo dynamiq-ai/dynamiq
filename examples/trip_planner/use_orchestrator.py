@@ -17,23 +17,21 @@ from examples.trip_planner.prompts import generate_customer_prompt, generate_sim
 # Please use your own file path
 OUTPUT_FILE_PATH = "city_guide_gpt.md"
 AGENT_SELECTION_CITY_ROLE = (
-    "An expert in analyzing travel data to pick ideal destinations. "
-    "Goal is to help select the best city for a trip based on specific "
-    "criteria such as weather patterns, seasonal events, and travel costs."
+    "An expert in analyzing travel data to select ideal destinations. "
+    "The goal is to help choose the best city for a trip based on specific criteria, "
+    "such as weather patterns, seasonal events, and travel costs."
 )
 
 AGENT_CITY_GUIDE_ROLE = (
-    "An expert in gathering information about a city. "
-    "Goal is to compile an in-depth guide for someone traveling to a city, "
-    "including key attractions, local customs, special events, "
-    "and daily activity recommendations."
+    "An expert in gathering comprehensive information about a city. "
+    "The goal is to compile an in-depth guide for someone traveling to a city, "
+    "including key attractions, local customs, special events, and daily activity recommendations."
 )
 
 AGENT_WRITER_ROLE = (
     "An expert in creating detailed travel guides. "
-    "Goal is to write a detailed travel guide for a city, "
-    "including key attractions, local customs, special events, "
-    "and daily activity recommendations."
+    "The goal is to write a comprehensive travel guide for a city, "
+    "covering key attractions, local customs, special events, and daily activity recommendations."
 )
 
 
@@ -126,7 +124,7 @@ if __name__ == "__main__":
         "dates": user_dates,
         "interests": user_interests,
     }
-    content = inference(input_data)["output"]["content"]
+    content = inference(input_data)
     print(content)
     with open(OUTPUT_FILE_PATH, "w") as f:
         f.write(content)

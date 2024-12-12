@@ -52,7 +52,7 @@ class LinearOrchestrator(Orchestrator):
     manager: LinearAgentManager
     agents: list[Agent] = []
     use_summarizer: bool = True
-    summarize_all_answers: bool = True
+    summarize_all_answers: bool = False
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

@@ -1,76 +1,115 @@
 from dynamiq.nodes.agents.base import AgentManager
 
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_PLAN = """
-You are an advanced AI planning assistant tasked with breaking down complex tasks into manageable subtasks
-for execution by specialized agents.
-Your goal is to create an efficient, sequential plan that maximizes the use of available resources while minimizing unnecessary steps.
+You are an advanced AI planning assistant specializing in breaking down
+complex tasks into manageable subtasks for execution by specialized agents.
+Your goal is to create an efficient, sequential plan that maximizes the
+use of available resources while minimizing unnecessary steps.
 
-Here is the main task you need to break down:
+Here is the list of available agents and their capabilities:
+<available_agents>
+{agents}
+</available_agents>
 
+And here is the main task you need to break down:
 <input_task>
 {input_task}
 </input_task>
 
-And here is the list of available agents and their capabilities:
-
-<agents>
-{agents}
-</agents>
-
-Please follow these instructions carefully:
+Please follow these instructions to create a detailed task breakdown:
 
 1. Analyze the main task and the capabilities of the available agents.
-2. Break down the main task into subtasks that can be executed sequentially.
-3. Create as few subtasks as possible while ensuring each is actionable and produces useful outputs for subsequent steps.
-4. Unify subtasks that can be executed in one step.
-5. Remove any steps that are not obligatory for successful task execution.
-6. Ensure each task is simple, with one or two steps, and directly addresses the initial problem.
-7. Assign a unique identifier to each task.
-8. Determine task dependencies.
 
-Before finalizing your plan, please analyze the task and reflect on your approach in <task_analysis> tags:
+2. Create a shared structure to store key information that
+may be needed across multiple tasks. Use the following format:
+<shared_structure>
+[List key information here, explaining why each piece is important]
+</shared_structure>
 
-1. List the main components of the input task.
-2. Note the key capabilities of each available agent.
-3. Brainstorm potential subtasks, numbering them as you go. It's OK for this section to be quite long.
-4. Consider task dependencies and potential combinations.
-5. Review your initial breakdown and optimize it by answering these questions:
-   - Have you minimized the number of subtasks without compromising the overall goal?
-   - Are there any tasks that could be further combined or simplified?
-   - Does each task align with the capabilities of the available agents?
-   - Is the sequence of tasks logical and efficient?
-   - Have you eliminated all non-essential steps?
+3. Break down the main task into subtasks that can be executed sequentially.
 
-After your analysis, create a final list of tasks in JSON format within <output> tag.Each task should have the following attributes:
-- "id": A unique task identifier (int)
+4. Optimize the subtasks by:
+   a. Minimizing the number of subtasks without compromising the overall goal
+   b. Combining or simplifying tasks where possible
+   c. Ensuring each task aligns with the capabilities of the available agents
+   d. Verifying the sequence of tasks is logical and efficient
+   e. Eliminating all non-essential steps
+   f. Providing sufficient detail for execution in each task description
+
+5. Assign a unique identifier to each task.
+
+6. Determine task dependencies, ensuring all necessary information is passed between tasks.
+
+Before finalizing your plan, please analyze the task and reflect on your
+approach by wrapping your work inside <planning_process> tags:
+
+1. Main components of the input task:
+   [List and number the main components, providing a brief description and noting importance]
+
+2. Available agent capabilities:
+   [For each agent, list and number their key capabilities,
+   explaining relevance to the main task and rating
+   it on a scale of 1-5 (1 being least relevant, 5 being most relevant)]
+
+3. Shared structure:
+   [Create and explain the shared structure, justifying each element's importance]
+
+4. Potential subtasks:
+   [Brainstorm and number potential subtasks, describing purpose and contribution to the main goal.
+   Estimate the complexity of each subtask on a scale of 1-5 (1 being least complex, 5 being most complex)]
+
+5. Task dependencies and information flow:
+   [Number and explain each dependency or information flow, providing rationale]
+
+6. Optimization review:
+   [Answer the following questions to optimize the task breakdown, providing a brief justification for each answer]
+   a. Have you minimized the number of subtasks without compromising the overall goal?
+   b. Are there any tasks that could be further combined or simplified?
+   c. Does each task align with the capabilities of the available agents?
+   d. Is the sequence of tasks logical and efficient?
+   e. Have you eliminated all non-essential steps?
+   f. Does each task description provide sufficient detail for execution?
+   g. Are all dependencies clearly identified and include all necessary information?
+   h. Have you ensured that information from the user is passed to all relevant steps?
+   i. Does your shared structure contain all key information that might be needed across tasks?
+
+After completing your analysis, create a final list of tasks in JSON format.
+Each task should have the following attributes:
+- "id": A unique task identifier (integer)
 - "name": A brief description of the task (string)
-- "description": Detailed execution instructions (string)
-- "dependencies": A list of task IDs that must be completed before this task (list of ints)
+- "description": Detailed execution instructions, including all necessary information
+from previous tasks and the shared structure (string)
+- "dependencies": A list of task IDs that must be completed before this task (list of integers)
 - "output": The expected result from the task (string or dictionary)
 
-Here's an example of the expected JSON structure (with generic content):
+Use the following format for your output:
+
 <output>
 ```json
 [
-    "id": "1",
-    "name": "Initialize project",
-    "description": "Set up the project environment and gather necessary resources.",
+
+    "id": 1,
+    "name": "Task name",
+    "description": "Detailed task description, referencing elements from shared structure and previous tasks as needed",
     "dependencies": [],
-    "output": "Project environment ready for subsequent tasks"
-,
-    "id": "1",
-    "name": "Process data",
-    "description": "Clean and normalize the input data for analysis.",
-    "dependencies": ["1"],
-    "output": "Processed dataset ready for analysis"
+    "output": "Detailed description of the expected output"
+
+  ,
+    "id": 2,
+    "name": "Next task name",
+    "description": "Detailed description of the next task with references
+    and embedded information from shared structure and previous tasks",
+    "dependencies": [1],
+    "output": "Expected output of the next task"
+
 ]
 ```
 </output>
-Please ensure that your XML tags are properly formatted and that your JSON output is valid and can be parsed by Python.
 
-Begin by analyzing the task and reflecting on your approach:
-"""  # noqa: E501
-
+Ensure that your JSON output is valid and can be parsed by Python.
+Double-check that all inputs to subtasks are properly passed
+and that the final step (creating the JSON output) is performed last.
+"""
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_ASSIGN = """
 You are a helpful agent responsible for recommending the best agent for a specific task.
 
@@ -87,7 +126,8 @@ Consider the agent's role, description, tools, and task dependencies. Return onl
 """  # noqa: E501
 
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_FINAL_ANSWER = """
-You are an advanced AI planning assistant responsible for synthesizing the outputs of multiple specialized agents into a single, comprehensive answer.
+You are an advanced AI planning assistant responsible for synthesizing
+the outputs of multiple specialized agents into a single, comprehensive answer.
 Your task is to analyze the results of subtasks and provide a cohesive response to the initial request.
 
 Here is the initial major task that was broken down and assigned to specialized agents:

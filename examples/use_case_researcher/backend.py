@@ -15,16 +15,16 @@ from examples.llm_setup import setup_llm
 
 # Agent Constants
 AGENT_ROLE = (
-    "Assistant that can access the internet and Python coding tools."
-    "It performs preliminary searches, scrapes data, writes code, and executes it."
-    "Tasks are broken into smaller subtasks and solved systematically."
-    "The agent ensures results are verified and rechecked before final delivery."
+    "An assistant with access to the internet and Python coding tools. "
+    "Capable of performing preliminary research, scraping data, writing code, and executing it."
+    "The agent breaks tasks into smaller parts and solves them sequentially. "
+    "It also ensures the quality of the code, refines it, and rechecks all results before final delivery."
 )
 
 PROMPT = (
-    "From the input file, for each company, find the company site, scrape it, and find the LinkedIn page."
-    "Deliver the final answer in a table with columns: company name, company site, LinkedIn page."
-    "Cover this for all items."
+    "Using the input file, for each company, find the company's website, scrape it, and locate the LinkedIn page. "
+    "Deliver the final answer in a table with the following columns: Company Name, Company Website, LinkedIn Page. "
+    "Ensure this is done for all items in the input file."
 )
 
 

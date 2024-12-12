@@ -7,8 +7,8 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from examples.llm_setup import setup_llm
 
 # Constants
-AGENT_ROLE = "professional writer,goal is to produce a well-written and informative response"
-INPUT_QUESTION = "Sum the first 10 random numbers, and prove that the sum is correct."
+AGENT_ROLE = "Helpful assistant with the goal of providing useful information and answering questions."
+INPUT_QUESTION = "Add the first 10 numbers and determine if the result is a prime number."
 
 
 def run_agent(event: str = "data") -> str:

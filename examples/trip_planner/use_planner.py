@@ -1,7 +1,7 @@
 from dynamiq import Workflow
 from dynamiq.connections import Anthropic as AnthropicConnection
+from dynamiq.connections import Exa
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators import LinearOrchestrator
@@ -9,30 +9,29 @@ from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
+from dynamiq.nodes.tools.exa_search import ExaTool
+from dynamiq.nodes.types import Behavior
 from dynamiq.utils.logger import logger
 from examples.trip_planner.prompts import generate_customer_prompt
 
 # Please use your own file path
 OUTPUT_FILE_PATH = "trip.md"
 AGENT_SELECTION_CITY_ROLE = (
-    "An expert in analyzing travel data to pick ideal destinations. "
-    "Goal is to help select the best city for a trip based on specific "
-    "criteria such as weather patterns, seasonal events, and travel costs."
+    "An expert in analyzing travel data to select ideal destinations. "
+    "The goal is to help choose the best city for a trip based on specific criteria, "
+    "such as weather patterns, seasonal events, and travel costs."
 )
 
 AGENT_CITY_GUIDE_ROLE = (
-    "An expert in gathering information about a city. "
-    "Goal is to compile an in-depth guide for someone traveling to a city, "
-    "including key attractions, local customs, special events, "
-    "and daily activity recommendations."
+    "An expert in gathering comprehensive information about a city. "
+    "The goal is to compile an in-depth guide for someone traveling to a city, "
+    "including key attractions, local customs, special events, and daily activity recommendations."
 )
 
 AGENT_WRITER_ROLE = (
     "An expert in creating detailed travel guides. "
-    "Goal is to write a detailed travel guide for a city, "
-    "including key attractions, local customs, special events, "
-    "and daily activity recommendations."
+    "The goal is to write a comprehensive travel guide for a city, "
+    "covering key attractions, local customs, special events, and daily activity recommendations."
 )
 
 
@@ -60,8 +59,8 @@ def choose_provider(model_type, model_name):
 
 def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini") -> dict:
     llm_agent = choose_provider(model_type, model_name)
-    http_connection_serp = ScaleSerp()
-    tool_search = ScaleSerpTool(connection=http_connection_serp)
+    http_connection_search = Exa()
+    tool_search = ExaTool(connection=http_connection_search)
 
     # Create agents
     agent_selection_city = ReActAgent(
@@ -69,7 +68,8 @@ def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini") -> d
         role=AGENT_SELECTION_CITY_ROLE,
         llm=llm_agent,
         tools=[tool_search],
-        max_loops=10,
+        max_loops=15,
+        behaviour_on_max_loops=Behavior.RETURN,
     )
 
     agent_city_guide = ReActAgent(
@@ -77,7 +77,8 @@ def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini") -> d
         role=AGENT_CITY_GUIDE_ROLE,
         llm=llm_agent,
         tools=[tool_search],
-        max_loops=10,
+        max_loops=15,
+        behaviour_on_max_loops=Behavior.RETURN,
     )
 
     agent_writer = Agent(
@@ -123,7 +124,7 @@ if __name__ == "__main__":
         "dates": user_dates,
         "interests": user_interests,
     }
-    content = inference(input_data)["output"]["content"]["result"]
+    content = inference(input_data)
     print(content)
     with open(OUTPUT_FILE_PATH, "w") as f:
         f.write(content)
