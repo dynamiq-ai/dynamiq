@@ -224,14 +224,15 @@ class TimeWeightedDocumentRanker(Node):
             # adjusted_candidates will be sorted by adjusted scores
         """
         for candidate in candidates:
-            days = TimeWeightedDocumentRanker.date_to_days(
-                candidate.metadata[date_field],
-                date_format=date_format,
-            )
-            coefficient = TimeWeightedDocumentRanker.days_to_coefficient(
-                days, max_days=max_days, min_coefficient=min_coefficient
-            )
-            candidate.score = candidate.score * coefficient
+            if date := candidate.metadata.get(date_field):
+                days = TimeWeightedDocumentRanker.date_to_days(
+                    date,
+                    date_format=date_format,
+                )
+                coefficient = TimeWeightedDocumentRanker.days_to_coefficient(
+                    days, max_days=max_days, min_coefficient=min_coefficient
+                )
+                candidate.score = candidate.score * coefficient
 
         documents = [
             {"score": candidate.score, "document": candidate}
