@@ -1,14 +1,13 @@
-from typing import Any, Literal
-
 from dynamiq.connections import Weaviate
-from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
+from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.writers.base import Writer, WriterInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import WeaviateVectorStore
 from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
 from dynamiq.utils.logger import logger
 
 
-class WeaviateDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
+class WeaviateDocumentWriter(Writer, BaseWriterVectorStoreParams):
     """
     Document Writer Node using Weaviate Vector Store.
 
@@ -21,7 +20,6 @@ class WeaviateDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
         vector_store (WeaviateVectorStore | None): The Weaviate Vector Store instance.
     """
 
-    group: Literal[NodeGroup.WRITERS] = NodeGroup.WRITERS
     name: str = "WeaviateDocumentWriter"
     connection: Weaviate | None = None
     vector_store: WeaviateVectorStore | None = None
@@ -50,14 +48,14 @@ class WeaviateDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
             "client": self.client,
         }
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
+    def execute(self, input_data: WriterInputSchema, config: RunnableConfig = None, **kwargs):
         """
         Execute the document writing operation.
 
         This method writes the input documents to the Weaviate Vector Store.
 
         Args:
-            input_data (dict[str, Any]): Input data containing the documents to be written.
+            input_data (WriterInputSchema): Input data containing the documents to be written.
             config (RunnableConfig, optional): Configuration for the execution.
             **kwargs: Additional keyword arguments.
 
@@ -67,8 +65,8 @@ class WeaviateDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        documents = input_data["documents"]
-        content_key = input_data.get("content_key")
+        documents = input_data.documents
+        content_key = input_data.content_key
 
         upserted_count = self.vector_store.write_documents(documents, content_key=content_key)
         logger.debug(f"Upserted {upserted_count} documents to Weaviate Vector Store.")

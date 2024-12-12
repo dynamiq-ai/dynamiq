@@ -1,8 +1,8 @@
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 import dynamiq.utils.jsonpath as jsonpath
 from dynamiq.nodes import Behavior, Node, NodeGroup
@@ -65,12 +65,17 @@ class ChoiceExecute(BaseModel):
     condition: ChoiceCondition | None = None
 
 
+class ChoiceInputSchema(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+
 class Choice(Node):
     """Represents a choice node in a flow."""
 
     name: str | None = "Choice"
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
     options: list[ChoiceOption] = []
+    input_schema: ClassVar[type[ChoiceInputSchema]] = ChoiceInputSchema
 
     @property
     def to_dict_exclude_params(self):
@@ -93,7 +98,7 @@ class Choice(Node):
         return data
 
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+        self, input_data: ChoiceInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, RunnableResult]:
         """
         Executes the choice node.
@@ -118,21 +123,21 @@ class Choice(Node):
             for option in self.options:
                 if is_success_evaluation:
                     results[option.id] = RunnableResult(
-                        status=RunnableStatus.SKIP, input=input_data, output=None
+                        status=RunnableStatus.SKIP, input=input_data.model_dump(), output=None
                     )
-                elif option.condition and self.evaluate(option.condition, input_data):
+                elif option.condition and self.evaluate(option.condition, input_data.model_dump()):
                     results[option.id] = RunnableResult(
-                        status=RunnableStatus.SUCCESS, input=input_data, output=True
+                        status=RunnableStatus.SUCCESS, input=input_data.model_dump(), output=True
                     )
                     is_success_evaluation = True
                 elif not option.condition:
                     results[option.id] = RunnableResult(
-                        status=RunnableStatus.SUCCESS, input=input_data, output=True
+                        status=RunnableStatus.SUCCESS, input=input_data.model_dump(), output=True
                     )
                     is_success_evaluation = True
                 else:
                     results[option.id] = RunnableResult(
-                        status=RunnableStatus.FAILURE, input=input_data, output=False
+                        status=RunnableStatus.FAILURE, input=input_data.model_dump(), output=False
                     )
 
         return results
@@ -193,6 +198,10 @@ class Choice(Node):
             raise ValueError(f"Operator {cond.operator} not supported.")
 
 
+class MapInputSchema(BaseModel):
+    input: list = Field(..., description="Parameter to provide list of inputs.")
+
+
 class Map(Node):
     """Represents a map node in a flow."""
 
@@ -200,6 +209,7 @@ class Map(Node):
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
     node: Node
     behavior: Behavior | None = Behavior.RETURN
+    input_schema: ClassVar[type[MapInputSchema]] = MapInputSchema
 
     @property
     def to_dict_exclude_params(self):
@@ -221,9 +231,7 @@ class Map(Node):
         data["node"] = self.node.to_dict(**kwargs)
         return data
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
+    def execute(self, input_data: MapInputSchema, config: RunnableConfig = None, **kwargs):
         """
         Executes the map node.
 
@@ -238,12 +246,7 @@ class Map(Node):
         Raises:
             Exception: If the input is not a list or if any flow execution fails.
         """
-        if isinstance(input_data, dict):
-            input_data = input_data["input"]
-
-        if not isinstance(input_data, list):
-            logger.error(f"Map operator {self.id} input is not a list.")
-            raise ValueError(f"Map operator {self.id} input is not a list.")
+        input_data = input_data.input
 
         output = []
         run_id = kwargs.get("run_id", uuid4())
@@ -288,9 +291,7 @@ class Pass(Node):
 
         return input_data
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
+    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
         """
         Executes the pass node.
 
