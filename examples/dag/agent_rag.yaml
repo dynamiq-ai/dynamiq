@@ -1,0 +1,43 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+  weaviate-conn:
+    type: dynamiq.connections.Weaviate
+    api_key: ${oc.env:WEAVIATE_API_KEY}
+    url: ${oc.env:WEAVIATE_URL}
+
+nodes:
+  agent-rag:
+    type: dynamiq.nodes.agents.react.ReActAgent
+    llm:
+      id: agent-rag-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+    tools:
+      - id: agent-rag-tool
+        type: dynamiq.nodes.tools.RetrievalTool
+        text_embedder:
+          type: dynamiq.nodes.embedders.OpenAITextEmbedder
+          name: OpenAI Text Embedder
+          connection: openai-conn
+          model: text-embedding-3-small
+        document_retriever:
+          type: dynamiq.nodes.retrievers.WeaviateDocumentRetriever
+          name: Weaviate Document Retriever
+          connection: weaviate-conn
+          index_name: default
+    role: AI assistant with knowledge about Dubai city, goal is provide well explained final answers
+
+flows:
+  rag-agent-flow:
+    name: Agent RAG Flow
+    nodes:
+      - agent-rag
+
+workflows:
+  rag-agent-workflow:
+    flow: rag-agent-flow
+    version: 1

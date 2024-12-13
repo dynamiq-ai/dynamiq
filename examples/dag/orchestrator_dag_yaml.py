@@ -22,13 +22,11 @@ Final result must be provided in a markdown format.
 
 
 if __name__ == "__main__":
-    dag_yaml_file_path = os.path.join(os.path.dirname(__file__), "agent_dag.yaml")
+    dag_yaml_file_path = os.path.join(os.path.dirname(__file__), "orchestrator_dag.yaml")
     tracing = TracingCallbackHandler()
     with get_connection_manager() as cm:
         # Load the workflow from the YAML file, parse and init components during parsing
-        wf = Workflow.from_yaml_file(
-            file_path=dag_yaml_file_path, connection_manager=cm, init_components=True
-        )
+        wf = Workflow.from_yaml_file(file_path=dag_yaml_file_path, connection_manager=cm, init_components=True)
         wf.run(
             input_data={"input": INPUT_DATA},
             config=runnables.RunnableConfig(callbacks=[tracing]),
