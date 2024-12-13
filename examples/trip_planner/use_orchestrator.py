@@ -124,7 +124,7 @@ if __name__ == "__main__":
         "dates": user_dates,
         "interests": user_interests,
     }
-    content = inference(input_data)
+    content = inference(input_data)["output"]["content"]
     print(content)
     with open(OUTPUT_FILE_PATH, "w") as f:
         f.write(content)

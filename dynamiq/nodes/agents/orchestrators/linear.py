@@ -283,7 +283,7 @@ class LinearOrchestrator(Orchestrator):
             )
             final_result = re.search(r"<final_answer>(.*?)</final_answer>", final_result_content, re.DOTALL)
             if not final_result:
-                raise ActionParseError("No <output> tags found in the response")
+                raise ActionParseError("No <final_answer> tags found in the response")
             final_result_answer = final_result.group(1).strip()
             return final_result_answer
 

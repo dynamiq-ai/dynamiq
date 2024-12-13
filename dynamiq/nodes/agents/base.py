@@ -488,7 +488,7 @@ class AgentManagerInputSchema(BaseModel):
         if not action or action not in context.context.get("actions"):
             raise InvalidActionException(
                 f"Invalid or missing action: {action}. Please select an action from \
-                    {context.context.get("actions")}."  # nosec: B608
+                    {context.context.get('actions')}."  # nosec: B608
             )
         return self
 

@@ -1,6 +1,6 @@
 from dynamiq import Workflow
 from dynamiq.connections import Anthropic as AnthropicConnection
-from dynamiq.connections import Exa
+from dynamiq.connections import Exa, ScaleSerp
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.base import Agent
@@ -10,6 +10,7 @@ from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.exa_search import ExaTool
+from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.types import Behavior
 from dynamiq.utils.logger import logger
 from examples.trip_planner.prompts import generate_customer_prompt
@@ -59,8 +60,8 @@ def choose_provider(model_type, model_name):
 
 def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini") -> dict:
     llm_agent = choose_provider(model_type, model_name)
-    http_connection_search = Exa()
-    tool_search = ExaTool(connection=http_connection_search)
+    http_connection_search = ScaleSerp()
+    tool_search = ScaleSerpTool(connection=http_connection_search)
 
     # Create agents
     agent_selection_city = ReActAgent(
@@ -124,7 +125,7 @@ if __name__ == "__main__":
         "dates": user_dates,
         "interests": user_interests,
     }
-    content = inference(input_data)
+    content = inference(input_data)["output"]["content"]
     print(content)
     with open(OUTPUT_FILE_PATH, "w") as f:
         f.write(content)
