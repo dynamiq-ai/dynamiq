@@ -1,16 +1,15 @@
-from typing import Any, Literal
-
 from pydantic import model_validator
 
 from dynamiq.connections import Pinecone
-from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
+from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.writers.base import Writer, WriterInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PineconeVectorStore
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType, PineconeWriterVectorStoreParams
 from dynamiq.utils.logger import logger
 
 
-class PineconeDocumentWriter(VectorStoreNode, PineconeWriterVectorStoreParams):
+class PineconeDocumentWriter(Writer, PineconeWriterVectorStoreParams):
     """
     Document Writer Node using Pinecone Vector Store.
 
@@ -23,7 +22,6 @@ class PineconeDocumentWriter(VectorStoreNode, PineconeWriterVectorStoreParams):
         vector_store (PineconeVectorStore | None): The Pinecone Vector Store object.
     """
 
-    group: Literal[NodeGroup.WRITERS] = NodeGroup.WRITERS
     name: str = "PineconeDocumentWriter"
     connection: Pinecone | None = None
     vector_store: PineconeVectorStore | None = None
@@ -72,16 +70,14 @@ class PineconeDocumentWriter(VectorStoreNode, PineconeWriterVectorStoreParams):
             "client": self.client,
         }
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
+    def execute(self, input_data: WriterInputSchema, config: RunnableConfig = None, **kwargs):
         """
         Execute the document writing process.
 
         This method writes the input documents to the Pinecone Vector Store.
 
         Args:
-            input_data (dict[str, Any]): A dictionary containing the input data.
+            input_data (WriterInputSchema): An instance containing the input data.
                 Expected to have a 'documents' key with the documents to be written.
             config (RunnableConfig, optional): Configuration for the execution.
             **kwargs: Additional keyword arguments.
@@ -95,8 +91,8 @@ class PineconeDocumentWriter(VectorStoreNode, PineconeWriterVectorStoreParams):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        documents = input_data["documents"]
-        content_key = input_data.get("content_key")
+        documents = input_data.documents
+        content_key = input_data.content_key
 
         upserted_count = self.vector_store.write_documents(documents, content_key=content_key)
         logger.debug(f"Upserted {upserted_count} documents to Pinecone Vector Store.")

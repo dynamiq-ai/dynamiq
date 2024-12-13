@@ -96,5 +96,5 @@ def test_milvus_write_workflow(
     mock_on_flow_end.assert_called_once()
 
     mock_milvus_vector_store.write_documents.assert_called_once_with(
-        input_data["documents"], content_key=None, embedding_key=None
+        mock_documents, content_key=None, embedding_key=None
     )

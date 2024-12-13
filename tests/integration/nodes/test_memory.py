@@ -48,6 +48,7 @@ def test_workflow_with_agent_and_in_memory_memory(openai_node):
         id="agent",
         memory=memory,
     )
+
     wf = Workflow(flow=flows.Flow(nodes=[agent]))
 
     user_input_1 = "Hi, what's the weather like today?"

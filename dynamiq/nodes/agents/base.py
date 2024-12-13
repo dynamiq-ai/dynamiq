@@ -213,12 +213,12 @@ class Agent(Node):
         """
         Executes the agent with the given input data.
         """
-        logger.info(f"Agent {self.name} - {self.id}: started with input:\n{input_data}")
+        logger.info(f"Agent {self.name} - {self.id}: started with input {dict(input_data)}")
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        custom_metadata = self._prepare_metadata(input_data.model_dump())
+        custom_metadata = self._prepare_metadata(dict(input_data))
 
         chat_history = input_data.chat_history
 
@@ -497,7 +497,7 @@ class AgentManager(Agent):
     """Manager class that extends the Agent class to include specific actions."""
 
     _actions: dict[str, Callable] = PrivateAttr(default_factory=dict)
-    name: str = "Agent Manager "
+    name: str = "Agent Manager"
     input_schema: ClassVar[type[AgentManagerInputSchema]] = AgentManagerInputSchema
 
     def __init__(self, **kwargs):

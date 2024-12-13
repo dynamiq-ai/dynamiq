@@ -1,13 +1,12 @@
-from typing import Any, Literal
-
 from dynamiq.connections import Chroma
-from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
+from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.writers.base import Writer, WriterInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import ChromaVectorStore
 from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
 
 
-class ChromaDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
+class ChromaDocumentWriter(Writer, BaseWriterVectorStoreParams):
     """
     Document Writer Node using Chroma Vector Store.
 
@@ -20,7 +19,6 @@ class ChromaDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
         vector_store (ChromaVectorStore | None): The Chroma Vector Store instance.
     """
 
-    group: Literal[NodeGroup.WRITERS] = NodeGroup.WRITERS
     name: str = "ChromaDocumentWriter"
     connection: Chroma | None = None
     vector_store: ChromaVectorStore | None = None
@@ -49,16 +47,14 @@ class ChromaDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
             "client": self.client,
         }
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
+    def execute(self, input_data: WriterInputSchema, config: RunnableConfig = None, **kwargs):
         """
         Execute the document writing operation.
 
         This method writes the documents provided in the input_data to the Chroma Vector Store.
 
         Args:
-            input_data (dict[str, Any]): A dictionary containing the input data.
+            input_data (WriterInputSchema): An instance containing the input data.
                 Expected to have a 'documents' key with the documents to be written.
             config (RunnableConfig, optional): Configuration for the execution.
             **kwargs: Additional keyword arguments.
@@ -69,7 +65,7 @@ class ChromaDocumentWriter(VectorStoreNode, BaseWriterVectorStoreParams):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        documents = input_data["documents"]
+        documents = input_data.documents
 
         output = self.vector_store.write_documents(documents)
         return {
