@@ -1,7 +1,7 @@
 from dynamiq import Workflow
 from dynamiq.connections import Anthropic as AnthropicConnection
-from dynamiq.connections import Exa, ScaleSerp
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators import LinearOrchestrator
@@ -9,7 +9,6 @@ from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.types import Behavior
 from dynamiq.utils.logger import logger
