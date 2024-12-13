@@ -1,5 +1,7 @@
 import concurrent.futures
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
+
+from pydantic import BaseModel, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import Node, NodeDependency, NodeGroup, ensure_config
@@ -16,6 +18,11 @@ The passage is:
 {{passage}}
 Write the answer final answer: 'Yes' or 'No'
 """
+
+
+class LLMDocumentRankerInputSchema(BaseModel):
+    query: str = Field(..., description="Parameter to provide query for ranking.")
+    documents: list[Document] = Field(..., description="Parameter to provide list of documents.")
 
 
 class LLMDocumentRanker(Node):
@@ -61,6 +68,7 @@ class LLMDocumentRanker(Node):
     prompt_template: str = DEFAULT_PROMPT
     top_k: int = 5
     llm: Node
+    input_schema: ClassVar[type[LLMDocumentRankerInputSchema]] = LLMDocumentRankerInputSchema
 
     def __init__(self, **kwargs):
         """
@@ -111,13 +119,13 @@ class LLMDocumentRanker(Node):
             self.llm.init_components(connection_manager)
 
     def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+        self, input_data: LLMDocumentRankerInputSchema, config: RunnableConfig = None, **kwargs
     ) -> dict[str, Any]:
         """
         Executes the document ranking process.
 
         Args:
-            input_data (dict[str, Any]): A dictionary containing the query and documents to be ranked.
+            input_data (LLMDocumentRankerInputSchema): A dictionary containing the query and documents to be ranked.
             config (RunnableConfig, optional): Configuration for the execution. Default is None.
             **kwargs: Additional keyword arguments.
 
@@ -143,8 +151,8 @@ class LLMDocumentRanker(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         ranked_documents = self.perform_llm_ranking(
-            query=input_data["query"],
-            documents=input_data["documents"],
+            query=input_data.query,
+            documents=input_data.documents,
             config=config,
             **kwargs,
         )

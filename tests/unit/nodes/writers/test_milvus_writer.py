@@ -1,7 +1,9 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
+from dynamiq.nodes.writers.base import WriterInputSchema
 from dynamiq.nodes.writers.milvus import MilvusDocumentWriter
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
@@ -42,26 +44,25 @@ def test_vector_store_params(milvus_document_writer):
 
 
 def test_execute(milvus_document_writer, mock_milvus_vector_store):
-    input_data = {
-        "documents": [
+    input_data = WriterInputSchema(
+        documents=[
             {"id": "1", "content": "Document 1", "embedding": [0.1, 0.2, 0.3]},
             {"id": "2", "content": "Document 2", "embedding": [0.4, 0.5, 0.6]},
         ]
-    }
+    )
     config = RunnableConfig(callbacks=[])
 
     result = milvus_document_writer.execute(input_data, config)
 
     mock_milvus_vector_store.write_documents.assert_called_once_with(
-        input_data["documents"], content_key=None, embedding_key=None
+        input_data.documents, content_key=None, embedding_key=None
     )
 
     assert result == {"upserted_count": 2}
 
 
 def test_execute_with_missing_documents_key(milvus_document_writer):
-    input_data = {}
     config = RunnableConfig(callbacks=[])
 
-    with pytest.raises(KeyError):
-        milvus_document_writer.execute(input_data, config)
+    with pytest.raises(ValidationError):
+        milvus_document_writer.execute(WriterInputSchema(), config)
