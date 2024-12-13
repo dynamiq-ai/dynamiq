@@ -492,8 +492,8 @@ class AgentManagerInputSchema(BaseModel):
             error_message = (
                 f"Invalid or missing action: {action}. "  # nosec B608: Static message construction, not SQL-related.
                 "Please select an action "
-                f"from {context.context.get('actions')}"
-            )  # nosec B608: Static message construction, not SQL-related.
+                f"from {context.context.get('actions')}"  # nosec B608: Static message construction, not SQL-related.
+            )
             raise InvalidActionException(error_message)
         return self
 
