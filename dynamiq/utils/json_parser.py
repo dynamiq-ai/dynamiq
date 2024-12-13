@@ -4,26 +4,43 @@ from typing import Any
 
 
 def extract_json_string(s: str) -> str | None:
-    """Extract the first JSON object from the string by balancing braces.
+    """Extract the first JSON object or array from the string by balancing brackets.
 
     Args:
-        s (str): The input string containing the JSON object.
+        s (str): The input string containing the JSON object or array.
 
     Returns:
         Optional[str]: The extracted JSON string, or None if not found.
     """
-    nesting = 0
+    stack = []
     start = None
+    in_string = False
+    escape = False
+
     for i, char in enumerate(s):
-        if char == "{":
-            if nesting == 0:
-                start = i
-            nesting += 1
-        elif char == "}":
-            if nesting > 0:
-                nesting -= 1
-                if nesting == 0 and start is not None:
-                    return s[start : i + 1]
+        if char == '"' and not escape:
+            in_string = not in_string
+        elif char == "\\" and not escape:
+            escape = True
+            continue
+
+        if not in_string:
+            if char in "{[":
+                if not stack:
+                    start = i
+                stack.append(char)
+            elif char in "}]":
+                if stack:
+                    opening_bracket = stack.pop()
+                    if (opening_bracket == "{" and char != "}") or (opening_bracket == "[" and char != "]"):
+                        # Mismatched brackets
+                        return None
+                    if not stack and start is not None:
+                        return s[start : i + 1]
+                else:
+                    # Unbalanced closing bracket
+                    return None
+        escape = False
     return None
 
 
@@ -53,14 +70,14 @@ def clean_json_string(json_str: str) -> str:
     return json_str
 
 
-def parse_llm_json_output(response: str) -> dict[str, Any]:
+def parse_llm_json_output(response: str) -> dict[str, Any] | list[Any]:
     """Attempt to parse the received LLM output into a JSON object.
 
     Args:
         response (str): The raw output from the LLM.
 
     Returns:
-        Dict[str, Any]: The parsed JSON object.
+        dict[str, Any] | list[Any]: The parsed JSON object.
 
     Raises:
         ValueError: If the output cannot be parsed into valid JSON.

@@ -145,3 +145,15 @@ def test_parse_llm_json_output_with_nested_objects():
     """
     expected_output = {"user": {"id": 123, "name": "Alice", "preferences": {"notifications": True, "theme": "dark"}}}
     assert parse_llm_json_output(response) == expected_output
+
+
+def test_json_array_in_text():
+    response = """
+    Here is your JSON:
+    [
+        {"answer": "text"},
+        {"answer": "another text"}
+    ]
+    """
+    expected_output = [{"answer": "text"}, {"answer": "another text"}]
+    assert parse_llm_json_output(response) == expected_output
