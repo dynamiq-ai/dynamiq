@@ -4,6 +4,7 @@ from warnings import warn
 
 from dynamiq.nodes import Node
 from dynamiq.prompts import Message, Prompt
+from dynamiq.utils.json_parser import parse_llm_json_output
 
 STRINGS_TO_OMIT_FROM_LLM_EVALUATOR_OUTPUT = ("```json", "```")
 
@@ -26,15 +27,15 @@ class LLMEvaluator:
 
     evaluator = LLMEvaluator(
         instructions="Is this answer problematic for children?",
-        inputs=[{"name": "predicted_answers", "type": List[str]}],
+        inputs=[{"name": "answer", "type": str}],
         outputs=[{"name": "score", "type": int}],
         examples=[
             {
-                "inputs": {"predicted_answers": "Damn, this is straight outta hell!!!"},
+                "inputs": {"answer": "Damn, this is straight outta hell!!!"},
                 "outputs": {"score": 1},
             },
             {
-                "inputs": {"predicted_answers": "Football is the most popular sport."},
+                "inputs": {answer": "Football is the most popular sport."},
                 "outputs": {"score": 0},
             },
         ],
@@ -45,7 +46,7 @@ class LLMEvaluator:
         "Football is the most popular sport with around 4 billion followers worldwide",
         "Python language was created by Guido van Rossum.",
     ]
-    results = evaluator.run(predicted_answers=predicted_answers)
+    results = evaluator.run(answer=predicted_answers)
     print(results)
     # Output: {'results': [{'score': 0}, {'score': 0}]}
     ```
@@ -54,9 +55,9 @@ class LLMEvaluator:
     def __init__(
         self,
         instructions: str,
-        inputs: list[dict[str, Any]],
         outputs: list[dict[str, Any]],
-        examples: list[dict[str, Any]],
+        examples: list[dict[str, Any]] | None = None,
+        inputs: list[dict[str, Any]] | None = None,
         *,
         raise_on_failure: bool = True,
         llm: Node,
@@ -67,22 +68,26 @@ class LLMEvaluator:
 
         Args:
             instructions (str): The prompt instructions to use for evaluation.
-            inputs (List[Dict[str, Any]]): A list of dictionaries defining the inputs.
-                Each input dict should have keys "name" and "type", where "name" is the
-                input name and "type" is its type.
             outputs (List[Dict[str, Any]]): A list of dictionaries defining the outputs.
                 Each output dict should have keys "name" and "type", where "name" is the
                 output name and "type" is its type.
-            examples (List[Dict[str, Any]]): Few-shot examples conforming to the expected input and
+            examples (Optional[List[Dict[str, Any]]]): Few-shot examples conforming to the expected input and
                 output format as defined in the `inputs` and `outputs` parameters. Each example is a
                 dictionary with keys "inputs" and "outputs". They contain the input and output as
                 dictionaries respectively.
+            inputs (Optional[List[Dict[str, Any]]]): A list of dictionaries defining the inputs.
+                Each input dict should have keys "name" and "type", where "name" is the
+                input name and "type" is its type. Defaults to None.
             raise_on_failure (bool): If True, the component will raise an exception on an
                 unsuccessful API call.
             llm (Node): The LLM node to use for evaluation.
             strings_to_omit_from_llm_output (Tuple[str]): A tuple of strings to omit from the LLM output.
         """
-        self.validate_init_parameters(inputs, outputs, examples)
+        if inputs is None:
+            inputs = []
+        if examples is None:
+            examples = []
+        self._validate_init_parameters(inputs, outputs, examples)
         self.raise_on_failure = raise_on_failure
         self.instructions = instructions
         self.inputs = inputs
@@ -102,7 +107,7 @@ class LLMEvaluator:
         self.api_params["generation_kwargs"] = merged_generation_kwargs
 
         # Prepare the prompt with placeholders
-        template = self.prepare_template()
+        template = self._prepare_prompt_template()
         message = Message(role="user", content=template)
         self.prompt = Prompt(messages=[message])
 
@@ -110,7 +115,7 @@ class LLMEvaluator:
         self.strings_to_omit_from_llm_output = strings_to_omit_from_llm_output
 
     @staticmethod
-    def validate_init_parameters(
+    def _validate_init_parameters(
         inputs: list[dict[str, Any]],
         outputs: list[dict[str, Any]],
         examples: list[dict[str, Any]],
@@ -189,20 +194,25 @@ class LLMEvaluator:
             ValueError: If input parameters are invalid or LLM execution fails.
         """
         expected_inputs = {inp["name"]: inp["type"] for inp in self.inputs}
-        self.validate_input_parameters(expected=expected_inputs, received=inputs)
+        self._validate_input_parameters(expected=expected_inputs, received=inputs)
 
-        input_names = list(inputs.keys())
-        values = list(zip(*inputs.values()))
-        list_of_input_names_to_values = [dict(zip(input_names, v)) for v in values]
+        if self.inputs:
+            input_names = list(inputs.keys())
+            values = list(zip(*inputs.values()))
+            list_of_input_data = [dict(zip(input_names, v)) for v in values]
+        else:
+            # If no inputs are provided, create a list with a single empty dictionary
+            list_of_input_data = [{}]
 
         results: list[dict[str, Any]] = []
         errors = 0
-        for input_data in list_of_input_names_to_values:
+
+        for input_data in list_of_input_data:
             # Pass the prompt and input_data to LLM
             try:
                 result = self.llm.execute(input_data=input_data, prompt=self.prompt)
             except Exception as e:
-                msg = f"Error while generating response for prompt: {self.prompt}. Error: {e}"
+                msg = f"Error while generating response for input {input_data}: {e}"
                 if self.raise_on_failure:
                     raise ValueError(msg)
                 warn(msg)
@@ -211,80 +221,121 @@ class LLMEvaluator:
                 continue
 
             expected_output_keys = [outp["name"] for outp in self.outputs]
-            content = self.cleanup_output_content(result["content"])
+            content = self._cleanup_output_content(result["content"])
 
-            if self.is_valid_json_and_has_expected_keys(expected=expected_output_keys, received=content):
-                parsed_result = json.loads(content)
+            parsed_result = self._parse_and_validate_json_output(expected_keys=expected_output_keys, content=content)
+            if parsed_result is not None:
                 results.append(parsed_result)
             else:
                 results.append(None)
                 errors += 1
 
         if errors > 0:
-            msg = f"LLM evaluator failed for {errors} out of {len(list_of_input_names_to_values)} inputs."
+            msg = f"LLM evaluator failed for {errors} out of {len(list_of_input_data)} inputs."
             warn(msg)
 
         return {"results": results}
 
-    def prepare_template(self) -> str:
+    def _prepare_prompt_template(self) -> str:
         """
-        Prepare the prompt template.
+        Prepares the prompt template.
 
         Returns:
             str: The prompt template.
         """
-        # Prepare inputs_section with placeholders using {{ variable_name }}
-        inputs_section = (
-            "{\n" + ",\n".join([f'  "{inp["name"]}": {{{{ {inp["name"]} }}}}' for inp in self.inputs]) + "\n}"
-        )
-
-        # Prepare examples_section
-        examples_section = "\n\n".join(
-            [
-                "Inputs:\n"
-                + json.dumps(example["inputs"], indent=2)
-                + "\nOutputs:\n"
-                + json.dumps(example["outputs"], indent=2)
-                for example in self.examples
-            ]
-        )
-
-        # Prepare output descriptions
-        def get_type_name(tp):
-            """Helper function to get the name of a type, including typing types."""
-            if hasattr(tp, "__name__"):
-                return tp.__name__
-            elif hasattr(tp, "_name") and tp._name:
-                args = ", ".join(get_type_name(arg) for arg in tp.__args__)
-                return f"{tp._name}[{args}]"
-            else:
-                return str(tp)
-
-        output_descriptions = [f'  "{outp["name"]}": {get_type_name(outp["type"])}' for outp in self.outputs]
-        output_section = "{\n" + ",\n".join(output_descriptions) + "\n}"
-
         prompt_parts = [
             "Instructions:",
             self.instructions.strip(),
-            "\nGenerate the response in JSON format, omitting extra keys and markdown syntax elements.",
-            "Include the following keys with their types:",
-            output_section,
         ]
 
+        # Check if outputs are provided
+        if self.outputs:
+            # Prepare expected_output_section
+            expected_output_dict = {outp["name"]: self._get_placeholder_for_type(outp["type"]) for outp in self.outputs}
+            expected_output = json.dumps(expected_output_dict, indent=2)
+            prompt_parts.extend(
+                [
+                    (
+                        "\nYour task is to generate a JSON object that contains the following keys "
+                        "and their corresponding values."
+                    ),
+                    "The output must be a valid JSON object and should exactly match the specified structure.",
+                    "Do not include any additional text, explanations, or markdown.",
+                    "Expected JSON format:",
+                    expected_output,
+                ]
+            )
+
         if self.examples:
-            prompt_parts.append("\nConsider the following examples:")
+            # Prepare examples_section with explicit labels
+            examples_parts = []
+            for idx, example in enumerate(self.examples, start=1):
+                example_input = json.dumps(example["inputs"], indent=2)
+                example_output = json.dumps(example["outputs"], indent=2)
+                example_text = f"Example {idx}:\n" f"Input:\n{example_input}\n" f"Expected Output:\n{example_output}"
+                examples_parts.append(example_text)
+            examples_section = "\n\n".join(examples_parts)
+            prompt_parts.append("\nHere are some examples:")
             prompt_parts.append(examples_section)
 
-        prompt_parts.append("\nCurrent Inputs:")
-        prompt_parts.append(inputs_section)
-        prompt_parts.append("Outputs:")
+        if self.inputs:
+            # Prepare inputs_section with placeholders using {{ variable_name }}
+            inputs_section = (
+                "{\n" + ",\n".join([f'  "{inp["name"]}": {{{{ {inp["name"]} }}}}' for inp in self.inputs]) + "\n}"
+            )
+            prompt_parts.append("\nNow, process the following input:")
+            prompt_parts.append(inputs_section)
+
+        prompt_parts.append("\nProvide the output as per the format specified above.")
 
         return "\n".join(prompt_parts)
 
+    def _get_placeholder_for_type(self, tp):
+        """
+        Generates a placeholder value based on the type.
+
+        Args:
+            tp: The type to generate a placeholder for.
+
+        Returns:
+            An example value corresponding to the type.
+        """
+        if tp == str:
+            return "string_value"
+        elif tp == int:
+            return 0
+        elif tp == float:
+            return 0.0
+        elif tp == bool:
+            return True
+        elif tp == list:
+            return []
+        elif tp == dict:
+            return {}
+        else:
+            return f"{tp}"
+
     @staticmethod
-    def validate_input_parameters(
-        expected: dict[str, Any], received: dict[str, Any]
-    ) -> None:
+    def _get_type_name(tp):
+        """
+        Helper function to get the name of a type, including typing types.
+
+        Args:
+            tp: The type to get the name of.
+
+        Returns:
+            str: The name of the type.
+        """
+        if hasattr(tp, "__name__"):
+            return tp.__name__
+        elif hasattr(tp, "_name") and tp._name:
+            args = ", ".join(LLMEvaluator._get_type_name(arg) for arg in tp.__args__)
+            return f"{tp._name}[{args}]"
+        else:
+            return str(tp)
+
+    @staticmethod
+    def _validate_input_parameters(expected: dict[str, Any], received: dict[str, Any]) -> None:
         """
         Validates the input parameters.
 
@@ -295,67 +346,76 @@ class LLMEvaluator:
         Raises:
             ValueError: If input parameters are invalid.
         """
-        for param in expected.keys():
-            if param not in received:
-                msg = f"LLM evaluator expected input parameter '{param}' but received only {list(received.keys())}."
+        if expected:
+            for param in expected.keys():
+                if param not in received:
+                    msg = f"LLM evaluator expected input parameter '{param}' but received {list(received.keys())}."
+                    raise ValueError(msg)
+
+            if not all(isinstance(value, list) for value in received.values()):
+                msg = (
+                    "LLM evaluator expects all input values to be lists but received "
+                    f"{[type(value) for value in received.values()]}."
+                )
                 raise ValueError(msg)
 
-        if not all(isinstance(value, list) for value in received.values()):
-            msg = (
-                "LLM evaluator expects all input values to be lists but received "
-                f"{[type(value) for value in received.values()]}."
-            )
-            raise ValueError(msg)
+            inputs = received.values()
+            length = len(next(iter(inputs)))
+            if not all(len(value) == length for value in inputs):
+                msg = (
+                    "LLM evaluator expects all input lists to have the same length but received input lengths "
+                    f"{[len(value) for value in inputs]}."
+                )
+                raise ValueError(msg)
+        else:
+            if received:
+                msg = f"LLM evaluator does not expect any input parameters but received {list(received.keys())}."
+                raise ValueError(msg)
 
-        inputs = received.values()
-        length = len(next(iter(inputs)))
-        if not all(len(value) == length for value in inputs):
-            msg = (
-                f"LLM evaluator expects all input lists to have the same length but received input lengths "
-                f"{[len(value) for value in inputs]}."
-            )
-            raise ValueError(msg)
-
-    def is_valid_json_and_has_expected_keys(
-        self, expected: list[str], received: str
-    ) -> bool:
+    def _parse_and_validate_json_output(self, expected_keys: list[str], content: str) -> dict[str, Any]:
         """
-        Ensures the output is a valid JSON with the expected keys.
+        Parses the LLM output content as JSON and validates that it contains the expected keys.
 
         Args:
-            expected (List[str]): Expected output keys.
-            received (str): The received output as a JSON string.
-
-        Raises:
-            ValueError: If the output is invalid.
+            expected_keys (List[str]): Expected output keys.
+            content (str): The received output as a JSON string.
 
         Returns:
-            bool: True if valid, False otherwise.
+            Dict[str, Any]: The parsed JSON output if valid, otherwise None.
+
+        Raises:
+            ValueError: If the output is invalid and raise_on_failure is True.
         """
         try:
-            parsed_output = json.loads(received)
+            parsed_output = parse_llm_json_output(content)
         except json.JSONDecodeError:
-            msg = f"Response from LLM evaluator is not a valid JSON: {received}."
+            msg = f"Response from LLM evaluator is not a valid JSON: {content}."
             if self.raise_on_failure:
                 raise ValueError(msg)
             warn(msg)
-            return False
+            return None
 
-        if not all(output in parsed_output for output in expected):
-            msg = f"Expected response from LLM evaluator to have keys {expected}, but got {list(parsed_output.keys())}."
+        if not all(key in parsed_output for key in expected_keys):
+            msg = (
+                f"Expected response from LLM evaluator to have keys {expected_keys}, "
+                f"but got {list(parsed_output.keys())}."
+            )
             if self.raise_on_failure:
                 raise ValueError(msg)
             warn(msg)
-            return False
+            return None
 
-        return True
+        return parsed_output
 
-    def cleanup_output_content(self, content: str):
+    def _cleanup_output_content(self, content: str) -> str:
         """
         Cleans up the output content by removing unwanted strings.
 
         Args:
             content (str): The content to clean up.
+
+        Returns:
+            str: The cleaned content.
         """
         for omit_string in self.strings_to_omit_from_llm_output:
             content = content.replace(omit_string, "")
