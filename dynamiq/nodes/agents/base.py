@@ -489,10 +489,12 @@ class AgentManagerInputSchema(BaseModel):
     def validate_action(self, context):
         action = self.action
         if not action or action not in context.context.get("actions"):
-            raise InvalidActionException(
-                f"Invalid or missing action: {action}. Please select an action from \
-                    {context.context.get('actions')}."  # nosec: B608
-            )
+            error_message = (
+                f"Invalid or missing action: {action}. "  # nosec B608: Static message construction, not SQL-related.
+                "Please select an action "
+                f"from {context.context.get('actions')}"
+            )  # nosec B608: Static message construction, not SQL-related.
+            raise InvalidActionException(error_message)
         return self
 
 
