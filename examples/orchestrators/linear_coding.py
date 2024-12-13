@@ -50,7 +50,7 @@ if __name__ == "__main__":
         tools=[python_tool],
         role=AGENT_ROLE,
         max_loops=10,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.XML,
     )
 
     agent_manager = LinearAgentManager(

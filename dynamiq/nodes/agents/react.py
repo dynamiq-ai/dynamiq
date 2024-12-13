@@ -17,7 +17,7 @@ from dynamiq.utils.logger import logger
 
 REACT_BLOCK_TOOLS = (
     "You have access to a variety of tools,"
-    "and you are responsible for using them in any order you choose to complete the task:"
+    "and you are responsible for using them in any order you choose to complete the task:\n"
     "{tools_desc}"
 )
 
@@ -253,14 +253,25 @@ class ReActAgent(Agent):
 
         try:
             action_input = json.loads(action_input_text)
-        except json.JSONDecodeError:
-            raise ActionParsingException(
-                (
-                    "Error: Unable to parse action and action input. "
-                    "Please rewrite in the correct XML format with action_input as a valid dictionary."
-                ),
-                recoverable=True,
+        except json.JSONDecodeError as e:
+            error_message = (
+                "Error: Unable to parse action and action input due to invalid JSON formatting. "
+                "Multiline strings are not allowed in JSON unless properly escaped. "
+                "Ensure all newlines (\\n), quotes, and special characters are escaped. "
+                "For example:\n\n"
+                "Correct:\n"
+                "{\n"
+                '  "key": "Line 1\\nLine 2",\n'
+                '  "code": "print(\\"Hello, World!\\")"\n'
+                "}\n\n"
+                "Incorrect:\n"
+                "{\n"
+                '  "key": "Line 1\nLine 2",\n'
+                '  "code": "print("Hello, World!")"\n'
+                "}\n\n"
+                f"JSON Parsing Error Details: {e}"
             )
+            raise ActionParsingException(error_message, recoverable=True)
 
         return action, action_input
 

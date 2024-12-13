@@ -6,7 +6,7 @@ from dynamiq.connections import E2B
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.retrievers import WeaviateDocumentRetriever
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
@@ -123,6 +123,7 @@ def setup_react_agent_http_python() -> ReActAgent:
         llm=llm,
         tools=[web_request_tool, api_call],
         role="is to help user with various tasks",
+        inference_mode=InferenceMode.XML,
     )
     return agent
 
