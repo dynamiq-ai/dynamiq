@@ -9,7 +9,7 @@ from dynamiq.utils import JsonWorkflowEncoder
 
 logger = logging.getLogger(__name__)
 
-INPUT_DATA_1 = "Dubai customs rules"
+INPUT_DATA = "Dubai customs rules"
 
 if __name__ == "__main__":
     yaml_file_path = os.path.join(os.path.dirname(__file__), "agent_rag.yaml")
@@ -19,7 +19,7 @@ if __name__ == "__main__":
         wf = Workflow.from_yaml_file(file_path=yaml_file_path, connection_manager=cm, init_components=True)
 
         result_1 = wf.run(
-            input_data={"input": INPUT_DATA_1},
+            input_data={"input": INPUT_DATA},
             config=runnables.RunnableConfig(callbacks=[tracing]),
         )
         logger.info(f"Result 1: {result_1.output}")
