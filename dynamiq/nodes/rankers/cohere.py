@@ -1,7 +1,6 @@
-from typing import Any, ClassVar, Literal
+from typing import Any, Callable, ClassVar, Literal
 
-from litellm import rerank
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from dynamiq.connections import Cohere
 from dynamiq.nodes.node import Node, NodeGroup, ensure_config
@@ -35,6 +34,15 @@ class CohereReranker(Node):
     model: str = "cohere/rerank-v3.5"
     connection: Cohere
     input_schema: ClassVar[type[CohereRerankerInputSchema]] = CohereRerankerInputSchema
+    _rerank: Callable = PrivateAttr()
+
+    def __init__(self, **kwargs):
+        """Initialize the CohereReranker instance."""
+        super().__init__(**kwargs)
+
+        from litellm import rerank
+
+        self._rerank = rerank
 
     def execute(self, input_data: CohereRerankerInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
@@ -65,10 +73,9 @@ class CohereReranker(Node):
 
             logger.debug(f"Node {self.name} - {self.id}: Reranking {len(documents)} documents")
 
-            response = rerank(model=self.model, query=query, documents=document_texts, top_n=self.top_k)
+            response = self._rerank(model=self.model, query=query, documents=document_texts, top_n=self.top_k)
 
             reranked_documents = []
-            print(response)
             for result in response.results:
                 doc = documents[result.get("index")]
                 doc.score = result.get("relevance_score")
@@ -81,9 +88,3 @@ class CohereReranker(Node):
         except Exception as e:
             logger.error(f"Node {self.name} - {self.id}: Error during reranking: {str(e)}")
             raise
-
-    def init_components(self, connection_manager=None):
-        """Initialize the reranker component with the Cohere connection."""
-        super().init_components(connection_manager)
-        if not self.connection:
-            self.connection = Cohere()
