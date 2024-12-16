@@ -33,7 +33,7 @@ class WeaviateDocumentRetriever(Retriever):
     name: str = "WeaviateDocumentRetriever"
     connection: Weaviate | None = None
     vector_store: WeaviateVectorStore | None = None
-    document_retriever: WeaviateDocumentRetrieverComponent = None
+    document_retriever: WeaviateDocumentRetrieverComponent | None = None
 
     def __init__(self, **kwargs):
         """

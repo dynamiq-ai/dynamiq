@@ -43,7 +43,7 @@ class StreamChunk(BaseModel):
     choices: list[StreamChunkChoice]
 
 
-class AgentStatus(Enum):
+class AgentStatus(str, Enum):
     """Represents the status of an agent's execution."""
 
     SUCCESS = "success"
@@ -122,6 +122,7 @@ class Agent(Node):
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
         data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools]
+        data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
         if self.files:
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         return data
