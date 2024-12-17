@@ -51,8 +51,28 @@ class Qdrant(MemoryBackend):
             dict: A dictionary representation of the instance.
         """
         data = super().to_dict(**kwargs)
+
         data["embedder"] = self.embedder.to_dict(**kwargs)
-        data["vector_store"] = self.vector_store.to_dict(**kwargs)
+
+        if self.vector_store:
+            data["vector_store"] = {
+                "index_name": self.vector_store.index_name,
+                "dimension": self.vector_store.dimension,
+                "on_disk": self.vector_store.on_disk,
+                "use_sparse_embeddings": self.vector_store.use_sparse_embeddings,
+                "sparse_idf": self.vector_store.sparse_idf,
+                "metric": self.vector_store.metric,
+                "return_embedding": self.vector_store.return_embedding,
+                "write_batch_size": self.vector_store.write_batch_size,
+                "scroll_size": self.vector_store.scroll_size,
+                "content_key": self.vector_store.content_key,
+                "create_if_not_exist": self.vector_store.create_if_not_exist,
+                "recreate_index": self.vector_store.recreate_index,
+                "payload_fields_to_index": self.vector_store.payload_fields_to_index,
+            }
+        else:
+            data["vector_store"] = None
+
         return data
 
     def model_post_init(self, __context) -> None:

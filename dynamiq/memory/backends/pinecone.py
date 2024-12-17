@@ -53,8 +53,27 @@ class Pinecone(MemoryBackend):
             dict: A dictionary representation of the instance.
         """
         data = super().to_dict(**kwargs)
+
         data["embedder"] = self.embedder.to_dict(**kwargs)
-        data["vector_store"] = self.vector_store.to_dict(**kwargs)
+
+        if self.vector_store:
+            data["vector_store"] = {
+                "index_name": self.vector_store.index_name,
+                "namespace": self.vector_store.namespace,
+                "batch_size": self.vector_store.batch_size,
+                "dimension": self.vector_store.dimension,
+                "metric": self.vector_store.metric,
+                "index_type": self.vector_store.index_type,
+                "cloud": self.vector_store.cloud,
+                "region": self.vector_store.region,
+                "environment": self.vector_store.environment,
+                "pod_type": self.vector_store.pod_type,
+                "pods": self.vector_store.pods,
+                "content_key": self.vector_store.content_key,
+            }
+        else:
+            data["vector_store"] = None
+
         return data
 
     def model_post_init(self, __context) -> None:
