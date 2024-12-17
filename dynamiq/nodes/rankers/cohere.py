@@ -25,6 +25,7 @@ class CohereReranker(Node):
         name (str): The name of the node.
         top_k (int): The number of top documents to return.
         model (str): The Cohere model to use for reranking.
+        threshold (float): The threshold for relevance score. Default is 0.
         connection (Cohere): The Cohere connection instance.
     """
 
@@ -32,6 +33,7 @@ class CohereReranker(Node):
     name: str = "CohereReranker"
     top_k: int = 5
     model: str = "cohere/rerank-v3.5"
+    threshold: float = 0
     connection: Cohere
     input_schema: ClassVar[type[CohereRerankerInputSchema]] = CohereRerankerInputSchema
     _rerank: Callable = PrivateAttr()
@@ -79,7 +81,8 @@ class CohereReranker(Node):
             for result in response.results:
                 doc = documents[result.get("index")]
                 doc.score = result.get("relevance_score")
-                reranked_documents.append(doc)
+                if doc.score > self.threshold:
+                    reranked_documents.append(doc)
 
             logger.debug(f"Node {self.name} - {self.id}: Successfully reranked {len(reranked_documents)} documents")
 
