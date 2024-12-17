@@ -52,7 +52,7 @@ def mock_scrape_requests(mocker):
 def test_jina_basic_search(mock_search_requests, mock_jina_search_response):
     """Test basic search functionality."""
     jina_connection = Jina(api_key="test_key")
-    jina_tool = JinaSearchTool(connection=jina_connection, model_config=ConfigDict())
+    jina_tool = JinaSearchTool(connection=jina_connection, model_config=ConfigDict(), include_full_content=True)
 
     input_data = {"query": "artificial intelligence", "max_results": 2}
 
@@ -74,7 +74,9 @@ def test_jina_basic_search(mock_search_requests, mock_jina_search_response):
 def test_jina_search_agent_optimized(mock_search_requests, mock_jina_search_response):
     """Test search with agent-optimized output format."""
     jina_connection = Jina(api_key="test_key")
-    jina_tool = JinaSearchTool(connection=jina_connection, is_optimized_for_agents=True, model_config=ConfigDict())
+    jina_tool = JinaSearchTool(
+        connection=jina_connection, is_optimized_for_agents=True, model_config=ConfigDict(), include_full_content=True
+    )
 
     input_data = {"query": "artificial intelligence"}
 
@@ -90,7 +92,9 @@ def test_jina_search_agent_optimized(mock_search_requests, mock_jina_search_resp
 
     for result in mock_jina_search_response["data"]:
         if "content" in result:
-            assert any(highlight in content for highlight in result["content"])
+            assert any(content_data in content for content_data in result["content"])
+        if "description" in result:
+            assert result["description"] in content
 
 
 def test_jina_basic_scraping(mock_scrape_requests):

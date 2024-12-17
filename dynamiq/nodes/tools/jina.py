@@ -32,6 +32,15 @@ class JinaScrapeTool(ConnectionNode):
     A tool for scraping web pages, powered by Jina.
 
     This class is responsible for scraping the content of a web page using Jina.
+
+    Attributes:
+        group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
+        name (str): The name of the tool.
+        description (str): A brief description of the tool.
+        connection (Jina): The connection instance for the Jina API.
+        url (str): The url of the page to scrape.
+        timeout(int): The timeout of the scraping process.
+        input_schema (JinaSearchInputSchema): The input schema for the tool.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -86,6 +95,8 @@ class JinaScrapeTool(ConnectionNode):
             )
             response.raise_for_status()
             scrape_result = response.text
+            if self.response_format in [ResponseFormat.PAGESHOT, ResponseFormat.SCREENSHOT]:
+                scrape_result = response.content
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {e}")
 
@@ -102,7 +113,7 @@ class JinaScrapeTool(ConnectionNode):
         return {"content": result}
 
 
-class JinaSeacrhInputSchema(BaseModel):
+class JinaSearchInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a search query.")
     max_results: int = Field(
         default=5,
@@ -114,7 +125,18 @@ class JinaSeacrhInputSchema(BaseModel):
 
 class JinaSearchTool(ConnectionNode):
     """
-    A tool for search service, powered by Jina.
+    A tool for performing web searches using the Jina AI API.
+
+    This tool accepts various search parameters and returns relevant search results.
+
+    Attributes:
+        group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
+        name (str): The name of the tool.
+        description (str): A brief description of the tool.
+        connection (Jina): The connection instance for the Jina API.
+        include_images(bool): Whether include images in the search results.
+        input_schema (JinaSearchInputSchema): The input schema for the tool.
+        include_full_content(bool): Whether include full content of the search results.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -123,13 +145,8 @@ class JinaSearchTool(ConnectionNode):
     connection: Jina
     model_config = ConfigDict(arbitrary_types_allowed=True)
     include_images: bool = Field(default=False, description="Include images in search results.")
-    max_results: int = Field(
-        default=5,
-        ge=1,
-        le=100,
-        description="The maximum number of search results to return.",
-    )
-    input_schema: ClassVar[type[JinaSeacrhInputSchema]] = JinaSeacrhInputSchema
+    input_schema: ClassVar[type[JinaSearchInputSchema]] = JinaSearchInputSchema
+    include_full_content: bool = False
 
     def _format_search_results(self, results: dict[str, Any]) -> str:
         """
@@ -148,14 +165,18 @@ class JinaSearchTool(ConnectionNode):
                     f"Source: {result.get('url')}",
                     f"Title: {result.get('title')}",
                     f"Description: {result.get('description')}",
-                    f"Content: {result.get('content')}",
-                    "",  # Blank line between results
+                    *(
+                        [f"Content: {result.get('content')}"]
+                        if self.include_full_content and result.get("content") != ""
+                        else []
+                    ),
+                    "",
                 ]
             )
 
         return "\n".join(formatted_results).strip()
 
-    def execute(self, input_data: JinaSeacrhInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+    def execute(self, input_data: JinaSearchInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Executes the web scraping process.
 
@@ -174,7 +195,7 @@ class JinaSearchTool(ConnectionNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         query = input_data.query
-        max_results = input_data.max_results or self.max_results
+        max_results = input_data.max_results
 
         headers = {
             **self.connection.headers,
