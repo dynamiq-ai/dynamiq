@@ -64,6 +64,17 @@ class InMemory(MemoryBackend):
     name: str = "InMemory"
     messages: list[Message] = Field(default_factory=list)
 
+    @property
+    def to_dict_exclude_params(self):
+        """Define parameters to exclude during serialization."""
+        return {"messages": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary."""
+        data = super().to_dict(**kwargs)
+        data["message_count"] = len(self.messages)
+        return data
+
     def add(self, message: Message) -> None:
         """Adds a message to the in-memory list."""
         try:

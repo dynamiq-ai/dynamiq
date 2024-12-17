@@ -62,6 +62,20 @@ class SQLite(MemoryBackend):
         FROM {index_name}
     """
 
+    @property
+    def to_dict_exclude_params(self):
+        """Define parameters to exclude during serialization."""
+        return {
+            # Exclude internal SQL query constants
+            "CREATE_TABLE_QUERY": True,
+            "VALIDATE_TABLE_QUERY": True,
+            "INSERT_MESSAGE_QUERY": True,
+            "SELECT_ALL_MESSAGES_QUERY": True,
+            "CHECK_IF_EMPTY_QUERY": True,
+            "CLEAR_TABLE_QUERY": True,
+            "SEARCH_MESSAGES_QUERY": True,
+        }
+
     def model_post_init(self, __context) -> None:
         """Initialize the SQLite database after model initialization."""
         try:

@@ -34,6 +34,27 @@ class Qdrant(MemoryBackend):
     vector_store: QdrantVectorStore | None = None
     _client: QdrantClient | None = PrivateAttr(default=None)
 
+    @property
+    def to_dict_exclude_params(self):
+        """
+        Property to define which parameters should be excluded when converting the class instance to a dictionary.
+
+        Returns:
+            dict: A dictionary defining the parameters to exclude.
+        """
+        return super().to_dict_exclude_params | {"embedder": True, "vector_store": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the instance.
+        """
+        data = super().to_dict(**kwargs)
+        data["embedder"] = self.embedder.to_dict(**kwargs)
+        data["vector_store"] = self.vector_store.to_dict(**kwargs)
+        return data
+
     def model_post_init(self, __context) -> None:
         """Initialize the vector store after model initialization."""
         if not self.vector_store:

@@ -36,6 +36,17 @@ class Memory(BaseModel):
     search_filters: dict = Field(default_factory=dict)
     backend: MemoryBackend = Field(default_factory=InMemory)
 
+    @property
+    def to_dict_exclude_params(self):
+        """Define parameters to exclude during serialization."""
+        return {"backend": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary."""
+        data = self.model_dump(exclude=kwargs.pop("exclude", self.to_dict_exclude_params), **kwargs)
+        data["backend"] = self.backend.to_dict(**kwargs)
+        return data
+
     def add(self, role: MessageRole, content: str, metadata: dict | None = None) -> None:
         """Adds a message to the memory."""
         try:

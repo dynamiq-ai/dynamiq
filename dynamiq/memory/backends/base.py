@@ -15,6 +15,15 @@ class MemoryBackend(ABC, BaseModel):
     id: str = Field(default_factory=generate_uuid)
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    @property
+    def to_dict_exclude_params(self):
+        """Define parameters to exclude during serialization."""
+        return {}
+
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary."""
+        return self.model_dump(exclude=kwargs.pop("exclude", self.to_dict_exclude_params), **kwargs)
+
     @computed_field
     @cached_property
     def type(self) -> str:
