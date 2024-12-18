@@ -11,20 +11,16 @@ from dynamiq.utils.logger import logger
 
 
 class JinaScrapeInputSchema(BaseModel):
-    url: str = Field(default="", description="Parameter to provide a url of the page to scrape.")
+    url: str = Field(..., description="Parameter to provide a url of the page to scrape.")
 
 
-class ResponseFormat(str, enum.Enum):
+class JinaResponseFormat(str, enum.Enum):
     DEFAULT = "default"
     MARKDOWN = "markdown"
     HTML = "html"
     TEXT = "text"
     SCREENSHOT = "screenshot"
     PAGESHOT = "pageshot"
-
-
-SCRAPE_PATH = "https://r.jina.ai/"
-SEARCH_PATH = "https://s.jina.ai/"
 
 
 class JinaScrapeTool(ConnectionNode):
@@ -37,21 +33,20 @@ class JinaScrapeTool(ConnectionNode):
         group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
         name (str): The name of the tool.
         description (str): A brief description of the tool.
+        SCRAPE_PATH(str): The constant path to perform scrape request using Jina API.
         connection (Jina): The connection instance for the Jina API.
-        url (str): The url of the page to scrape.
         timeout(int): The timeout of the scraping process.
         input_schema (JinaSearchInputSchema): The input schema for the tool.
     """
-
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Jina Scraper Tool"
     description: str = (
         "A tool for scraping web pages, powered by Jina. " "You can use this tool to scrape the content of a web page."
     )
-    response_format: ResponseFormat = ResponseFormat.DEFAULT
+    SCRAPE_PATH: ClassVar[str] = "https://r.jina.ai/"
+    response_format: JinaResponseFormat = JinaResponseFormat.DEFAULT
     connection: Jina
-    url: str | None = None
-    timeout: int = 60000
+    timeout: int = 60
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     input_schema: ClassVar[type[JinaScrapeInputSchema]] = JinaScrapeInputSchema
@@ -81,11 +76,11 @@ class JinaScrapeTool(ConnectionNode):
 
         headers = {
             **self.connection.headers,
-            **({"X-Return-Format": self.response_format} if self.response_format != ResponseFormat.DEFAULT else {}),
+            **({"X-Return-Format": self.response_format} if self.response_format != JinaResponseFormat.DEFAULT else {}),
             "X-Timeout": str(self.timeout),
         }
 
-        connection_url = SCRAPE_PATH + url
+        connection_url = self.SCRAPE_PATH + url
 
         try:
             response = self.client.request(
@@ -95,7 +90,7 @@ class JinaScrapeTool(ConnectionNode):
             )
             response.raise_for_status()
             scrape_result = response.text
-            if self.response_format in [ResponseFormat.PAGESHOT, ResponseFormat.SCREENSHOT]:
+            if self.response_format in [JinaResponseFormat.PAGESHOT, JinaResponseFormat.SCREENSHOT]:
                 scrape_result = response.content
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {e}")
@@ -142,6 +137,7 @@ class JinaSearchTool(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Jina Search Tool"
     description: str = "A tool for searching the web, powered by Jina."
+    SEARCH_PATH: ClassVar[str] = "https://s.jina.ai/"
     connection: Jina
     model_config = ConfigDict(arbitrary_types_allowed=True)
     include_images: bool = Field(default=False, description="Include images in search results.")
@@ -205,7 +201,7 @@ class JinaSearchTool(ConnectionNode):
 
         params = {"count": max_results}
 
-        connection_url = SEARCH_PATH + query
+        connection_url = self.SEARCH_PATH + query
 
         try:
             response = self.client.request(
