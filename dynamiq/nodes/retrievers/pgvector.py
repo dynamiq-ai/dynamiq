@@ -33,7 +33,7 @@ class PGVectorDocumentRetriever(Retriever, PGVectorStoreParams):
     name: str = "PGVectorDocumentRetriever"
     connection: PostgreSQL | None = None
     vector_store: PGVectorStore | None = None
-    document_retriever: PGVectorDocumentRetrieverComponent = None
+    document_retriever: PGVectorDocumentRetrieverComponent | None = None
 
     def __init__(self, **kwargs):
         """

@@ -1,6 +1,6 @@
-import typing
 from datetime import datetime
-from typing import Any
+from os import PathLike
+from typing import IO, TYPE_CHECKING, Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -11,8 +11,8 @@ from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, Runnable
 from dynamiq.utils import format_duration, generate_uuid, merge
 from dynamiq.utils.logger import logger
 
-if typing.TYPE_CHECKING:
-    from dynamiq.loaders.yaml import WorkflowYamlLoaderData
+if TYPE_CHECKING:
+    from dynamiq.serializers.loaders.yaml import WorkflowYamlData
 
 
 class Workflow(BaseModel, Runnable):
@@ -52,7 +52,7 @@ class Workflow(BaseModel, Runnable):
         Returns:
             Workflow: Loaded workflow instance.
         """
-        from dynamiq.loaders.yaml import WorkflowYAMLLoader
+        from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 
         try:
             wf_data = WorkflowYAMLLoader.load(
@@ -65,13 +65,11 @@ class Workflow(BaseModel, Runnable):
         return cls.from_yaml_file_data(wf_data, wf_id)
 
     @classmethod
-    def from_yaml_file_data(
-        cls, file_data: "WorkflowYamlLoaderData", wf_id: str = None
-    ):
+    def from_yaml_file_data(cls, file_data: "WorkflowYamlData", wf_id: str = None):
         """Load workflow from YAML file data.
 
         Args:
-            file_data (WorkflowYamlLoaderData): Data loaded from the YAML file.
+            file_data (WorkflowYamlData): Data loaded from the YAML file.
             wf_id (str, optional): Workflow ID. Defaults to None.
 
         Returns:
@@ -91,6 +89,57 @@ class Workflow(BaseModel, Runnable):
                 raise ValueError(f"Workflow '{wf_id}' not found in YAML")
         except Exception as e:
             logger.error(f"Failed to load workflow from YAML. {e}")
+            raise
+
+    @property
+    def to_dict_exclude_params(self):
+        return {"flow": True}
+
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
+        """Converts the instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the instance.
+        """
+        exclude = kwargs.pop("exclude", self.to_dict_exclude_params)
+        data = self.model_dump(
+            exclude=exclude,
+            serialize_as_any=kwargs.pop("serialize_as_any", True),
+            **kwargs,
+        )
+        data["flow"] = self.flow.to_dict(include_secure_params=include_secure_params, **kwargs)
+        return data
+
+    def to_yaml_file_data(self) -> "WorkflowYamlData":
+        """Dump the workflow to a YAML file data.
+
+        Returns:
+            WorkflowYamlData: Data for the YAML dump.
+        """
+        from dynamiq.serializers.loaders.yaml import WorkflowYamlData
+
+        return WorkflowYamlData(
+            workflows={self.id: self},
+            flows={self.flow.id: self.flow},
+            nodes={node.id: node for node in self.flow.nodes},
+            connections={},
+        )
+
+    def to_yaml_file(self, file_path: str | PathLike | IO[Any]):
+        """
+        Dump the workflow to a YAML file.
+
+        Args:
+            file_path(str | PathLike | IO[Any]): Path to the YAML file.
+        """
+        from dynamiq.serializers.dumpers.yaml import WorkflowYAMLDumper
+
+        yaml_file_data = self.to_yaml_file_data()
+
+        try:
+            WorkflowYAMLDumper.dump(file_path, yaml_file_data)
+        except Exception as e:
+            logger.error(f"Failed to dump workflow to YAML. {e}")
             raise
 
     def run(

@@ -1,7 +1,7 @@
 from enum import Enum
 
 
-class DuplicatePolicy(Enum):
+class DuplicatePolicy(str, Enum):
     """
     Enumeration of policies for handling duplicate items.
 

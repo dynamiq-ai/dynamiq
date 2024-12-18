@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from dynamiq.utils import generate_uuid
 
 
-class StreamingMode(Enum):
+class StreamingMode(str, Enum):
     """Enumeration for streaming modes."""
 
     FINAL = "final"  # Only final output

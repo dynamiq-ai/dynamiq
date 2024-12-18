@@ -25,7 +25,7 @@ class HuggingFaceDocumentEmbedder(DocumentEmbedder):
     name: str = "HuggingFaceDocumentEmbedder"
     connection: HuggingFaceConnection | None = None
     model: str = "huggingface/BAAI/bge-large-zh"
-    document_embedder: HuggingFaceEmbedderComponent = None
+    document_embedder: HuggingFaceEmbedderComponent | None = None
 
     def __init__(self, **kwargs):
         """
