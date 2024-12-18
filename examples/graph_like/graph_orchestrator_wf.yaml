@@ -16,7 +16,7 @@ nodes:
     initial_state: researcher
     states:
         - id: researcher
-          type: dynamiq.nodes.agents.orchestrators.utils.state.State
+          type: dynamiq.nodes.agents.orchestrators.GraphState
           manager:
             id: graph-manager-agent
             type: dynamiq.nodes.agents.orchestrators.GraphAgentManager
@@ -47,7 +47,7 @@ nodes:
             - "writer"
 
         - id: writer
-          type: dynamiq.nodes.agents.orchestrators.utils.state.State
+          type: dynamiq.nodes.agents.orchestrators.GraphState
           manager:
             id: graph-manager-agent
             type: dynamiq.nodes.agents.orchestrators.GraphAgentManager
