@@ -63,31 +63,26 @@ class CohereReranker(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        try:
-            query = input_data.query
-            documents = input_data.documents
+        query = input_data.query
+        documents = input_data.documents
 
-            if not documents:
-                logger.warning(f"Node {self.name} - {self.id}: No documents provided for reranking")
-                return {"documents": []}
+        if not documents:
+            logger.warning(f"Node {self.name} - {self.id}: No documents provided for reranking")
+            return {"documents": []}
 
-            document_texts = [doc.content for doc in documents]
+        document_texts = [doc.content for doc in documents]
 
-            logger.debug(f"Node {self.name} - {self.id}: Reranking {len(documents)} documents")
+        logger.debug(f"Node {self.name} - {self.id}: Reranking {len(documents)} documents")
 
-            response = self._rerank(model=self.model, query=query, documents=document_texts, top_n=self.top_k)
+        response = self._rerank(model=self.model, query=query, documents=document_texts, top_n=self.top_k)
 
-            reranked_documents = []
-            for result in response.results:
-                doc = documents[result.get("index")]
-                doc.score = result.get("relevance_score")
-                if doc.score > self.threshold:
-                    reranked_documents.append(doc)
+        reranked_documents = []
+        for result in response.results:
+            doc = documents[result.get("index")]
+            doc.score = result.get("relevance_score")
+            if doc.score > self.threshold:
+                reranked_documents.append(doc)
 
-            logger.debug(f"Node {self.name} - {self.id}: Successfully reranked {len(reranked_documents)} documents")
+        logger.debug(f"Node {self.name} - {self.id}: Successfully reranked {len(reranked_documents)} documents")
 
-            return reranked_documents[: self.top_k]
-
-        except Exception as e:
-            logger.error(f"Node {self.name} - {self.id}: Error during reranking: {str(e)}")
-            raise
+        return reranked_documents[: self.top_k]
