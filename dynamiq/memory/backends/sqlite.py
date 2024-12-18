@@ -4,7 +4,7 @@ import sqlite3
 import uuid
 from typing import ClassVar
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 from typing_extensions import Annotated
 
 from dynamiq.memory.backends.base import MemoryBackend
@@ -65,7 +65,7 @@ class SQLite(MemoryBackend):
     @property
     def to_dict_exclude_params(self):
         """Define parameters to exclude during serialization."""
-        return {
+        return super().to_dict_exclude_params | {
             "CREATE_TABLE_QUERY": True,
             "VALIDATE_TABLE_QUERY": True,
             "INSERT_MESSAGE_QUERY": True,
@@ -73,12 +73,45 @@ class SQLite(MemoryBackend):
             "CHECK_IF_EMPTY_QUERY": True,
             "CLEAR_TABLE_QUERY": True,
             "SEARCH_MESSAGES_QUERY": True,
-            "db_path": True,
         }
+
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
+        """Converts the instance to a dictionary.
+
+        Args:
+            include_secure_params (bool): Whether to include secure parameters
+            **kwargs: Additional arguments
+
+        Returns:
+            dict: Dictionary representation of the instance
+        """
+        kwargs.pop("include_secure_params", None)
+        data = super().to_dict(**kwargs)
+
+        if not include_secure_params:
+            data.pop("db_path", None)
+
+        return data
+
+    @model_validator(mode="after")
+    def validate_paths(self):
+        """Validate and process database path."""
+        if not self.db_path.startswith("/"):
+            from os.path import abspath, expanduser
+
+            self.db_path = abspath(expanduser(self.db_path))
+        return self
 
     def model_post_init(self, __context) -> None:
         """Initialize the SQLite database after model initialization."""
         try:
+            from os import makedirs
+            from os.path import dirname
+
+            db_dir = dirname(self.db_path)
+            if db_dir:
+                makedirs(db_dir, exist_ok=True)
+
             self._validate_table_name(create_if_not_exists=True)
         except Exception as e:
             raise SQLiteError(f"Error initializing SQLite backend: {e}") from e

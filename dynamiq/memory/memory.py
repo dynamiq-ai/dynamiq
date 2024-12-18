@@ -41,10 +41,11 @@ class Memory(BaseModel):
         """Define parameters to exclude during serialization."""
         return {"backend": True}
 
-    def to_dict(self, **kwargs) -> dict:
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
+        kwargs.pop("include_secure_params", None)
         data = self.model_dump(exclude=kwargs.pop("exclude", self.to_dict_exclude_params), **kwargs)
-        data["backend"] = self.backend.to_dict(**kwargs)
+        data["backend"] = self.backend.to_dict(include_secure_params=include_secure_params, **kwargs)
         return data
 
     def add(self, role: MessageRole, content: str, metadata: dict | None = None) -> None:

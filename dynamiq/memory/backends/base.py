@@ -20,8 +20,9 @@ class MemoryBackend(ABC, BaseModel):
         """Define parameters to exclude during serialization."""
         return {}
 
-    def to_dict(self, **kwargs) -> dict:
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
+        kwargs.pop("include_secure_params", None)
         return self.model_dump(exclude=kwargs.pop("exclude", self.to_dict_exclude_params), **kwargs)
 
     @computed_field

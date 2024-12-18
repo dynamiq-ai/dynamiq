@@ -1,6 +1,6 @@
 import uuid
 
-from pydantic import ConfigDict, Field, PrivateAttr
+from pydantic import ConfigDict, Field, PrivateAttr, model_validator
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 
@@ -31,7 +31,7 @@ class Qdrant(MemoryBackend):
     on_disk: bool = Field(default=False)
     create_if_not_exist: bool = Field(default=True)
     recreate_index: bool = Field(default=False)
-    vector_store: QdrantVectorStore | None = None
+    vector_store: QdrantVectorStore | dict | None = None
     _client: QdrantClient | None = PrivateAttr(default=None)
 
     @property
@@ -44,23 +44,65 @@ class Qdrant(MemoryBackend):
         """
         return super().to_dict_exclude_params | {"embedder": True, "vector_store": True}
 
-    def to_dict(self, **kwargs) -> dict:
-        """Converts the instance to a dictionary.
+    def model_post_init(self, __context) -> None:
+        """Initialize the vector store after model initialization."""
+        if isinstance(self.vector_store, dict):
+            self.vector_store = QdrantVectorStore(
+                connection=self.connection,
+                index_name=self.vector_store["index_name"],
+                dimension=self.vector_store["dimension"],
+                on_disk=self.vector_store["on_disk"],
+                use_sparse_embeddings=self.vector_store["use_sparse_embeddings"],
+                sparse_idf=self.vector_store.get("sparse_idf", False),
+                metric=self.vector_store["metric"],
+                return_embedding=self.vector_store["return_embedding"],
+                write_batch_size=self.vector_store["write_batch_size"],
+                scroll_size=self.vector_store["scroll_size"],
+                content_key=self.vector_store["content_key"],
+                create_if_not_exist=self.vector_store.get("create_if_not_exist", True),
+                recreate_index=self.vector_store.get("recreate_index", False),
+                payload_fields_to_index=self.vector_store.get("payload_fields_to_index"),
+            )
+        elif not self.vector_store:
+            self.vector_store = QdrantVectorStore(
+                connection=self.connection,
+                index_name=self.index_name,
+                metric=self.metric,
+                on_disk=self.on_disk,
+                create_if_not_exist=self.create_if_not_exist,
+                recreate_index=self.recreate_index,
+            )
 
-        Returns:
-            dict: A dictionary representation of the instance.
-        """
+        self._client = self.vector_store._client
+        if not self._client:
+            raise QdrantError("Failed to initialize Qdrant client")
+
+    @model_validator(mode="after")
+    def validate_vector_store(self):
+        """Validate and initialize vector store if needed."""
+        if isinstance(self.vector_store, dict):
+            try:
+                self.vector_store = QdrantVectorStore(connection=self.connection, **self.vector_store)
+            except Exception as e:
+                raise ValueError(f"Failed to initialize vector store from dict: {e}")
+        return self
+
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
+        """Converts the instance to a dictionary."""
+        kwargs.pop("include_secure_params", None)
         data = super().to_dict(**kwargs)
 
-        data["embedder"] = self.embedder.to_dict(**kwargs)
+        # Add embedder data
+        data["embedder"] = self.embedder.to_dict(include_secure_params=include_secure_params, **kwargs)
 
+        # Add vector store data if exists
         if self.vector_store:
             data["vector_store"] = {
                 "index_name": self.vector_store.index_name,
                 "dimension": self.vector_store.dimension,
                 "on_disk": self.vector_store.on_disk,
                 "use_sparse_embeddings": self.vector_store.use_sparse_embeddings,
-                "sparse_idf": self.vector_store.sparse_idf,
+                "sparse_idf": getattr(self.vector_store, "sparse_idf", False),
                 "metric": self.vector_store.metric,
                 "return_embedding": self.vector_store.return_embedding,
                 "write_batch_size": self.vector_store.write_batch_size,
@@ -74,34 +116,6 @@ class Qdrant(MemoryBackend):
             data["vector_store"] = None
 
         return data
-
-    def model_post_init(self, __context) -> None:
-        """Initialize the vector store after model initialization."""
-        if not self.vector_store:
-            self.vector_store = QdrantVectorStore(
-                connection=self.connection,
-                index_name=self.index_name,
-                create_if_not_exist=self.create_if_not_exist,
-                metric=self.metric,
-                on_disk=self.on_disk,
-                recreate_index=self.recreate_index,
-            )
-        self._client = self.vector_store._client
-        if not self._client:
-            raise QdrantError("Failed to initialize Qdrant client")
-
-            # Ensure collection exists before any operations
-            if self.create_if_not_exist and not self._client.collection_exists(self.index_name):
-                self.vector_store._set_up_collection(
-                    collection_name=self.index_name,
-                    embedding_dim=1536,
-                    create_if_not_exist=True,
-                    recreate_collection=self.recreate_index,
-                    similarity=self.metric,
-                    use_sparse_embeddings=False,
-                    sparse_idf=False,
-                    on_disk=self.on_disk,
-                )
 
     def _message_to_document(self, message: Message) -> Document:
         """Converts a Message object to a Document object."""
