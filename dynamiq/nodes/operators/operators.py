@@ -12,7 +12,7 @@ from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
 
-class ConditionOperator(Enum):
+class ConditionOperator(str, Enum):
     """Enum representing various condition operators for choice nodes."""
 
     OR = "or"
@@ -44,11 +44,11 @@ class ConditionOperator(Enum):
 class ChoiceCondition(BaseModel):
     """Represents a condition for a choice node."""
 
-    variable: str = None
-    operator: ConditionOperator = None
+    variable: str | None = None
+    operator: ConditionOperator | None = None
     value: Any = None
     is_not: bool = False
-    operands: list["ChoiceCondition"] = None
+    operands: list["ChoiceCondition"] | None = None
 
 
 class ChoiceOption(BaseModel):
@@ -81,7 +81,7 @@ class Choice(Node):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"options": True}
 
-    def to_dict(self, **kwargs) -> dict:
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
         """Converts the instance to a dictionary.
 
         Returns:
@@ -90,7 +90,7 @@ class Choice(Node):
         # Separately dump ChoiceOption list as it has nested ChoiceCondition model
         # Bug: https://github.com/pydantic/pydantic/issues/9670
         data = self.model_dump(
-            exclude=self.to_dict_exclude_params,
+            exclude=kwargs.pop("exclude", self.to_dict_exclude_params),
             serialize_as_any=True,
             **kwargs,
         )

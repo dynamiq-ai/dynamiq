@@ -28,7 +28,7 @@ class PineconeDocumentRetriever(Retriever, PineconeVectorStoreParams):
     name: str = "PineconeDocumentRetriever"
     connection: Pinecone | None = None
     vector_store: PineconeVectorStore | None = None
-    document_retriever: PineconeDocumentRetrieverComponent = None
+    document_retriever: PineconeDocumentRetrieverComponent | None = None
 
     def __init__(self, **kwargs):
         """

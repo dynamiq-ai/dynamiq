@@ -41,7 +41,7 @@ class State(Node):
     description: str = ""
     next_states: list[str] = []
     tasks: list[Node] = []
-    condition: Python | FunctionTool = None
+    condition: Python | FunctionTool | None = None
     manager: GraphAgentManager | None = None
 
     @model_validator(mode="after")

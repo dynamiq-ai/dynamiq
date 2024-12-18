@@ -1,8 +1,6 @@
 from os import PathLike
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
-
 from dynamiq import Workflow
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager
@@ -11,32 +9,21 @@ from dynamiq.nodes import Node
 from dynamiq.nodes.managers import NodeManager
 from dynamiq.nodes.node import ConnectionNode, NodeDependency
 from dynamiq.prompts import Prompt
+from dynamiq.serializers.types import WorkflowYamlData
 from dynamiq.utils.logger import logger
 
 
 class WorkflowYAMLLoaderException(Exception):
-    """Exception raised for errors in the WorkflowYAMLLoader."""
+    """Exception raised for errors in the WorkflowYAMLDumper."""
+
     pass
-
-
-class WorkflowYamlLoaderData(BaseModel):
-    """Data model for the WorkflowYAMLLoader output."""
-
-    connections: dict[str, BaseConnection]
-    nodes: dict[str, Node]
-    flows: dict[str, Flow]
-    workflows: dict[str, Workflow]
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class WorkflowYAMLLoader:
     """Loader class for parsing YAML files and creating workflow components."""
 
     @classmethod
-    def get_entity_by_type(
-        cls, entity_type: str, entity_registry: dict[str, Any] | None = None
-    ) -> Any:
+    def get_entity_by_type(cls, entity_type: str, entity_registry: dict[str, Any] | None = None) -> Any:
         """
         Try to get entity by type and update mutable shared registry.
 
@@ -74,9 +61,7 @@ class WorkflowYAMLLoader:
         return entity
 
     @classmethod
-    def get_connections(
-        cls, data: dict[str, dict], registry: dict[str, Any]
-    ) -> dict[str, BaseConnection]:
+    def get_connections(cls, data: dict[str, dict], registry: dict[str, Any]) -> dict[str, BaseConnection]:
         """
         Get connections from the provided data.
 
@@ -93,17 +78,11 @@ class WorkflowYAMLLoader:
         connections = {}
         for conn_id, conn_data in data.get("connections", {}).items():
             if conn_id in connections:
-                raise WorkflowYAMLLoaderException(
-                    f"Connection '{conn_id}' already exists"
-                )
+                raise WorkflowYAMLLoaderException(f"Connection '{conn_id}' already exists")
             if not (conn_type := conn_data.get("type")):
-                raise WorkflowYAMLLoaderException(
-                    f"Value 'type' not found for connection '{conn_id}'"
-                )
+                raise WorkflowYAMLLoaderException(f"Value 'type' not found for connection '{conn_id}'")
 
-            conn_cls = cls.get_entity_by_type(
-                entity_type=conn_type, entity_registry=registry
-            )
+            conn_cls = cls.get_entity_by_type(entity_type=conn_type, entity_registry=registry)
             conn_init_data = conn_data | {"id": conn_id}
             conn_init_data.pop("type", None)
             try:
@@ -153,17 +132,13 @@ class WorkflowYAMLLoader:
         prompts = {}
         for prompt_id, prompt_data in data.get("prompts", {}).items():
             if prompt_id in prompts:
-                raise WorkflowYAMLLoaderException(
-                    f"Prompt '{prompt_id}' already exists"
-                )
+                raise WorkflowYAMLLoaderException(f"Prompt '{prompt_id}' already exists")
             prompts[prompt_id] = cls.init_prompt(prompt_data | {"id": prompt_id})
 
         return prompts
 
     @classmethod
-    def get_node_prompt(
-        cls, node_id: str, node_data: dict, prompts: dict[id, Prompt]
-    ) -> Prompt | None:
+    def get_node_prompt(cls, node_id: str, node_data: dict, prompts: dict[id, Prompt]) -> Prompt | None:
         """
         Get the prompt for a node.
 
@@ -182,9 +157,7 @@ class WorkflowYAMLLoader:
         if prompt_id := node_data.get("prompt"):
             prompt = prompts.get(prompt_id)
             if not prompt:
-                raise WorkflowYAMLLoaderException(
-                    f"Prompt '{prompt_id}' for node '{node_id}' not found"
-                )
+                raise WorkflowYAMLLoaderException(f"Prompt '{prompt_id}' for node '{node_id}' not found")
         return prompt
 
     @classmethod
@@ -209,9 +182,7 @@ class WorkflowYAMLLoader:
         if conn_id := node_data.get("connection"):
             conn = connections.get(conn_id)
             if not conn:
-                raise WorkflowYAMLLoaderException(
-                    f"Connection '{conn_id}' for node '{node_id}' not found"
-                )
+                raise WorkflowYAMLLoaderException(f"Connection '{conn_id}' for node '{node_id}' not found")
         return conn
 
     @classmethod
@@ -233,21 +204,15 @@ class WorkflowYAMLLoader:
             WorkflowYAMLLoaderException: If the specified vector store connection is not found or
                                          does not support vector store initialization.
         """
-        if conn := cls.get_node_connection(
-            node_id=node_id, node_data=node_data, connections=connections
-        ):
-            if not (
-                conn_to_vs := getattr(conn, "connect_to_vector_store", None)
-            ) or not callable(conn_to_vs):
+        if conn := cls.get_node_connection(node_id=node_id, node_data=node_data, connections=connections):
+            if not (conn_to_vs := getattr(conn, "connect_to_vector_store", None)) or not callable(conn_to_vs):
                 raise WorkflowYAMLLoaderException(
                     f"Vector store connection '{conn.id}' for node '{node_id}' not support vector store initialization"
                 )
         return conn
 
     @classmethod
-    def get_node_flow(
-        cls, node_id: str, node_data: dict, flows: dict[id, Flow]
-    ) -> Flow | None:
+    def get_node_flow(cls, node_id: str, node_data: dict, flows: dict[id, Flow]) -> Flow | None:
         """
         Get the flow for a node.
 
@@ -266,15 +231,11 @@ class WorkflowYAMLLoader:
         if flow_id := node_data.get("flow"):
             flow = flows.get(flow_id)
             if not flow:
-                raise WorkflowYAMLLoaderException(
-                    f"Flow '{flow_id}' for node '{node_id}' not found"
-                )
+                raise WorkflowYAMLLoaderException(f"Flow '{flow_id}' for node '{node_id}' not found")
         return flow
 
     @classmethod
-    def get_node_flows(
-        cls, node_id: str, node_data: dict, flows: dict[id, Flow]
-    ) -> list[Flow]:
+    def get_node_flows(cls, node_id: str, node_data: dict, flows: dict[id, Flow]) -> list[Flow]:
         """
         Get the flows for a node.
 
@@ -293,16 +254,12 @@ class WorkflowYAMLLoader:
         for flow_id in node_data.get("flows", []):
             node_flow = flows.get(flow_id)
             if not node_flow:
-                raise WorkflowYAMLLoaderException(
-                    f"Flow '{flow_id}' for node '{node_id}' not found"
-                )
+                raise WorkflowYAMLLoaderException(f"Flow '{flow_id}' for node '{node_id}' not found")
             node_flows.append(node_flow)
         return node_flows
 
     @classmethod
-    def get_node_dependencies(
-        cls, node_id: str, node_data: dict, nodes: dict[str, Node]
-    ):
+    def get_node_dependencies(cls, node_id: str, node_data: dict, nodes: dict[str, Node]):
         """
         Get the dependencies for a node.
 
@@ -467,13 +424,9 @@ class WorkflowYAMLLoader:
                 raise WorkflowYAMLLoaderException(f"Node '{node_id}' already exists")
 
             if not (node_type := node_data.get("type")):
-                raise WorkflowYAMLLoaderException(
-                    f"Value 'type' for node '{node_id}' not found"
-                )
+                raise WorkflowYAMLLoaderException(f"Value 'type' for node '{node_id}' not found")
 
-            node_cls = cls.get_entity_by_type(
-                entity_type=node_type, entity_registry=registry
-            )
+            node_cls = cls.get_entity_by_type(entity_type=node_type, entity_registry=registry)
 
             # Init node params
             node_init_data = node_data.copy()
@@ -501,13 +454,9 @@ class WorkflowYAMLLoader:
                     else cls.init_prompt(prompt_data)
                 )
             if "flow" in node_init_data:
-                node_init_data["flow"] = cls.get_node_flow(
-                    node_id=node_id, node_data=node_data, flows=flows
-                )
+                node_init_data["flow"] = cls.get_node_flow(node_id=node_id, node_data=node_data, flows=flows)
             if "flows" in node_init_data:
-                node_init_data["flows"] = cls.get_node_flows(
-                    node_id=node_id, node_data=node_data, flows=flows
-                )
+                node_init_data["flows"] = cls.get_node_flows(node_id=node_id, node_data=node_data, flows=flows)
             try:
 
                 node_init_data = cls.get_updated_node_init_data_with_initialized_nodes(
@@ -528,9 +477,7 @@ class WorkflowYAMLLoader:
                     node.is_postponed_component_init = False
 
             except Exception as e:
-                raise WorkflowYAMLLoaderException(
-                    f"Node '{node_id}' data is invalid. Data: {node_data}. Error: {e}"
-                )
+                raise WorkflowYAMLLoaderException(f"Node '{node_id}' data is invalid. Data: {node_data}. Error: {e}")
 
             new_nodes[node_id] = node
 
@@ -578,9 +525,7 @@ class WorkflowYAMLLoader:
 
         all_nodes = nodes | new_nodes
         for node_id, node in new_nodes.items():
-            node.depends = cls.get_node_dependencies(
-                node_id=node_id, node_data=nodes_data[node_id], nodes=all_nodes
-            )
+            node.depends = cls.get_node_dependencies(node_id=node_id, node_data=nodes_data[node_id], nodes=all_nodes)
 
         return new_nodes
 
@@ -629,9 +574,7 @@ class WorkflowYAMLLoader:
                     dependant_flows_nodes_ids.extend(flow_data.get("nodes", []))
 
             dependant_flows_nodes_data = {
-                node_id: node_data
-                for node_id, node_data in nodes_data.items()
-                if node_id in dependant_flows_nodes_ids
+                node_id: node_data for node_id, node_data in nodes_data.items() if node_id in dependant_flows_nodes_ids
             }
 
             dependant_nodes = cls.get_nodes(
@@ -683,9 +626,7 @@ class WorkflowYAMLLoader:
             dep_node_ids = set()
             for node_id in flow_node_ids:
                 if node_id not in nodes:
-                    raise WorkflowYAMLLoaderException(
-                        f"Node '{node_id}' for flow '{flow_id}' not found"
-                    )
+                    raise WorkflowYAMLLoaderException(f"Node '{node_id}' for flow '{flow_id}' not found")
 
                 dep_node_ids.update({dep.node.id for dep in nodes[node_id].depends})
 
@@ -705,9 +646,7 @@ class WorkflowYAMLLoader:
             try:
                 flow = Flow(**flow_init_data)
             except Exception as e:
-                raise WorkflowYAMLLoaderException(
-                    f"Flow '{flow_id}' data is invalid. Data: {flow_data}. Error: {e}"
-                )
+                raise WorkflowYAMLLoaderException(f"Flow '{flow_id}' data is invalid. Data: {flow_data}. Error: {e}")
 
             new_flows[flow_id] = flow
         return new_flows
@@ -743,9 +682,7 @@ class WorkflowYAMLLoader:
 
         if dependant_flow_ids:
             dependant_flows_data = {
-                flow_id: flow_data
-                for flow_id, flow_data in flows_data.items()
-                if flow_id in dependant_flow_ids
+                flow_id: flow_data for flow_id, flow_data in flows_data.items() if flow_id in dependant_flow_ids
             }
             dependant_flows = cls.get_flows(
                 data=dependant_flows_data,
@@ -774,22 +711,16 @@ class WorkflowYAMLLoader:
         workflows = {}
         for wf_id, wf_data in data.get("workflows", {}).items():
             if not (flow_id := wf_data.get("flow")):
-                raise WorkflowYAMLLoaderException(
-                    f"Value 'flow' for dynamiq '{wf_id}' not found "
-                )
+                raise WorkflowYAMLLoaderException(f"Value 'flow' for dynamiq '{wf_id}' not found ")
             if not (flow := flows.get(flow_id)):
-                raise WorkflowYAMLLoaderException(
-                    f"Flow '{flow_id}' for dynamiq '{wf_id}' not found"
-                )
+                raise WorkflowYAMLLoaderException(f"Flow '{flow_id}' for dynamiq '{wf_id}' not found")
             if version := wf_data.get("version"):
                 version = str(version)
 
             try:
                 wf = Workflow(id=wf_id, flow=flow, version=version)
             except Exception as e:
-                raise WorkflowYAMLLoaderException(
-                    f"Workflow '{wf_id}' data is invalid. Data: {wf_data}. Error: {e}"
-                )
+                raise WorkflowYAMLLoaderException(f"Workflow '{wf_id}' data is invalid. Data: {wf_data}. Error: {e}")
 
             workflows[wf_id] = wf
         return workflows
@@ -800,7 +731,7 @@ class WorkflowYAMLLoader:
         file_path: str | PathLike,
         connection_manager: ConnectionManager | None = None,
         init_components: bool = False,
-    ) -> WorkflowYamlLoaderData:
+    ) -> WorkflowYamlData:
         """
         Load data from a YAML file and parse it.
 
@@ -810,7 +741,7 @@ class WorkflowYAMLLoader:
             init_components: Flag to initialize components.
 
         Returns:
-            Parsed WorkflowYamlLoaderData object.
+            Parsed WorkflowYamlData object.
         """
         data = cls.loads(file_path)
         return cls.parse(
@@ -851,7 +782,7 @@ class WorkflowYAMLLoader:
         data: dict,
         connection_manager: ConnectionManager | None = None,
         init_components: bool = False,
-    ) -> WorkflowYamlLoaderData:
+    ) -> WorkflowYamlData:
         """
         Parse dynamiq workflow data.
 
@@ -861,7 +792,7 @@ class WorkflowYAMLLoader:
             init_components: Flag to initialize components.
 
         Returns:
-            Parsed WorkflowYamlLoaderData object.
+            Parsed WorkflowYamlData object.
 
         Raises:
             WorkflowYAMLLoaderException: If parsing fails.
@@ -925,7 +856,7 @@ class WorkflowYAMLLoader:
             logger.exception("Failed to parse Yaml data with unexpected error")
             raise
 
-        return WorkflowYamlLoaderData(
+        return WorkflowYamlData(
             connections=connections,
             nodes=nodes,
             flows=flows,

@@ -56,7 +56,7 @@ class UnstructuredFileConverter(ConnectionNode):
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     strategy: ConvertStrategy = ConvertStrategy.AUTO
     unstructured_kwargs: dict[str, Any] | None = None
-    file_converter: UnstructuredFileConverterComponent = None
+    file_converter: UnstructuredFileConverterComponent | None = None
     input_schema: ClassVar[type[UnstructuredFileConverterInputSchema]] = UnstructuredFileConverterInputSchema
 
     def __init__(self, **kwargs):

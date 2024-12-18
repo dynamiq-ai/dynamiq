@@ -27,7 +27,7 @@ class MistralDocumentEmbedder(DocumentEmbedder):
     name: str = "MistralDocumentEmbedder"
     connection: MistralConnection | None = None
     model: str = "mistral/mistral-embed"
-    document_embedder: MistralEmbedderComponent = None
+    document_embedder: MistralEmbedderComponent | None = None
 
     def __init__(self, **kwargs):
         """

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from dynamiq.connections import RedisConnection
 
 
-class CacheBackend(enum.Enum):
+class CacheBackend(str, enum.Enum):
     """Enumeration for cache backends."""
     Redis = "Redis"
 

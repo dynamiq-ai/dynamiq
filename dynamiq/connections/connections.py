@@ -1,9 +1,9 @@
 import enum
 from abc import ABC, abstractmethod
-from functools import partial
+from functools import cached_property, partial
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -18,51 +18,6 @@ if TYPE_CHECKING:
     from weaviate import WeaviateClient
 
 
-class ConnectionType(str, enum.Enum):
-    """
-    This enum defines various connection types for different services and databases.
-    """
-    Anthropic = "Anthropic"
-    AWS = "AWS"
-    Chroma = "Chroma"
-    Cohere = "Cohere"
-    Gemini = "Gemini"
-    GeminiVertexAI = "GeminiVertexAI"
-    HttpApiKey = "HttpApiKey"
-    Http = "Http"
-    Mistral = "Mistral"
-    MySQL = "MySQL"
-    OpenAI = "OpenAI"
-    Pinecone = "Pinecone"
-    Unstructured = "Unstructured"
-    Weaviate = "Weaviate"
-    Whisper = "Whisper"
-    ElevenLabs = "ElevenLabs"
-    Tavily = "Tavily"
-    ScaleSerp = "ScaleSerp"
-    ZenRows = "ZenRows"
-    Groq = "Groq"
-    TogetherAI = "TogetherAI"
-    Anyscale = "Anyscale"
-    HuggingFace = "HuggingFace"
-    WatsonX = "WatsonX"
-    AzureAI = "AzureAI"
-    Firecrawl = "Firecrawl"
-    E2B = "E2B"
-    DeepInfra = "DeepInfra"
-    Cerebras = "Cerebras"
-    Replicate = "Replicate"
-    AI21 = "AI21"
-    Qdrant = "Qdrant"
-    SambaNova = "SambaNova"
-    Milvus = "Milvus"
-    Perplexity = "Perplexity"
-    DeepSeek = "DeepSeek"
-    PostgreSQL = "PostgreSQL"
-    Exa = "Exa"
-    Ollama = "Ollama"
-
-
 class HTTPMethod(str, enum.Enum):
     """
     This enum defines various method types for different HTTP requests.
@@ -73,13 +28,6 @@ class HTTPMethod(str, enum.Enum):
     PUT = "PUT"
     DELETE = "DELETE"
     PATCH = "PATCH"
-
-
-class SearchType(enum.Enum):
-    WEB = None
-    NEWS = "news"
-    IMAGES = "images"
-    VIDEOS = "videos"
 
 
 class BaseConnection(BaseModel, ABC):
@@ -93,7 +41,11 @@ class BaseConnection(BaseModel, ABC):
         type (ConnectionType): The type of connection.
     """
     id: str = Field(default_factory=generate_uuid)
-    type: ConnectionType
+
+    @computed_field
+    @cached_property
+    def type(self) -> str:
+        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     @property
     def conn_params(self) -> dict:
@@ -163,11 +115,9 @@ class HttpApiKey(BaseApiKeyConnection):
     Represents a connection to an API that uses an HTTP API key for authentication.
 
     Attributes:
-        type (Literal[ConnectionType.HttpApiKey]): The type of connection, always 'HttpApiKey'.
         url (str): The URL of the API.
     """
 
-    type: Literal[ConnectionType.HttpApiKey] = ConnectionType.HttpApiKey
     url: str
 
     def connect(self):
@@ -203,7 +153,6 @@ class Http(BaseConnection):
     Represents a connection to an API.
 
     Attributes:
-        type (Literal[ConnectionType.HttpConnection]): The type of connection, always 'HttpConnection'.
         url (str): The URL of the API.
         method (str): HTTP method used for the request, defaults to HTTPMethod.POST.
         headers (dict[str, Any]): Additional headers to include in the request, defaults to an empty dictionary.
@@ -211,7 +160,6 @@ class Http(BaseConnection):
         data (Optional[dict[str, Any]]): Data to include in the request, defaults to an empty dictionary.
     """
 
-    type: Literal[ConnectionType.Http] = ConnectionType.Http
     url: str = ""
     method: HTTPMethod
     headers: dict[str, Any] = Field(default_factory=dict)
@@ -238,10 +186,8 @@ class OpenAI(BaseApiKeyConnection):
     Represents a connection to the OpenAI service.
 
     Attributes:
-        type (Literal[ConnectionType.OpenAI]): The type of connection, which is always 'OpenAI'.
         api_key (str): The API key for the OpenAI service, fetched from the environment variable 'OPENAI_API_KEY'.
     """
-    type: Literal[ConnectionType.OpenAI] = ConnectionType.OpenAI
     api_key: str = Field(default_factory=partial(get_env_var, "OPENAI_API_KEY"))
 
     def connect(self) -> "OpenAIClient":
@@ -261,7 +207,6 @@ class OpenAI(BaseApiKeyConnection):
 
 
 class Anthropic(BaseApiKeyConnection):
-    type: Literal[ConnectionType.Anthropic] = ConnectionType.Anthropic
     api_key: str = Field(default_factory=partial(get_env_var, "ANTHROPIC_API_KEY"))
 
     def connect(self):
@@ -269,7 +214,6 @@ class Anthropic(BaseApiKeyConnection):
 
 
 class AWS(BaseConnection):
-    type: Literal[ConnectionType.AWS] = ConnectionType.AWS
     access_key_id: str | None = Field(
         default_factory=partial(get_env_var, "AWS_ACCESS_KEY_ID")
     )
@@ -298,7 +242,6 @@ class AWS(BaseConnection):
 
 
 class Gemini(BaseApiKeyConnection):
-    type: Literal[ConnectionType.Gemini] = ConnectionType.Gemini
     api_key: str = Field(default_factory=partial(get_env_var, "GEMINI_API_KEY"))
 
     def connect(self):
@@ -316,12 +259,10 @@ class GeminiVertexAI(BaseConnection):
     Attributes:
         project_id (str): The GCP project ID.
         project_location (str): The location of the GCP project.
-        type (Literal[ConnectionType.GeminiVertexAI]): The type of connection, which is always 'GeminiVertexAI'.
     """
 
     project_id: str
     project_location: str
-    type: Literal[ConnectionType.GeminiVertexAI] = ConnectionType.GeminiVertexAI
 
     def connect(self):
         pass
@@ -343,7 +284,6 @@ class GeminiVertexAI(BaseConnection):
 
 
 class Cohere(BaseApiKeyConnection):
-    type: Literal[ConnectionType.Cohere] = ConnectionType.Cohere
     api_key: str = Field(default_factory=partial(get_env_var, "COHERE_API_KEY"))
 
     def connect(self):
@@ -351,7 +291,6 @@ class Cohere(BaseApiKeyConnection):
 
 
 class Mistral(BaseApiKeyConnection):
-    type: Literal[ConnectionType.Mistral] = ConnectionType.Mistral
     api_key: str = Field(default_factory=partial(get_env_var, "MISTRAL_API_KEY"))
 
     def connect(self):
@@ -363,12 +302,10 @@ class Whisper(Http):
     Represents a connection to the Whisper API using an HTTP request.
 
     Attributes:
-        type (Literal[ConnectionType.Whisper]): Type of the connection, which is always "Whisper".
         url (str): URL of the Whisper API, fetched from the environment variable "WHISPER_URL".
         method (str): HTTP method used for the request, defaults to HTTPMethod.POST.
         api_key (str): API key for authentication, fetched from the environment variable "OPENAI_API_KEY".
     """
-    type: Literal[ConnectionType.Whisper] = ConnectionType.Whisper
     url: str = Field(
         default_factory=partial(
             get_env_var, "WHISPER_URL", "https://api.openai.com/v1/"
@@ -393,13 +330,11 @@ class ElevenLabs(Http):
     Represents a connection to the ElevenLabs API using an HTTP request.
 
     Attributes:
-        type (Literal[ConnectionType.ElevenLabs]): Type of the connection, which is always "ElevenLabs".
         url (str): URL of the ElevenLabs API.
         method (str): HTTP method used for the request, defaults to HTTPMethod.POST.
         api_key (str): API key for authentication, fetched from the environment variable "ELEVENLABS_API_KEY".
     """
 
-    type: Literal[ConnectionType.ElevenLabs] = ConnectionType.ElevenLabs
     url: str = Field(
         default_factory=partial(
             get_env_var,
@@ -426,12 +361,10 @@ class Pinecone(BaseApiKeyConnection):
     Represents a connection to the Pinecone service.
 
     Attributes:
-        type (Literal[ConnectionType.Pinecone]): The type of connection, always 'Pinecone'.
         api_key (str): The API key for the service.
             Defaults to the environment variable 'PINECONE_API_KEY'.
     """
 
-    type: Literal[ConnectionType.Pinecone] = ConnectionType.Pinecone
     api_key: str = Field(default_factory=partial(get_env_var, "PINECONE_API_KEY"))
 
     def connect(self) -> "PineconeClient":
@@ -455,14 +388,12 @@ class Qdrant(BaseApiKeyConnection):
     Represents a connection to the Qdrant service.
 
     Attributes:
-        type (Literal[ConnectionType.Qdrant]): The type of connection, always 'Qdrant'.
         url (str): The URL of the Qdrant service.
             Defaults to the environment variable 'QDRANT_URL'.
         api_key (str): The API key for the Qdrant service.
             Defaults to the environment variable 'QDRANT_API_KEY'.
     """
 
-    type: Literal[ConnectionType.Qdrant] = ConnectionType.Qdrant
     url: str = Field(default_factory=partial(get_env_var, "QDRANT_URL"))
     api_key: str = Field(default_factory=partial(get_env_var, "QDRANT_API_KEY"))
 
@@ -497,7 +428,6 @@ class Weaviate(BaseApiKeyConnection):
     Represents a connection to the Weaviate service.
 
     Attributes:
-        type (Literal[ConnectionType.Weaviate]): The type of connection, always 'Weaviate'.
         deployment_type (WeaviateDeploymentType): The deployment type of the service.
         api_key (str): The API key for the service.
             Defaults to the environment variable 'WEAVIATE_API_KEY'.
@@ -513,7 +443,6 @@ class Weaviate(BaseApiKeyConnection):
             Defaults to the environment variable 'WEAVIATE_GRPC_PORT'.
     """
 
-    type: Literal[ConnectionType.Weaviate] = ConnectionType.Weaviate
     deployment_type: WeaviateDeploymentType = WeaviateDeploymentType.WEAVIATE_CLOUD
     api_key: str = Field(default_factory=partial(get_env_var, "WEAVIATE_API_KEY"))
     url: str = Field(default_factory=partial(get_env_var, "WEAVIATE_URL"))
@@ -568,12 +497,10 @@ class Chroma(BaseConnection):
     Represents a connection to the Chroma service.
 
     Attributes:
-        type (Literal[ConnectionType.Chroma]): The type of connection, which is always 'Chroma'.
         host (str): The host address of the Chroma service, fetched from the environment variable 'CHROMA_HOST'.
         port (int): The port number of the Chroma service, fetched from the environment variable 'CHROMA_PORT'.
     """
 
-    type: Literal[ConnectionType.Chroma] = ConnectionType.Chroma
     host: str = Field(default_factory=partial(get_env_var, "CHROMA_HOST"))
     port: int = Field(default_factory=partial(get_env_var, "CHROMA_PORT"))
 
@@ -614,13 +541,11 @@ class Unstructured(HttpApiKey):
     Represents a connection to the Unstructured API.
 
     Attributes:
-        type (Literal[ConnectionType.Unstructured]): The type of connection, which is always 'Unstructured'.
         url (str): The URL of the Unstructured API, fetched from the environment variable 'UNSTRUCTURED_API_URL'.
         api_key (str): The API key for the Unstructured API, fetched from the environment
             variable 'UNSTRUCTURED_API_KEY'.
     """
 
-    type: Literal[ConnectionType.Unstructured] = ConnectionType.Unstructured
     url: str = Field(
         default_factory=partial(
             get_env_var,
@@ -638,7 +563,6 @@ class Unstructured(HttpApiKey):
 
 
 class Tavily(Http):
-    type: Literal[ConnectionType.Tavily] = ConnectionType.Tavily
     url: str = Field(default="https://api.tavily.com")
     api_key: str = Field(default_factory=partial(get_env_var, "TAVILY_API_KEY"))
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
@@ -656,13 +580,9 @@ class ScaleSerp(Http):
     Connection class for Scale SERP Search API.
     """
 
-    type: Literal[ConnectionType.ScaleSerp] = ConnectionType.ScaleSerp
     url: str = "https://api.scaleserp.com"
     api_key: str = Field(default_factory=partial(get_env_var, "SERP_API_KEY"))
     method: str = HTTPMethod.GET
-
-    # Common parameters
-    search_type: SearchType = SearchType.WEB
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -673,28 +593,12 @@ class ScaleSerp(Http):
         self.params.update({"api_key": self.api_key})
         return super().connect()
 
-    def get_params(self, query: str | None = None, url: str | None = None, **kwargs) -> dict[str, Any]:
-        """
-        Prepare the parameters for the API request.
-        """
-        params = {"api_key": self.api_key, "search_type": self.search_type, **kwargs}
-        if self.search_type == SearchType.WEB:
-            params.pop("search_type")
-
-        if query:
-            params["q"] = query
-        elif url:
-            params["url"] = url
-
-        return {k: v for k, v in params.items() if v is not None}
-
 
 class ZenRows(Http):
     """
     Connection class for ZenRows Scrape API.
     """
 
-    type: Literal[ConnectionType.ZenRows] = ConnectionType.ZenRows
     url: str = "https://api.zenrows.com/v1/"
     api_key: str = Field(default_factory=partial(get_env_var, "ZENROWS_API_KEY"))
     method: str = HTTPMethod.GET
@@ -708,7 +612,6 @@ class ZenRows(Http):
 
 
 class Groq(BaseApiKeyConnection):
-    type: Literal[ConnectionType.Groq] = ConnectionType.Groq
     api_key: str = Field(default_factory=partial(get_env_var, "GROQ_API_KEY"))
 
     def connect(self):
@@ -716,7 +619,6 @@ class Groq(BaseApiKeyConnection):
 
 
 class TogetherAI(BaseApiKeyConnection):
-    type: Literal[ConnectionType.TogetherAI] = ConnectionType.TogetherAI
     api_key: str = Field(default_factory=partial(get_env_var, "TOGETHER_API_KEY"))
 
     def connect(self):
@@ -724,7 +626,6 @@ class TogetherAI(BaseApiKeyConnection):
 
 
 class Anyscale(BaseApiKeyConnection):
-    type: Literal[ConnectionType.Anyscale] = ConnectionType.Anyscale
     api_key: str = Field(default_factory=partial(get_env_var, "ANYSCALE_API_KEY"))
 
     def connect(self):
@@ -732,7 +633,6 @@ class Anyscale(BaseApiKeyConnection):
 
 
 class Firecrawl(Http):
-    type: Literal[ConnectionType.Firecrawl] = ConnectionType.Firecrawl
     url: str = Field(default="https://api.firecrawl.dev/v0/")
     api_key: str = Field(default_factory=lambda: get_env_var("FIRECRAWL_API_KEY"))
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
@@ -746,7 +646,6 @@ class Firecrawl(Http):
 
 
 class E2B(BaseApiKeyConnection):
-    type: Literal[ConnectionType.E2B] = ConnectionType.E2B
     api_key: str = Field(default_factory=partial(get_env_var, "E2B_API_KEY"))
 
     def connect(self):
@@ -754,7 +653,6 @@ class E2B(BaseApiKeyConnection):
 
 
 class HuggingFace(BaseApiKeyConnection):
-    type: Literal[ConnectionType.HuggingFace] = ConnectionType.HuggingFace
     api_key: str = Field(default_factory=partial(get_env_var, "HUGGINGFACE_API_KEY"))
 
     def connect(self):
@@ -762,7 +660,6 @@ class HuggingFace(BaseApiKeyConnection):
 
 
 class WatsonX(BaseApiKeyConnection):
-    type: Literal[ConnectionType.WatsonX] = ConnectionType.WatsonX
     api_key: str = Field(default_factory=partial(get_env_var, "WATSONX_API_KEY"))
     project_id: str = Field(default_factory=partial(get_env_var, "WATSONX_PROJECT_ID"))
     url: str = Field(default_factory=partial(get_env_var, "WATSONX_URL"))
@@ -792,7 +689,6 @@ class WatsonX(BaseApiKeyConnection):
 
 
 class AzureAI(BaseApiKeyConnection):
-    type: Literal[ConnectionType.AzureAI] = ConnectionType.AzureAI
     api_key: str = Field(default_factory=partial(get_env_var, "AZURE_API_KEY"))
     url: str = Field(default_factory=partial(get_env_var, "AZURE_URL"))
     api_version: str = Field(default_factory=partial(get_env_var, "AZURE_API_VERSION"))
@@ -822,7 +718,6 @@ class AzureAI(BaseApiKeyConnection):
 
 
 class DeepInfra(BaseApiKeyConnection):
-    type: Literal[ConnectionType.DeepInfra] = ConnectionType.DeepInfra
     api_key: str = Field(default_factory=partial(get_env_var, "DEEPINFRA_API_KEY"))
 
     def connect(self):
@@ -830,7 +725,6 @@ class DeepInfra(BaseApiKeyConnection):
 
 
 class Cerebras(BaseApiKeyConnection):
-    type: Literal[ConnectionType.Cerebras] = ConnectionType.Cerebras
     api_key: str = Field(default_factory=partial(get_env_var, "CEREBRAS_API_KEY"))
 
     def connect(self):
@@ -838,7 +732,6 @@ class Cerebras(BaseApiKeyConnection):
 
 
 class Replicate(BaseApiKeyConnection):
-    type: Literal[ConnectionType.Replicate] = ConnectionType.Replicate
     api_key: str = Field(default_factory=partial(get_env_var, "REPLICATE_API_KEY"))
 
     def connect(self):
@@ -846,7 +739,6 @@ class Replicate(BaseApiKeyConnection):
 
 
 class AI21(BaseApiKeyConnection):
-    type: Literal[ConnectionType.AI21] = ConnectionType.AI21
     api_key: str = Field(default_factory=partial(get_env_var, "AI21_API_KEY"))
 
     def connect(self):
@@ -854,7 +746,6 @@ class AI21(BaseApiKeyConnection):
 
 
 class SambaNova(BaseApiKeyConnection):
-    type: Literal[ConnectionType.SambaNova] = ConnectionType.SambaNova
     api_key: str = Field(default_factory=partial(get_env_var, "SAMBANOVA_API_KEY"))
 
     def connect(self):
@@ -879,13 +770,11 @@ class Milvus(BaseConnection):
     Represents a connection to the Milvus service.
 
     Attributes:
-        type (Literal[ConnectionType.Milvus]): The type of connection, always 'Milvus'.
         deployment_type (MilvusDeploymentType): The deployment type of the Milvus service
         api_key (Optional[str]): The API key for Milvus
         uri (str): The URI for the Milvus instance (file path or host URL).
     """
 
-    type: Literal[ConnectionType.Milvus] = ConnectionType.Milvus
     deployment_type: MilvusDeploymentType = MilvusDeploymentType.HOST
     uri: str = Field(default_factory=partial(get_env_var, "MILVUS_URI", "http://localhost:19530"))
     api_key: str | None = Field(default_factory=partial(get_env_var, "MILVUS_API_TOKEN", None))
@@ -919,7 +808,6 @@ class Milvus(BaseConnection):
 
 
 class Perplexity(BaseApiKeyConnection):
-    type: Literal[ConnectionType.Perplexity] = ConnectionType.Perplexity
     api_key: str = Field(default_factory=partial(get_env_var, "PERPLEXITYAI_API_KEY"))
 
     def connect(self):
@@ -927,7 +815,6 @@ class Perplexity(BaseApiKeyConnection):
 
 
 class DeepSeek(BaseApiKeyConnection):
-    type: Literal[ConnectionType.DeepSeek] = ConnectionType.DeepSeek
     api_key: str = Field(default_factory=partial(get_env_var, "DEEPSEEK_API_KEY"))
 
     def connect(self):
@@ -935,7 +822,6 @@ class DeepSeek(BaseApiKeyConnection):
 
 
 class PostgreSQL(BaseConnection):
-    type: Literal[ConnectionType.PostgreSQL] = ConnectionType.PostgreSQL
     host: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_HOST", "localhost"))
     port: int = Field(default_factory=partial(get_env_var, "POSTGRESQL_PORT", 5432))
     database: str = Field(default_factory=partial(get_env_var, "POSTGRESQL_DATABASE", "db"))
@@ -977,13 +863,11 @@ class Exa(Http):
     Represents a connection to the Exa AI Search API.
 
     Attributes:
-        type (Literal[ConnectionType.Exa]): The type of connection, which is always 'Exa'.
         url (str): The URL of the Exa API.
         method (Literal[HTTPMethod.POST]): HTTP method used for the request, defaults to POST.
         api_key (str): The API key for authentication, fetched from the environment variable 'EXA_API_KEY'.
     """
 
-    type: Literal[ConnectionType.Exa] = ConnectionType.Exa
     url: Literal["https://api.exa.ai"] = Field(default="https://api.exa.ai")
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
     api_key: str = Field(default_factory=partial(get_env_var, "EXA_API_KEY"))
@@ -1003,11 +887,9 @@ class Ollama(BaseConnection):
     """Represents a connection to Ollama API.
 
     Attributes:
-        type (Literal[ConnectionType.HttpApiKey]): The type of connection, always 'HttpApiKey'.
         url (str): The URL of the Ollama API, defaults to "http://localhost:11434".
     """
 
-    type: Literal[ConnectionType.Ollama] = ConnectionType.Ollama
     url: str = Field(default="http://localhost:11434")
 
     def connect(self):

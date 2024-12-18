@@ -34,6 +34,24 @@ class BaseFlow(BaseModel, Runnable, ABC):
         """Reset the internal run state by clearing the results dictionary."""
         self._results = {}
 
+    @property
+    def to_dict_exclude_params(self) -> dict:
+        return {}
+
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
+        """Converts the instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the instance.
+        """
+        exclude = kwargs.pop("exclude", self.to_dict_exclude_params)
+        data = self.model_dump(
+            exclude=exclude,
+            serialize_as_any=kwargs.pop("serialize_as_any", True),
+            **kwargs,
+        )
+        return data
+
     def run_on_flow_start(
         self, input_data: Any, config: RunnableConfig = None, **kwargs: Any
     ):

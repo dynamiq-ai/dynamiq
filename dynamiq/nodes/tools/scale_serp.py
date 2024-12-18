@@ -1,3 +1,4 @@
+import enum
 from typing import Any, ClassVar, Literal
 from urllib.parse import urljoin
 
@@ -8,6 +9,13 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
+
+
+class SearchType(str, enum.Enum):
+    WEB = "web"
+    NEWS = "news"
+    IMAGES = "images"
+    VIDEOS = "videos"
 
 
 class ScaleSerpInputSchema(BaseModel):
@@ -53,6 +61,7 @@ class ScaleSerpTool(ConnectionNode):
         le=100,
         description="The default number of search results to return",
     )
+    search_type: SearchType = SearchType.WEB
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ScaleSerpInputSchema]] = ScaleSerpInputSchema
@@ -89,6 +98,21 @@ class ScaleSerpTool(ConnectionNode):
 
         return "\n".join(formatted_results).strip()
 
+    def get_params(self, query: str | None = None, url: str | None = None, **kwargs) -> dict[str, Any]:
+        """
+        Prepare the parameters for the API request.
+        """
+        params = {"api_key": self.connection.api_key, "search_type": self.search_type, **kwargs}
+        if self.search_type == SearchType.WEB:
+            params.pop("search_type")
+
+        if query:
+            params["q"] = query
+        elif url:
+            params["url"] = url
+
+        return {k: v for k, v in params.items() if v is not None}
+
     def execute(
         self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -116,7 +140,7 @@ class ScaleSerpTool(ConnectionNode):
                 "content": "Error: Either 'input' (for query) or 'url' must be provided."
             }
 
-        search_params = self.connection.get_params(query=query, url=url, num=limit)
+        search_params = self.get_params(query=query, url=url, num=limit)
 
         connection_url = urljoin(self.connection.url, "/search")
 
