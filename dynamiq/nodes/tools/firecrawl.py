@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -116,10 +117,11 @@ class FirecrawlTool(ConnectionNode):
             response.raise_for_status()
             scrape_result = response.json()
         except Exception as e:
+            error_message = f"Error with processing url:{url}, error:{e}. Try to try other url or check the url."
             logger.error(
                 f"Tool {self.name} - {self.id}: failed to get results. Error: {e}"
             )
-            raise
+            raise ToolExecutionException(error_message, recoverable=True)
 
         if self.is_optimized_for_agents:
             result = f"<Source URL>\n{url}\n<\\Source URL>"

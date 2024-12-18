@@ -1,9 +1,9 @@
-from dynamiq.connections import Exa, Tavily, ScaleSerp, ZenRows, Firecrawl
+from dynamiq.connections import Firecrawl, ScaleSerp, Tavily, ZenRows
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.tools.zenrows import ZenRowsTool
-from dynamiq.nodes.tools.tavily import TavilyTool
-from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
+from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
+from dynamiq.nodes.tools.tavily import TavilyTool
+from dynamiq.nodes.tools.zenrows import ZenRowsTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
@@ -36,8 +36,9 @@ You are an expert business intelligence and competitive analysis agent designed 
 - Maintain objectivity and avoid speculation
 - Protect confidentiality and respect intellectual property rights
 
-Approach each research task methodically, providing comprehensive yet concise analysis that supports strategic business decision-making.
-"""
+Approach each research task methodically, providing comprehensive yet concise
+analysis that supports strategic business decision-making.
+"""  # noqa E501
 
 INPUT_TASK = """Conduct a comprehensive competitive analysis for Dynamiq AI, including:
 
@@ -89,23 +90,25 @@ INPUT_TASK = """Conduct a comprehensive competitive analysis for Dynamiq AI, inc
     - Potential regulatory considerations
     - Technological innovation landscape
 
-    Deliver a comprehensive report with clear, actionable insights and a strategic overview of Dynamiq AI's competitive environment."""
+    Deliver a comprehensive report with clear, actionable insights and a strategic overview of Dynamiq AI's competitive environment.
+    """  # noqa E501
 
 
 if __name__ == "__main__":
     connection_zenrows = ZenRows()
     connection_tavily = Tavily()
     connection_serp = ScaleSerp()
-    tool_serp = ScaleSerpTool(connection=connection_serp,
-                              description="A tool for searching the company details, "
-                                          "all information about the company, "
-                              )
-    tool_tavily = TavilyTool(connection=connection_tavily,
-                             description="A tool for searching the competitors of the company, "
-                                            "all information about the competitors, "
-                             )
-    tool_zenrows = ZenRowsTool(connection=connection_zenrows,
-                              )
+    tool_serp = ScaleSerpTool(
+        connection=connection_serp,
+        description=("A tool for searching the company details, " "all information about the company, "),
+    )
+    tool_tavily = TavilyTool(
+        connection=connection_tavily,
+        description=("A tool for searching the competitors of the company, " "all information about the competitors, "),
+    )
+    tool_zenrows = ZenRowsTool(
+        connection=connection_zenrows,
+    )
     connection_firecrawl = Firecrawl()
     tool_firecrawl = FirecrawlTool(connection=connection_firecrawl,
                                    )
