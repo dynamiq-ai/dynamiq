@@ -33,7 +33,7 @@ class QdrantDocumentRetriever(Retriever):
     name: str = "QdrantDocumentRetriever"
     connection: Qdrant | None = None
     vector_store: QdrantVectorStore | None = None
-    document_retriever: QdrantDocumentRetrieverComponent = None
+    document_retriever: QdrantDocumentRetrieverComponent | None = None
 
     def __init__(self, **kwargs):
         """

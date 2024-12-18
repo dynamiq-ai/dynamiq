@@ -26,7 +26,7 @@ class WatsonXDocumentEmbedder(DocumentEmbedder):
     name: str = "WatsonXDocumentEmbedder"
     connection: WatsonXConnection | None = None
     model: str = "watsonx/ibm/slate-30m-english-rtrvr"
-    document_embedder: WatsonXEmbedderComponent = None
+    document_embedder: WatsonXEmbedderComponent | None = None
 
     def __init__(self, **kwargs):
         """

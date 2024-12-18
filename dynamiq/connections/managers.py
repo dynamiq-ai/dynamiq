@@ -89,7 +89,7 @@ class ConnectionManager:
             ConnectionManagerException: If the connection does not support the specified initialization type.
         """
         logger.debug(
-            f"Get connection client for '{connection.id}-{connection.type.value}' "
+            f"Get connection client for '{connection.id}-{connection.type}' "
             f"with '{init_type.value.lower()}' initialization"
         )
         conn_id = self.get_connection_id(connection, init_type)
@@ -97,7 +97,7 @@ class ConnectionManager:
             return conn_client
 
         logger.debug(
-            f"Init connection client for '{connection.id}-{connection.type.value}' "
+            f"Init connection client for '{connection.id}-{connection.type}' "
             f"with '{init_type.value.lower()}' initialization"
         )
         conn_method_name = CONNECTION_METHOD_BY_INIT_TYPE[init_type]
@@ -105,7 +105,7 @@ class ConnectionManager:
             conn_method := getattr(connection, conn_method_name, None)
         ) or not callable(conn_method):
             raise ConnectionManagerException(
-                f"Connection '{connection.id}-{connection.type.value}' not support '{init_type.value}' initialization"
+                f"Connection '{connection.id}-{connection.type}' not support '{init_type.value}' initialization"
             )
 
         conn_client = conn_method()

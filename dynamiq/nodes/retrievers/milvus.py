@@ -33,7 +33,7 @@ class MilvusDocumentRetriever(Retriever, MilvusVectorStoreParams):
     name: str = "MilvusDocumentRetriever"
     connection: Milvus | None = None
     vector_store: MilvusVectorStore | None = None
-    document_retriever: MilvusDocumentRetrieverComponent = None
+    document_retriever: MilvusDocumentRetrieverComponent | None = None
 
     def __init__(self, **kwargs):
         """
