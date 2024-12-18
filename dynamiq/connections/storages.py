@@ -1,17 +1,4 @@
-import enum
-from typing import Literal
-
 from dynamiq.connections import BaseConnection
-
-
-class StorageConnectionType(str, enum.Enum):
-    """
-    Enumeration of storage connection types.
-
-    Attributes:
-        Redis (str): Represents a Redis connection type.
-    """
-    Redis = "Redis"
 
 
 class RedisConnection(BaseConnection):
@@ -27,7 +14,6 @@ class RedisConnection(BaseConnection):
         db (int): The Redis database number to connect to.
         username (str | None): The username for authentication (optional).
         password (str | None): The password for authentication (optional).
-        type (Literal[StorageConnectionType.Redis]): The connection type, always set to Redis.
     """
 
     host: str
@@ -35,7 +21,6 @@ class RedisConnection(BaseConnection):
     db: int
     username: str | None = None
     password: str | None = None
-    type: Literal[StorageConnectionType.Redis] = StorageConnectionType.Redis
 
     def connect(self):
         """

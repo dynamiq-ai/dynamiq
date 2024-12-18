@@ -26,7 +26,7 @@ class BedrockDocumentEmbedder(DocumentEmbedder):
     name: str = "AmazonBedrockDocumentEmbedder"
     connection: BedrockConnection | None = None
     model: str = "amazon.titan-embed-text-v1"
-    document_embedder: BedrockEmbedderComponent = None
+    document_embedder: BedrockEmbedderComponent | None = None
 
     def __init__(self, **kwargs):
         """

@@ -26,7 +26,7 @@ class CohereDocumentEmbedder(DocumentEmbedder):
     name: str = "CohereDocumentEmbedder"
     connection: CohereConnection | None = None
     model: str = "cohere/embed-english-v2.0"
-    document_embedder: CohereEmbedderComponent = None
+    document_embedder: CohereEmbedderComponent | None = None
 
     def __init__(self, **kwargs):
         """

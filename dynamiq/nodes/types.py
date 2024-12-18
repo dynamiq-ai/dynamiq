@@ -1,7 +1,7 @@
 from enum import Enum
 
 
-class NodeGroup(Enum):
+class NodeGroup(str, Enum):
     """
     Enumeration of node groups that categorize different types of nodes.
 
@@ -24,7 +24,7 @@ class NodeGroup(Enum):
     VALIDATORS = "validators"
 
 
-class InferenceMode(Enum):
+class InferenceMode(str, Enum):
     """
     Enumeration of inference types.
     """

@@ -31,7 +31,7 @@ class OpenAIDocumentEmbedder(DocumentEmbedder):
     connection: OpenAIConnection | None = None
     model: str = "text-embedding-3-small"
     dimensions: int | None = None
-    document_embedder: OpenAIEmbedderComponent = None
+    document_embedder: OpenAIEmbedderComponent | None = None
 
     def __init__(self, **kwargs):
         """

@@ -86,7 +86,7 @@ class BaseLLM(ConnectionNode):
     group: Literal[NodeGroup.LLMS] = NodeGroup.LLMS
     temperature: float = 0.1
     max_tokens: int = 1000
-    stop: list[str] = None
+    stop: list[str] | None = None
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     top_p: float | None = None
     seed: int | None = None

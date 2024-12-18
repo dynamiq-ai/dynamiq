@@ -46,6 +46,20 @@ class Flow(BaseFlow):
         self._init_components()
         self.reset_run_state()
 
+    @property
+    def to_dict_exclude_params(self):
+        return {"nodes": True, "connection_manager": True}
+
+    def to_dict(self, include_secure_params: bool = True, **kwargs) -> dict:
+        """Converts the instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the instance.
+        """
+        data = super().to_dict(include_secure_params=include_secure_params, **kwargs)
+        data["nodes"] = [node.to_dict(include_secure_params=include_secure_params, **kwargs) for node in self.nodes]
+        return data
+
     @field_validator("nodes")
     @classmethod
     def validate_nodes(cls, nodes: list[Node]) -> list[Node]:
