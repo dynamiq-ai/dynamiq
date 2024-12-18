@@ -5,17 +5,16 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.agents.orchestrators.orchestrator import Orchestrator, OrchestratorError
+from dynamiq.nodes.agents.orchestrators.utils.state import State
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.function_tool import function_tool
-from dynamiq.nodes.utils.state import State
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
 
 class StateNotFoundError(OrchestratorError):
     """Raised when next state was not found."""
-
     pass
 
 
