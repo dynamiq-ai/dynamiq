@@ -119,7 +119,7 @@ def test_jina_basic_scraping(mock_scrape_requests):
     mock_scrape_requests.assert_called_once()
     call_args = mock_scrape_requests.call_args
     assert call_args[1]["url"] == "https://r.jina.ai/https://your-url"
-    assert call_args[1]["headers"]["X-Timeout"] == "60000"
+    assert call_args[1]["headers"]["X-Timeout"] == "60"
 
 
 def test_jina_scrape_agent_optimized(mock_scrape_requests):

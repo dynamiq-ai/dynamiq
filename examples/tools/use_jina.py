@@ -1,5 +1,5 @@
 from dynamiq.connections import Jina
-from dynamiq.nodes.tools import JinaScrapeTool, JinaSearchTool, ResponseFormat
+from dynamiq.nodes.tools import JinaResponseFormat, JinaScrapeTool, JinaSearchTool
 
 
 def basic_search_example():
@@ -22,7 +22,7 @@ def basic_scrape_example():
     jina_connection = Jina()
 
     jina_search_tool = JinaScrapeTool(
-        connection=jina_connection, is_optimized_for_agents=False, response_format=ResponseFormat.DEFAULT
+        connection=jina_connection, is_optimized_for_agents=False, response_format=JinaResponseFormat.DEFAULT
     )
 
     result = jina_search_tool.run(
