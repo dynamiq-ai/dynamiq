@@ -1,6 +1,57 @@
+import json
+
 import pytest
 
-from dynamiq.utils.json_parser import parse_llm_json_output
+from dynamiq.utils.json_parser import clean_json_string, parse_llm_json_output
+
+
+def test_basic_single_quoted_keys_and_strings():
+    input_str = "{'key': 'value'}"
+    cleaned = clean_json_string(input_str)
+    data = json.loads(cleaned)
+    assert data == {"key": "value"}
+
+
+def test_apostrophe_in_text():
+    input_str = """
+    {
+       'message': 'Hello, I\\'ve got apples'
+    }
+    """
+    cleaned = clean_json_string(input_str)
+    data = json.loads(cleaned)
+    assert data == {"message": "Hello, I've got apples"}
+
+
+def test_comments_and_python_literals():
+    input_str = """
+    {
+      // single line comment
+      'bool_val': True, /* multi-line
+      comment */
+      'none_val': None,
+      'another': 'Text with // a comment inside the string is not a comment'
+    }
+    """
+    cleaned = clean_json_string(input_str)
+    data = json.loads(cleaned)
+    assert data == {
+        "bool_val": True,
+        "none_val": None,
+        "another": "Text with // a comment inside the string is not a comment",
+    }
+
+
+def test_trailing_comma():
+    input_str = """
+    {
+       'key1': 'v1',
+       'key2': 'v2',
+    }
+    """
+    cleaned = clean_json_string(input_str)
+    data = json.loads(cleaned)
+    assert data == {"key1": "v1", "key2": "v2"}
 
 
 def test_valid_json():
@@ -157,3 +208,45 @@ def test_json_array_in_text():
     """
     expected_output = [{"answer": "text"}, {"answer": "another text"}]
     assert parse_llm_json_output(response) == expected_output
+
+
+def test_mismatched_brackets():
+    response = "Here is JSON: { 'key': 123 ] end"
+    # Should fail due to mismatched '{' with ']'
+    with pytest.raises(ValueError, match="not valid JSON"):
+        parse_llm_json_output(response)
+
+
+def test_nested_comments():
+    response = """
+    {
+      // This is a outer comment
+      "example": "Here is // inside a string", /* Another comment */
+      "other": "/* not a comment inside string */"
+    }
+    """
+    # Comments outside strings should be removed,
+    # but the sequences inside the string remain untouched.
+    expected_output = {
+        "example": "Here is // inside a string",
+        "other": "/* not a comment inside string */",
+    }
+    assert parse_llm_json_output(response) == expected_output
+
+
+def test_multiple_issues_single_quotes_trailing_comma_python_literals():
+    response = """
+    {
+      'test': True, 'strings': ['yes', 'no',],
+      'noneVal': None, // comment
+    }
+    """
+    # All issues should be corrected by clean_json_string
+    expected_output = {"test": True, "strings": ["yes", "no"], "noneVal": None}
+    assert parse_llm_json_output(response) == expected_output
+
+
+def test_empty_json_object_and_array():
+    # Just confirm that empty objects/arrays parse without error.
+    assert parse_llm_json_output("{}") == {}
+    assert parse_llm_json_output("[]") == []
