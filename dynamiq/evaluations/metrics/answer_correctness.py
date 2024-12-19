@@ -111,21 +111,21 @@ class RunInput(BaseModel):
     Input model for running the evaluator.
 
     Attributes:
-        questions (List[str]): The list of questions.
-        answers (List[str]): The list of answers.
-        ground_truths (List[str]): The list of ground truth texts.
+        question (List[str]): The list of questions.
+        answer (List[str]): The list of answers.
+        ground_truth_answer (List[str]): The list of ground truth answers.
         verbose (bool): Flag to enable verbose logging.
     """
 
-    questions: list[str]
-    answers: list[str]
-    ground_truths: list[str]
+    question: list[str]
+    answer: list[str]
+    ground_truth_answer: list[str]
     verbose: bool = False
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if len(self.questions) != len(self.answers) or len(self.questions) != len(self.ground_truths):
-            raise ValueError("Questions, answers, and ground truths must have the same length.")
+        if len(self.question) != len(self.answer) or len(self.question) != len(self.ground_truth_answer):
+            raise ValueError("Question, answer, and ground truth answer must have the same length.")
         return self
 
 
@@ -357,25 +357,37 @@ class AnswerCorrectnessEvaluator(BaseModel):
 
     def run(
         self,
-        questions: list[str],
-        answers: list[str],
-        ground_truths: list[str],
+        question: list[str],
+        answer: list[str],
+        ground_truth_answer: list[str],
         verbose: bool = False,
     ) -> list[float]:
+        """
+        Run the answer correctness evaluation.
+
+        Args:
+            question (list[str]): The list of questions.
+            answer (list[str]): The list of answers.
+            ground_truth_answer (list[str]): The list of ground truth answers.
+            verbose (bool): Flag to enable verbose logging.
+
+        Returns:
+            list[float]: The list of final correctness scores.
+        """
         input_data = RunInput(
-            questions=questions,
-            answers=answers,
-            ground_truths=ground_truths,
+            question=question,
+            answer=answer,
+            ground_truth_answer=ground_truth_answer,
             verbose=verbose,
         )
 
         # Extract statements
-        answer_statements_list = self.extract_statements(input_data.answers)
-        ground_truth_statements_list = self.extract_statements(input_data.ground_truths)
+        answer_statements_list = self.extract_statements(input_data.answer)
+        ground_truth_statements_list = self.extract_statements(input_data.ground_truth_answer)
 
         # Classify statements
         classifications_list = self.classify_statements(
-            input_data.questions,
+            input_data.question,
             answer_statements_list,
             ground_truth_statements_list,
         )
@@ -384,20 +396,20 @@ class AnswerCorrectnessEvaluator(BaseModel):
         f1_scores = [self.compute_f1_score(classifications) for classifications in classifications_list]
 
         # Compute similarity scores
-        similarity_scores = self.compute_similarity_scores(input_data.answers, input_data.ground_truths)
+        similarity_scores = self.compute_similarity_scores(input_data.answer, input_data.ground_truth_answer)
 
         # Combine scores
         final_scores = []
-        for i in range(len(input_data.questions)):
+        for i in range(len(input_data.question)):
             f1_score = f1_scores[i]
             sim_score = similarity_scores[i]
             final_score = self.weights[0] * f1_score + self.weights[1] * sim_score
             final_scores.append(final_score)
 
             if input_data.verbose:
-                logger.debug(f"Question: {input_data.questions[i]}")
-                logger.debug(f"Answer: {input_data.answers[i]}")
-                logger.debug(f"Ground Truth: {input_data.ground_truths[i]}")
+                logger.debug(f"Question: {input_data.question[i]}")
+                logger.debug(f"Answer: {input_data.answer[i]}")
+                logger.debug(f"Ground Truth Answer: {input_data.ground_truth_answer[i]}")
                 logger.debug("Classifications:")
                 logger.debug(json.dumps(classifications_list[i].dict(), indent=2))
                 logger.debug(f"F1 Score: {f1_score}")
