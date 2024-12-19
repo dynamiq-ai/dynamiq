@@ -920,7 +920,7 @@ class Jina(Http):
     """
 
     api_key: str = Field(default_factory=partial(get_env_var, "JINA_API_KEY"))
-    method: str = HTTPMethod.GET
+    method: Literal[HTTPMethod.GET] = HTTPMethod.GET
 
     def connect(self):
         """

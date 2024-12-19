@@ -38,15 +38,18 @@ class JinaScrapeTool(ConnectionNode):
         timeout(int): The timeout of the scraping process.
         input_schema (JinaSearchInputSchema): The input schema for the tool.
     """
+
+    SCRAPE_PATH: ClassVar[str] = "https://r.jina.ai/"
+
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Jina Scraper Tool"
     description: str = (
         "A tool for scraping web pages, powered by Jina. " "You can use this tool to scrape the content of a web page."
     )
-    SCRAPE_PATH: ClassVar[str] = "https://r.jina.ai/"
     response_format: JinaResponseFormat = JinaResponseFormat.DEFAULT
     connection: Jina
     timeout: int = 60
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     input_schema: ClassVar[type[JinaScrapeInputSchema]] = JinaScrapeInputSchema
@@ -56,7 +59,7 @@ class JinaScrapeTool(ConnectionNode):
         Executes the web scraping process.
 
         Args:
-            input_data (dict[str, Any]): A dictionary containing 'input' key with the URL to scrape.
+            input_data (JinaScrapeInputSchema): input data for the tool, which includes the url to scrape.
             config (RunnableConfig, optional): Configuration for the runnable, including callbacks.
             **kwargs: Additional arguments passed to the execution context.
 
@@ -69,10 +72,7 @@ class JinaScrapeTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        url = input_data.url or self.url
-        if not url:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
-            raise ValueError("URL is required for scraping")
+        url = input_data.url
 
         headers = {
             **self.connection.headers,
@@ -134,22 +134,25 @@ class JinaSearchTool(ConnectionNode):
         include_full_content(bool): Whether include full content of the search results.
     """
 
+    SEARCH_PATH: ClassVar[str] = "https://s.jina.ai/"
+
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Jina Search Tool"
     description: str = "A tool for searching the web, powered by Jina."
-    SEARCH_PATH: ClassVar[str] = "https://s.jina.ai/"
     connection: Jina
-    model_config = ConfigDict(arbitrary_types_allowed=True)
     include_images: bool = Field(default=False, description="Include images in search results.")
-    input_schema: ClassVar[type[JinaSearchInputSchema]] = JinaSearchInputSchema
     include_full_content: bool = False
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    input_schema: ClassVar[type[JinaSearchInputSchema]] = JinaSearchInputSchema
 
     def _format_search_results(self, results: dict[str, Any]) -> str:
         """
         Formats the search results into a readable string format.
 
         Args:
-            results (dict[str, Any]): The raw search results from Tavily.
+            results (dict[str, Any]): The raw search results from Jina.
 
         Returns:
             str: The formatted search results as a string.
@@ -177,7 +180,7 @@ class JinaSearchTool(ConnectionNode):
         Executes the web scraping process.
 
         Args:
-            input_data (dict[str, Any]): A dictionary containing 'input' key with the URL to scrape.
+            input_data (JinaSearchInputSchema): input data for the tool, which includes the query to search.
             config (RunnableConfig, optional): Configuration for the runnable, including callbacks.
             **kwargs: Additional arguments passed to the execution context.
 
