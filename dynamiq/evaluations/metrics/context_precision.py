@@ -15,21 +15,21 @@ class ContextPrecisionInput(BaseModel):
     Input model for context precision evaluation.
 
     Attributes:
-        questions (List[str]): List of questions.
-        answers (List[str]): List of corresponding answers.
-        contexts_list (List[List[str]]): List of contexts for each question.
+        question (List[str]): List of questions.
+        answer (List[str]): List of corresponding answers.
+        context_list (List[str]): List of contexts for each question.
         verbose (bool): Flag to enable verbose logging.
     """
 
-    questions: list[str]
-    answers: list[str]
-    contexts_list: list[list[str]]
+    question: list[str]
+    answer: list[str]
+    context_list: list[str]
     verbose: bool = False
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if not (len(self.questions) == len(self.answers) == len(self.contexts_list)):
-            raise ValueError("Questions, answers, and contexts_list must have the same length.")
+        if not (len(self.question) == len(self.answer) == len(self.context_list)):
+            raise ValueError("Question, answer, and context must have the same length.")
         return self
 
 
@@ -93,7 +93,7 @@ class ContextPrecisionEvaluator(BaseModel):
         context_precision_instructions = (
             'Given a "Question", "Answer", and "Context", verify if the Context was '
             "useful in arriving at the given Answer.\n"
-            '- Provide a "verdict": 1 if useful, 0 if not.\n'
+            '- Provide a "verdict": 1 if useful, 0 otherwise.\n'
             '- Provide a brief "reason" for the verdict.\n'
             '- Output the result as a JSON object with keys "verdict" and "reason".\n'
             "- Ensure that your response is valid JSON, using double quotes for all "
@@ -125,22 +125,10 @@ class ContextPrecisionEvaluator(BaseModel):
                         ],
                         "context": [
                             (
-                                "Albert Einstein (14 March 1879 – 18 April 1955) was a German-born "
-                                "theoretical physicist, widely held to be one of the greatest and most "
-                                "influential scientists of all time. Best known for developing the theory "
-                                "of relativity, he also made important contributions to quantum mechanics, "
-                                "and was thus a central figure in the revolutionary reshaping of the "
-                                "scientific understanding of nature that modern physics accomplished in "
-                                "the first decades of the twentieth century. His mass–energy equivalence "
-                                "formula E = mc2, which arises from relativity theory, has been called "
-                                "'the world's most famous equation'. He received the 1921 Nobel Prize in "
-                                "Physics 'for his services to theoretical physics, and especially for his "
-                                "discovery of the law of the photoelectric effect', a pivotal step in the "
-                                "development of quantum theory. His work is also known for its influence on "
-                                "the philosophy of science. In a 1999 poll of 130 leading physicists "
-                                "worldwide by the British journal Physics World, Einstein was ranked the "
-                                "greatest physicist of all time. His intellectual achievements and "
-                                "originality have made Einstein synonymous with genius."
+                                "Albert Einstein (14 March 1879 – 18 April 1955) was a German-born theoretical "
+                                "physicist, widely held to be one of the greatest and most influential scientists "
+                                "of all time. Best known for developing the theory of relativity, he also made "
+                                "important contributions to quantum mechanics."
                             )
                         ],
                     },
@@ -160,10 +148,10 @@ class ContextPrecisionEvaluator(BaseModel):
                         "context": [
                             (
                                 "The 2022 ICC Men's T20 World Cup, held from October 16 to November 13, "
-                                "2022, in Australia, was the eighth edition of the tournament. Originally "
-                                "scheduled for 2020, it was postponed due to the COVID-19 pandemic. "
-                                "England emerged victorious, defeating Pakistan by five wickets in the "
-                                "final to clinch their second ICC Men's T20 World Cup title."
+                                "2022, in Australia, was the eighth edition of the tournament. Originally scheduled "
+                                "for 2020, it was postponed due to the COVID-19 pandemic. England emerged victorious, "
+                                "defeating Pakistan by five wickets in the final to clinch their second ICC Men's "
+                                "T20 World Cup title."
                             )
                         ],
                     },
@@ -181,11 +169,8 @@ class ContextPrecisionEvaluator(BaseModel):
                         "answer": ["Mount Everest."],
                         "context": [
                             (
-                                "The Andes is the longest continental mountain range in the world, located "
-                                "in South America. It stretches across seven countries and features many of "
-                                "the highest peaks in the Western Hemisphere. The range is known for its "
-                                "diverse ecosystems, including the high-altitude Andean Plateau and the "
-                                "Amazon rainforest."
+                                "The Andes is the longest continental mountain range in the world, located in "
+                                "South America. It features many high peaks but not the tallest in the world."
                             )
                         ],
                     },
@@ -227,70 +212,67 @@ class ContextPrecisionEvaluator(BaseModel):
 
     def run(
         self,
-        questions: list[str],
-        answers: list[str],
-        contexts_list: list[list[str]],
+        question: list[str],
+        answer: list[str],
+        context: list[str],
         verbose: bool = False,
     ) -> list[float]:
         """
         Evaluate the context precision for each question.
 
         Args:
-            questions (List[str]): List of questions.
-            answers (List[str]): List of corresponding answers.
-            contexts_list (List[List[str]]): List of contexts for each question.
+            question (List[str]): List of questions.
+            answer (List[str]): List of corresponding answers.
+            context (List[str]): List of context texts for each question.
             verbose (bool): Flag to enable verbose logging.
 
         Returns:
             List[float]: List of context precision scores for each question.
         """
         input_data = ContextPrecisionInput(
-            questions=questions,
-            answers=answers,
-            contexts_list=contexts_list,
+            question=question,
+            answer=answer,
+            context=context,
             verbose=verbose,
         )
 
         final_scores = []
 
-        for idx in range(len(input_data.questions)):
-            question = input_data.questions[idx]
-            answer = input_data.answers[idx]
-            contexts = input_data.contexts_list[idx]
+        for idx in range(len(input_data.question)):
+            single_question = input_data.question[idx]
+            single_answer = input_data.answer[idx]
+            single_context = input_data.context[idx]
 
-            verdicts = []
-            for context in contexts:
-                # Prepare inputs for the evaluator
-                result = self._context_precision_evaluator.run(
-                    question=[question],
-                    answer=[answer],
-                    context=[context],
-                )
-                # Extract the verdict (ensure it's an int)
-                verdict_raw = result["results"][0]["verdict"]
-                if isinstance(verdict_raw, str):
-                    verdict = int(verdict_raw.strip())
-                else:
-                    verdict = int(verdict_raw)
-                verdicts.append(verdict)
+            # Evaluate context precision
+            result = self._context_precision_evaluator.run(
+                question=[single_question],
+                answer=[single_answer],
+                context=[single_context],
+            )
 
-                if input_data.verbose:
-                    reason = result["results"][0]["reason"]
-                    # Use logging instead of print
-                    logger.debug(f"Question: {question}")
-                    logger.debug(f"Answer: {answer}")
-                    logger.debug(f"Context: {context}")
-                    logger.debug(f"Verdict: {verdict}")
-                    logger.debug(f"Reason: {reason}")
-                    logger.debug("-" * 50)
+            # Extract the verdict (ensure it's an int)
+            verdict_raw = result["results"][0]["verdict"]
+            if isinstance(verdict_raw, str):
+                verdict = int(verdict_raw.strip())
+            else:
+                verdict = int(verdict_raw)
+            reason = result["results"][0]["reason"]
 
-            # Calculate average precision for this set
+            # Append verdict
+            verdicts = [verdict]
+
+            # Calculate average precision
             score = self.calculate_average_precision(verdicts)
             final_scores.append(score)
 
             if input_data.verbose:
+                logger.debug(f"Question: {single_question}")
+                logger.debug(f"Answer: {single_answer}")
+                logger.debug(f"Context: {single_context}")
+                logger.debug(f"Verdict: {verdict}")
+                logger.debug(f"Reason: {reason}")
                 logger.debug(f"Average Precision Score: {score}")
-                logger.debug("=" * 50)
+                logger.debug("-" * 50)
 
         output_data = ContextPrecisionOutput(final_scores=final_scores)
         return output_data.final_scores

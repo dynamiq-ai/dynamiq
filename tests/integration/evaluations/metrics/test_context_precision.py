@@ -19,15 +19,10 @@ def test_context_precision_evaluator(openai_node):
         "England",
         "Mount Everest.",
     ]
-    contexts_list = [
+    context_list = [
         [
             # Contexts for the first question
-            (
-                "Albert Einstein (14 March 1879 – 18 April 1955) was a German-born theoretical "
-                "physicist, widely held to be one of the greatest and most influential scientists "
-                "of all time. Best known for developing the theory of relativity, he also made "
-                "important contributions to quantum mechanics."
-            ),
+            ("Albert Einstein was a German-born theoretical physicist. " "He developed the theory of relativity."),
             (
                 "Albert Einstein's work is also known for its influence on the philosophy of "
                 "science. His mass–energy equivalence formula E = mc^2 has been called 'the world's "
@@ -68,7 +63,7 @@ def test_context_precision_evaluator(openai_node):
             "results": [
                 {
                     "verdict": "1",
-                    "reason": "The context provides information about Albert Einstein relevant to the answer.",
+                    "reason": ("The context provides information about Albert Einstein relevant to the answer."),
                 }
             ]
         },
@@ -77,8 +72,10 @@ def test_context_precision_evaluator(openai_node):
             "results": [
                 {
                     "verdict": "1",
-                    "reason": """ The context includes details about Einstein's famous equation,
-                                which is relevant to the answer.""",
+                    "reason": (
+                        "The context includes details about Einstein's famous equation, which is "
+                        "relevant to the answer."
+                    ),
                 }
             ]
         },
@@ -87,7 +84,7 @@ def test_context_precision_evaluator(openai_node):
             "results": [
                 {
                     "verdict": "1",
-                    "reason": "The context explains England won the tournament, which answers the question.",
+                    "reason": ("The context explains England won the tournament, which answers the question."),
                 }
             ]
         },
@@ -96,28 +93,42 @@ def test_context_precision_evaluator(openai_node):
             "results": [
                 {
                     "verdict": "0",
-                    "reason": "The context is about the 2016 World Cup, not relevant to the 2020 World Cup.",
+                    "reason": ("The context is about the 2016 World Cup, not relevant to the 2020 World Cup."),
                 }
             ]
         },
         # Third question, first context
         {
             "results": [
-                {"verdict": "0", "reason": "The context is about the Andes, not relevant to the tallest mountain."}
+                {
+                    "verdict": "0",
+                    "reason": ("The context is about the Andes, not relevant to the tallest mountain."),
+                }
             ]
         },
         # Third question, second context
-        {"results": [{"verdict": "0", "reason": "The context is about Mount Kilimanjaro, not the tallest mountain."}]},
+        {
+            "results": [
+                {
+                    "verdict": "0",
+                    "reason": ("The context is about Mount Kilimanjaro, not the tallest mountain."),
+                }
+            ]
+        },
     ]
 
     # Mock the run method of the evaluator's internal LLMEvaluator
     evaluator._context_precision_evaluator.run = MagicMock(side_effect=mocked_run_results)
 
     # Run the evaluator
-    correctness_scores = evaluator.run(questions=questions, answers=answers, contexts_list=contexts_list, verbose=False)
+    correctness_scores = evaluator.run(question=questions, answer=answers, context=context_list, verbose=False)
 
     # Expected scores based on the mocked data
-    expected_scores = [1.0, 1.0, 0.0]
+    expected_scores = [
+        1.0,  # For the first question: 2 out of 2 contexts marked as useful
+        0.5,  # For the second question: 1 out of 2 contexts marked as useful
+        0.0,  # For the third question: 0 out of 2 contexts marked as useful
+    ]
 
     # Assert that the correctness scores are as expected
     for computed, expected in zip(correctness_scores, expected_scores):
