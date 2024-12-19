@@ -73,8 +73,8 @@ def test_context_precision_evaluator(openai_node):
                 {
                     "verdict": "1",
                     "reason": (
-                        "The context includes details about Einstein's famous equation, which is "
-                        "relevant to the answer."
+                        "The context includes details about Einstein's famous equation, which is relevant "
+                        "to the answer."
                     ),
                 }
             ]
@@ -121,7 +121,7 @@ def test_context_precision_evaluator(openai_node):
     evaluator._context_precision_evaluator.run = MagicMock(side_effect=mocked_run_results)
 
     # Run the evaluator
-    correctness_scores = evaluator.run(question=questions, answer=answers, context=context_list, verbose=False)
+    correctness_scores = evaluator.run(question=questions, answer=answers, context_list=context_list, verbose=False)
 
     # Expected scores based on the mocked data
     expected_scores = [

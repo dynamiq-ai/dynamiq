@@ -17,13 +17,13 @@ class ContextPrecisionInput(BaseModel):
     Attributes:
         question (List[str]): List of questions.
         answer (List[str]): List of corresponding answers.
-        context_list (List[str]): List of contexts for each question.
+        context_list (List[List[str]]): List of contexts for each question.
         verbose (bool): Flag to enable verbose logging.
     """
 
     question: list[str]
     answer: list[str]
-    context_list: list[str]
+    context_list: list[list[str]]
     verbose: bool = False
 
     @model_validator(mode="after")
@@ -93,7 +93,7 @@ class ContextPrecisionEvaluator(BaseModel):
         context_precision_instructions = (
             'Given a "Question", "Answer", and "Context", verify if the Context was '
             "useful in arriving at the given Answer.\n"
-            '- Provide a "verdict": 1 if useful, 0 otherwise.\n'
+            '- Provide a "verdict": 1 if useful, 0 if not.\n'
             '- Provide a brief "reason" for the verdict.\n'
             '- Output the result as a JSON object with keys "verdict" and "reason".\n'
             "- Ensure that your response is valid JSON, using double quotes for all "
@@ -214,7 +214,7 @@ class ContextPrecisionEvaluator(BaseModel):
         self,
         question: list[str],
         answer: list[str],
-        context: list[str],
+        context_list: list[list[str]],
         verbose: bool = False,
     ) -> list[float]:
         """
@@ -223,7 +223,7 @@ class ContextPrecisionEvaluator(BaseModel):
         Args:
             question (List[str]): List of questions.
             answer (List[str]): List of corresponding answers.
-            context (List[str]): List of context texts for each question.
+            context_list (List[List[str]]): List of contexts for each question.
             verbose (bool): Flag to enable verbose logging.
 
         Returns:
@@ -232,7 +232,7 @@ class ContextPrecisionEvaluator(BaseModel):
         input_data = ContextPrecisionInput(
             question=question,
             answer=answer,
-            context=context,
+            context_list=context_list,
             verbose=verbose,
         )
 
@@ -241,38 +241,41 @@ class ContextPrecisionEvaluator(BaseModel):
         for idx in range(len(input_data.question)):
             single_question = input_data.question[idx]
             single_answer = input_data.answer[idx]
-            single_context = input_data.context[idx]
+            contexts = input_data.context_list[idx]
 
-            # Evaluate context precision
-            result = self._context_precision_evaluator.run(
-                question=[single_question],
-                answer=[single_answer],
-                context=[single_context],
-            )
+            verdicts = []
+            for context in contexts:
+                # Prepare inputs for the evaluator
+                result = self._context_precision_evaluator.run(
+                    question=[single_question],
+                    answer=[single_answer],
+                    context=[context],
+                )
+                # Extract the verdict (ensure it's an int)
+                verdict_raw = result["results"][0]["verdict"]
+                if isinstance(verdict_raw, str):
+                    verdict = int(verdict_raw.strip())
+                else:
+                    verdict = int(verdict_raw)
+                verdicts.append(verdict)
 
-            # Extract the verdict (ensure it's an int)
-            verdict_raw = result["results"][0]["verdict"]
-            if isinstance(verdict_raw, str):
-                verdict = int(verdict_raw.strip())
-            else:
-                verdict = int(verdict_raw)
-            reason = result["results"][0]["reason"]
+                if input_data.verbose:
+                    reason = result["results"][0]["reason"]
+                    # Use logging instead of print
+                    logger.debug(f"Question: {single_question}")
+                    logger.debug(f"Answer: {single_answer}")
+                    logger.debug(f"Context: {context}")
+                    logger.debug(f"Verdict: {verdict}")
+                    logger.debug(f"Reason: {reason}")
+                    logger.debug("-" * 50)
 
-            # Append verdict
-            verdicts = [verdict]
-
-            # Calculate average precision
+            # Calculate average precision for this set
             score = self.calculate_average_precision(verdicts)
             final_scores.append(score)
 
             if input_data.verbose:
-                logger.debug(f"Question: {single_question}")
-                logger.debug(f"Answer: {single_answer}")
-                logger.debug(f"Context: {single_context}")
-                logger.debug(f"Verdict: {verdict}")
-                logger.debug(f"Reason: {reason}")
                 logger.debug(f"Average Precision Score: {score}")
-                logger.debug("-" * 50)
+                logger.debug("=" * 50)
 
         output_data = ContextPrecisionOutput(final_scores=final_scores)
         return output_data.final_scores

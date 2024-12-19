@@ -73,7 +73,7 @@ def main():
     correctness_scores = evaluator.run(
         question=questions,
         answer=answers,
-        context=context_list,
+        context_list=context_list,
         verbose=True,  # Set to False to disable verbose logging
     )
 
