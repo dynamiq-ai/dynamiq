@@ -10,8 +10,11 @@ from examples.llm_setup import setup_llm
 
 # Constants
 AGENT_NAME = "Role Agent"
-AGENT_ROLE = "professional writer, goal is to produce a well written and informative response with emoji for childrens"
-INPUT_QUESTION = "how sin(x) and cos(x) connected in electrodynamics?"
+AGENT_ROLE = (
+    "Professional writer with the goal of producing well-written and informative responses, "
+    "using emojis to engage with children."
+)
+INPUT_QUESTION = "How are sin(x) and cos(x) connected in electrodynamics?"
 
 
 def run_workflow() -> tuple[str, dict]:

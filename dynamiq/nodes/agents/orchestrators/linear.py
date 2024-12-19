@@ -8,7 +8,7 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-from dynamiq.nodes.agents.orchestrators.orchestrator import Orchestrator
+from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Orchestrator
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
@@ -52,7 +52,7 @@ class LinearOrchestrator(Orchestrator):
     manager: LinearAgentManager
     agents: list[Agent] = []
     use_summarizer: bool = True
-    summarize_all_answers: bool = True
+    summarize_all_answers: bool = False
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -130,28 +130,30 @@ class LinearOrchestrator(Orchestrator):
 
     def parse_tasks_from_output(self, output: str) -> list[Task]:
         """Parse tasks from the manager's output string."""
-        # Remove 'output' XML tags if present
-        if "<output>" in output and "</output>" in output:
-            output = output.split("<output>")[1].split("</output>")[0]
 
-        # Remove '```' code block markers and 'json' keyword if present
+        output_match = re.search(r"<output>(.*?)</output>", output, re.DOTALL)
+        if not output_match:
+            error_response = f"Error parsing final answer: No <output> tags found in the response {output}"
+            raise ActionParseError(f"Error: {error_response}")
+
+        output_content = output_match.group(1).strip()
+
         try:
-            output = output.replace("```", "").replace("json", "")
+            output_content = output_content.replace("```", "").replace("json", "")
         except AttributeError as e:
             logger.warning(
                 f"Orchestrator {self.name} - {self.id}: "
                 f"Failed to remove code block markers and 'json' keyword "
-                f"from output {output} due to error: {e}"
+                f"from output {output_content} due to error: {e}"
             )
 
-        # Parse the JSON string
         try:
-            task_list_json = output.strip()
+            task_list_json = output_content.strip()
         except AttributeError as e:
             logger.warning(
-                f"Orchestrator {self.name} - {self.id}: Failed to strip the output {output} due to error: {e}"
+                f"Orchestrator {self.name} - {self.id}: Failed to strip the output {output_content} due to error: {e}"
             )
-            task_list_json = output
+            task_list_json = output_content
         return TypeAdapter(list[Task]).validate_json(task_list_json)
 
     def get_dependency_outputs(self, dependencies: list[int]) -> str:
@@ -272,12 +274,18 @@ class LinearOrchestrator(Orchestrator):
                 if final_task_id is not None:
                     final_task_output = self._results[final_task_id].get("result", "")
                     logger.debug(f"Orchestrator {self.name} - {self.id}: Final task output: {final_task_output}")
+                    return final_task_output
 
-            self.get_final_result(
+            final_result_content = self.get_final_result(
                 {"input_task": task, "chat_history": self._chat_history, "tasks_outputs": tasks_outputs},
                 config=config,
                 **kwargs,
             )
+            final_result = re.search(r"<final_answer>(.*?)</final_answer>", final_result_content, re.DOTALL)
+            if not final_result:
+                raise ActionParseError("No <final_answer> tags found in the response")
+            final_result_answer = final_result.group(1).strip()
+            return final_result_answer
 
         return tasks_outputs
 

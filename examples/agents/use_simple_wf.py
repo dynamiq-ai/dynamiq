@@ -10,7 +10,7 @@ from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
 
 # Constants
-AGENT_ROLE = "professional writer,goal is to produce a well-written and informative response"
+AGENT_ROLE = "Helpful assistant with the goal of providing useful information and answering questions."
 INPUT_QUESTION = "What is the capital of France?"
 
 

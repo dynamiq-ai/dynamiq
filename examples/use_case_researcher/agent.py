@@ -9,18 +9,19 @@ from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
-AGENT_ROLE = """
-Assistant that have access to the internet and python coding tools.
-He has the ability to do preliminary search, scrape data and write the code and execute it.
-Agent split tasks into smaller parts and solvem them in order.
-Agent also check the quality of code and refined, and all results should be rechecked before final delivery.
-"""
+AGENT_ROLE = (
+    "An assistant with access to the internet and Python coding tools. "
+    "Capable of performing preliminary research, scraping data, writing code, and executing it."
+    "The agent breaks tasks into smaller parts and solves them sequentially. "
+    "It also ensures the quality of the code, refines it, and rechecks all results before final delivery."
+)
 
-PROMPT = """
-From the input file, for each company, find the company site, then scrape it and find the linkedin page,
-deliver final answer in table with columns: company name, company site, linkedin page.
-Cover this fo all items
-"""
+PROMPT = (
+    "Using the input file, for each company, find the company's website, scrape it, and locate the LinkedIn page. "
+    "Deliver the final answer in a table with the following columns: Company Name, Company Website, LinkedIn Page. "
+    "Ensure this is done for all items in the input file."
+)
+
 
 FILE_PATH = "companies.txt"
 FILE_DESCRIPTION = "File with list of companies"

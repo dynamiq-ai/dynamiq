@@ -5,7 +5,7 @@ from examples.llm_setup import setup_llm
 
 def setup_agent():
     llm = setup_llm()
-    AGENT_ROLE = "helpful assistant," "goal is to provide useful information and answer questions"
+    AGENT_ROLE = "Helpful assistant with the goal of providing useful information and answering questions."
     agent = SimpleAgent(
         name="Agent",
         llm=llm,

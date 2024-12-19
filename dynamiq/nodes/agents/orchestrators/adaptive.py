@@ -1,21 +1,17 @@
+import re
 from enum import Enum
+from xml.etree import ElementTree as ET  # nosec B405
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents.orchestrators.orchestrator import Orchestrator, OrchestratorError
+from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Orchestrator, OrchestratorError
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
-
-
-class ActionParseError(OrchestratorError):
-    """Raised when there's an error parsing the LLM action."""
-
-    pass
 
 
 class AgentNotFoundError(OrchestratorError):
@@ -126,15 +122,8 @@ class AdaptiveOrchestrator(Orchestrator):
             error_message = f"Agent '{self.manager.name}' failed: {manager_result.output.get('content')}"
             raise ActionParseError(f"Unable to retrieve the next action from Agent Manager, Error: {error_message}")
 
-        manager_result = (
-            manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
-        )
-        try:
-            return Action.model_validate_json(manager_result)
-        except ValidationError as e:
-            raise ActionParseError(
-                f"Unable to create Action from Agent Manager output, due to Validation JSON Error: {e}"
-            )
+        manager_content = manager_result.output.get("content").get("result")
+        return self._parse_xml_content(manager_content)
 
     def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
         """
@@ -155,7 +144,7 @@ class AdaptiveOrchestrator(Orchestrator):
             if action.command == ActionCommand.DELEGATE:
                 self._handle_delegation(action=action, config=config, **kwargs)
             elif action.command == ActionCommand.FINAL_ANSWER:
-                return self.get_final_result(
+                manager_final_result = self.get_final_result(
                     {
                         "input_task": input_task,
                         "chat_history": self._chat_history,
@@ -164,6 +153,8 @@ class AdaptiveOrchestrator(Orchestrator):
                     config=config,
                     **kwargs,
                 )
+                final_result = self.parse_xml_final_answer(manager_final_result)
+                return final_result
 
     def _handle_delegation(self, action: Action, config: RunnableConfig = None, **kwargs) -> None:
         """
@@ -218,3 +209,71 @@ class AdaptiveOrchestrator(Orchestrator):
         self.manager.streaming = self.streaming
         for agent in self.agents:
             agent.streaming = self.streaming
+
+    def _parse_xml_content(self, content: str) -> Action:
+        """
+        Parse XML content to extract action details.
+
+        Args:
+            content (str): XML formatted content from LLM response
+
+        Returns:
+            Action: Parsed action object
+
+        Raises:
+            ActionParseError: If XML parsing fails or required tags are missing
+        """
+        try:
+            content = content.replace("```", "").strip()
+
+            output_match = re.search(r"<output>(.*?)</output>", content, re.DOTALL)
+            if not output_match:
+                raise ActionParseError("No <output> tags found in the response")
+
+            output_content = output_match.group(1).strip()
+            root = ET.fromstring(f"<root>{output_content}</root>")  # nosec B314
+
+            action_elem = root.find("action")
+            if action_elem is None:
+                raise ActionParseError("No <action> tag found in the response")
+
+            action_type = action_elem.text.strip().lower()
+
+            if action_type == "delegate":
+                agent_elem = root.find("agent")
+                task_elem = root.find("task")
+                task_data_elem = root.find("task_data")
+
+                if agent_elem is None or task_elem is None:
+                    raise ActionParseError("Delegate action missing required agent or task tags")
+
+                return Action(
+                    command=ActionCommand.DELEGATE,
+                    agent=agent_elem.text.strip(),
+                    task=task_elem.text.strip()
+                    + (f" {task_data_elem.text.strip()}" if task_data_elem is not None else ""),
+                )
+
+            elif action_type == "final_answer":
+                answer_elem = root.find("final_answer")
+                if answer_elem is None:
+                    raise ActionParseError("Final answer action missing required final_answer tag")
+
+                return Action(command=ActionCommand.FINAL_ANSWER, answer=answer_elem.text.strip())
+
+            else:
+                raise ActionParseError(f"Unknown action type: {action_type}")
+
+        except ET.ParseError as e:
+            raise ActionParseError(f"XML parsing error: {str(e)}")
+        except Exception as e:
+            raise ActionParseError(f"Error parsing action: {str(e)}")
+
+    def parse_xml_final_answer(self, content: str) -> str:
+        output_match = re.search(r"<output>(.*?)</output>", content, re.DOTALL)
+        if not output_match:
+            error_response = f"Error parsing final answer: No <output> tags found in the response {content}"
+            raise ActionParseError(f"Error: {error_response}")
+
+        output_content = output_match.group(1).strip()
+        return output_content

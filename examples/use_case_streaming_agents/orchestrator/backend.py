@@ -12,18 +12,21 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from examples.llm_setup import setup_llm
 
+# Agent Constants
 AGENT_ROLE_CODING = (
-    "An Expert Agent with high programming skills, he can solve any problem using coding skills."
-    "Goal is to provide the best solution for request,"
-    "using all his algorithmic knowledge and coding skills"
+    "An Expert Agent with advanced programming skills, capable of solving any problem using coding expertise. "
+    "The goal is to provide the best solution for each request, utilizing all algorithmic knowledge and coding skills."
 )
 
-AGENT_ROLE_SEARCH = "An Expert Agent with search skills, he can find any information using search skills."
+AGENT_ROLE_SEARCH = (
+    "An Expert Agent with exceptional search skills, capable of finding any information efficiently and accurately."
+)
+
 AGENT_ROLE_WRITER = (
-    "An Expert Agent with high writing skills, he can write any report or summary."
-    "Goal is to provide the best solution for request, using markdown language."
-    "He can write reports, summaries, and other text-based content."
-    "Keep friendly and professional tone with citations of sources."
+    "An Expert Agent with advanced writing skills, "
+    "capable of crafting reports, summaries, and other text-based content. "
+    "The goal is to provide the best solution for each request using markdown language. "
+    "Maintains a friendly and professional tone with proper citations of sources."
 )
 
 

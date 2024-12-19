@@ -12,7 +12,7 @@ from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
 
 # Constants
-AGENT_ROLE = "professional writer, goal is to produce a well-written and informative response"
+AGENT_ROLE = "Helpful assistant with the goal of providing useful information and answering questions."
 INPUT_QUESTION = "What is the capital of France?"
 
 
@@ -29,7 +29,7 @@ def run_simple_workflow() -> tuple[str, dict]:
     llm = setup_llm()
     memory = Memory(backend=InMemory())
     memory.add(
-        MessageRole.USER, "Hey! I'm Oleksii, machine learning engineer from Dynamiq.", metadata={"user_id": "01"}
+        MessageRole.USER, "Hey! I'm Oleksii, a Machine Learning Engineer at Dynamiq.", metadata={"user_id": "01"}
     )
     agent = SimpleAgent(
         name=" Agent",

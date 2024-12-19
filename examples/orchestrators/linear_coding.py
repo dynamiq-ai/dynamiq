@@ -1,6 +1,6 @@
 from dynamiq.connections import E2B as E2BConnection
-from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
-from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
+from dynamiq.nodes.agents.orchestrators.linear import LinearOrchestrator
+from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
@@ -12,9 +12,11 @@ AGENT_ROLE = (
 )
 
 INPUT_TASK = (
-    "Write a report about the weather in Warsaw for September 2024 "
-    "and compare it with the data from the last three years. "
-    "Provide the results in a clear table and also compare them with the weather in San Francisco. "
+    "Write a report about the weather in "
+    "Warsaw for September 2024 and compare "
+    "it with the data from the last three years. "
+    "Provide the results in a clear table "
+    "and also compare them with the weather in San Francisco. "
     "Start by searching for available free APIs."
 )
 
@@ -30,8 +32,8 @@ INPUT_TASK = (
 INPUT_TASK = (
     "Use programming skills to gather data on NVIDIA and INTEL stock prices over the last 10 years. "
     "Calculate the average price per year for each company and create a table. "
-    "Then, craft a report and add a conclusion about "
-    "what would have been the better investment if $100 had been invested 10 years ago. "
+    "Then, craft a report and add a conclusion "
+    "about what would have been the better investment if $100 had been invested 10 years ago. "
     "Use Yahoo Finance for the data."
 )
 
@@ -47,16 +49,16 @@ if __name__ == "__main__":
         llm=llm,
         tools=[python_tool],
         role=AGENT_ROLE,
-        max_loops=4,
+        max_loops=10,
         inference_mode=InferenceMode.XML,
     )
 
-    agent_manager = AdaptiveAgentManager(
+    agent_manager = LinearAgentManager(
         llm=llm,
     )
 
-    orchestrator = AdaptiveOrchestrator(
-        name="Adaptive Orchestrator",
+    orchestrator = LinearOrchestrator(
+        name="Linear Orchestrator",
         agents=[agent_coding],
         manager=agent_manager,
     )

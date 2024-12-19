@@ -25,31 +25,33 @@ from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
 
 # Constants
-AGENT_RESAERCHER_ROLE = (
-    "the Senior Research Analyst, "
-    "that specializes in finding latest and most actual information,"
-    "goal is to find the most relevant information regarding"
-    "to the requested topic and provide to user"
+AGENT_RESEARCHER_ROLE = (
+    "The Senior Research Analyst, "
+    "specializing in finding the latest and most accurate information. "
+    "The goal is to locate the most relevant information on the requested topic and provide it to the user."
 )
+
 AGENT_WRITER_ROLE = (
-    "the Senior Writer and Editor,"
-    "that specializes in creating high-quality content,"
-    "goal is to create a high-quality content based "
-    "on the information provided by the Research Analyst"
+    "The Senior Writer and Editor, "
+    "specializing in creating high-quality content. "
+    "The goal is to produce high-quality content based on the information provided by the Research Analyst."
 )
 
 REACT_AGENT_TEMPERATURE = 0.1
 REGULAR_AGENT_TEMPERATURE = 0.1
 MAX_TOKENS = 4000
-PROMPT = """I need to write a literature overview on the topic of `LLM based Multi-Agent Systems and Frameworks` for my research paper.
-Use the latest and most relevant information from the internet and scientific articles. Try to keep simple format like:
+
+PROMPT = """I need to write a literature overview on the topic
+of `LLM-based Multi-Agent Systems and Frameworks` for my research paper.
+Use the latest and most relevant information from the internet and scientific articles. Please follow a simple format such as:
 - Introduction
-- Main concepts
+- Main Concepts
 - Applications
 - Conclusion
-Also include the sources in the end of the document. Double check that the information is up-to-date and relevant.
-Final result must be provided in a markdown format.
+Also, include the sources at the end of the document. Double-check that the information is up-to-date and relevant.
+The final result must be provided in markdown format.
 """  # noqa: E501
+
 # Please use your own file path
 OUTPUT_FILE_PATH = "article_gpt.md"
 
@@ -132,7 +134,7 @@ def run_workflow(
         name="Research Analyst",
         llm=llm_react_agent,
         tools=[tool_search],
-        role=AGENT_RESAERCHER_ROLE,
+        role=AGENT_RESEARCHER_ROLE,
         max_loops=8,
         function_calling=True,
     )
