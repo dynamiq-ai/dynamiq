@@ -15,7 +15,7 @@ class DocumentEmbedderInputSchema(BaseModel):
 
 class DocumentEmbedder(ConnectionNode):
     group: Literal[NodeGroup.EMBEDDERS] = NodeGroup.EMBEDDERS
-    document_embedder: BaseEmbedder = None
+    document_embedder: BaseEmbedder | None = None
     input_schema: ClassVar[type[DocumentEmbedderInputSchema]] = DocumentEmbedderInputSchema
 
     @property
@@ -51,7 +51,7 @@ class TextEmbedderInputSchema(BaseModel):
 
 class TextEmbedder(ConnectionNode):
     group: Literal[NodeGroup.EMBEDDERS] = NodeGroup.EMBEDDERS
-    text_embedder: BaseEmbedder = None
+    text_embedder: BaseEmbedder | None = None
     input_schema: ClassVar[type[TextEmbedderInputSchema]] = TextEmbedderInputSchema
 
     @property

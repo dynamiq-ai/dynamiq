@@ -62,6 +62,37 @@ class SQLite(MemoryBackend):
         FROM {index_name}
     """
 
+    @property
+    def to_dict_exclude_params(self):
+        """Define parameters to exclude during serialization."""
+        return super().to_dict_exclude_params | {
+            "CREATE_TABLE_QUERY": True,
+            "VALIDATE_TABLE_QUERY": True,
+            "INSERT_MESSAGE_QUERY": True,
+            "SELECT_ALL_MESSAGES_QUERY": True,
+            "CHECK_IF_EMPTY_QUERY": True,
+            "CLEAR_TABLE_QUERY": True,
+            "SEARCH_MESSAGES_QUERY": True,
+        }
+
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
+        """Converts the instance to a dictionary.
+
+        Args:
+            include_secure_params (bool): Whether to include secure parameters
+            **kwargs: Additional arguments
+
+        Returns:
+            dict: Dictionary representation of the instance
+        """
+        kwargs.pop("include_secure_params", None)
+        data = super().to_dict(**kwargs)
+
+        if not include_secure_params:
+            data.pop("db_path", None)
+
+        return data
+
     def model_post_init(self, __context) -> None:
         """Initialize the SQLite database after model initialization."""
         try:

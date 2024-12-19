@@ -7,7 +7,7 @@ from dotenv import find_dotenv, load_dotenv
 from dynamiq import Workflow, runnables
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections.managers import ConnectionManager, get_connection_manager
-from dynamiq.loaders.yaml import WorkflowYAMLLoader
+from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 from dynamiq.utils import JsonWorkflowEncoder
 from examples.rag.utils import list_data_folder_paths, read_bytes_io_files
 

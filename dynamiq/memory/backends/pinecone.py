@@ -36,6 +36,18 @@ class Pinecone(MemoryBackend):
     pods: int = Field(default=1)
     vector_store: PineconeVectorStore | None = None
 
+    @property
+    def to_dict_exclude_params(self):
+        """Define parameters to exclude when converting the class instance to a dictionary."""
+        return super().to_dict_exclude_params | {"embedder": True, "vector_store": True}
+
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
+        """Converts the instance to a dictionary."""
+        kwargs.pop("include_secure_params", None)
+        data = super().to_dict(**kwargs)
+        data["embedder"] = self.embedder.to_dict(include_secure_params=include_secure_params, **kwargs)
+        return data
+
     def model_post_init(self, __context) -> None:
         """Initialize the vector store after model initialization."""
         if not self.vector_store:
@@ -51,6 +63,7 @@ class Pinecone(MemoryBackend):
                 pod_type=self.pod_type,
                 pods=self.pods,
             )
+
         if not self.vector_store._index:
             raise PineconeError("Failed to initialize Pinecone index")
 

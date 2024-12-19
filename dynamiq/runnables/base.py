@@ -34,7 +34,7 @@ class RunnableConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
-class RunnableStatus(Enum):
+class RunnableStatus(str, Enum):
     """
     Enumeration of possible statuses for a Runnable object.
 

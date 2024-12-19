@@ -32,7 +32,7 @@ class ChromaDocumentRetriever(Retriever):
     name: str = "ChromaDocumentRetriever"
     connection: Chroma | None = None
     vector_store: ChromaVectorStore | None = None
-    document_retriever: ChromaDocumentRetrieverComponent = None
+    document_retriever: ChromaDocumentRetrieverComponent | None = None
 
     def __init__(self, **kwargs):
         """
