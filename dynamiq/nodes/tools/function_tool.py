@@ -104,6 +104,7 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
         return create_model(
             "FunctionToolInputSchema",
             **{k: (v[0], ...) if v[1] is inspect.Parameter.empty else (v[0], v[1]) for k, v in params_dict.items()},
+            model_config=dict(extra="allow"),
         )
 
     class FunctionToolFromDecorator(FunctionTool[T]):

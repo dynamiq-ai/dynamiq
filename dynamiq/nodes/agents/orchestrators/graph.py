@@ -1,6 +1,7 @@
 import json
 from typing import Any, Callable
 
+from dynamiq.callbacks import NodeCallbackHandler
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
@@ -91,14 +92,16 @@ class GraphOrchestrator(Orchestrator):
         data["states"] = [state.to_dict(**kwargs) for state in self.states]
         return data
 
-    def add_state_by_tasks(self, state_id: str, tasks: list[Node | Callable]) -> None:
+    def add_state_by_tasks(
+        self, state_id: str, tasks: list[Node | Callable], callbacks: list[NodeCallbackHandler] = []
+    ) -> None:
         """
         Adds state to the graph based on tasks.
 
         Args:
             state_id (str): Id of the state.
             tasks (list[Node | Callable]): List of tasks that have to be executed when running this state.
-
+            callbacks: list[NodeCallbackHandler]: List of callbacks.
         Raises:
             ValueError: If state with specified id already exists.
         """
@@ -118,7 +121,13 @@ class GraphOrchestrator(Orchestrator):
             else:
                 raise OrchestratorError("Error: Task must be either a Node or a Callable.")
 
-        state = State(id=state_id, name=state_id, manager=self.manager if has_agent else None, tasks=filtered_tasks)
+        state = State(
+            id=state_id,
+            name=state_id,
+            manager=self.manager if has_agent else None,
+            tasks=filtered_tasks,
+            callbacks=callbacks,
+        )
         self.states.append(state)
         self._state_by_id[state.id] = state
 
@@ -166,7 +175,13 @@ class GraphOrchestrator(Orchestrator):
             if state_id not in self._state_by_id:
                 raise ValueError(f"State with id {state_id} does not exist")
 
-    def add_conditional_edge(self, source_id: str, destination_ids: list[str], condition: Callable | Python) -> None:
+    def add_conditional_edge(
+        self,
+        source_id: str,
+        destination_ids: list[str],
+        condition: Callable | Python,
+        callbacks: list[NodeCallbackHandler] = [],
+    ) -> None:
         """
         Adds conditional edge to the graph.
         Conditional edge provides opportunity to choose between destination states based on condition.
@@ -175,16 +190,19 @@ class GraphOrchestrator(Orchestrator):
             source_id (str): Id of the source state.
             destination_ids (list[str]): Ids of destination states.
             condition (Callable | Python): Condition that will determine next state.
-
+            callbacks: list[NodeCallbackHandler]: List of callbacks.
         Raises:
             ValueError: If state with specified id is not present.
         """
         self.validate_states(destination_ids + [source_id])
 
         if isinstance(condition, Python):
+            condition.callbacks.extend(callbacks)
             self._state_by_id[source_id].condition = condition
         elif isinstance(condition, Callable):
-            self._state_by_id[source_id].condition = function_tool(condition)()
+            tool = function_tool(condition)()
+            tool.callbacks = callbacks
+            self._state_by_id[source_id].condition = tool
         else:
             raise OrchestratorError("Error: Conditional edge must be either a Python Node or a Callable.")
 
