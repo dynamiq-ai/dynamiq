@@ -1,6 +1,6 @@
 import uuid
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field
 
 from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory.backends.base import MemoryBackend
@@ -34,53 +34,23 @@ class Pinecone(MemoryBackend):
     environment: str | None = Field(default=None)
     pod_type: str | None = Field(default=None)
     pods: int = Field(default=1)
-    vector_store: PineconeVectorStore | dict | None = None
+    vector_store: PineconeVectorStore | None = None
+
+    @property
+    def to_dict_exclude_params(self):
+        """Define parameters to exclude when converting the class instance to a dictionary."""
+        return super().to_dict_exclude_params | {"embedder": True, "vector_store": True}
 
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
-        data = super().to_dict(include_secure_params=include_secure_params, **kwargs)
-
+        kwargs.pop("include_secure_params", None)
+        data = super().to_dict(**kwargs)
         data["embedder"] = self.embedder.to_dict(include_secure_params=include_secure_params, **kwargs)
-
-        if self.vector_store:
-            data["vector_store"] = {
-                "index_name": self.vector_store.index_name,
-                "namespace": self.vector_store.namespace,
-                "batch_size": self.vector_store.batch_size,
-                "dimension": self.vector_store.dimension,
-                "metric": self.vector_store.metric,
-                "index_type": self.vector_store.index_type,
-                "cloud": self.vector_store.cloud,
-                "region": self.vector_store.region,
-                "environment": self.vector_store.environment,
-                "pod_type": self.vector_store.pod_type,
-                "pods": self.vector_store.pods,
-                "content_key": self.vector_store.content_key,
-            }
-        else:
-            data["vector_store"] = None
-
         return data
 
     def model_post_init(self, __context) -> None:
         """Initialize the vector store after model initialization."""
-        if isinstance(self.vector_store, dict):
-            self.vector_store = PineconeVectorStore(
-                connection=self.connection,
-                index_name=self.vector_store["index_name"],
-                namespace=self.vector_store["namespace"],
-                batch_size=self.vector_store["batch_size"],
-                dimension=self.vector_store["dimension"],
-                metric=self.vector_store["metric"],
-                index_type=self.vector_store["index_type"],
-                cloud=self.vector_store["cloud"],
-                region=self.vector_store["region"],
-                environment=self.vector_store["environment"],
-                pod_type=self.vector_store["pod_type"],
-                pods=self.vector_store["pods"],
-                content_key=self.vector_store["content_key"],
-            )
-        elif not self.vector_store:
+        if not self.vector_store:
             self.vector_store = PineconeVectorStore(
                 connection=self.connection,
                 index_name=self.index_name,
@@ -96,16 +66,6 @@ class Pinecone(MemoryBackend):
 
         if not self.vector_store._index:
             raise PineconeError("Failed to initialize Pinecone index")
-
-    @model_validator(mode="after")
-    def validate_vector_store(self):
-        """Validate and initialize vector store if needed."""
-        if isinstance(self.vector_store, dict):
-            try:
-                self.vector_store = PineconeVectorStore(connection=self.connection, **self.vector_store)
-            except Exception as e:
-                raise ValueError(f"Failed to initialize vector store from dict: {e}")
-        return self
 
     def _message_to_document(self, message: Message) -> Document:
         """Converts a Message object to a Document object."""

@@ -4,7 +4,7 @@ import sqlite3
 import uuid
 from typing import ClassVar
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field
 from typing_extensions import Annotated
 
 from dynamiq.memory.backends.base import MemoryBackend
@@ -92,15 +92,6 @@ class SQLite(MemoryBackend):
             data.pop("db_path", None)
 
         return data
-
-    @model_validator(mode="after")
-    def validate_paths(self):
-        """Validate and process database path."""
-        if not self.db_path.startswith("/"):
-            from os.path import abspath, expanduser
-
-            self.db_path = abspath(expanduser(self.db_path))
-        return self
 
     def model_post_init(self, __context) -> None:
         """Initialize the SQLite database after model initialization."""
