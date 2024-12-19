@@ -5,7 +5,7 @@ from dynamiq.evaluations.metrics import FactualCorrectnessEvaluator
 
 def test_factual_correctness_evaluator(openai_node):
     # Sample data
-    responses = [
+    answer = [
         (
             "Albert Einstein was a German theoretical physicist. "
             "He developed the theory of relativity and contributed "
@@ -13,7 +13,7 @@ def test_factual_correctness_evaluator(openai_node):
         ),
         ("The Eiffel Tower is located in Berlin, Germany. " "It was constructed in 1889."),
     ]
-    references = [
+    context = [
         ("Albert Einstein was a German-born theoretical physicist. " "He developed the theory of relativity."),
         ("The Eiffel Tower is located in Paris, France. " "It was constructed in 1887 and opened in 1889."),
     ]
@@ -24,7 +24,7 @@ def test_factual_correctness_evaluator(openai_node):
     # Mock the run method of the claim decomposer
     evaluator._claim_decomposer.run = MagicMock(
         side_effect=[
-            # First call to decompose claims from responses
+            # First call to decompose claims from answers (First answer)
             {
                 "results": [
                     {
@@ -36,7 +36,7 @@ def test_factual_correctness_evaluator(openai_node):
                     }
                 ]
             },
-            # Second call to decompose claims from references
+            # Second call to decompose claims from contexts (First context)
             {
                 "results": [
                     {
@@ -47,13 +47,18 @@ def test_factual_correctness_evaluator(openai_node):
                     }
                 ]
             },
-            # Third call to decompose claims from responses
+            # Third call to decompose claims from answers (Second answer)
             {
                 "results": [
-                    {"claims": ["The Eiffel Tower is located in Berlin, Germany.", "It was constructed in 1889."]}
+                    {
+                        "claims": [
+                            "The Eiffel Tower is located in Berlin, Germany.",
+                            "It was constructed in 1889.",
+                        ]
+                    }
                 ]
             },
-            # Fourth call to decompose claims from references
+            # Fourth call to decompose claims from contexts (Second context)
             {
                 "results": [
                     {
@@ -71,7 +76,7 @@ def test_factual_correctness_evaluator(openai_node):
     # Mock the run method of the NLI evaluator
     evaluator._nli_evaluator.run = MagicMock(
         side_effect=[
-            # First call: Verify response claims against reference (precision)
+            # First call: Verify answer claims against context (precision for first pair)
             {
                 "results": [
                     {
@@ -95,7 +100,7 @@ def test_factual_correctness_evaluator(openai_node):
                     }
                 ]
             },
-            # Second call: Verify reference claims against response (recall)
+            # Second call: Verify context claims against answer (recall for first pair)
             {
                 "results": [
                     {
@@ -103,18 +108,18 @@ def test_factual_correctness_evaluator(openai_node):
                             {
                                 "claim": "Albert Einstein was a German-born theoretical physicist.",
                                 "verdict": "1",
-                                "reason": "The response claims he was a German theoretical physicist.",
+                                "reason": "The answer states he was a German theoretical physicist.",
                             },
                             {
                                 "claim": "He developed the theory of relativity.",
                                 "verdict": "1",
-                                "reason": "This is mentioned in the response.",
+                                "reason": "This is mentioned in the answer.",
                             },
                         ]
                     }
                 ]
             },
-            # Third call: Verify response claims against reference (precision)
+            # Third call: Verify answer claims against context (precision for second pair)
             {
                 "results": [
                     {
@@ -133,7 +138,7 @@ def test_factual_correctness_evaluator(openai_node):
                     }
                 ]
             },
-            # Fourth call: Verify reference claims against response (recall)
+            # Fourth call: Verify context claims against answer (recall for second pair)
             {
                 "results": [
                     {
@@ -141,17 +146,17 @@ def test_factual_correctness_evaluator(openai_node):
                             {
                                 "claim": "The Eiffel Tower is located in Paris, France.",
                                 "verdict": "0",
-                                "reason": "The response states it is in Berlin, Germany.",
+                                "reason": "The answer states it is in Berlin, Germany.",
                             },
                             {
                                 "claim": "It was constructed in 1887.",
                                 "verdict": "0",
-                                "reason": "The response does not mention construction start year.",
+                                "reason": "The answer does not mention construction start year.",
                             },
                             {
                                 "claim": "It opened in 1889.",
                                 "verdict": "1",
-                                "reason": "The response mentions it was constructed in 1889.",
+                                "reason": "The answer mentions it was constructed in 1889.",
                             },
                         ]
                     }
@@ -161,10 +166,13 @@ def test_factual_correctness_evaluator(openai_node):
     )
 
     # Run the evaluator
-    correctness_scores = evaluator.run(responses=responses, references=references, verbose=False)
+    correctness_scores = evaluator.run(answer=answer, context=context, verbose=False)
 
     # Expected scores based on the mocked data
-    expected_scores = [0.8, 0.4]  # For the first item  # For the second item
+    expected_scores = [
+        0.75,  # For the first pair: 3 out of 4 statements attributed
+        0.3333,  # For the second pair: 1 out of 3 statements attributed
+    ]
 
     # Assert that the correctness scores are as expected
     for computed, expected in zip(correctness_scores, expected_scores):

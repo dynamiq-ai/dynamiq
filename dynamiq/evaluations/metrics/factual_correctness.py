@@ -62,23 +62,23 @@ class RunInput(BaseModel):
     Input model for running factual correctness evaluation.
 
     Attributes:
-        responses (List[str]): List of response texts.
-        references (List[str]): List of reference texts.
+        answer (List[str]): List of response texts.
+        context (List[str]): List of reference texts.
         mode (Optional[str]): Evaluation mode ('precision', 'recall', or 'f1').
         beta (Optional[float]): Beta value for F-beta score.
         verbose (bool): Flag to enable verbose logging.
     """
 
-    responses: list[str]
-    references: list[str]
+    answer: list[str]
+    context: list[str]
     mode: str | None = None
     beta: float | None = None
     verbose: bool = False
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if len(self.responses) != len(self.references):
-            raise ValueError("Responses and references must have the same length.")
+        if len(self.answer) != len(self.context):
+            raise ValueError("Answer and context must have the same length.")
         return self
 
 
@@ -188,8 +188,8 @@ class FactualCorrectnessEvaluator(BaseModel):
                         "claims": [
                             [
                                 "Albert Einstein was a German theoretical physicist.",
-                                "Albert Einstein developed the theory of relativity.",
-                                "Albert Einstein contributed to quantum mechanics.",
+                                "He developed the theory of relativity.",
+                                "He contributed to quantum mechanics.",
                             ]
                         ],
                     },
@@ -201,12 +201,12 @@ class FactualCorrectnessEvaluator(BaseModel):
                                 "reason": "The premise states he was a German-born theoretical physicist.",
                             },
                             {
-                                "claim": "Albert Einstein developed the theory of relativity.",
+                                "claim": "He developed the theory of relativity.",
                                 "verdict": 1,
                                 "reason": "This is explicitly mentioned in the premise.",
                             },
                             {
-                                "claim": "Albert Einstein contributed to quantum mechanics.",
+                                "claim": "He contributed to quantum mechanics.",
                                 "verdict": 0,
                                 "reason": "The premise does not mention contributions to quantum mechanics.",
                             },
@@ -289,18 +289,18 @@ class FactualCorrectnessEvaluator(BaseModel):
 
     def run(
         self,
-        responses: list[str],
-        references: list[str],
+        answer: list[str],
+        context: list[str],
         mode: str | None = None,
         beta: float | None = None,
         verbose: bool = False,
     ) -> list[float]:
         """
-        Evaluate the factual correctness of responses against references.
+        Evaluate the factual correctness of answers against contexts.
 
         Args:
-            responses (List[str]): List of response texts.
-            references (List[str]): List of reference texts.
+            answer (List[str]): List of response texts.
+            context (List[str]): List of reference texts.
             mode (Optional[str]): Evaluation mode ('precision', 'recall', or 'f1').
             beta (Optional[float]): Beta value for F-beta score.
             verbose (bool): Flag to enable verbose logging.
@@ -309,8 +309,8 @@ class FactualCorrectnessEvaluator(BaseModel):
             List[float]: List of factual correctness scores.
         """
         input_data = RunInput(
-            responses=responses,
-            references=references,
+            answer=answer,
+            context=context,
             mode=mode,
             beta=beta,
             verbose=verbose,
@@ -320,32 +320,35 @@ class FactualCorrectnessEvaluator(BaseModel):
 
         final_scores = []
 
-        for idx in range(len(input_data.responses)):
-            response = input_data.responses[idx]
-            reference = input_data.references[idx]
+        for idx in range(len(input_data.answer)):
+            single_answer = input_data.answer[idx]
+            single_context = input_data.context[idx]
 
-            # Decompose claims
-            response_claims_list = self.decompose_claims([response])
-            reference_claims_list = self.decompose_claims([reference])
+            # Decompose claims from answer and context
+            answer_claims_list = self.decompose_claims([single_answer])
+            context_claims_list = self.decompose_claims([single_context])
 
-            response_claims = response_claims_list[0]
-            reference_claims = reference_claims_list[0]
+            answer_claims = answer_claims_list[0]
+            context_claims = context_claims_list[0]
 
-            # Verify response claims against reference (precision)
-            reference_response_verdicts_list = self.verify_claims(premises=[reference], claims_list=[response_claims])
-            reference_response_verdicts = reference_response_verdicts_list[0]
+            # Verify answer claims against context (precision)
+            context_verdicts_list = self.verify_claims(
+                premises=[single_context],
+                claims_list=[answer_claims],
+            )
+            context_verdicts = context_verdicts_list[0]
 
-            tp = sum(reference_response_verdicts)
-            fp = len(reference_response_verdicts) - tp
+            tp = sum(context_verdicts)
+            fp = len(context_verdicts) - tp
 
             if mode != "precision":
-                # Verify reference claims against response (recall)
-                response_reference_verdicts_list = self.verify_claims(
-                    premises=[response],
-                    claims_list=[reference_claims],
+                # Verify context claims against answer (recall)
+                answer_verdicts_list = self.verify_claims(
+                    premises=[single_answer],
+                    claims_list=[context_claims],
                 )
-                response_reference_verdicts = response_reference_verdicts_list[0]
-                fn = sum(1 - v for v in response_reference_verdicts)
+                answer_verdicts = answer_verdicts_list[0]
+                fn = sum(1 - v for v in answer_verdicts)
             else:
                 fn = 0
 
@@ -359,10 +362,10 @@ class FactualCorrectnessEvaluator(BaseModel):
             final_scores.append(score)
 
             if input_data.verbose:
-                logger.debug(f"Response: {response}")
-                logger.debug(f"Reference: {reference}")
-                logger.debug(f"Response Claims: {response_claims}")
-                logger.debug(f"Reference Claims: {reference_claims}")
+                logger.debug(f"Answer: {single_answer}")
+                logger.debug(f"Context: {single_context}")
+                logger.debug(f"Answer Claims: {answer_claims}")
+                logger.debug(f"Context Claims: {context_claims}")
                 logger.debug(f"TP: {tp}, FP: {fp}, FN: {fn}")
                 logger.debug(f"Score: {score}")
                 logger.debug("-" * 50)
