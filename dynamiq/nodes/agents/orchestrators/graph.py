@@ -4,18 +4,17 @@ from typing import Any, Callable
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
+from dynamiq.nodes.agents.orchestrators.graph_state import GraphState
 from dynamiq.nodes.agents.orchestrators.orchestrator import Orchestrator, OrchestratorError
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.function_tool import function_tool
-from dynamiq.nodes.utils.state import State
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
 
 class StateNotFoundError(OrchestratorError):
     """Raised when next state was not found."""
-
     pass
 
 
@@ -33,7 +32,7 @@ class GraphOrchestrator(Orchestrator):
     Attributes:
         manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
         context (Dict[str, Any]): Context of the orchestrator.
-        states (List[State]): List of states within orchestrator.
+        states (List[GraphState]): List of states within orchestrator.
         initial_state (str): State to start from.
         objective (Optional[str]): The main objective of the orchestration.
         max_loops (Optional[int]): Maximum number of transition between states.
@@ -43,7 +42,7 @@ class GraphOrchestrator(Orchestrator):
     manager: GraphAgentManager
     initial_state: str = START
     context: dict[str, Any] = {}
-    states: list[State] = []
+    states: list[GraphState] = []
     max_loops: int = 15
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
@@ -67,12 +66,12 @@ class GraphOrchestrator(Orchestrator):
         self._state_by_id = {state.id: state for state in self.states}
 
         if START not in self._state_by_id:
-            start_state = State(id=START, description="Initial state")
+            start_state = GraphState(id=START, description="Initial state")
             self._state_by_id[START] = start_state
             self.states.append(start_state)
 
         if END not in self._state_by_id:
-            end_state = State(id=END, description="Final state")
+            end_state = GraphState(id=END, description="Final state")
             self._state_by_id[END] = end_state
             self.states.append(end_state)
 
@@ -118,11 +117,13 @@ class GraphOrchestrator(Orchestrator):
             else:
                 raise OrchestratorError("Error: Task must be either a Node or a Callable.")
 
-        state = State(id=state_id, name=state_id, manager=self.manager if has_agent else None, tasks=filtered_tasks)
+        state = GraphState(
+            id=state_id, name=state_id, manager=self.manager if has_agent else None, tasks=filtered_tasks
+        )
         self.states.append(state)
         self._state_by_id[state.id] = state
 
-    def add_state(self, state: State) -> None:
+    def add_state(self, state: GraphState) -> None:
         """
         Adds state to the graph.
 
@@ -190,7 +191,7 @@ class GraphOrchestrator(Orchestrator):
 
         self._state_by_id[source_id].next_states = destination_ids
 
-    def get_next_state_by_manager(self, state: State, config: RunnableConfig, **kwargs) -> State:
+    def get_next_state_by_manager(self, state: GraphState, config: RunnableConfig, **kwargs) -> GraphState:
         """
         Determine the next state based on the current state and history. Uses GraphAgentManager.
 
@@ -236,7 +237,7 @@ class GraphOrchestrator(Orchestrator):
             logger.error(f"GraphOrchestrator: State with id {next_state} was not found.")
             raise StateNotFoundError(f"State with id {next_state} was not found.")
 
-    def _get_next_state(self, state: State, config: RunnableConfig = None, **kwargs) -> State:
+    def _get_next_state(self, state: GraphState, config: RunnableConfig = None, **kwargs) -> GraphState:
         """
         Determine the next state based on the current state and chat history.
 
