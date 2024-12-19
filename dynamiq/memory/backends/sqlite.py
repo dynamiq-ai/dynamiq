@@ -96,13 +96,6 @@ class SQLite(MemoryBackend):
     def model_post_init(self, __context) -> None:
         """Initialize the SQLite database after model initialization."""
         try:
-            from os import makedirs
-            from os.path import dirname
-
-            db_dir = dirname(self.db_path)
-            if db_dir:
-                makedirs(db_dir, exist_ok=True)
-
             self._validate_table_name(create_if_not_exists=True)
         except Exception as e:
             raise SQLiteError(f"Error initializing SQLite backend: {e}") from e
