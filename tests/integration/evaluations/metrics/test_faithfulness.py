@@ -19,23 +19,19 @@ def test_faithfulness_evaluator(openai_node):
             "It is visible from space."
         ),
     ]
-    contexts_list = [
-        [
-            (
-                "Albert Einstein (14 March 1879 - 18 April 1955) was a German-born "
-                "theoretical physicist, widely held to be one of the greatest and "
-                "most influential scientists of all time. Best known for developing "
-                "the theory of relativity, he also made important contributions to "
-                "quantum mechanics."
-            )
-        ],
-        [
-            (
-                "The Great Wall of China is a series of fortifications that were built "
-                "across the historical northern borders of ancient Chinese states and "
-                "Imperial China as protection against various nomadic groups."
-            )
-        ],
+    contexts = [
+        (
+            "Albert Einstein (14 March 1879 - 18 April 1955) was a German-born "
+            "theoretical physicist, widely held to be one of the greatest and "
+            "most influential scientists of all time. Best known for developing "
+            "the theory of relativity, he also made important contributions to "
+            "quantum mechanics."
+        ),
+        (
+            "The Great Wall of China is a series of fortifications that were built "
+            "across the historical northern borders of ancient Chinese states and "
+            "Imperial China as protection against various nomadic groups."
+        ),
     ]
 
     # Initialize evaluator with the provided openai_node
@@ -77,7 +73,7 @@ def test_faithfulness_evaluator(openai_node):
     # Mock the NLI evaluator
     evaluator._nli_evaluator.run = MagicMock(
         side_effect=[
-            # First call to check faithfulness for the first question
+            # First call: Check faithfulness for the first question
             {
                 "results": [
                     {
@@ -108,7 +104,7 @@ def test_faithfulness_evaluator(openai_node):
                     }
                 ]
             },
-            # Second call to check faithfulness for the second question
+            # Second call: Check faithfulness for the second question
             {
                 "results": [
                     {
@@ -136,14 +132,12 @@ def test_faithfulness_evaluator(openai_node):
     )
 
     # Run the evaluator
-    faithfulness_scores = evaluator.run(
-        questions=questions, answers=answers, contexts_list=contexts_list, verbose=False
-    )
+    faithfulness_scores = evaluator.run(question=questions, answer=answers, context=contexts, verbose=False)
 
     # Expected scores based on the mocked data
     expected_scores = [
-        1.0,  # All statements are faithful for the first question
-        0.6667,  # 2 out of 3 statements are faithful for the second question
+        1.0,  # For the first question: 4 out of 4 statements are faithful
+        0.6667,  # For the second question: 2 out of 3 statements are faithful
     ]
 
     # Assert that the faithfulness scores are as expected

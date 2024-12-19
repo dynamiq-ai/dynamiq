@@ -16,17 +16,17 @@ class SimplifyStatementsInput(BaseModel):
     Input model for simplifying statements.
 
     Attributes:
-        questions (List[str]): List of questions.
-        answers (List[str]): List of corresponding answers.
+        question (List[str]): List of questions.
+        answer (List[str]): List of corresponding answers.
     """
 
-    questions: list[str]
-    answers: list[str]
+    question: list[str]
+    answer: list[str]
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if len(self.questions) != len(self.answers):
-            raise ValueError("Questions and answers must have the same length.")
+        if len(self.question) != len(self.answer):
+            raise ValueError("Question and answer must have the same length.")
         return self
 
 
@@ -46,17 +46,17 @@ class NLIInput(BaseModel):
     Input model for NLI evaluation.
 
     Attributes:
-        contexts (List[str]): List of contexts.
+        context (List[str]): List of contexts.
         statements_list (List[List[str]]): List of lists of statements.
     """
 
-    contexts: list[str]
+    context: list[str]
     statements_list: list[list[str]]
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if len(self.contexts) != len(self.statements_list):
-            raise ValueError("Contexts and statements_list must have the same length.")
+        if len(self.context) != len(self.statements_list):
+            raise ValueError("Context and statements_list must have the same length.")
         return self
 
 
@@ -98,21 +98,21 @@ class RunInput(BaseModel):
     Input model for running the faithfulness evaluation.
 
     Attributes:
-        questions (List[str]): List of questions.
-        answers (List[str]): List of corresponding answers.
-        contexts_list (List[List[str]]): List of contexts for each question.
+        question (List[str]): List of questions.
+        answer (List[str]): List of corresponding answers.
+        context (List[str]): List of context texts for each question.
         verbose (bool): Flag to enable verbose logging.
     """
 
-    questions: list[str]
-    answers: list[str]
-    contexts_list: list[list[str]]
+    question: list[str]
+    answer: list[str]
+    context: list[str]
     verbose: bool = False
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if not (len(self.questions) == len(self.answers) == len(self.contexts_list)):
-            raise ValueError("Questions, answers, and contexts_list must have the same length.")
+        if not (len(self.question) == len(self.answer) == len(self.context)):
+            raise ValueError("Question, answer, and context must have the same length.")
         return self
 
 
@@ -181,7 +181,7 @@ class FaithfulnessEvaluator(BaseModel):
                                 "acknowledged to be one of the greatest and most influential "
                                 "physicists of all time. He was best known for developing "
                                 "the theory of relativity, he also made important contributions "
-                                "to the development of quantum mechanics."
+                                "to the development of the theory of quantum mechanics."
                             )
                         ],
                     },
@@ -287,10 +287,10 @@ class FaithfulnessEvaluator(BaseModel):
         Returns:
             List[List[str]]: List of lists of simplified statements.
         """
-        input_data = SimplifyStatementsInput(questions=questions, answers=answers)
+        input_data = SimplifyStatementsInput(question=questions, answer=answers)
         results = self._statement_simplifier.run(
-            question=input_data.questions,
-            answer=input_data.answers,
+            question=input_data.question,
+            answer=input_data.answer,
         )
         statements_list = []
         for result in results["results"]:
@@ -304,22 +304,22 @@ class FaithfulnessEvaluator(BaseModel):
 
     def check_faithfulness(
         self,
-        contexts: list[str],
+        context: list[str],
         statements_list: list[list[str]],
     ) -> list[list[NLIResultItem]]:
         """
         Check the faithfulness of statements against contexts.
 
         Args:
-            contexts (List[str]): List of contexts.
+            context (List[str]): List of contexts.
             statements_list (List[List[str]]): List of lists of statements.
 
         Returns:
             List[List[NLIResultItem]]: List of lists of NLI results.
         """
-        input_data = NLIInput(contexts=contexts, statements_list=statements_list)
+        input_data = NLIInput(context=context, statements_list=statements_list)
         results = self._nli_evaluator.run(
-            context=input_data.contexts,
+            context=input_data.context,
             statements=input_data.statements_list,
         )
         results_list = []
@@ -338,36 +338,35 @@ class FaithfulnessEvaluator(BaseModel):
 
     def run(
         self,
-        questions: list[str],
-        answers: list[str],
-        contexts_list: list[list[str]],
+        question: list[str],
+        answer: list[str],
+        context: list[str],
         verbose: bool = False,
     ) -> list[float]:
         """
         Evaluate the faithfulness of answers given contexts.
 
         Args:
-            questions (List[str]): List of questions.
-            answers (List[str]): List of corresponding answers.
-            contexts_list (List[List[str]]): List of contexts for each question.
+            question (List[str]): List of questions.
+            answer (List[str]): List of corresponding answers.
+            context (List[str]): List of context texts for each question.
             verbose (bool): Flag to enable verbose logging.
 
         Returns:
             List[float]: List of faithfulness scores.
         """
         input_data = RunInput(
-            questions=questions,
-            answers=answers,
-            contexts_list=contexts_list,
+            question=question,
+            answer=answer,
+            context=context,
             verbose=verbose,
         )
         final_scores = []
 
-        for idx in range(len(input_data.questions)):
-            question = input_data.questions[idx]
-            answer = input_data.answers[idx]
-            contexts = input_data.contexts_list[idx]
-            context = "\n".join(contexts)
+        for idx in range(len(input_data.question)):
+            question = input_data.question[idx]
+            answer = input_data.answer[idx]
+            context = input_data.context[idx]
 
             # Simplify statements
             statements_list = self.simplify_statements([question], [answer])
