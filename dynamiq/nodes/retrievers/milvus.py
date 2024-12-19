@@ -1,15 +1,16 @@
-from typing import Any, Literal
+from typing import Any
 
 from dynamiq.components.retrievers.milvus import MilvusDocumentRetriever as MilvusDocumentRetrieverComponent
 from dynamiq.connections import Milvus
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
+from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.retrievers.base import Retriever, RetrieverInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import MilvusVectorStore
 from dynamiq.storages.vector.milvus.milvus import MilvusVectorStoreParams
 
 
-class MilvusDocumentRetriever(VectorStoreNode, MilvusVectorStoreParams):
+class MilvusDocumentRetriever(Retriever, MilvusVectorStoreParams):
     """
     Document Retriever using Milvus.
 
@@ -29,13 +30,10 @@ class MilvusDocumentRetriever(VectorStoreNode, MilvusVectorStoreParams):
         **kwargs: Keyword arguments for initializing the node.
     """
 
-    group: Literal[NodeGroup.RETRIEVERS] = NodeGroup.RETRIEVERS
     name: str = "MilvusDocumentRetriever"
     connection: Milvus | None = None
     vector_store: MilvusVectorStore | None = None
-    filters: dict[str, Any] | None = None
-    top_k: int = 10
-    document_retriever: MilvusDocumentRetrieverComponent = None
+    document_retriever: MilvusDocumentRetrieverComponent | None = None
 
     def __init__(self, **kwargs):
         """
@@ -61,10 +59,6 @@ class MilvusDocumentRetriever(VectorStoreNode, MilvusVectorStoreParams):
             "client": self.client,
         }
 
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"document_retriever": True}
-
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the MilvusDocumentRetriever.
@@ -82,7 +76,7 @@ class MilvusDocumentRetriever(VectorStoreNode, MilvusVectorStoreParams):
                 vector_store=self.vector_store, filters=self.filters, top_k=self.top_k
             )
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+    def execute(self, input_data: RetrieverInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Execute the document retrieval process.
 
@@ -90,7 +84,7 @@ class MilvusDocumentRetriever(VectorStoreNode, MilvusVectorStoreParams):
         document retriever component, and returns the retrieved documents.
 
         Args:
-            input_data (dict[str, Any]): The input data containing the query embedding.
+            input_data (RetrieverInputSchema): The input data containing the query embedding.
             config (RunnableConfig, optional): The configuration for the execution.
             **kwargs: Additional keyword arguments.
 
@@ -100,11 +94,11 @@ class MilvusDocumentRetriever(VectorStoreNode, MilvusVectorStoreParams):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        query_embedding = input_data["embedding"]
-        content_key = input_data.get("content_key")
-        embedding_key = input_data.get("embedding_key")
-        filters = input_data.get("filters") or self.filters
-        top_k = input_data.get("top_k") or self.top_k
+        query_embedding = input_data.embedding
+        content_key = input_data.content_key
+        embedding_key = input_data.embedding_key
+        filters = input_data.filters or self.filters
+        top_k = input_data.top_k or self.top_k
 
         output = self.document_retriever.run(
             query_embedding, filters=filters, top_k=top_k, content_key=content_key, embedding_key=embedding_key

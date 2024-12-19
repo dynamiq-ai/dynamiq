@@ -1,14 +1,13 @@
-from typing import Any, Literal
-
 from dynamiq.connections import Milvus
-from dynamiq.nodes.node import NodeGroup, VectorStoreNode, ensure_config
+from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.writers.base import Writer, WriterInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import MilvusVectorStore
 from dynamiq.storages.vector.milvus.milvus import MilvusVectorStoreParams
 from dynamiq.utils.logger import logger
 
 
-class MilvusDocumentWriter(VectorStoreNode, MilvusVectorStoreParams):
+class MilvusDocumentWriter(Writer, MilvusVectorStoreParams):
     """
     Document Writer Node using Milvus Vector Store.
 
@@ -21,7 +20,6 @@ class MilvusDocumentWriter(VectorStoreNode, MilvusVectorStoreParams):
         vector_store (ChromaVectorStore | None): The Chroma Vector Store instance.
     """
 
-    group: Literal[NodeGroup.WRITERS] = NodeGroup.WRITERS
     name: str = "MilvusDocumentWriter"
     connection: Milvus | None = None
     vector_store: MilvusVectorStore | None = None
@@ -50,14 +48,14 @@ class MilvusDocumentWriter(VectorStoreNode, MilvusVectorStoreParams):
             "client": self.client,
         }
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
+    def execute(self, input_data: WriterInputSchema, config: RunnableConfig = None, **kwargs):
         """
         Execute the document writing process.
 
         This method writes the input documents to the Milvus Vector Store.
 
         Args:
-            input_data (dict[str, Any]): A dictionary containing the input data.
+            input_data (WriterInputSchema): An instance containing the input data.
                 Expected to have a 'documents' key with the documents to be written.
             config (RunnableConfig, optional): Configuration for the execution.
             **kwargs: Additional keyword arguments.
@@ -71,9 +69,9 @@ class MilvusDocumentWriter(VectorStoreNode, MilvusVectorStoreParams):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        documents = input_data["documents"]
-        content_key = input_data.get("content_key")
-        embedding_key = input_data.get("embedding_key")
+        documents = input_data.documents
+        content_key = input_data.content_key
+        embedding_key = input_data.embedding_key
 
         # Write documents to Milvus
         upserted_count = self.vector_store.write_documents(

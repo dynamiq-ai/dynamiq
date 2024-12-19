@@ -435,19 +435,25 @@ class Node(BaseModel, Runnable, ABC):
         return {
             "client": True,
             "vector_store": True,
-            "connection": {"api_key": True},
             "depends": True,
             "input_mapping": True,
         }
 
-    def to_dict(self, **kwargs) -> dict:
+    @property
+    def to_dict_exclude_secure_params(self):
+        return self.to_dict_exclude_params | {"connection": {"api_key": True}}
+
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
         """Converts the instance to a dictionary.
 
         Returns:
             dict: A dictionary representation of the instance.
         """
+        exclude = kwargs.pop(
+            "exclude", self.to_dict_exclude_params if include_secure_params else self.to_dict_exclude_secure_params
+        )
         data = self.model_dump(
-            exclude=kwargs.pop("exclude", self.to_dict_exclude_params),
+            exclude=exclude,
             serialize_as_any=kwargs.pop("serialize_as_any", True),
             **kwargs,
         )

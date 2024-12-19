@@ -24,7 +24,7 @@ class AgentNotFoundError(OrchestratorError):
     pass
 
 
-class ActionCommand(Enum):
+class ActionCommand(str, Enum):
     DELEGATE = "delegate"
     CLARIFY = "clarify"
     FINAL_ANSWER = "final_answer"

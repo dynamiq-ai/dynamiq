@@ -9,7 +9,7 @@ from ragas.metrics import answer_relevancy, context_precision, context_recall, f
 
 from dynamiq import ROOT_PATH, Workflow, runnables
 from dynamiq.connections.managers import get_connection_manager
-from dynamiq.loaders.yaml import WorkflowYAMLLoader
+from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 
 logger = logging.getLogger(__name__)
 

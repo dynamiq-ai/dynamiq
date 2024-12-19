@@ -43,7 +43,7 @@ class StreamChunk(BaseModel):
     choices: list[StreamChunkChoice]
 
 
-class AgentStatus(Enum):
+class AgentStatus(str, Enum):
     """Represents the status of an agent's execution."""
 
     SUCCESS = "success"
@@ -122,6 +122,7 @@ class Agent(Node):
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
         data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools]
+        data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
         if self.files:
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         return data
@@ -213,12 +214,12 @@ class Agent(Node):
         """
         Executes the agent with the given input data.
         """
-        logger.info(f"Agent {self.name} - {self.id}: started with input:\n{input_data}")
+        logger.info(f"Agent {self.name} - {self.id}: started with input {dict(input_data)}")
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        custom_metadata = self._prepare_metadata(input_data.model_dump())
+        custom_metadata = self._prepare_metadata(dict(input_data))
 
         chat_history = input_data.chat_history
 
@@ -486,10 +487,12 @@ class AgentManagerInputSchema(BaseModel):
     def validate_action(self, context):
         action = self.action
         if not action or action not in context.context.get("actions"):
-            raise InvalidActionException(
-                f"Invalid or missing action: {action}. Please select an action from \
-                    {context.context.get("actions")}."  # nosec: B608
+            error_message = (
+                f"Invalid or missing action: {action}. "  # nosec B608: Static message construction, not SQL-related.
+                "Please select an action "
+                f"from {context.context.get('actions')}"  # nosec B608: Static message construction, not SQL-related.
             )
+            raise InvalidActionException(error_message)
         return self
 
 
@@ -497,7 +500,7 @@ class AgentManager(Agent):
     """Manager class that extends the Agent class to include specific actions."""
 
     _actions: dict[str, Callable] = PrivateAttr(default_factory=dict)
-    name: str = "Agent Manager "
+    name: str = "Agent Manager"
     input_schema: ClassVar[type[AgentManagerInputSchema]] = AgentManagerInputSchema
 
     def __init__(self, **kwargs):

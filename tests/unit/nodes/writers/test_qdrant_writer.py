@@ -1,7 +1,9 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
+from dynamiq.nodes.writers.base import WriterInputSchema
 from dynamiq.nodes.writers.qdrant import QdrantDocumentWriter
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore, QdrantWriterVectorStoreParams
@@ -40,24 +42,22 @@ def test_vector_store_params(qdrant_document_writer):
 
 
 def test_execute(qdrant_document_writer, mock_qdrant_vector_store):
-    input_data = {
-        "documents": [
+    input_data = WriterInputSchema(
+        documents=[
             {"id": "1", "content": "Document 1"},
             {"id": "2", "content": "Document 2"},
-        ]
-    }
+        ],
+    )
     config = RunnableConfig(callbacks=[])
 
     result = qdrant_document_writer.execute(input_data, config)
 
-    mock_qdrant_vector_store.write_documents.assert_called_once_with(input_data["documents"], content_key=None)
+    mock_qdrant_vector_store.write_documents.assert_called_once_with(input_data.documents, content_key=None)
 
     assert result == {"upserted_count": 2}
 
 
 def test_execute_with_missing_documents_key(qdrant_document_writer):
-    input_data = {}
     config = RunnableConfig(callbacks=[])
-
-    with pytest.raises(KeyError):
-        qdrant_document_writer.execute(input_data, config)
+    with pytest.raises(ValidationError):
+        qdrant_document_writer.execute(WriterInputSchema(), config)

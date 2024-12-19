@@ -44,7 +44,7 @@ class PPTXFileConverter(Node):
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
     name: str = "PPTX File Converter"
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
-    file_converter: PPTXConverterComponent = None
+    file_converter: PPTXConverterComponent | None = None
     input_schema: ClassVar[type[PPTXFileConverterInputSchema]] = PPTXFileConverterInputSchema
 
     @property

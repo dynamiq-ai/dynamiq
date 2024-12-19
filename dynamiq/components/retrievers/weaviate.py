@@ -1,6 +1,7 @@
 from typing import Any
 
 from dynamiq.storages.vector.weaviate import WeaviateVectorStore
+from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
@@ -42,7 +43,7 @@ class WeaviateDocumentRetriever:
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
         content_key: str | None = None,
-    ):
+    ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the WeaviateDocumentStore that are similar to the provided query embedding.
         Args:
