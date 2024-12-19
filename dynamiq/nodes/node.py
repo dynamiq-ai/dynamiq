@@ -11,7 +11,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
-from dynamiq.callbacks import BaseCallbackHandler
+from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.exceptions import (
@@ -215,7 +215,7 @@ class Node(BaseModel, Runnable, ABC):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[BaseModel] | None] = None
-    callbacks: list[BaseCallbackHandler] = []
+    callbacks: list[NodeCallbackHandler] = []
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -722,7 +722,7 @@ class Node(BaseModel, Runnable, ABC):
         Returns:
             dict[str, Any]: Output from callbacks.
         """
-        for callback in callbacks + self.callbacks:
+        for callback in callbacks:
             callback.on_node_end(self.model_dump(), output_data, **kwargs)
 
         output = {}

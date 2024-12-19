@@ -11,12 +11,15 @@ from examples.llm_setup import setup_llm
 
 
 class HumanFeedbackHandler(NodeCallbackHandler):
-    def on_node_start(self, serialized, input_data, **kwargs):
+    def on_node_end(self, serialized, output_data, **kwargs):
         result = input(
-            f"Approve whether to publish a post (write CANCEL if not): "
-            f"{input_data["context"]["messages"][-1].content}"
+            f"Approve whether to publish by providing nothing or cancel by typing in feedback: "
+            f"{output_data["context"]["messages"][-1].content}"
         )
-        return {"feedback": result}
+
+        context = output_data["context"]
+        context |= {"feedback": result}
+        return context
 
 
 def create_orchestrator() -> GraphOrchestrator:
@@ -51,8 +54,8 @@ def create_orchestrator() -> GraphOrchestrator:
 
         return {"result": "Generated draft", **context}
 
-    def accept_sketch(context: dict[str, Any], feedback: str):
-        if feedback == "CANCEL":
+    def accept_sketch(context: dict[str, Any]):
+        if context.get("feedback"):
             return "generate_sketch"
 
         logger.info("Post was successfully published!")
@@ -63,12 +66,10 @@ def create_orchestrator() -> GraphOrchestrator:
         manager=GraphAgentManager(llm=llm),
     )
 
-    orchestrator.add_state_by_tasks("generate_sketch", [generate_sketch])
+    orchestrator.add_state_by_tasks("generate_sketch", [generate_sketch], callbacks=[HumanFeedbackHandler()])
 
     orchestrator.add_edge(START, "generate_sketch")
-    orchestrator.add_conditional_edge(
-        "generate_sketch", ["generate_sketch", END], accept_sketch, callbacks=[HumanFeedbackHandler()]
-    )
+    orchestrator.add_conditional_edge("generate_sketch", ["generate_sketch", END], accept_sketch)
 
     return orchestrator
 
@@ -78,7 +79,6 @@ def run_orchestrator(orchestrator, request="Write and publish small post about A
     orchestrator = create_orchestrator()
     orchestrator.context = {
         "messages": [Message(role="user", content=f"Return nothing but text: {request}")],
-        "feedback": None,
     }
     tracing = TracingCallbackHandler()
 
