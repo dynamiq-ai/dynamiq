@@ -1,14 +1,14 @@
 import logging
-import os
 
 import typer
-from datasets import Dataset
 from dotenv import find_dotenv, load_dotenv
-from ragas import evaluate
-from ragas.metrics import answer_relevancy, context_precision, context_recall, faithfulness
 
-from dynamiq import ROOT_PATH, Workflow, runnables
+from dynamiq import Workflow, runnables
 from dynamiq.connections.managers import get_connection_manager
+
+# Import Dynamiq evaluators
+from dynamiq.evaluations.metrics import ContextRecallEvaluator, FaithfulnessEvaluator
+from dynamiq.nodes.llms import OpenAI
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 
 logger = logging.getLogger(__name__)
@@ -20,10 +20,10 @@ app = typer.Typer()
 
 @app.command()
 def main(
-    question: str = "How to build an advanced RAG pipeline?", ground_truth: str = ""
+    question: str = "How to build an advanced RAG pipeline?",
+    dag_yaml_file_path: str = "examples/rag/dag_pinecone.yaml",
 ):
     with get_connection_manager() as cm:
-        dag_yaml_file_path = os.path.join(os.path.dirname(ROOT_PATH), "examples/rag/dag_pinecone.yaml")
         wf_data = WorkflowYAMLLoader.load(
             file_path=dag_yaml_file_path,
             connection_manager=cm,
@@ -38,35 +38,46 @@ def main(
             config=runnables.RunnableConfig(callbacks=[]),
         )
 
+        # Extracting the answer and documents
         answer = wf_result.output.get("openai-1").get("output").get("answer")
         documents = (
             wf_result.output.get("document-retriever-node-1")
             .get("output")
             .get("documents")
         )
-        context = [doc["content"] for doc in documents]
+        context_list = [doc["content"] for doc in documents]
+        context = " ".join(context_list)
 
-        eval_dataset = Dataset.from_dict(
-            {
-                "question": [question],
-                "ground_truth": [ground_truth],
-                "answer": [answer],
-                "contexts": [context],
-            }
+        # Initialize the LLM (replace 'gpt-4o-mini' with your available model)
+        llm = OpenAI(model="gpt-4o-mini")
+
+        # Initialize Dynamiq Evaluators
+        context_recall_evaluator = ContextRecallEvaluator(llm=llm)
+        faithfulness_evaluator = FaithfulnessEvaluator(llm=llm)
+
+        # Evaluate Context Recall
+        recall_scores = context_recall_evaluator.run(
+            question=[question],
+            answer=[answer],
+            context=[context],
         )
 
-        eval_metrics = evaluate(
-            dataset=eval_dataset,
-            metrics=[
-                context_precision,
-                faithfulness,
-                answer_relevancy,
-                context_recall,
-            ],
+        # Evaluate Faithfulness
+        faithfulness_scores = faithfulness_evaluator.run(
+            question=[question],
+            answer=[answer],
+            context=[context],
         )
 
-        logger.info(f"Retrival output (Answer):\n {answer}")
-        logger.info(f"RAG Evaluation Result:\n {eval_metrics}")
+        # Aggregate Evaluation Metrics
+        eval_metrics = {
+            "context_recall": recall_scores[0],
+            "faithfulness": faithfulness_scores[0],
+        }
+
+        # Log the results
+        logger.info(f"Retrieval output (Answer):\n {answer}")
+        logger.info(f"Dynamiq Evaluation Result:\n {eval_metrics}")
 
 
 if __name__ == "__main__":
