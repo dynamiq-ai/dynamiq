@@ -29,7 +29,7 @@ class ContextPrecisionInput(BaseModel):
     @model_validator(mode="after")
     def check_equal_length(self):
         if not (len(self.question) == len(self.answer) == len(self.context_list)):
-            raise ValueError("Question, answer, and context must have the same length.")
+            raise ValueError("Question, answer, and context_list must have the same length.")
         return self
 
 
@@ -125,10 +125,22 @@ class ContextPrecisionEvaluator(BaseModel):
                         ],
                         "context": [
                             (
-                                "Albert Einstein (14 March 1879 – 18 April 1955) was a German-born theoretical "
-                                "physicist, widely held to be one of the greatest and most influential scientists "
-                                "of all time. Best known for developing the theory of relativity, he also made "
-                                "important contributions to quantum mechanics."
+                                "Albert Einstein (14 March 1879 – 18 April 1955) was a German-born "
+                                "theoretical physicist, widely held to be one of the greatest and most "
+                                "influential scientists of all time. Best known for developing the theory "
+                                "of relativity, he also made important contributions to quantum mechanics, "
+                                "and was thus a central figure in the revolutionary reshaping of the "
+                                "scientific understanding of nature that modern physics accomplished in "
+                                "the first decades of the twentieth century. His mass–energy equivalence "
+                                "formula E = mc2, which arises from relativity theory, has been called "
+                                "'the world's most famous equation'. He received the 1921 Nobel Prize in "
+                                "Physics 'for his services to theoretical physics, and especially for his "
+                                "discovery of the law of the photoelectric effect', a pivotal step in the "
+                                "development of quantum theory. His work is also known for its influence on "
+                                "the philosophy of science. In a 1999 poll of 130 leading physicists "
+                                "worldwide by the British journal Physics World, Einstein was ranked the "
+                                "greatest physicist of all time. His intellectual achievements and "
+                                "originality have made Einstein synonymous with genius."
                             )
                         ],
                     },
@@ -148,10 +160,10 @@ class ContextPrecisionEvaluator(BaseModel):
                         "context": [
                             (
                                 "The 2022 ICC Men's T20 World Cup, held from October 16 to November 13, "
-                                "2022, in Australia, was the eighth edition of the tournament. Originally scheduled "
-                                "for 2020, it was postponed due to the COVID-19 pandemic. England emerged victorious, "
-                                "defeating Pakistan by five wickets in the final to clinch their second ICC Men's "
-                                "T20 World Cup title."
+                                "2022, in Australia, was the eighth edition of the tournament. Originally "
+                                "scheduled for 2020, it was postponed due to the COVID-19 pandemic. "
+                                "England emerged victorious, defeating Pakistan by five wickets in the "
+                                "final to clinch their second ICC Men's T20 World Cup title."
                             )
                         ],
                     },
@@ -169,8 +181,11 @@ class ContextPrecisionEvaluator(BaseModel):
                         "answer": ["Mount Everest."],
                         "context": [
                             (
-                                "The Andes is the longest continental mountain range in the world, located in "
-                                "South America. It features many high peaks but not the tallest in the world."
+                                "The Andes is the longest continental mountain range in the world, located "
+                                "in South America. It stretches across seven countries and features many of "
+                                "the highest peaks in the Western Hemisphere. The range is known for its "
+                                "diverse ecosystems, including the high-altitude Andean Plateau and the "
+                                "Amazon rainforest."
                             )
                         ],
                     },
@@ -221,9 +236,9 @@ class ContextPrecisionEvaluator(BaseModel):
         Evaluate the context precision for each question.
 
         Args:
-            question (List[str]): List of questions.
-            answer (List[str]): List of corresponding answers.
-            context_list (List[List[str]]): List of contexts for each question.
+            questions (List[str]): List of questions.
+            answers (List[str]): List of corresponding answers.
+            contexts_list (List[List[str]]): List of contexts for each question.
             verbose (bool): Flag to enable verbose logging.
 
         Returns:
@@ -262,8 +277,8 @@ class ContextPrecisionEvaluator(BaseModel):
                 if input_data.verbose:
                     reason = result["results"][0]["reason"]
                     # Use logging instead of print
-                    logger.debug(f"Question: {single_question}")
-                    logger.debug(f"Answer: {single_answer}")
+                    logger.debug(f"Question: {question}")
+                    logger.debug(f"Answer: {answer}")
                     logger.debug(f"Context: {context}")
                     logger.debug(f"Verdict: {verdict}")
                     logger.debug(f"Reason: {reason}")

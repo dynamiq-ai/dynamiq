@@ -37,7 +37,12 @@ def main():
     context_list = [
         [
             # Contexts for the first question
-            ("Albert Einstein was a German-born theoretical physicist. " "He developed the theory of relativity."),
+            (
+                "Albert Einstein (14 March 1879 – 18 April 1955) was a German-born theoretical "
+                "physicist, widely held to be one of the greatest and most influential scientists "
+                "of all time. Best known for developing the theory of relativity, he also made "
+                "important contributions to quantum mechanics."
+            ),
             (
                 "Albert Einstein's work is also known for its influence on the philosophy of "
                 "science. His mass–energy equivalence formula E = mc^2 has been called 'the world's "
@@ -68,13 +73,13 @@ def main():
         ],
     ]
 
-    # Initialize evaluator and evaluate
+    # Initialize evaluator
     evaluator = ContextPrecisionEvaluator(llm=llm)
     correctness_scores = evaluator.run(
         question=questions,
         answer=answers,
         context_list=context_list,
-        verbose=True,  # Set to False to disable verbose logging
+        verbose=False,  # Set to True to enable verbose logging
     )
 
     # Print the results
