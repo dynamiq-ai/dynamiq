@@ -17,21 +17,21 @@ class ContextRecallInput(BaseModel):
     Input model for context recall evaluation.
 
     Attributes:
-        questions (List[str]): List of questions.
-        contexts (List[str]): List of corresponding contexts.
-        answers (List[str]): List of answers.
+        question (List[str]): Single questions.
+        context (List[str]): Corresponding context for each question.
+        answer (List[str]): List of answers.
         verbose (bool): Flag to enable verbose logging.
     """
 
-    questions: list[str]
-    contexts: list[str]
-    answers: list[str]
+    question: list[str]
+    context: list[str]
+    answer: list[str]
     verbose: bool = False
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if not (len(self.questions) == len(self.contexts) == len(self.answers)):
-            raise ValueError("Questions, contexts, and answers must have the same length.")
+        if not (len(self.question) == len(self.context) == len(self.answer)):
+            raise ValueError("Question, context, and answer must have the same length.")
         return self
 
 
@@ -199,41 +199,41 @@ class ContextRecallEvaluator(BaseModel):
 
     def run(
         self,
-        questions: list[str],
-        contexts: list[str],
-        answers: list[str],
+        question: list[str],
+        context: list[str],
+        answer: list[str],
         verbose: bool = False,
     ) -> list[float]:
         """
         Evaluate the context recall for each question.
 
         Args:
-            questions (List[str]): List of questions.
-            contexts (List[str]): List of corresponding contexts.
-            answers (List[str]): List of answers.
+            question (List[str]): Single questions.
+            context (List[str]): Corresponding context for each question.
+            answer (List[str]): List of answers.
             verbose (bool): Flag to enable verbose logging.
 
         Returns:
             List[float]: List of context recall scores for each question.
         """
         input_data = ContextRecallInput(
-            questions=questions,
-            contexts=contexts,
-            answers=answers,
+            question=question,
+            context=context,
+            answer=answer,
             verbose=verbose,
         )
 
         final_scores = []
 
-        for idx in range(len(input_data.questions)):
-            question = input_data.questions[idx]
-            context = input_data.contexts[idx]
-            answer = input_data.answers[idx]
+        for idx in range(len(input_data.question)):
+            single_question = input_data.question[idx]
+            single_context = input_data.context[idx]
+            single_answer = input_data.answer[idx]
 
             result = self._classification_evaluator.run(
-                question=[question],
-                context=[context],
-                answer=[answer],
+                question=[single_question],
+                context=[single_context],
+                answer=[single_answer],
             )
 
             # Extract classifications
@@ -255,9 +255,9 @@ class ContextRecallEvaluator(BaseModel):
             final_scores.append(score)
 
             if input_data.verbose:
-                logger.debug(f"Question: {question}")
-                logger.debug(f"Answer: {answer}")
-                logger.debug(f"Context: {context}")
+                logger.debug(f"Question: {single_question}")
+                logger.debug(f"Answer: {single_answer}")
+                logger.debug(f"Context: {single_context}")
                 logger.debug("Classifications:")
                 logger.debug(json.dumps([item.dict() for item in classifications], indent=2))
                 logger.debug(f"Context Recall Score: {score}")

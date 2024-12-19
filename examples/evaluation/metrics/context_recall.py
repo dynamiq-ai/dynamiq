@@ -20,8 +20,8 @@ def main():
     llm = OpenAI(model="gpt-4o-mini")
 
     # Sample data
-    questions = ["What can you tell me about Albert Einstein?"]
-    contexts = [
+    question = ["What can you tell me about Albert Einstein?"]
+    context = [
         (
             "Albert Einstein (14 March 1879 - 18 April 1955) was a German-born "
             "theoretical physicist, widely held to be one of the greatest and most "
@@ -41,7 +41,7 @@ def main():
             "originality have made Einstein synonymous with genius."
         )
     ]
-    answers = [
+    answer = [
         (
             "Albert Einstein, born on 14 March 1879, was a German-born theoretical "
             "physicist, widely held to be one of the greatest and most influential "
@@ -54,12 +54,12 @@ def main():
     # Initialize evaluator and evaluate
     evaluator = ContextRecallEvaluator(llm=llm)
     recall_scores = evaluator.run(
-        questions=questions, contexts=contexts, answers=answers, verbose=True  # Set to False to disable verbose logging
+        question=question, context=context, answer=answer, verbose=True  # Set to False to disable verbose logging
     )
 
     # Print the results
     for idx, score in enumerate(recall_scores):
-        print(f"Question: {questions[idx]}")
+        print(f"Question: {question[idx]}")
         print(f"Context Recall Score: {score}")
         print("-" * 50)
 
