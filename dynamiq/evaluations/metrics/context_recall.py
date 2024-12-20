@@ -23,14 +23,14 @@ class ContextRecallInput(BaseModel):
         verbose (bool): Flag to enable verbose logging.
     """
 
-    question: list[str]
-    context: list[str]
-    answer: list[str]
+    questions: list[str]
+    contexts: list[str]
+    answers: list[str]
     verbose: bool = False
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if not (len(self.question) == len(self.context) == len(self.answer)):
+        if not (len(self.questions) == len(self.contexts) == len(self.answers)):
             raise ValueError("Question, context, and answer must have the same length.")
         return self
 
@@ -199,9 +199,9 @@ class ContextRecallEvaluator(BaseModel):
 
     def run(
         self,
-        question: list[str],
-        context: list[str],
-        answer: list[str],
+        questions: list[str],
+        contexts: list[str],
+        answers: list[str],
         verbose: bool = False,
     ) -> list[float]:
         """
@@ -217,18 +217,18 @@ class ContextRecallEvaluator(BaseModel):
             List[float]: List of context recall scores for each question.
         """
         input_data = ContextRecallInput(
-            question=question,
-            context=context,
-            answer=answer,
+            questions=questions,
+            contexts=contexts,
+            answers=answers,
             verbose=verbose,
         )
 
         final_scores = []
 
-        for idx in range(len(input_data.question)):
-            single_question = input_data.question[idx]
-            single_context = input_data.context[idx]
-            single_answer = input_data.answer[idx]
+        for idx in range(len(input_data.questions)):
+            single_question = input_data.questions[idx]
+            single_context = input_data.contexts[idx]
+            single_answer = input_data.answers[idx]
 
             result = self._classification_evaluator.run(
                 question=[single_question],

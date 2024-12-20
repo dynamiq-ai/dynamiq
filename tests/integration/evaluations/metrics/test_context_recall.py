@@ -5,8 +5,8 @@ from dynamiq.evaluations.metrics import ContextRecallEvaluator
 
 def test_context_recall_evaluator(openai_node):
     # Sample data
-    question = ["What can you tell me about Albert Einstein?", "Tell me about the Great Wall of China."]
-    context = [
+    questions = ["What can you tell me about Albert Einstein?", "Tell me about the Great Wall of China."]
+    contexts = [
         (
             "Albert Einstein (14 March 1879 - 18 April 1955) was a German-born "
             "theoretical physicist, widely held to be one of the greatest and most "
@@ -20,7 +20,7 @@ def test_context_recall_evaluator(openai_node):
             "Imperial China as protection against various nomadic groups."
         ),
     ]
-    answer = [
+    answers = [
         (
             "Albert Einstein was a theoretical physicist. He developed the theory of "
             "relativity and contributed to quantum mechanics. He was born in Germany "
@@ -97,7 +97,7 @@ def test_context_recall_evaluator(openai_node):
     evaluator._classification_evaluator.run = MagicMock(side_effect=mocked_run_results)
 
     # Run the evaluator
-    recall_scores = evaluator.run(question=question, context=context, answer=answer, verbose=False)
+    recall_scores = evaluator.run(questions=questions, contexts=contexts, answers=answers, verbose=False)
 
     # Expected scores based on the mocked data
     expected_scores = [

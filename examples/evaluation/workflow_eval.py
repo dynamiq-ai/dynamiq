@@ -57,9 +57,9 @@ def main(
 
         # Evaluate Context Recall
         recall_scores = context_recall_evaluator.run(
-            question=[question],
-            answer=[answer],
-            context=[context],
+            questions=[question],
+            answers=[answer],
+            contexts=[context],
         )
 
         # Evaluate Faithfulness
