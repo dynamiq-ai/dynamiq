@@ -104,14 +104,14 @@ class RunInput(BaseModel):
         verbose (bool): Flag to enable verbose logging.
     """
 
-    question: list[str]
-    answer: list[str]
-    context: list[str]
+    questions: list[str]
+    answers: list[str]
+    contexts: list[str]
     verbose: bool = False
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if not (len(self.question) == len(self.answer) == len(self.context)):
+        if not (len(self.questions) == len(self.answers) == len(self.contexts)):
             raise ValueError("Question, answer, and context must have the same length.")
         return self
 
@@ -338,9 +338,9 @@ class FaithfulnessEvaluator(BaseModel):
 
     def run(
         self,
-        question: list[str],
-        answer: list[str],
-        context: list[str],
+        questions: list[str],
+        answers: list[str],
+        contexts: list[str],
         verbose: bool = False,
     ) -> list[float]:
         """
@@ -356,24 +356,24 @@ class FaithfulnessEvaluator(BaseModel):
             List[float]: List of faithfulness scores.
         """
         input_data = RunInput(
-            question=question,
-            answer=answer,
-            context=context,
+            questions=questions,
+            answers=answers,
+            contexts=contexts,
             verbose=verbose,
         )
         final_scores = []
 
-        for idx in range(len(input_data.question)):
-            question = input_data.question[idx]
-            answer = input_data.answer[idx]
-            context = input_data.context[idx]
+        for idx in range(len(input_data.questions)):
+            questions = input_data.questions[idx]
+            answers = input_data.answers[idx]
+            contexts = input_data.contexts[idx]
 
             # Simplify statements
-            statements_list = self.simplify_statements([question], [answer])
+            statements_list = self.simplify_statements([questions], [answers])
             statements = statements_list[0]
 
             # Check faithfulness of statements
-            results_list = self.check_faithfulness([context], [statements])
+            results_list = self.check_faithfulness([contexts], [statements])
             results = results_list[0]
 
             # Compute faithfulness score
@@ -383,9 +383,9 @@ class FaithfulnessEvaluator(BaseModel):
             final_scores.append(score)
 
             if input_data.verbose:
-                logger.debug(f"Question: {question}")
-                logger.debug(f"Answer: {answer}")
-                logger.debug(f"Context: {context}")
+                logger.debug(f"Question: {questions}")
+                logger.debug(f"Answer: {answers}")
+                logger.debug(f"Context: {contexts}")
                 logger.debug("Simplified Statements:")
                 logger.debug(statements)
                 logger.debug("Faithfulness Results:")

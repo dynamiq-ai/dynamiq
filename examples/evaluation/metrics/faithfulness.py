@@ -46,9 +46,9 @@ def main():
     # Initialize evaluator and evaluate
     evaluator = FaithfulnessEvaluator(llm=llm)
     faithfulness_scores = evaluator.run(
-        question=questions,
-        answer=answers,
-        context=contexts,
+        questions=questions,
+        answers=answers,
+        contexts=contexts,
         verbose=True,  # Set to False to disable verbose logging
     )
 

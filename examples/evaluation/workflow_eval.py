@@ -64,9 +64,9 @@ def main(
 
         # Evaluate Faithfulness
         faithfulness_scores = faithfulness_evaluator.run(
-            question=[question],
-            answer=[answer],
-            context=[context],
+            questions=[question],
+            answers=[answer],
+            contexts=[context],
         )
 
         # Aggregate Evaluation Metrics

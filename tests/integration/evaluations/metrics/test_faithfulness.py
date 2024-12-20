@@ -132,7 +132,7 @@ def test_faithfulness_evaluator(openai_node):
     )
 
     # Run the evaluator
-    faithfulness_scores = evaluator.run(question=questions, answer=answers, context=contexts, verbose=False)
+    faithfulness_scores = evaluator.run(questions=questions, answers=answers, contexts=contexts, verbose=False)
 
     # Expected scores based on the mocked data
     expected_scores = [
