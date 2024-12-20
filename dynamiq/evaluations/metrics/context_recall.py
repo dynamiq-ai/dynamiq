@@ -226,14 +226,14 @@ class ContextRecallEvaluator(BaseModel):
         final_scores = []
 
         for idx in range(len(input_data.questions)):
-            single_question = input_data.questions[idx]
-            single_context = input_data.contexts[idx]
-            single_answer = input_data.answers[idx]
+            question = input_data.questions[idx]
+            context = input_data.contexts[idx]
+            answer = input_data.answers[idx]
 
             result = self._classification_evaluator.run(
-                question=[single_question],
-                context=[single_context],
-                answer=[single_answer],
+                question=[question],
+                context=[context],
+                answer=[answer],
             )
 
             # Extract classifications
@@ -255,9 +255,9 @@ class ContextRecallEvaluator(BaseModel):
             final_scores.append(score)
 
             if input_data.verbose:
-                logger.debug(f"Question: {single_question}")
-                logger.debug(f"Answer: {single_answer}")
-                logger.debug(f"Context: {single_context}")
+                logger.debug(f"Question: {question}")
+                logger.debug(f"Answer: {answer}")
+                logger.debug(f"Context: {context}")
                 logger.debug("Classifications:")
                 logger.debug(json.dumps([item.dict() for item in classifications], indent=2))
                 logger.debug(f"Context Recall Score: {score}")
