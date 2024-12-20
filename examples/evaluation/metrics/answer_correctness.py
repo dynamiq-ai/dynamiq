@@ -31,7 +31,7 @@ def main():
         ),
         "The boiling point of water is 100 degrees Celsius at sea level.",
     ]
-    ground_truths = [
+    ground_truth_answers = [
         (
             "The sun is powered by nuclear fusion, where hydrogen atoms fuse to form helium."
             " This fusion process releases a tremendous amount of energy. The sun provides"
@@ -51,7 +51,7 @@ def main():
     correctness_scores = evaluator.run(
         questions=questions,
         answers=answers,
-        ground_truths=ground_truths,
+        ground_truth_answers=ground_truth_answers,
         verbose=False,  # Set verbose=True to enable logging
     )
 

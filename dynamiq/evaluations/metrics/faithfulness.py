@@ -100,19 +100,19 @@ class RunInput(BaseModel):
     Attributes:
         questions (List[str]): List of questions.
         answers (List[str]): List of corresponding answers.
-        contexts_list (List[List[str]]): List of contexts for each question.
+        contexts (List[str]): List of context texts for each question.
         verbose (bool): Flag to enable verbose logging.
     """
 
     questions: list[str]
     answers: list[str]
-    contexts_list: list[list[str]]
+    contexts: list[str]
     verbose: bool = False
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if not (len(self.questions) == len(self.answers) == len(self.contexts_list)):
-            raise ValueError("Questions, answers, and contexts_list must have the same length.")
+        if not (len(self.questions) == len(self.answers) == len(self.contexts)):
+            raise ValueError("Questions, answers, and contexts must have the same length.")
         return self
 
 
@@ -181,7 +181,7 @@ class FaithfulnessEvaluator(BaseModel):
                                 "acknowledged to be one of the greatest and most influential "
                                 "physicists of all time. He was best known for developing "
                                 "the theory of relativity, he also made important contributions "
-                                "to the development of quantum mechanics."
+                                "to the development of the theory of quantum mechanics."
                             )
                         ],
                     },
@@ -340,7 +340,7 @@ class FaithfulnessEvaluator(BaseModel):
         self,
         questions: list[str],
         answers: list[str],
-        contexts_list: list[list[str]],
+        contexts: list[str],
         verbose: bool = False,
     ) -> list[float]:
         """
@@ -349,7 +349,7 @@ class FaithfulnessEvaluator(BaseModel):
         Args:
             questions (List[str]): List of questions.
             answers (List[str]): List of corresponding answers.
-            contexts_list (List[List[str]]): List of contexts for each question.
+            contexts (List[str]): List of context texts for each question.
             verbose (bool): Flag to enable verbose logging.
 
         Returns:
@@ -358,23 +358,22 @@ class FaithfulnessEvaluator(BaseModel):
         input_data = RunInput(
             questions=questions,
             answers=answers,
-            contexts_list=contexts_list,
+            contexts=contexts,
             verbose=verbose,
         )
         final_scores = []
 
         for idx in range(len(input_data.questions)):
-            question = input_data.questions[idx]
-            answer = input_data.answers[idx]
-            contexts = input_data.contexts_list[idx]
-            context = "\n".join(contexts)
+            questions = input_data.questions[idx]
+            answers = input_data.answers[idx]
+            contexts = input_data.contexts[idx]
 
             # Simplify statements
-            statements_list = self.simplify_statements([question], [answer])
+            statements_list = self.simplify_statements([questions], [answers])
             statements = statements_list[0]
 
             # Check faithfulness of statements
-            results_list = self.check_faithfulness([context], [statements])
+            results_list = self.check_faithfulness([contexts], [statements])
             results = results_list[0]
 
             # Compute faithfulness score
@@ -384,9 +383,9 @@ class FaithfulnessEvaluator(BaseModel):
             final_scores.append(score)
 
             if input_data.verbose:
-                logger.debug(f"Question: {question}")
-                logger.debug(f"Answer: {answer}")
-                logger.debug(f"Context: {context}")
+                logger.debug(f"Question: {questions}")
+                logger.debug(f"Answer: {answers}")
+                logger.debug(f"Context: {contexts}")
                 logger.debug("Simplified Statements:")
                 logger.debug(statements)
                 logger.debug("Faithfulness Results:")

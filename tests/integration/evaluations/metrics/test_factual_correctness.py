@@ -5,7 +5,7 @@ from dynamiq.evaluations.metrics import FactualCorrectnessEvaluator
 
 def test_factual_correctness_evaluator(openai_node):
     # Sample data
-    responses = [
+    answers = [
         (
             "Albert Einstein was a German theoretical physicist. "
             "He developed the theory of relativity and contributed "
@@ -13,7 +13,7 @@ def test_factual_correctness_evaluator(openai_node):
         ),
         ("The Eiffel Tower is located in Berlin, Germany. " "It was constructed in 1889."),
     ]
-    references = [
+    contexts = [
         ("Albert Einstein was a German-born theoretical physicist. " "He developed the theory of relativity."),
         ("The Eiffel Tower is located in Paris, France. " "It was constructed in 1887 and opened in 1889."),
     ]
@@ -161,7 +161,7 @@ def test_factual_correctness_evaluator(openai_node):
     )
 
     # Run the evaluator
-    correctness_scores = evaluator.run(responses=responses, references=references, verbose=False)
+    correctness_scores = evaluator.run(answers=answers, contexts=contexts, verbose=False)
 
     # Expected scores based on the mocked data
     expected_scores = [0.8, 0.4]  # For the first item  # For the second item
