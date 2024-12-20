@@ -69,15 +69,15 @@ class RunInput(BaseModel):
         verbose (bool): Flag to enable verbose logging.
     """
 
-    answer: list[str]
-    context: list[str]
+    answers: list[str]
+    contexts: list[str]
     mode: str | None = None
     beta: float | None = None
     verbose: bool = False
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if len(self.answer) != len(self.context):
+        if len(self.answers) != len(self.contexts):
             raise ValueError("Answer and context must have the same length.")
         return self
 
@@ -289,8 +289,8 @@ class FactualCorrectnessEvaluator(BaseModel):
 
     def run(
         self,
-        answer: list[str],
-        context: list[str],
+        answers: list[str],
+        contexts: list[str],
         mode: str | None = None,
         beta: float | None = None,
         verbose: bool = False,
@@ -309,8 +309,8 @@ class FactualCorrectnessEvaluator(BaseModel):
             List[float]: List of factual correctness scores.
         """
         input_data = RunInput(
-            answer=answer,
-            context=context,
+            answers=answers,
+            contexts=contexts,
             mode=mode,
             beta=beta,
             verbose=verbose,
@@ -320,9 +320,9 @@ class FactualCorrectnessEvaluator(BaseModel):
 
         final_scores = []
 
-        for idx in range(len(input_data.answer)):
-            single_answer = input_data.answer[idx]
-            single_context = input_data.context[idx]
+        for idx in range(len(input_data.answers)):
+            single_answer = input_data.answers[idx]
+            single_context = input_data.contexts[idx]
 
             # Decompose claims from answer and context
             answer_claims_list = self.decompose_claims([single_answer])
