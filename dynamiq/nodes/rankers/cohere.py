@@ -85,4 +85,4 @@ class CohereReranker(Node):
 
         logger.debug(f"Node {self.name} - {self.id}: Successfully reranked {len(reranked_documents)} documents")
 
-        return reranked_documents[: self.top_k]
+        return {"documents": reranked_documents[: self.top_k]}
