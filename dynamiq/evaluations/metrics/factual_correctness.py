@@ -2,7 +2,7 @@ import logging
 from functools import cached_property
 from typing import Any
 
-from pydantic import BaseModel, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, PrivateAttr, computed_field, field_validator, model_validator
 
 from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
 from dynamiq.nodes.llms import BaseLLM
@@ -62,23 +62,46 @@ class RunInput(BaseModel):
     Input model for running factual correctness evaluation.
 
     Attributes:
-        answers (List[str]): List of response texts.
-        contexts (List[str]): List of reference texts.
-        mode (Optional[str]): Evaluation mode ('precision', 'recall', or 'f1').
-        beta (Optional[float]): Beta value for F-beta score.
+        answers (list[str]): List of response texts.
+        contexts (list[str] | list[list[str]]): List of reference texts, or list of lists of reference texts.
+        mode (str | None): Evaluation mode ('precision', 'recall', or 'f1').
+        beta (float | None): Beta value for F-beta score.
         verbose (bool): Flag to enable verbose logging.
     """
 
     answers: list[str]
-    contexts: list[str]
+    contexts: list[str] | list[list[str]]
     mode: str | None = None
     beta: float | None = None
     verbose: bool = False
 
+    @field_validator("contexts", mode="before")
+    def unify_contexts(cls, v):
+        """
+        Allow contexts to be either list[str] or list[list[str]]. If list[list[str]],
+        each sub-list is joined into one string. Otherwise, if it's already list[str],
+        we leave it as-is.
+        """
+        if not isinstance(v, list):
+            raise ValueError("contexts must be a list of strings or a list of list of strings.")
+
+        # Check if it's a list[list[str]] -> join each sublist
+        if all(isinstance(item, list) and all(isinstance(x, str) for x in item) for item in v):
+            return [" ".join(sublist) for sublist in v]
+
+        # Check if it's already list[str]
+        if all(isinstance(item, str) for item in v):
+            return v
+
+        raise ValueError("contexts must be either a list of strings or a list of lists of strings.")
+
     @model_validator(mode="after")
     def check_equal_length(self):
+        """
+        By this time, contexts should be list[str]. Ensure answers and contexts have the same length.
+        """
         if len(self.answers) != len(self.contexts):
-            raise ValueError("Answer and context must have the same length.")
+            raise ValueError("answers and contexts must have the same length.")
         return self
 
 
@@ -290,7 +313,7 @@ class FactualCorrectnessEvaluator(BaseModel):
     def run(
         self,
         answers: list[str],
-        contexts: list[str],
+        contexts: list[str] | list[list[str]],
         mode: str | None = None,
         beta: float | None = None,
         verbose: bool = False,
@@ -299,15 +322,16 @@ class FactualCorrectnessEvaluator(BaseModel):
         Evaluate the factual correctness of answers against contexts.
 
         Args:
-            answers (List[str]): List of response texts.
-            contexts (List[str]): List of reference texts.
-            mode (Optional[str]): Evaluation mode ('precision', 'recall', or 'f1').
-            beta (Optional[float]): Beta value for F-beta score.
-            verbose (bool): Flag to enable verbose logging.
+            answers: List of response texts.
+            contexts: Either a list of context strings or a list of lists of context strings.
+            mode: 'precision', 'recall', or 'f1' (if None, defaults to self.mode).
+            beta: Beta value for F-beta score (if None, defaults to self.beta).
+            verbose: Flag for verbose debugging logs.
 
         Returns:
-            List[float]: List of factual correctness scores.
+            List[float]: List of factual correctness scores for each answer/context pair.
         """
+        # Validate and normalize the inputs via Pydantic
         input_data = RunInput(
             answers=answers,
             contexts=contexts,
@@ -315,6 +339,7 @@ class FactualCorrectnessEvaluator(BaseModel):
             beta=beta,
             verbose=verbose,
         )
+        # If mode/beta not specified in the input, default to self.mode/self.beta
         mode = input_data.mode or self.mode
         beta = input_data.beta or self.beta
 
@@ -322,7 +347,7 @@ class FactualCorrectnessEvaluator(BaseModel):
 
         for idx in range(len(input_data.answers)):
             answer = input_data.answers[idx]
-            context = input_data.contexts[idx]
+            context = input_data.contexts[idx]  # Guaranteed to be a single string now
 
             # Decompose claims from answer and context
             answer_claims_list = self.decompose_claims([answer])
@@ -342,7 +367,7 @@ class FactualCorrectnessEvaluator(BaseModel):
             fp = len(context_verdicts) - tp
 
             if mode != "precision":
-                # Verify context claims against answer (recall)
+                # If mode is recall or F1, verify context claims against answer (recall)
                 answer_verdicts_list = self.verify_claims(
                     premises=[answer],
                     claims_list=[context_claims],

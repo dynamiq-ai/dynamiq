@@ -17,19 +17,46 @@ class ContextRecallInput(BaseModel):
     Input model for context recall evaluation.
 
     Attributes:
-        questions (List[str]): List of questions.
-        contexts (List[str]): List of corresponding contexts.
-        answers (List[str]): List of answers.
+        questions (list[str]): List of questions.
+        contexts (list[str]): List of corresponding contexts (can also accept list[list[str]]).
+        answers (list[str]): List of answers.
         verbose (bool): Flag to enable verbose logging.
     """
 
     questions: list[str]
-    contexts: list[str]
+    contexts: list[str] | list[list[str]]
     answers: list[str]
     verbose: bool = False
 
+    # mode="before" -> run this validator before creating the model
+    @field_validator("contexts", mode="before")
+    def unify_contexts(cls, v):
+        """
+        If we receive a list of lists of strings, join each sublist into a single string.
+        Otherwise, if it's already list[str], do nothing.
+        """
+        # Ensure "contexts" is at least a list
+        if not isinstance(v, list):
+            raise ValueError("contexts must be either a list[str] or a list[list[str]].")
+
+        # Check if list[list[str]] (all items are lists, each sublist all strings)
+        if all(isinstance(item, list) and all(isinstance(x, str) for x in item) for item in v):
+            # Convert each sublist into a single string by joining with a space
+            return [" ".join(sublist) for sublist in v]
+
+        # Check if already list[str]
+        if all(isinstance(item, str) for item in v):
+            return v
+
+        # Otherwise, invalid data structure
+        raise ValueError("contexts must be either a list[str] or a list[list[str]].")
+
     @model_validator(mode="after")
     def check_equal_length(self):
+        """
+        After the model is created (and 'contexts' is normalized),
+        ensure that questions, contexts, and answers are the same length.
+        """
         if not (len(self.questions) == len(self.contexts) == len(self.answers)):
             raise ValueError("Questions, contexts, and answers must have the same length.")
         return self
@@ -200,7 +227,7 @@ class ContextRecallEvaluator(BaseModel):
     def run(
         self,
         questions: list[str],
-        contexts: list[str],
+        contexts: list[str] | list[list[str]],
         answers: list[str],
         verbose: bool = False,
     ) -> list[float]:
@@ -208,14 +235,16 @@ class ContextRecallEvaluator(BaseModel):
         Evaluate the context recall for each question.
 
         Args:
-            questions (List[str]): List of questions.
-            contexts (List[str]): List of corresponding contexts.
-            answers (List[str]): List of answers.
+            questions (list[str]): List of questions.
+            contexts (list[str] or list[list[str]]): Could be a single list of context strings
+                or a list of sublists (each sublist is for one question).
+            answers (list[str]): List of answers.
             verbose (bool): Flag to enable verbose logging.
 
         Returns:
-            List[float]: List of context recall scores for each question.
+            list[float]: List of context recall scores for each question.
         """
+        # Pass everything to the Pydantic model, which will unify "contexts".
         input_data = ContextRecallInput(
             questions=questions,
             contexts=contexts,
@@ -227,9 +256,10 @@ class ContextRecallEvaluator(BaseModel):
 
         for idx in range(len(input_data.questions)):
             question = input_data.questions[idx]
-            context = input_data.contexts[idx]
+            context = input_data.contexts[idx]  # Now guaranteed to be a single string
             answer = input_data.answers[idx]
 
+            # Evaluate classification
             result = self._classification_evaluator.run(
                 question=[question],
                 context=[context],
