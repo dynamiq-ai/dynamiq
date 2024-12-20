@@ -277,8 +277,8 @@ class ContextPrecisionEvaluator(BaseModel):
                 if input_data.verbose:
                     reason = result["results"][0]["reason"]
                     # Use logging instead of print
-                    logger.debug(f"Question: {questions}")
-                    logger.debug(f"Answer: {answers}")
+                    logger.debug(f"Question: {question}")
+                    logger.debug(f"Answer: {answer}")
                     logger.debug(f"Context: {context}")
                     logger.debug(f"Verdict: {verdict}")
                     logger.debug(f"Reason: {reason}")
