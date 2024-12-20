@@ -34,33 +34,33 @@ class Qdrant(MemoryBackend):
     vector_store: QdrantVectorStore | None = None
     _client: QdrantClient | None = PrivateAttr(default=None)
 
+    @property
+    def to_dict_exclude_params(self):
+        """Define parameters to exclude when converting the class instance to a dictionary."""
+        return super().to_dict_exclude_params | {"embedder": True, "vector_store": True}
+
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
+        """Converts the instance to a dictionary."""
+        kwargs.pop("include_secure_params", None)
+        data = super().to_dict(**kwargs)
+        data["embedder"] = self.embedder.to_dict(include_secure_params=include_secure_params, **kwargs)
+        return data
+
     def model_post_init(self, __context) -> None:
         """Initialize the vector store after model initialization."""
         if not self.vector_store:
             self.vector_store = QdrantVectorStore(
                 connection=self.connection,
                 index_name=self.index_name,
-                create_if_not_exist=self.create_if_not_exist,
                 metric=self.metric,
                 on_disk=self.on_disk,
+                create_if_not_exist=self.create_if_not_exist,
                 recreate_index=self.recreate_index,
             )
+
         self._client = self.vector_store._client
         if not self._client:
             raise QdrantError("Failed to initialize Qdrant client")
-
-            # Ensure collection exists before any operations
-            if self.create_if_not_exist and not self._client.collection_exists(self.index_name):
-                self.vector_store._set_up_collection(
-                    collection_name=self.index_name,
-                    embedding_dim=1536,
-                    create_if_not_exist=True,
-                    recreate_collection=self.recreate_index,
-                    similarity=self.metric,
-                    use_sparse_embeddings=False,
-                    sparse_idf=False,
-                    on_disk=self.on_disk,
-                )
 
     def _message_to_document(self, message: Message) -> Document:
         """Converts a Message object to a Document object."""

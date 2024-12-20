@@ -21,7 +21,7 @@ class StateInputSchema(BaseModel):
     chat_history: list[dict[str, Any]] = Field(..., description="Previous chat history.")
 
 
-class State(Node):
+class GraphState(Node):
     """Represents single state of graph flow
 
     Attributes:

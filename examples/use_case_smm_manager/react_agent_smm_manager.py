@@ -58,9 +58,9 @@ file_io = read_file_as_bytesio(
 result = agent.run(
     input_data={
         "input": (
-            "Read the file and craft the personalised email for each recipient. "
-            "Also send the emails to the recipients."
-            "For end of the email use the following text: 'Best regards, AI Agent from Dynamiq'"
+            "Read the file and craft a personalized email for each recipient. "
+            "Also, send the emails to the recipients. "
+            "End each email with the following text: 'Best regards, AI Agent from Dynamiq.'"
         ),
         "files": [file_io],
     },

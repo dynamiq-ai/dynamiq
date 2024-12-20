@@ -24,17 +24,16 @@ from examples.tools.scraper import ScraperSummarizerTool
 # Constants
 GPT_MODEL = "gpt-4o"
 CLAUDE_MODEL = "claude-3-5-sonnet-20240620"
-AGENT_RESAERCHER_ROLE = (
-    "the Senior Research Analyst, "
-    "that specializes in finding latest and most actual information,"
-    "goal is to find the most relevant information regarding"
-    "to the requested topic and provide to user"
+AGENT_RESEARCHER_ROLE = (
+    "The Senior Research Analyst, "
+    "specializing in finding the latest and most accurate information. "
+    "The goal is to locate the most relevant information on the requested topic and provide it to the user."
 )
+
 AGENT_WRITER_ROLE = (
-    "the Senior Writer and Editor,"
-    "that specializes in creating high-quality content,"
-    "goal is to create a high-quality content based "
-    "on the information provided by the Research Analyst"
+    "The Senior Writer and Editor, "
+    "specializing in creating high-quality content. "
+    "The goal is to produce high-quality content based on the information provided by the Research Analyst."
 )
 # Please use your own file path
 OUTPUT_FILE_PATH = "article_gpt.md"
@@ -119,7 +118,7 @@ def inference(user_prompt: str, model_type="gpt", model_name="gpt-4o-mini") -> d
         name="Research Analyst",
         llm=llm_react_agent,
         tools=[tool_search, tool_scrape_summarizer],
-        role=AGENT_RESAERCHER_ROLE,
+        role=AGENT_RESEARCHER_ROLE,
         max_loops=8,
         function_calling=True,
     )
@@ -155,7 +154,10 @@ def inference(user_prompt: str, model_type="gpt", model_name="gpt-4o-mini") -> d
 
 
 if __name__ == "__main__":
-    user_prompt = "comprehensive study of the Turkish shooter in 2024 in Paris olympics,write a report for me"
+    user_prompt = (
+        "Write a comprehensive study on the Turkish shooter in the 2024 Paris Olympics. "
+        "Provide a detailed report including achievements, performance analysis, and any notable highlights."
+    )
     content = inference(user_prompt)["output"]["content"]
     print(content)
 

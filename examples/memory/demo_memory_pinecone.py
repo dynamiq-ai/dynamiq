@@ -46,6 +46,9 @@ print("Results with query and filter:", [r.content for r in results])
 results = memory.search(filters={"user_id": "123"})
 print("Results with filter only:", [r.content for r in results])
 
+# Dump
+print("Memory dump:", memory.to_dict())
+
 # Clear memory
 memory.clear()
 print("Is memory empty?", memory.is_empty())

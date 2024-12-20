@@ -5,7 +5,7 @@ from pydantic import ConfigDict, Field
 from dynamiq.connections import ZenRows
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
-from dynamiq.nodes.tools.zenrows import ZenRowsTool
+from dynamiq.nodes.tools.zenrows import ZenRowsInputSchema, ZenRowsTool
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -21,7 +21,7 @@ class ScraperSummarizerTool(ZenRowsTool):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Scraper-Summarizer"
     description: str = (
-        "A tool for scraping webpages using ZenRows API and summarizing the content. Input should be a valid URL."
+        "A tool for scraping webpages using ZenRows API and summarizing the content. " "Input should be a valid URL."
     )
     connection: ZenRows
     llm: Node
@@ -43,17 +43,13 @@ class ScraperSummarizerTool(ZenRowsTool):
     def generate_prompt(self, chunk: str) -> str:
         return self.prompt.format(chunk=chunk)
 
-    def execute(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ) -> dict[str, Any]:
-        logger.debug(
-            f"Tool {self.name} - {self.id}: started with input data {input_data}"
-        )
+    def execute(self, input_data: ZenRowsInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        url = input_data.get("input", "")
+        url = input_data.url
 
         params = {
             "url": url,

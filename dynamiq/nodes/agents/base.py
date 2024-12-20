@@ -427,7 +427,10 @@ class Agent(Node):
         """Returns a description of the tools available to the agent."""
         return (
             "\n".join(
-                [f"{tool.name}: {tool.description.strip()}" for tool in self.tools]
+                [
+                    f"{tool.name}:\n <{tool.name}_description>\n{tool.description.strip()}\n<\\{tool.name}_description>"
+                    for tool in self.tools
+                ]
             )
             if self.tools
             else ""
