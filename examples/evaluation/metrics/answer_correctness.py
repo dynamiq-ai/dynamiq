@@ -49,9 +49,9 @@ def main():
     # Evaluate
     # Set verbose=True to enable detailed logging
     correctness_scores = evaluator.run(
-        question=questions,
-        answer=answers,
-        ground_truth_answer=ground_truth_answers,
+        questions=questions,
+        answers=answers,
+        ground_truth_answers=ground_truth_answers,
         verbose=False,  # Set verbose=True to enable logging
     )
 

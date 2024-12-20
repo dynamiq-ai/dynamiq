@@ -117,15 +117,15 @@ class RunInput(BaseModel):
         verbose (bool): Flag to enable verbose logging.
     """
 
-    question: list[str]
-    answer: list[str]
-    ground_truth_answer: list[str]
+    questions: list[str]
+    answers: list[str]
+    ground_truth_answers: list[str]
     verbose: bool = False
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if len(self.question) != len(self.answer) or len(self.question) != len(self.ground_truth_answer):
-            raise ValueError("Question, answer, and ground truth answer must have the same length.")
+        if len(self.questions) != len(self.answers) or len(self.questions) != len(self.ground_truth_answers):
+            raise ValueError("Questions, answers, and ground truth answers must have the same length.")
         return self
 
 
@@ -357,9 +357,9 @@ class AnswerCorrectnessEvaluator(BaseModel):
 
     def run(
         self,
-        question: list[str],
-        answer: list[str],
-        ground_truth_answer: list[str],
+        questions: list[str],
+        answers: list[str],
+        ground_truth_answers: list[str],
         verbose: bool = False,
     ) -> list[float]:
         """
@@ -375,19 +375,19 @@ class AnswerCorrectnessEvaluator(BaseModel):
             list[float]: The list of final correctness scores.
         """
         input_data = RunInput(
-            question=question,
-            answer=answer,
-            ground_truth_answer=ground_truth_answer,
+            questions=questions,
+            answers=answers,
+            ground_truth_answers=ground_truth_answers,
             verbose=verbose,
         )
 
         # Extract statements
-        answer_statements_list = self.extract_statements(input_data.answer)
-        ground_truth_statements_list = self.extract_statements(input_data.ground_truth_answer)
+        answer_statements_list = self.extract_statements(input_data.answers)
+        ground_truth_statements_list = self.extract_statements(input_data.ground_truth_answers)
 
         # Classify statements
         classifications_list = self.classify_statements(
-            input_data.question,
+            input_data.questions,
             answer_statements_list,
             ground_truth_statements_list,
         )
@@ -396,20 +396,20 @@ class AnswerCorrectnessEvaluator(BaseModel):
         f1_scores = [self.compute_f1_score(classifications) for classifications in classifications_list]
 
         # Compute similarity scores
-        similarity_scores = self.compute_similarity_scores(input_data.answer, input_data.ground_truth_answer)
+        similarity_scores = self.compute_similarity_scores(input_data.answers, input_data.ground_truth_answers)
 
         # Combine scores
         final_scores = []
-        for i in range(len(input_data.question)):
+        for i in range(len(input_data.questions)):
             f1_score = f1_scores[i]
             sim_score = similarity_scores[i]
             final_score = self.weights[0] * f1_score + self.weights[1] * sim_score
             final_scores.append(final_score)
 
             if input_data.verbose:
-                logger.debug(f"Question: {input_data.question[i]}")
-                logger.debug(f"Answer: {input_data.answer[i]}")
-                logger.debug(f"Ground Truth Answer: {input_data.ground_truth_answer[i]}")
+                logger.debug(f"Question: {input_data.questions[i]}")
+                logger.debug(f"Answer: {input_data.answers[i]}")
+                logger.debug(f"Ground Truth Answer: {input_data.ground_truth_answers[i]}")
                 logger.debug("Classifications:")
                 logger.debug(json.dumps(classifications_list[i].dict(), indent=2))
                 logger.debug(f"F1 Score: {f1_score}")

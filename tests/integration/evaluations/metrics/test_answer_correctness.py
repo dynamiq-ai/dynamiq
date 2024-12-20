@@ -5,15 +5,15 @@ from dynamiq.evaluations.metrics import AnswerCorrectnessEvaluator
 
 def test_answer_correctness_evaluator(openai_node):
     # Sample data
-    question = ["What powers the sun and what is its primary function?", "What is the boiling point of water?"]
-    answer = [
+    questions = ["What powers the sun and what is its primary function?", "What is the boiling point of water?"]
+    answers = [
         (
             "The sun is powered by nuclear fission, similar to nuclear reactors on Earth."
             " Its primary function is to provide light to the solar system."
         ),
         "The boiling point of water is 100 degrees Celsius at sea level.",
     ]
-    ground_truth_answer = [
+    ground_truth_answers = [
         (
             "The sun is powered by nuclear fusion, where hydrogen atoms fuse to form helium."
             " This fusion process releases a tremendous amount of energy. The sun provides"
@@ -98,7 +98,7 @@ def test_answer_correctness_evaluator(openai_node):
 
     # Run the evaluator
     correctness_scores = evaluator.run(
-        question=question, answer=answer, ground_truth_answer=ground_truth_answer, verbose=False
+        questions=questions, answers=answers, ground_truth_answers=ground_truth_answers, verbose=False
     )
 
     # Expected scores based on the mocked data and computations
