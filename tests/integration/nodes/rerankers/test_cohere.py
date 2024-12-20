@@ -68,7 +68,7 @@ def test_workflow_with_cohere_reranker(mock_rerank_executor):
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=input_data,
-        output=expected_documents,
+        output={"documents": expected_documents},
     ).to_dict()
 
     expected_output = {wf_cohere_ai.flow.nodes[0].id: expected_result}
