@@ -912,3 +912,19 @@ class Ollama(BaseConnection):
         return {
             "api_base": self.url,
         }
+
+
+class Jina(Http):
+    """
+    Connection class for Jina Scrape API.
+    """
+
+    api_key: str = Field(default_factory=partial(get_env_var, "JINA_API_KEY"))
+    method: Literal[HTTPMethod.GET] = HTTPMethod.GET
+
+    def connect(self):
+        """
+        Returns the requests module for making HTTP requests.
+        """
+        self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return super().connect()
