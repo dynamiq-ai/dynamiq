@@ -56,7 +56,7 @@ class NLIInput(BaseModel):
     @model_validator(mode="after")
     def check_equal_length(self):
         if len(self.contexts) != len(self.statements_list):
-            raise ValueError("Context and statements_list must have the same length.")
+            raise ValueError("Contexts and statements_list must have the same length.")
         return self
 
 
@@ -112,7 +112,7 @@ class RunInput(BaseModel):
     @model_validator(mode="after")
     def check_equal_length(self):
         if not (len(self.questions) == len(self.answers) == len(self.contexts)):
-            raise ValueError("Question, answer, and context must have the same length.")
+            raise ValueError("Questions, answers, and contexts must have the same length.")
         return self
 
 

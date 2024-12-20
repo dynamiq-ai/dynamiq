@@ -18,7 +18,7 @@ class ContextRecallInput(BaseModel):
 
     Attributes:
         questions (List[str]): List of questions.
-        contexts (List[str]): List of corresponding contexts
+        contexts (List[str]): List of corresponding contexts.
         answers (List[str]): List of answers.
         verbose (bool): Flag to enable verbose logging.
     """
@@ -209,7 +209,7 @@ class ContextRecallEvaluator(BaseModel):
 
         Args:
             questions (List[str]): List of questions.
-            contexts (List[str]): List of corresponding contexts
+            contexts (List[str]): List of corresponding contexts.
             answers (List[str]): List of answers.
             verbose (bool): Flag to enable verbose logging.
 
