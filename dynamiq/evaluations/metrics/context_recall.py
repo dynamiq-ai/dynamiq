@@ -17,9 +17,9 @@ class ContextRecallInput(BaseModel):
     Input model for context recall evaluation.
 
     Attributes:
-        question (List[str]): Single questions.
-        context (List[str]): Corresponding context for each question.
-        answer (List[str]): List of answers.
+        questions (List[str]): Single questions.
+        contexts (List[str]): Corresponding context for each question.
+        answers (List[str]): List of answers.
         verbose (bool): Flag to enable verbose logging.
     """
 
@@ -208,9 +208,9 @@ class ContextRecallEvaluator(BaseModel):
         Evaluate the context recall for each question.
 
         Args:
-            question (List[str]): Single questions.
-            context (List[str]): Corresponding context for each question.
-            answer (List[str]): List of answers.
+            questions (List[str]): Single questions.
+            contexts (List[str]): Corresponding context for each question.
+            answers (List[str]): List of answers.
             verbose (bool): Flag to enable verbose logging.
 
         Returns:

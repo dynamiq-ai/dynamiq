@@ -111,9 +111,9 @@ class RunInput(BaseModel):
     Input model for running the evaluator.
 
     Attributes:
-        question (List[str]): The list of questions.
-        answer (List[str]): The list of answers.
-        ground_truth_answer (List[str]): The list of ground truth answers.
+        questions (List[str]): The list of questions.
+        answers (List[str]): The list of answers.
+        ground_truth_answers (List[str]): The list of ground truth answers.
         verbose (bool): Flag to enable verbose logging.
     """
 
@@ -366,9 +366,9 @@ class AnswerCorrectnessEvaluator(BaseModel):
         Run the answer correctness evaluation.
 
         Args:
-            question (list[str]): The list of questions.
-            answer (list[str]): The list of answers.
-            ground_truth_answer (list[str]): The list of ground truth answers.
+            questions (list[str]): The list of questions.
+            answers (list[str]): The list of answers.
+            ground_truth_answers (list[str]): The list of ground truth answers.
             verbose (bool): Flag to enable verbose logging.
 
         Returns:

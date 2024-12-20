@@ -98,9 +98,9 @@ class RunInput(BaseModel):
     Input model for running the faithfulness evaluation.
 
     Attributes:
-        question (List[str]): List of questions.
-        answer (List[str]): List of corresponding answers.
-        context (List[str]): List of context texts for each question.
+        questions (List[str]): List of questions.
+        answers (List[str]): List of corresponding answers.
+        contexts (List[str]): List of context texts for each question.
         verbose (bool): Flag to enable verbose logging.
     """
 
@@ -347,9 +347,9 @@ class FaithfulnessEvaluator(BaseModel):
         Evaluate the faithfulness of answers given contexts.
 
         Args:
-            question (List[str]): List of questions.
-            answer (List[str]): List of corresponding answers.
-            context (List[str]): List of context texts for each question.
+            questions (List[str]): List of questions.
+            answers (List[str]): List of corresponding answers.
+            contexts (List[str]): List of context texts for each question.
             verbose (bool): Flag to enable verbose logging.
 
         Returns:

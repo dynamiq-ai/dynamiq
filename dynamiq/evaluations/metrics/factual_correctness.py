@@ -62,8 +62,8 @@ class RunInput(BaseModel):
     Input model for running factual correctness evaluation.
 
     Attributes:
-        answer (List[str]): List of response texts.
-        context (List[str]): List of reference texts.
+        answers (List[str]): List of response texts.
+        contexts (List[str]): List of reference texts.
         mode (Optional[str]): Evaluation mode ('precision', 'recall', or 'f1').
         beta (Optional[float]): Beta value for F-beta score.
         verbose (bool): Flag to enable verbose logging.
@@ -299,8 +299,8 @@ class FactualCorrectnessEvaluator(BaseModel):
         Evaluate the factual correctness of answers against contexts.
 
         Args:
-            answer (List[str]): List of response texts.
-            context (List[str]): List of reference texts.
+            answers (List[str]): List of response texts.
+            contexts (List[str]): List of reference texts.
             mode (Optional[str]): Evaluation mode ('precision', 'recall', or 'f1').
             beta (Optional[float]): Beta value for F-beta score.
             verbose (bool): Flag to enable verbose logging.
