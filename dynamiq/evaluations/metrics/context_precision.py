@@ -29,7 +29,7 @@ class ContextPrecisionInput(BaseModel):
     @model_validator(mode="after")
     def check_equal_length(self):
         if not (len(self.questions) == len(self.answers) == len(self.contexts_list)):
-            raise ValueError("Question, answer, and context_list must have the same length.")
+            raise ValueError("Questions, answers, and contexts_list must have the same length.")
         return self
 
 

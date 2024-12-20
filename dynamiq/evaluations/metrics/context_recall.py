@@ -17,8 +17,8 @@ class ContextRecallInput(BaseModel):
     Input model for context recall evaluation.
 
     Attributes:
-        questions (List[str]): Single questions.
-        contexts (List[str]): Corresponding context for each question.
+        questions (List[str]): List of questions.
+        contexts (List[str]): List of corresponding contexts
         answers (List[str]): List of answers.
         verbose (bool): Flag to enable verbose logging.
     """
@@ -31,7 +31,7 @@ class ContextRecallInput(BaseModel):
     @model_validator(mode="after")
     def check_equal_length(self):
         if not (len(self.questions) == len(self.contexts) == len(self.answers)):
-            raise ValueError("Question, context, and answer must have the same length.")
+            raise ValueError("Questions, contexts, and answers must have the same length.")
         return self
 
 
@@ -208,8 +208,8 @@ class ContextRecallEvaluator(BaseModel):
         Evaluate the context recall for each question.
 
         Args:
-            questions (List[str]): Single questions.
-            contexts (List[str]): Corresponding context for each question.
+            questions (List[str]): List of questions.
+            contexts (List[str]): List of corresponding contexts
             answers (List[str]): List of answers.
             verbose (bool): Flag to enable verbose logging.
 

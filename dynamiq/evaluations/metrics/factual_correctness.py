@@ -188,8 +188,8 @@ class FactualCorrectnessEvaluator(BaseModel):
                         "claims": [
                             [
                                 "Albert Einstein was a German theoretical physicist.",
-                                "He developed the theory of relativity.",
-                                "He contributed to quantum mechanics.",
+                                "Albert Einstein developed the theory of relativity.",
+                                "Albert Einstein contributed to quantum mechanics.",
                             ]
                         ],
                     },
@@ -201,12 +201,12 @@ class FactualCorrectnessEvaluator(BaseModel):
                                 "reason": "The premise states he was a German-born theoretical physicist.",
                             },
                             {
-                                "claim": "He developed the theory of relativity.",
+                                "claim": "Albert Einstein developed the theory of relativity.",
                                 "verdict": 1,
                                 "reason": "This is explicitly mentioned in the premise.",
                             },
                             {
-                                "claim": "He contributed to quantum mechanics.",
+                                "claim": "Albert Einstein contributed to quantum mechanics.",
                                 "verdict": 0,
                                 "reason": "The premise does not mention contributions to quantum mechanics.",
                             },
@@ -321,19 +321,19 @@ class FactualCorrectnessEvaluator(BaseModel):
         final_scores = []
 
         for idx in range(len(input_data.answers)):
-            single_answer = input_data.answers[idx]
-            single_context = input_data.contexts[idx]
+            answer = input_data.answers[idx]
+            context = input_data.contexts[idx]
 
             # Decompose claims from answer and context
-            answer_claims_list = self.decompose_claims([single_answer])
-            context_claims_list = self.decompose_claims([single_context])
+            answer_claims_list = self.decompose_claims([answer])
+            context_claims_list = self.decompose_claims([context])
 
             answer_claims = answer_claims_list[0]
             context_claims = context_claims_list[0]
 
             # Verify answer claims against context (precision)
             context_verdicts_list = self.verify_claims(
-                premises=[single_context],
+                premises=[context],
                 claims_list=[answer_claims],
             )
             context_verdicts = context_verdicts_list[0]
@@ -344,7 +344,7 @@ class FactualCorrectnessEvaluator(BaseModel):
             if mode != "precision":
                 # Verify context claims against answer (recall)
                 answer_verdicts_list = self.verify_claims(
-                    premises=[single_answer],
+                    premises=[answer],
                     claims_list=[context_claims],
                 )
                 answer_verdicts = answer_verdicts_list[0]
@@ -362,8 +362,8 @@ class FactualCorrectnessEvaluator(BaseModel):
             final_scores.append(score)
 
             if input_data.verbose:
-                logger.debug(f"Answer: {single_answer}")
-                logger.debug(f"Context: {single_context}")
+                logger.debug(f"Answer: {answer}")
+                logger.debug(f"Context: {context}")
                 logger.debug(f"Answer Claims: {answer_claims}")
                 logger.debug(f"Context Claims: {context_claims}")
                 logger.debug(f"TP: {tp}, FP: {fp}, FN: {fn}")

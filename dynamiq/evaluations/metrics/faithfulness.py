@@ -16,17 +16,17 @@ class SimplifyStatementsInput(BaseModel):
     Input model for simplifying statements.
 
     Attributes:
-        question (List[str]): List of questions.
-        answer (List[str]): List of corresponding answers.
+        questions (List[str]): List of questions.
+        answers (List[str]): List of corresponding answers.
     """
 
-    question: list[str]
-    answer: list[str]
+    questions: list[str]
+    answers: list[str]
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if len(self.question) != len(self.answer):
-            raise ValueError("Question and answer must have the same length.")
+        if len(self.questions) != len(self.answers):
+            raise ValueError("Questions and answers must have the same length.")
         return self
 
 
@@ -46,16 +46,16 @@ class NLIInput(BaseModel):
     Input model for NLI evaluation.
 
     Attributes:
-        context (List[str]): List of contexts.
+        contexts (List[str]): List of contexts.
         statements_list (List[List[str]]): List of lists of statements.
     """
 
-    context: list[str]
+    contexts: list[str]
     statements_list: list[list[str]]
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if len(self.context) != len(self.statements_list):
+        if len(self.contexts) != len(self.statements_list):
             raise ValueError("Context and statements_list must have the same length.")
         return self
 
@@ -287,10 +287,10 @@ class FaithfulnessEvaluator(BaseModel):
         Returns:
             List[List[str]]: List of lists of simplified statements.
         """
-        input_data = SimplifyStatementsInput(question=questions, answer=answers)
+        input_data = SimplifyStatementsInput(questions=questions, answers=answers)
         results = self._statement_simplifier.run(
-            question=input_data.question,
-            answer=input_data.answer,
+            question=input_data.questions,
+            answer=input_data.answers,
         )
         statements_list = []
         for result in results["results"]:
@@ -304,22 +304,22 @@ class FaithfulnessEvaluator(BaseModel):
 
     def check_faithfulness(
         self,
-        context: list[str],
+        contexts: list[str],
         statements_list: list[list[str]],
     ) -> list[list[NLIResultItem]]:
         """
         Check the faithfulness of statements against contexts.
 
         Args:
-            context (List[str]): List of contexts.
+            contexts (List[str]): List of contexts.
             statements_list (List[List[str]]): List of lists of statements.
 
         Returns:
             List[List[NLIResultItem]]: List of lists of NLI results.
         """
-        input_data = NLIInput(context=context, statements_list=statements_list)
+        input_data = NLIInput(contexts=contexts, statements_list=statements_list)
         results = self._nli_evaluator.run(
-            context=input_data.context,
+            context=input_data.contexts,
             statements=input_data.statements_list,
         )
         results_list = []
