@@ -15,21 +15,35 @@ class ContextPrecisionInput(BaseModel):
     Input model for context precision evaluation.
 
     Attributes:
-        questions (List[str]): List of questions.
-        answers (List[str]): List of corresponding answers.
-        contexts_list (List[List[str]]): List of contexts for each question.
+        questions (list[str]): List of questions.
+        answers (list[str]): List of corresponding answers.
+        contexts_list (list[list[str]] | list[str]): Either a list of lists of
+            strings or a list of strings; it will be normalized to a list of lists.
         verbose (bool): Flag to enable verbose logging.
     """
 
     questions: list[str]
     answers: list[str]
-    contexts_list: list[list[str]]
+    contexts_list: list[list[str]] | list[str]
     verbose: bool = False
+
+    @field_validator("contexts_list", mode="before")
+    def normalize_contexts_list(cls, v):
+        # If the user provides a list[str], wrap it into [list[str]].
+        # If the user provides a list[list[str]], leave as-is.
+        # If neither, raise an error.
+        if isinstance(v, list):
+            if all(isinstance(item, str) for item in v):
+                return [v]  # e.g. ["foo", "bar"] -> [["foo", "bar"]]
+            if all(isinstance(item, list) and all(isinstance(x, str) for x in item) for item in v):
+                return v
+        raise ValueError("contexts_list must be either a list of strings or a list of list of strings.")
 
     @model_validator(mode="after")
     def check_equal_length(self):
+        # Now self.contexts_list will always be a list of lists of strings
         if not (len(self.questions) == len(self.answers) == len(self.contexts_list)):
-            raise ValueError("Questions, answers, and contexts_list must have the same length.")
+            raise ValueError("questions, answers, and contexts_list must have the same length.")
         return self
 
 
@@ -229,21 +243,23 @@ class ContextPrecisionEvaluator(BaseModel):
         self,
         questions: list[str],
         answers: list[str],
-        contexts_list: list[list[str]],
+        contexts_list: list[list[str]] | list[str],
         verbose: bool = False,
     ) -> list[float]:
         """
         Evaluate the context precision for each question.
 
         Args:
-            questions (List[str]): List of questions.
-            answers (List[str]): List of corresponding answers.
-            contexts_list (List[List[str]]): List of contexts for each question.
+            questions (list[str]): List of questions.
+            answers (list[str]): List of corresponding answers.
+            contexts_list (list[list[str]] | list[str]): Either a list of contexts
+                per question (list[list[str]]) or a single list of context strings (list[str]).
             verbose (bool): Flag to enable verbose logging.
 
         Returns:
-            List[float]: List of context precision scores for each question.
+            list[float]: List of context precision scores for each question.
         """
+        # Pass everything to the Pydantic model
         input_data = ContextPrecisionInput(
             questions=questions,
             answers=answers,
@@ -256,7 +272,7 @@ class ContextPrecisionEvaluator(BaseModel):
         for idx in range(len(input_data.questions)):
             question = input_data.questions[idx]
             answer = input_data.answers[idx]
-            contexts = input_data.contexts_list[idx]
+            contexts = input_data.contexts_list[idx]  # This is now a list[str]
 
             verdicts = []
             for context in contexts:
@@ -268,15 +284,11 @@ class ContextPrecisionEvaluator(BaseModel):
                 )
                 # Extract the verdict (ensure it's an int)
                 verdict_raw = result["results"][0]["verdict"]
-                if isinstance(verdict_raw, str):
-                    verdict = int(verdict_raw.strip())
-                else:
-                    verdict = int(verdict_raw)
+                verdict = int(verdict_raw) if not isinstance(verdict_raw, str) else int(verdict_raw.strip())
                 verdicts.append(verdict)
 
                 if input_data.verbose:
                     reason = result["results"][0]["reason"]
-                    # Use logging instead of print
                     logger.debug(f"Question: {question}")
                     logger.debug(f"Answer: {answer}")
                     logger.debug(f"Context: {context}")
@@ -284,7 +296,7 @@ class ContextPrecisionEvaluator(BaseModel):
                     logger.debug(f"Reason: {reason}")
                     logger.debug("-" * 50)
 
-            # Calculate average precision for this set
+            # Calculate average precision for this question
             score = self.calculate_average_precision(verdicts)
             final_scores.append(score)
 

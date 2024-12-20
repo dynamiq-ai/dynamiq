@@ -122,3 +122,55 @@ def test_context_precision_evaluator(openai_node):
     # Assert that the correctness scores are as expected
     for computed, expected in zip(correctness_scores, expected_scores):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
+
+
+def test_context_precision_evaluator_single_list_of_contexts(openai_node):
+    """
+    Test that the ContextPrecisionEvaluator can accept contexts_list as list[str].
+    We'll provide one question, one answer, and multiple context strings in a single list.
+    """
+
+    question = ["Tell me about Python programming language."]
+    answer = ["Python is a high-level, interpreted programming language known for its readability."]
+    # Here is the single list[str] of contexts:
+    contexts_list = [
+        "Python is an interpreted language created by Guido van Rossum, first released in 1991.",
+        "It's dynamically typed and garbage-collected, and supports multiple programming paradigms.",
+        "Python's design philosophy emphasizes code readability with its notable use of significant indentation.",
+    ]
+
+    evaluator = ContextPrecisionEvaluator(llm=openai_node)
+
+    # Mocked results for each context string
+    # Assume we want the first two contexts to be relevant (verdict=1), last one not relevant (verdict=0).
+    mocked_run_results = [
+        {
+            "results": [
+                {"verdict": "1", "reason": "Context describes Python accurately and is relevant to the question."}
+            ]
+        },
+        {"results": [{"verdict": "1", "reason": "Context also accurately describes Python and remains relevant."}]},
+        {
+            "results": [
+                {
+                    "verdict": "0",
+                    "reason": "Context is about Python indentation only, not fully relevant to the answer.",
+                }
+            ]
+        },
+    ]
+
+    # Mock the run method
+    evaluator._context_precision_evaluator.run = MagicMock(side_effect=mocked_run_results)
+
+    # Run the evaluator
+    precision_scores = evaluator.run(
+        questions=question, answers=answer, contexts_list=contexts_list, verbose=False  # list[str] for contexts
+    )
+
+    # We expect two correct contexts (1, 1) and one incorrect (0) -> average = 2/3.
+    expected_score = [1, 1, 0]  # This is the final score for the single question.
+
+    # Compare computed result with expected
+    for computed, expected in zip(precision_scores, expected_score):
+        assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
