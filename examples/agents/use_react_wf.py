@@ -6,7 +6,7 @@ from dynamiq.connections import E2B
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.retrievers import WeaviateDocumentRetriever
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
@@ -21,16 +21,17 @@ from examples.llm_setup import setup_llm
 
 # Constants
 AGENT_ROLE = (
-    "teacher for children, goal is to craft a well-structured and simple final answer"
-    "with a lot of emojis to empathize with the children."
+    "As a teacher for children, my goal is to create well-structured and simple final answers. "
+    "I also use plenty of emojis to connect with the children."
 )
-QUERY = "Who won the Euro 2024?"
-QUERY_FOR_CODING_SIMPLE = "Add the first 10 numbers and tell if the result is prime"
+QUERY = "Who won Euro 2024?"
+QUERY_FOR_CODING_SIMPLE = "Add the first 10 numbers and determine if the result is a prime number."
 QUERY_FOR_CODING_COMPLEX = (
-    "generate a sample for linear regression analysis and print the results, just textual representations"
+    "Generate a sample for linear regression analysis and display the results as textual representations."
 )
-QUERY_FOR_PYTHON_TOOL = "Show me content of example.com"
-QUERY_FOR_HTTP_TOOL = "Show me some random fact about cat"
+QUERY_FOR_PYTHON_TOOL = "Show me the content of example.com."
+QUERY_FOR_HTTP_TOOL = "Tell me a random fact about cats."
+
 PYTHON_TOOL_CODE = """
 def run(inputs):
     import requests
@@ -122,6 +123,7 @@ def setup_react_agent_http_python() -> ReActAgent:
         llm=llm,
         tools=[web_request_tool, api_call],
         role="is to help user with various tasks",
+        inference_mode=InferenceMode.XML,
     )
     return agent
 

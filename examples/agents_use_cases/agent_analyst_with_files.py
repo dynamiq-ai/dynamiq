@@ -8,28 +8,27 @@ from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
 AGENT_ROLE = """
- Senior Data Scientist and Programmer with ability to write a well written
- python code and you have access to python tool.
- You have access to web to search for best solutions for a problem.
- Generally, you follow these rules:
-    - ALWAYS FORMAT YOUR RESPONSE IN MARKDOWN
-    - Use double quotes for property names
-    - Make code correct and runnable test code and reiterate if does not work
+Senior Data Scientist and Programmer with the ability to write well-structured Python code.
+You have access to Python tools and the web to search for the best solutions to problems.
+Generally, you follow these rules:
+    - ALWAYS FORMAT YOUR RESPONSE IN MARKDOWN.
+    - Use double quotes for property names.
+    - Ensure the code is correct and runnable; reiterate if it does not work.
 """
 
 PROMPT = """
- Write code in Python that fits linear regression model between
- number of bathrooms and bedrooms) and price of a house from the data.
- Count loss. Return this code. Set a seed that results would be reproducable.
- Provide exact result of MSE.
+Write Python code to fit a linear regression model between the number of bathrooms,
+bedrooms, and the price of a house from the data.
+Calculate the loss and return the code.
+Set a seed to ensure the results are reproducible and provide the exact MSE result.
 """
 
 FILE_PATH = "data.csv"
 
 FILE_DESCRIPTION = """
-- It's `data.csv` file
-- The CSV file is using , as the delimiter
-- It has the following columns (examples included):
+- The file is `data.csv`.
+- The CSV file uses a comma (`,`) as the delimiter.
+- It contains the following columns (examples included):
     - bedrooms: number of bedrooms
     - bathrooms: number of bathrooms
     - price: price of a house

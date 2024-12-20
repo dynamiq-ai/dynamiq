@@ -1,35 +1,115 @@
 from dynamiq.nodes.agents.base import AgentManager
 
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_PLAN = """
+You are an advanced AI planning assistant specializing in breaking down
+complex tasks into manageable subtasks for execution by specialized agents.
+Your goal is to create an efficient, sequential plan that maximizes the
+use of available resources while minimizing unnecessary steps.
 
-You are a helpful planning assistant. Your task is to break down the input task into as few smaller subtasks as possible that can be executed by different specified agents based on their capabilities.
-
-**Planning Instructions:**
-- Decompose the main task into subtasks for sequential execution.
-- Make as few subtasks as possible.
-- Unify subtasks that can be executed in one step.
-- Avoid steps that are not obligatory for successful task execution.
-- Ensure each task is actionable and produces outputs useful for subsequent steps.
-- Tasks should be simple, with one or two steps, and must address the initial problem effectively.
-
-**Planner Output Format:**
-- List of tasks with attributes:
-  - `id`: Unique task identifier.
-  - `name`: Brief description of the task.
-  - `description`: Detailed execution instructions.
-  - `dependencies`: List of task IDs that must be completed before this task.
-  - `output`: Expected result from the task.
-
-**Input task**:
-{input_task}
-
-**Agents**:
+Here is the list of available agents and their capabilities:
+<available_agents>
 {agents}
+</available_agents>
 
-Begin planning by breaking down the task into subtasks. Return the list in JSON format.
-Remember JSON must be readable by Python.
-"""  # noqa: E501
+And here is the main task you need to break down:
+<input_task>
+{input_task}
+</input_task>
 
+Please follow these instructions to create a detailed task breakdown:
+
+1. Analyze the main task and the capabilities of the available agents.
+
+2. Create a shared structure to store key information that
+may be needed across multiple tasks. Use the following format:
+<shared_structure>
+[List key information here, explaining why each piece is important]
+</shared_structure>
+
+3. Break down the main task into subtasks that can be executed sequentially.
+
+4. Optimize the subtasks by:
+   a. Minimizing the number of subtasks without compromising the overall goal
+   b. Combining or simplifying tasks where possible
+   c. Ensuring each task aligns with the capabilities of the available agents
+   d. Verifying the sequence of tasks is logical and efficient
+   e. Eliminating all non-essential steps
+   f. Providing sufficient detail for execution in each task description
+
+5. Assign a unique identifier to each task.
+
+6. Determine task dependencies, ensuring all necessary information is passed between tasks.
+
+Before finalizing your plan, please analyze the task and reflect on your
+approach by wrapping your work inside <planning_process> tags:
+
+1. Main components of the input task:
+   [List and number the main components, providing a brief description and noting importance]
+
+2. Available agent capabilities:
+   [For each agent, list and number their key capabilities,
+   explaining relevance to the main task and rating
+   it on a scale of 1-5 (1 being least relevant, 5 being most relevant)]
+
+3. Shared structure:
+   [Create and explain the shared structure, justifying each element's importance]
+
+4. Potential subtasks:
+   [Brainstorm and number potential subtasks, describing purpose and contribution to the main goal.
+   Estimate the complexity of each subtask on a scale of 1-5 (1 being least complex, 5 being most complex)]
+
+5. Task dependencies and information flow:
+   [Number and explain each dependency or information flow, providing rationale]
+
+6. Optimization review:
+   [Answer the following questions to optimize the task breakdown, providing a brief justification for each answer]
+   a. Have you minimized the number of subtasks without compromising the overall goal?
+   b. Are there any tasks that could be further combined or simplified?
+   c. Does each task align with the capabilities of the available agents?
+   d. Is the sequence of tasks logical and efficient?
+   e. Have you eliminated all non-essential steps?
+   f. Does each task description provide sufficient detail for execution?
+   g. Are all dependencies clearly identified and include all necessary information?
+   h. Have you ensured that information from the user is passed to all relevant steps?
+   i. Does your shared structure contain all key information that might be needed across tasks?
+
+After completing your analysis, create a final list of tasks in JSON format.
+Each task should have the following attributes:
+- "id": A unique task identifier (integer)
+- "name": A brief description of the task (string)
+- "description": Detailed execution instructions, including all necessary information
+from previous tasks and the shared structure (string)
+- "dependencies": A list of task IDs that must be completed before this task (list of integers)
+- "output": The expected result from the task (string or dictionary)
+
+Use the following format for your output:
+
+<output>
+```json
+[
+
+    "id": 1,
+    "name": "Task name",
+    "description": "Detailed task description, referencing elements from shared structure and previous tasks as needed",
+    "dependencies": [],
+    "output": "Detailed description of the expected output"
+
+  ,
+    "id": 2,
+    "name": "Next task name",
+    "description": "Detailed description of the next task with references
+    and embedded information from shared structure and previous tasks",
+    "dependencies": [1],
+    "output": "Expected output of the next task"
+
+]
+```
+</output>
+
+Ensure that your JSON output is valid and can be parsed by Python.
+Double-check that all inputs to subtasks are properly passed
+and that the final step (creating the JSON output) is performed last.
+"""
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_ASSIGN = """
 You are a helpful agent responsible for recommending the best agent for a specific task.
 
@@ -46,15 +126,45 @@ Consider the agent's role, description, tools, and task dependencies. Return onl
 """  # noqa: E501
 
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_FINAL_ANSWER = """
-You are a helpful agent responsible for providing the final answer to the customer's request.
+You are an advanced AI planning assistant responsible for synthesizing
+the outputs of multiple specialized agents into a single, comprehensive answer.
+Your task is to analyze the results of subtasks and provide a cohesive response to the initial request.
 
-**Initial major task**
+Here is the initial major task that was broken down and assigned to specialized agents:
+
+<input_task>
 {input_task}
+</input_task>
 
-**Tasks Outputs**
+Below are the outputs from the specialized agents who worked on the subtasks:
+
+<tasks_outputs>
 {tasks_outputs}
+</tasks_outputs>
 
-Craft the final answer based on all task outputs. Return only the final answer.
+Your goal is to craft a final, unified answer based on all the task outputs.
+This answer should directly address the initial request and provide a complete response to the user.
+
+Before providing your final answer, break down your thought process inside <task_synthesis> tags. Follow these steps:
+
+1. Summarize the initial task in one or two sentences to ensure you understand the main objective.
+2. For each subtask output:
+   - List the key information relevant to the initial request.
+   - Note any unique insights or perspectives provided.
+3. Identify connections between the different subtask outputs, noting how they relate to each other and to the overall task.
+4. Outline the most important points that need to be included in the final answer.
+5. Propose a structure for your response that will provide a clear and concise answer.
+
+Now, based on your analysis, please provide your final answer in the following structure:
+<final_answer>
+[Write your final answer here, ensuring it's well-structured and addresses the original task comprehensively.
+If user asks for a specific format, please follow that format.
+If user asks about some code, reports, or tables, please include them in the final answer.
+Include all relevant information to be as informative as possible.
+]
+</final_answer>
+
+Please proceed with your task synthesis and final answer.
 """  # noqa: E501
 
 

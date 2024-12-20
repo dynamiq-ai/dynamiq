@@ -25,7 +25,7 @@ def setup_agent():
 
     memory_pinecone = Memory(backend=backend)
 
-    AGENT_ROLE = "helpful assistant," "goal is to provide useful information and answer questions"
+    AGENT_ROLE = "Helpful assistant with the goal of providing useful information and answering questions."
     agent = SimpleAgent(
         name="Agent",
         llm=llm,
