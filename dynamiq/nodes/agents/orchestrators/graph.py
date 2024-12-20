@@ -121,7 +121,11 @@ class GraphOrchestrator(Orchestrator):
                 raise OrchestratorError("Error: Task must be either a Node or a Callable.")
 
         state = GraphState(
-            id=state_id, name=state_id, manager=self.manager if has_agent else None, tasks=filtered_tasks, callbacks=callbacks
+            id=state_id,
+            name=state_id,
+            manager=self.manager if has_agent else None,
+            tasks=filtered_tasks,
+            callbacks=callbacks,
         )
         self.states.append(state)
         self._state_by_id[state.id] = state
