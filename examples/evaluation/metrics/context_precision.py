@@ -34,7 +34,7 @@ def main():
         "England",
         "Mount Everest.",
     ]
-    context_list = [
+    contexts_list = [
         [
             # Contexts for the first question
             (
@@ -76,9 +76,9 @@ def main():
     # Initialize evaluator
     evaluator = ContextPrecisionEvaluator(llm=llm)
     correctness_scores = evaluator.run(
-        question=questions,
-        answer=answers,
-        context_list=context_list,
+        questions=questions,
+        answers=answers,
+        contexts_list=contexts_list,
         verbose=False,  # Set to True to enable verbose logging
     )
 

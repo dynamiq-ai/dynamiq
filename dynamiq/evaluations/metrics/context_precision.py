@@ -15,20 +15,20 @@ class ContextPrecisionInput(BaseModel):
     Input model for context precision evaluation.
 
     Attributes:
-        question (List[str]): List of questions.
-        answer (List[str]): List of corresponding answers.
-        context_list (List[List[str]]): List of contexts for each question.
+        questions (List[str]): List of questions.
+        answers (List[str]): List of corresponding answers.
+        contexts_list (List[List[str]]): List of contexts for each question.
         verbose (bool): Flag to enable verbose logging.
     """
 
-    question: list[str]
-    answer: list[str]
-    context_list: list[list[str]]
+    questions: list[str]
+    answers: list[str]
+    contexts_list: list[list[str]]
     verbose: bool = False
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if not (len(self.question) == len(self.answer) == len(self.context_list)):
+        if not (len(self.questions) == len(self.answers) == len(self.contexts_list)):
             raise ValueError("Question, answer, and context_list must have the same length.")
         return self
 
@@ -227,9 +227,9 @@ class ContextPrecisionEvaluator(BaseModel):
 
     def run(
         self,
-        question: list[str],
-        answer: list[str],
-        context_list: list[list[str]],
+        questions: list[str],
+        answers: list[str],
+        contexts_list: list[list[str]],
         verbose: bool = False,
     ) -> list[float]:
         """
@@ -245,25 +245,25 @@ class ContextPrecisionEvaluator(BaseModel):
             List[float]: List of context precision scores for each question.
         """
         input_data = ContextPrecisionInput(
-            question=question,
-            answer=answer,
-            context_list=context_list,
+            questions=questions,
+            answers=answers,
+            contexts_list=contexts_list,
             verbose=verbose,
         )
 
         final_scores = []
 
-        for idx in range(len(input_data.question)):
-            single_question = input_data.question[idx]
-            single_answer = input_data.answer[idx]
-            contexts = input_data.context_list[idx]
+        for idx in range(len(input_data.questions)):
+            question = input_data.questions[idx]
+            answer = input_data.answers[idx]
+            contexts = input_data.contexts_list[idx]
 
             verdicts = []
             for context in contexts:
                 # Prepare inputs for the evaluator
                 result = self._context_precision_evaluator.run(
-                    question=[single_question],
-                    answer=[single_answer],
+                    question=[question],
+                    answer=[answer],
                     context=[context],
                 )
                 # Extract the verdict (ensure it's an int)
@@ -277,8 +277,8 @@ class ContextPrecisionEvaluator(BaseModel):
                 if input_data.verbose:
                     reason = result["results"][0]["reason"]
                     # Use logging instead of print
-                    logger.debug(f"Question: {question}")
-                    logger.debug(f"Answer: {answer}")
+                    logger.debug(f"Question: {questions}")
+                    logger.debug(f"Answer: {answers}")
                     logger.debug(f"Context: {context}")
                     logger.debug(f"Verdict: {verdict}")
                     logger.debug(f"Reason: {reason}")

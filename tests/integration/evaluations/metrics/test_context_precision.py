@@ -19,7 +19,7 @@ def test_context_precision_evaluator(openai_node):
         "England",
         "Mount Everest.",
     ]
-    context_list = [
+    contexts_list = [
         [
             # Contexts for the first question
             (
@@ -114,7 +114,7 @@ def test_context_precision_evaluator(openai_node):
     evaluator._context_precision_evaluator.run = MagicMock(side_effect=mocked_run_results)
 
     # Run the evaluator
-    correctness_scores = evaluator.run(question=questions, answer=answers, context_list=context_list, verbose=False)
+    correctness_scores = evaluator.run(questions=questions, answers=answers, contexts_list=contexts_list, verbose=False)
 
     # Expected scores based on the mocked data
     expected_scores = [1.0, 1.0, 0.0]
