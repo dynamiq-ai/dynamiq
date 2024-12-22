@@ -536,7 +536,7 @@ class Node(BaseModel, Runnable, ABC):
         except Exception as e:
             self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
             logger.error(
-                f"Node {self.name} - {self.id}: execution failed in "
+                f"Node {self.name} - {self.id}: execution failed in {e}"
                 f"{format_duration(time_start, datetime.now())}."
             )
 
@@ -694,8 +694,12 @@ class Node(BaseModel, Runnable, ABC):
             input_data (dict[str, Any]): Input data for the node.
             **kwargs: Additional keyword arguments.
         """
+
         for callback in callbacks + self.callbacks:
-            callback.on_node_start(self.to_dict(), input_data, **kwargs)
+            try:
+                callback.on_node_start(self.to_dict(), input_data, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_end(
         self,
@@ -712,7 +716,12 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
-            callback.on_node_end(self.model_dump(), output_data, **kwargs)
+            try:
+                print("here")
+                callback.on_node_end(self.model_dump(), output_data, **kwargs)
+                print("here1")
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_error(
         self,
@@ -729,7 +738,10 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
-            callback.on_node_error(self.to_dict(), error, **kwargs)
+            try:
+                callback.on_node_error(self.to_dict(), error, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_skip(
         self,
@@ -748,7 +760,10 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
-            callback.on_node_skip(self.to_dict(), skip_data, input_data, **kwargs)
+            try:
+                callback.on_node_skip(self.to_dict(), skip_data, input_data, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_execute_start(
         self,
@@ -768,7 +783,10 @@ class Node(BaseModel, Runnable, ABC):
             input_data = dict(input_data)
 
         for callback in callbacks + self.callbacks:
-            callback.on_node_execute_start(self.to_dict(), input_data, **kwargs)
+            try:
+                callback.on_node_execute_start(self.to_dict(), input_data, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_execute_end(
         self,
@@ -785,7 +803,10 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
-            callback.on_node_execute_end(self.to_dict(), output_data, **kwargs)
+            try:
+                callback.on_node_execute_end(self.to_dict(), output_data, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_execute_error(
         self,
@@ -802,7 +823,10 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
-            callback.on_node_execute_error(self.model_dump(), error, **kwargs)
+            try:
+                callback.on_node_execute_error(self.model_dump(), error, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_execute_run(
         self,
@@ -817,7 +841,10 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
-            callback.on_node_execute_run(self.to_dict(), **kwargs)
+            try:
+                callback.on_node_execute_run(self.to_dict(), **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_execute_stream(
         self,
@@ -834,7 +861,10 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs: Additional keyword arguments.
         """
         for callback in callbacks + self.callbacks:
-            callback.on_node_execute_stream(self.to_dict(), chunk, **kwargs)
+            try:
+                callback.on_node_execute_stream(self.to_dict(), chunk, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     @abstractmethod
     def execute(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs) -> Any:
