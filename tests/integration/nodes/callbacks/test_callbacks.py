@@ -1,34 +1,34 @@
 import json
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from dynamiq import Workflow
-from dynamiq.callbacks import TracingCallbackHandler
+from dynamiq.callbacks import NodeCallbackHandler, TracingCallbackHandler
 from dynamiq.connections import connections
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.utils import JsonWorkflowEncoder
-from dynamiq.callbacks import NodeCallbackHandler
-from typing import Any
-from dynamiq.prompts import Message, Prompt, MessageRole
 
 
 class HumanFeedbackHandler(NodeCallbackHandler):
-    def on_node_end(self, serialized, output_data, **kwargs):
-        context = output_data["context"]
-        iteration_num = context.get("iteration", 1)
-        if iteration_num < 1:
-            context = output_data["context"]
-            context |= {"feedback": "Feedback", "iteration": iteration_num + 1}
-            return context
 
-        context |= {"feedback": None, "iteration": iteration_num}
+    def __init__(self):
+        super().__init__()
+        self.mock_callback = MagicMock()
+
+    def on_node_start(self, serialized, output_data, **kwargs):
+        self.mock_callback()
 
 
-def create_orchestrator(model: str, connection: connections.OpenAI, context_input: dict) -> GraphOrchestrator:
+def create_orchestrator(
+    model: str, connection: connections.OpenAI, context_input: dict, human_feedback_callback: HumanFeedbackHandler
+) -> GraphOrchestrator:
     """
     Creates orchestrator
 
@@ -55,10 +55,12 @@ def create_orchestrator(model: str, connection: connections.OpenAI, context_inpu
 
         context["messages"] += [{"role": MessageRole.ASSISTANT, "content": "mocked_response", "metadata": None}]
 
+        context["iteration"] += 1
+
         return {"result": response, **context}
 
     def accept_sketch(context: dict[str, Any]):
-        if context.get("feedback"):
+        if context.get("iteration") < 2:
             return "generate_sketch"
 
         return END
@@ -67,8 +69,7 @@ def create_orchestrator(model: str, connection: connections.OpenAI, context_inpu
         name="Graph orchestrator", manager=GraphAgentManager(llm=llm), context=context_input
     )
 
-    orchestrator.add_state_by_tasks("generate_sketch", [generate_sketch], callbacks=[HumanFeedbackHandler()])
-
+    orchestrator.add_state_by_tasks("generate_sketch", [generate_sketch], callbacks=[human_feedback_callback])
     orchestrator.add_edge(START, "generate_sketch")
     orchestrator.add_conditional_edge("generate_sketch", ["generate_sketch", END], accept_sketch)
 
@@ -88,25 +89,23 @@ def create_orchestrator(model: str, connection: connections.OpenAI, context_inpu
             create_orchestrator,
             {"iteration": 0, "messages": [Message(role="user", content="Answer on question")]},
             {"content": "mocked_response"},
-            {"iteration": 1, 'feedback': None, 'messages': [
-                {'content': 'Answer on question', 'metadata': None, 'role': MessageRole.USER},
-                {'content': 'mocked_response',  'role': MessageRole.ASSISTANT, 'metadata': None},
-                {'content': 'mocked_response',  'role': MessageRole.ASSISTANT, 'metadata': None}
-                ]},
-            ),
+            {
+                "iteration": 2,
+                "messages": [
+                    {"content": "Answer on question", "metadata": None, "role": MessageRole.USER},
+                    {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
+                    {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
+                ],
+            },
+        ),
         (
             create_orchestrator,
             {"iteration": 1, "messages": [Message(role="user", content="Answer on question")]},
             {"content": "mocked_response"},
             {
-                "iteration": 1,
-                "feedback": None,
+                "iteration": 2,
                 "messages": [
-                    {
-                        "content": "Answer on question",
-                        "role": MessageRole.USER,
-                        "metadata": None,
-                    },
+                    {"content": "Answer on question", "role": MessageRole.USER, "metadata": None},
                     {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
                 ],
             },
@@ -119,7 +118,9 @@ def test_workflow_with_map_node(get_orchestrator_workflow, context_input, output
         api_key="api_key",
     )
 
-    wf_orchestrator = get_orchestrator_workflow(model, connection, context_input)
+    human_feedback_callback = HumanFeedbackHandler()
+
+    wf_orchestrator = get_orchestrator_workflow(model, connection, context_input, human_feedback_callback)
     input_data = {"input": ""}
     tracing = TracingCallbackHandler()
     response = wf_orchestrator.run(input_data=input_data)
@@ -139,3 +140,5 @@ def test_workflow_with_map_node(get_orchestrator_workflow, context_input, output
     assert json.dumps({"runs": [run.to_dict() for run in tracing.runs.values()]}, cls=JsonWorkflowEncoder)
 
     assert wf_orchestrator.flow.nodes[0].context == context_output
+
+    assert human_feedback_callback.mock_callback.call_count == 2 - context_input.get("iteration")

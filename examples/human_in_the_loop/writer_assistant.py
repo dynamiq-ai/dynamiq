@@ -1,25 +1,12 @@
 from typing import Any
 
 from dynamiq.callbacks import TracingCallbackHandler
-from dynamiq.callbacks.base import NodeCallbackHandler
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
-
-
-class HumanFeedbackHandler(NodeCallbackHandler):
-    def on_node_end(self, serialized, output_data, **kwargs):
-        result = input(
-            f"Approve whether to publish by providing nothing or cancel by typing in feedback: "
-            f"{output_data["context"]["messages"][-1].content}"
-        )
-
-        context = output_data["context"]
-        context |= {"feedback": result}
-        return context
 
 
 def create_orchestrator() -> GraphOrchestrator:
@@ -55,7 +42,13 @@ def create_orchestrator() -> GraphOrchestrator:
         return {"result": "Generated draft", **context}
 
     def accept_sketch(context: dict[str, Any]):
-        if context.get("feedback"):
+
+        result = input(
+            f"Approve whether to publish by providing nothing or cancel by typing in feedback: "
+            f"{context["messages"][-1]["content"]}"
+        )
+
+        if result:
             return "generate_sketch"
 
         logger.info("Post was successfully published!")
@@ -66,7 +59,7 @@ def create_orchestrator() -> GraphOrchestrator:
         manager=GraphAgentManager(llm=llm),
     )
 
-    orchestrator.add_state_by_tasks("generate_sketch", [generate_sketch], callbacks=[HumanFeedbackHandler()])
+    orchestrator.add_state_by_tasks("generate_sketch", [generate_sketch])
 
     orchestrator.add_edge(START, "generate_sketch")
     orchestrator.add_conditional_edge("generate_sketch", ["generate_sketch", END], accept_sketch)
