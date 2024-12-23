@@ -19,38 +19,28 @@ def main():
     # Initialize the LLM (replace 'gpt-4o-mini' with your available model)
     llm = OpenAI(model="gpt-4o-mini")
 
-    # Sample data
-    questions = ["Who was Albert Einstein and what is he best known for?"]
+    # Sample data (can be replaced with your data)
+    questions = ["Who was Albert Einstein and what is he best known for?", "Tell me about the Great Wall of China."]
     answers = [
         (
             "He was a German-born theoretical physicist, widely acknowledged to be one "
-            "of the greatest and most influential physicists of all time. He was best "
-            "known for developing the theory of relativity, he also made important "
-            "contributions to the development of the theory of quantum mechanics."
-        )
+            "of the greatest and most influential physicists of all time. "
+            "He was best known for developing the theory of relativity, he also made "
+            "important contributions to the development of the theory of quantum mechanics."
+        ),
+        (
+            "The Great Wall of China is a large wall in China. "
+            "It was built to keep out invaders. "
+            "It is visible from space."
+        ),
     ]
-    contexts_list = [
-        [
-            (
-                "Albert Einstein (14 March 1879 - 18 April 1955) was a German-born "
-                "theoretical physicist, widely held to be one of the greatest and "
-                "most influential scientists of all time. Best known for developing "
-                "the theory of relativity, he also made important contributions to "
-                "quantum mechanics, and was thus a central figure in the revolutionary "
-                "reshaping of the scientific understanding of nature that modern "
-                "physics accomplished in the first decades of the twentieth century. "
-                "His mass-energy equivalence formula E = mc^2, which arises from "
-                "relativity theory, has been called 'the world's most famous equation'. "
-                "He received the 1921 Nobel Prize in Physics 'for his services to "
-                "theoretical physics, and especially for his discovery of the law of "
-                "the photoelectric effect', a pivotal step in the development of "
-                "quantum theory. His work is also known for its influence on the "
-                "philosophy of science. In a 1999 poll of 130 leading physicists "
-                "worldwide by the British journal Physics World, Einstein was "
-                "ranked the greatest physicist of all time. His intellectual "
-                "achievements and originality have made Einstein synonymous with genius."
-            )
-        ]
+    contexts = [
+        ("Albert Einstein was a German-born theoretical physicist. " "He developed the theory of relativity."),
+        (
+            "The Great Wall of China is a series of fortifications that were built "
+            "across the historical northern borders of ancient Chinese states and "
+            "Imperial China as protection against various nomadic groups."
+        ),
     ]
 
     # Initialize evaluator and evaluate
@@ -58,7 +48,7 @@ def main():
     faithfulness_scores = evaluator.run(
         questions=questions,
         answers=answers,
-        contexts_list=contexts_list,
+        contexts=contexts,
         verbose=True,  # Set to False to disable verbose logging
     )
 
