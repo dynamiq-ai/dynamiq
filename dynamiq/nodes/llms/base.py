@@ -192,7 +192,7 @@ class BaseLLM(ConnectionNode):
             **kwargs: Additional keyword arguments.
 
         Returns:
-            dict: A dictionary containing the generated content and tool calls.
+            dict: A dictionary containing the generated content and tool calls if present.
         """
         content = response.choices[0].message.content
         result = {"content": content}
@@ -203,7 +203,7 @@ class BaseLLM(ConnectionNode):
                 call["function"]["arguments"] = json.loads(call["function"]["arguments"])
                 tool_calls_parsed.append(call)
 
-            result |= {"tool_calls": tool_calls_parsed}
+            result["tool_calls"] = tool_calls_parsed
 
         usage_data = self.get_usage_data(model=self.model, completion=response).model_dump()
         self.run_on_node_execute_run(callbacks=config.callbacks, usage_data=usage_data, **kwargs)
