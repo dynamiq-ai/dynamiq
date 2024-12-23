@@ -45,7 +45,7 @@ def get_map_workflow(
     [
         (
             [{"test": "OK"}, {"test": "BAD"}],
-            [{"content": "mocked_response", "tool_calls": None}, {"content": "mocked_response", "tool_calls": None}],
+            [{"content": "mocked_response"}, {"content": "mocked_response"}],
         ),
     ],
 )

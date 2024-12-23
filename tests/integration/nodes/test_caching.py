@@ -68,7 +68,7 @@ def test_node_caching(
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=first_input_data,
-        output={"content": mock_llm_response_text, "tool_calls": None},
+        output={"content": mock_llm_response_text},
     )
     assert result == expected_result
     assert mock_llm_executor.call_count == 1

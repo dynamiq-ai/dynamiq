@@ -47,7 +47,7 @@ def test_node_streaming(
         node_with_streaming.id: RunnableResult(
             status=RunnableStatus.SUCCESS,
             input=input_data,
-            output={"content": mock_llm_response_text, "tool_calls": None},
+            output={"content": mock_llm_response_text},
         ).to_dict()
     }
     assert response == RunnableResult(
