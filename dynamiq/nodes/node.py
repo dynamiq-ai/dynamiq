@@ -717,9 +717,7 @@ class Node(BaseModel, Runnable, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                print("here")
                 callback.on_node_end(self.model_dump(), output_data, **kwargs)
-                print("here1")
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
