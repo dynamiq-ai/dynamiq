@@ -192,7 +192,7 @@ def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mo
 
     response = wf.run(input_data=input_data, config=RunnableConfig(callbacks=[tracing]))
 
-    expected_output_openai_anthropic = {"content": mock_llm_response_text, "tool_calls": None}
+    expected_output_openai_anthropic = {"content": mock_llm_response_text}
     expected_result_openai_anthropic = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=input_data,

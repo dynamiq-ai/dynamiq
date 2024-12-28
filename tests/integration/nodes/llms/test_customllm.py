@@ -55,7 +55,7 @@ def test_workflow_with_custom_llm(mock_llm_response_text, mock_llm_executor):
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input={},
-        output={"content": mock_llm_response_text, "tool_calls": None},
+        output={"content": mock_llm_response_text},
     ).to_dict()
     expected_output = {wf_customllm_studio.flow.nodes[0].id: expected_result}
     assert response == RunnableResult(

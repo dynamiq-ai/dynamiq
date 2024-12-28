@@ -64,7 +64,7 @@ def test_workflow_with_watsonx_ai(mock_llm_response_text, mock_llm_executor, mod
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input={},
-        output={"content": mock_llm_response_text, "tool_calls": None},
+        output={"content": mock_llm_response_text},
     ).to_dict()
     expected_output = {wf_watsonx_ai.flow.nodes[0].id: expected_result}
     assert response == RunnableResult(
