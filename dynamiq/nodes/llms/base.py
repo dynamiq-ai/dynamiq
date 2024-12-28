@@ -1,3 +1,4 @@
+import json
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
@@ -191,16 +192,23 @@ class BaseLLM(ConnectionNode):
             **kwargs: Additional keyword arguments.
 
         Returns:
-            dict: A dictionary containing the generated content and tool calls.
+            dict: A dictionary containing the generated content and tool calls if present.
         """
         content = response.choices[0].message.content
+        result = {"content": content}
         if tool_calls := response.choices[0].message.tool_calls:
-            tool_calls = [tc.model_dump() for tc in tool_calls]
+            tool_calls_parsed = []
+            for tc in tool_calls:
+                call = tc.model_dump()
+                call["function"]["arguments"] = json.loads(call["function"]["arguments"])
+                tool_calls_parsed.append(call)
+
+            result["tool_calls"] = tool_calls_parsed
 
         usage_data = self.get_usage_data(model=self.model, completion=response).model_dump()
         self.run_on_node_execute_run(callbacks=config.callbacks, usage_data=usage_data, **kwargs)
 
-        return {"content": content, "tool_calls": tool_calls}
+        return result
 
     def _handle_streaming_completion_response(
         self,
