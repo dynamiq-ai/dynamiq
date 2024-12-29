@@ -48,7 +48,7 @@ class FunctionTool(Node, Generic[T]):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        result = self.run_func(input_data)
+        result = self.run_func(input_data, config=config, **kwargs)
 
         logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
         return {"content": result}
@@ -100,10 +100,21 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
 
     def create_input_schema(func) -> type[BaseModel]:
         signature = inspect.signature(func)
-        params_dict = {param.name: (param.annotation, param.default) for param in signature.parameters.values()}
+
+        params_dict = {}
+
+        for param in signature.parameters.values():
+            if param.name == "kwargs" or param.name == "config":
+                continue
+            if param.default is inspect.Parameter.empty:
+                params_dict[param.name] = (param.annotation, ...)
+            else:
+                params_dict[param.name] = (param.annotation, param.default)
+
         return create_model(
             "FunctionToolInputSchema",
-            **{k: (v[0], ...) if v[1] is inspect.Parameter.empty else (v[0], v[1]) for k, v in params_dict.items()},
+            **params_dict,
+            model_config=dict(extra="allow"),
         )
 
     class FunctionToolFromDecorator(FunctionTool[T]):
@@ -115,8 +126,8 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
         _original_func = staticmethod(func)
         input_schema: ClassVar[type[BaseModel]] = create_input_schema(func)
 
-        def run_func(self, input_data: BaseModel, **_) -> T:
-            return func(**input_data.model_dump())
+        def run_func(self, input_data: BaseModel, **kwargs) -> T:
+            return func(**input_data.model_dump(), **kwargs)
 
     FunctionToolFromDecorator.__name__ = func.__name__
     FunctionToolFromDecorator.__qualname__ = (
