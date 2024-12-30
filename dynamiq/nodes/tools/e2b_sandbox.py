@@ -328,7 +328,7 @@ class E2BInterpreterTool(ConnectionNode):
                 result += "<Code execution>\n" + code_execution + "\n</Code execution>"
             content = result
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
         return {"content": content}
 
     def close(self) -> None:
