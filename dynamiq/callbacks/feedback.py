@@ -138,5 +138,6 @@ def send_message(message: EventMessage, config: RunnableConfig) -> None:
         sender_callback_streaming.queue.put_nowait(message)
     else:
         raise ValueError(
-            "Error: No AsyncFeedbackIteratorCallbackHandler " "nor AsyncStreamingIteratorCallbackHandler was found. "
+            "Error: To use 'send_message' either AsyncFeedbackIteratorCallbackHandler "
+            "or AsyncStreamingIteratorCallbackHandler has to be present in config callbacks. "
         )
