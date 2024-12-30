@@ -46,6 +46,8 @@ class PGVectorDocumentRetriever:
         filters: dict[str, Any] | None = None,
         content_key: str | None = None,
         embedding_key: str | None = None,
+        query: str | None = None,
+        alpha: float | None = None,
     ):
         """
         Retrieves documents from the PGVectorStore that are similar to the provided query embedding.
@@ -67,14 +69,27 @@ class PGVectorDocumentRetriever:
         top_k = top_k or self.top_k
         filters = filters or self.filters
 
-        docs = self.vector_store._embedding_retrieval(
-            query_embedding=query_embedding,
-            filters=filters,
-            top_k=top_k,
-            exclude_document_embeddings=exclude_document_embeddings,
-            content_key=content_key,
-            embedding_key=embedding_key,
-        )
+        if query:
+            docs = self.vector_store._hybrid_retrieval(
+                query_embedding=query_embedding,
+                query=query,
+                filters=filters,
+                top_k=top_k,
+                exclude_document_embeddings=exclude_document_embeddings,
+                content_key=content_key,
+                embedding_key=embedding_key,
+                alpha=alpha,
+            )
+        else:
+            docs = self.vector_store._embedding_retrieval(
+                query_embedding=query_embedding,
+                filters=filters,
+                top_k=top_k,
+                exclude_document_embeddings=exclude_document_embeddings,
+                content_key=content_key,
+                embedding_key=embedding_key,
+            )
+
         logger.debug(f"Retrieved {len(docs)} documents from pgvector Vector Store.")
 
         return {"documents": docs}

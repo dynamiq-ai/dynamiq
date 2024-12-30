@@ -14,6 +14,8 @@ class RetrieverInputSchema(BaseModel):
     top_k: int = Field(default=0, description="Parameter to provided how many documents to retrieve.")
     content_key: str = Field(default=None, description="Parameter to provide content key.")
     embedding_key: str = Field(default=None, description="Parameter to provide embedding key.")
+    query: str = Field(default=None, description="Parameter to provide query for search.")
+    alpha: float = Field(default=0.5, description="Parameter to provide alpha for hybrid retrieval.")
 
 
 class Retriever(VectorStoreNode, ABC):
