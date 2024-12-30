@@ -16,6 +16,9 @@ from dynamiq.runnables import RunnableConfig, RunnableResult
 from dynamiq.types.streaming import StreamingConfig, StreamingEventMessage
 from dynamiq.utils.logger import logger
 
+HOST = "127.0.0.1"
+PORT = 6001
+
 app = FastAPI()
 
 logging.basicConfig(level=logging.INFO)
@@ -73,10 +76,12 @@ def create_orchestrator() -> GraphOrchestrator:
 
         event_message = StreamingEventMessage(
             entity_id=str(uuid4()),
-            data=(
-                "This is draft of post. Type in: <br> • 'SEND' - to publish post,<br>"
-                " • 'CANCEL' - to NOT publish post,<br> • Any feedback to refine post."
-            ),
+            data={
+                "content": (
+                    "This is draft of post. Type in: <br> • 'SEND' - to publish post,<br>"
+                    " • 'CANCEL' - to NOT publish post,<br> • Any feedback to refine post."
+                )
+            },
         )
 
         send_message(event_message, config)
@@ -102,7 +107,7 @@ def create_orchestrator() -> GraphOrchestrator:
         if feedback == "SEND":
             event_message = StreamingEventMessage(
                 entity_id=str(uuid4()),
-                data="Message was sent!",
+                data={"content": "Post was published!", "final": True},
             )
             send_message(event_message, config)
             return END
@@ -111,7 +116,7 @@ def create_orchestrator() -> GraphOrchestrator:
             print("Get here")
             event_message = StreamingEventMessage(
                 entity_id=str(uuid4()),
-                data="Message was NOT sent!",
+                data={"content": "Post was canceled!", "final": True},
             )
             send_message(event_message, config)
             return END
@@ -131,11 +136,13 @@ def create_orchestrator() -> GraphOrchestrator:
     return orchestrator
 
 
-def run_orchestrator(
-    orchestrator, queue: Queue, handler, request="Write and publish small post about AI in Sales."
-) -> RunnableResult:
+def run_orchestrator(orchestrator, queue: Queue, handler) -> RunnableResult:
     """Runs orchestrator"""
-    _ = orchestrator.run(input_data={"input": request}, config=RunnableConfig(callbacks=[handler]), input_queue=queue)
+    _ = orchestrator.run(
+        input_data={"input": "Write and publish small post."},
+        config=RunnableConfig(callbacks=[handler]),
+        input_queue=queue,
+    )
 
 
 async def _send_stream_events_by_ws(websocket: WebSocket, send_handler: Any):
@@ -178,7 +185,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 asyncio.create_task(_send_stream_events_by_ws(websocket, send_handler))
                 await asyncio.sleep(0.01)
 
-                orchestrator.context["messages"].append(Message(role="user", content=message.content))
+                orchestrator.context["messages"].append(
+                    Message(role="user", content=f"Write small post about {message.content}")
+                )
                 asyncio.get_running_loop().run_in_executor(
                     None, run_orchestrator, orchestrator, message_queue, send_handler
                 )
@@ -188,3 +197,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         logging.info("WebSocket disconnected")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host=HOST, port=PORT)

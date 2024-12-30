@@ -4,7 +4,7 @@ import logging
 
 import websockets
 
-from examples.human_in_the_loop.article_writer.server import HOST, PORT, SocketMessage
+from examples.human_in_the_loop.post_writer.server import HOST, PORT, SocketMessage
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ WS_URI = f"ws://{HOST}:{PORT}/ws"
 
 async def websocket_client():
     async with websockets.connect(WS_URI) as websocket:
-        input_query = input("Provide topic for article: ")
+        input_query = input("Provide topic for post: ")
         wf_run_event = SocketMessage(type="run", content=input_query)
         await websocket.send(wf_run_event.to_json())
 

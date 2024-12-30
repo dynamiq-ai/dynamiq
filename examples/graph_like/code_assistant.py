@@ -11,6 +11,7 @@ from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
 
@@ -61,12 +62,12 @@ def create_orchestrator() -> GraphOrchestrator:
 
         return json.loads(llm_result) if structured_output else llm_result
 
-    def generate_code_solution(context: dict[str, Any]):
+    def generate_code_solution(context: dict[str, Any], **kwargs):
         """
         Generate a code solution
         """
 
-        print("#####CODE GENERATION#####")
+        logger.info("CODE GENERATION")
 
         messages = context.get("messages")
 
@@ -87,8 +88,8 @@ def create_orchestrator() -> GraphOrchestrator:
 
         return {"result": code_solution, **context}
 
-    def reflect(context: dict[str, Any]):
-        print("#####REFLECTING ON ERRORS#####")
+    def reflect(context: dict[str, Any], **kwargs):
+        logger.info("REFLECTING ON ERRORS")
         reflections = code_llm(messages=context.get("messages"))
         context["messages"] += [Message(role="assistant", content=f"Here are reflections on the error: {reflections}")]
         return {"result": reflections, **context}
@@ -104,25 +105,25 @@ def create_orchestrator() -> GraphOrchestrator:
             state (dict): New key added to state, error
         """
 
-        print("#####CHECKING#####")
+        logger.info("CHECKING")
         solution = context["solution"]
 
         result = tool_code.run(input_data={"python": solution.get("code"), "packages": solution.get("libraries")})
         if result.status == RunnableStatus.SUCCESS:
-            print("#####SUCCESSFUL#####")
+            logger.info("SUCCESSFUL")
             successful_message = [
                 Message(role="user", content=f"Your code executed successfully {result.output['content']}")
             ]
             context["messages"] += successful_message
             context["reiterate"] = False
         else:
-            print("#####FAILED#####")
+            logger.info("FAILED")
             error_message = [
                 Message(
                     role="user",
                     content=(
-                        f"Your solution failed the code execution test: {result.output['content']}."
-                        " Reflect on possible errors."
+                        f"Your solution failed to execute: {result.output['content']}."
+                        " Reflect on possible errors and solutions."
                     ),
                 )
             ]
@@ -144,7 +145,7 @@ def create_orchestrator() -> GraphOrchestrator:
     orchestrator.add_edge("generate_code", "validate_code")
     orchestrator.add_edge("reflect", "generate_code")
 
-    def orchestrate(context: dict[str, Any]) -> str:
+    def orchestrate(context: dict[str, Any], **kwargs) -> str:
         return "reflect" if context["reiterate"] else END
 
     orchestrator.add_conditional_edge("validate_code", ["generate_code", END], orchestrate)
@@ -169,7 +170,7 @@ def run_orchestrator(request="Write 100 lines of code.") -> RunnableResult:
         config=RunnableConfig(callbacks=[tracing]),
     )
 
-    print(result.output[orchestrator.id])
+    logger.info(result.output[orchestrator.id])
     return result.output[orchestrator.id]["output"]["content"], tracing.runs
 
 

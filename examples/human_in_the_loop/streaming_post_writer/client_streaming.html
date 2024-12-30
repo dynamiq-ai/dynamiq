@@ -95,7 +95,7 @@
         <div class="chat-container">
             <div id="messages" class="messages">
                 <div class="message received">
-                    <p>Hello, provide description of the post.</p>
+                    <p>Hello, provide description of the post you want to write.</p>
                 </div>
             </div>
             <div class="input-container">
@@ -111,7 +111,7 @@
     var startMessage = true;
 
 
-    const socket = new WebSocket("ws://127.0.0.1:8069/ws");
+    const socket = new WebSocket("ws://127.0.0.1:6001/ws");
 
     socket.onopen = function(event) {
         console.log("WebSocket connection established.");
@@ -126,22 +126,26 @@
         let message = JSON.parse(event.data)
         let content = message["data"];
 
-        if (typeof content != "string"){
-            if (content["choices"][0]["finish_reason"] == "stop"){
-                isFirstChunk = true;
-                return
-            }
-            content = content["choices"][0]["delta"]["content"]
-        }else{
-            isFirstChunk = true;
-        }
-
         if (isFirstChunk){
             isFirstChunk = false;
             newDiv = document.createElement('div');
             newDiv.classList.add('message');
             newDiv.classList.add("received");
             parentDiv.appendChild(newDiv);
+        }
+
+        if (content["content"] == undefined){
+            if (content["choices"][0]["finish_reason"] == "stop"){
+                isFirstChunk = true;
+                return
+            }
+            content = content["choices"][0]["delta"]["content"]
+        }else{
+            if (content["final"]){
+                startMessage = true;
+            }
+            content = content["content"]
+            isFirstChunk = true;
         }
 
         newDiv.innerHTML += content;

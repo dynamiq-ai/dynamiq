@@ -16,12 +16,12 @@ from dynamiq.runnables import RunnableConfig, RunnableResult
 from dynamiq.types.message import EventMessage
 from dynamiq.utils.logger import logger
 
+HOST = "127.0.0.1"
+PORT = 6003
+
 app = FastAPI()
 
 logging.basicConfig(level=logging.INFO)
-
-HOST = "127.0.0.1"
-PORT = 6000
 
 
 class SocketMessage(BaseModel):
@@ -79,13 +79,12 @@ def create_orchestrator() -> GraphOrchestrator:
             entity_id=str(uuid4()),
             data={
                 "content": (
-                    "This is draft of article. Type in: <br> • 'SEND' - to publish article,<br>"
-                    " • 'CANCEL' - to NOT publish article,<br> • Any feedback to refine article."
+                    "This is draft of post. Type in: \n • 'SEND' - to publish post,\n"
+                    " • 'CANCEL' - to NOT publish post,\n • Any feedback to refine post.\n"
                 ),
                 "require_feedback": True,
             },
         )
-
         send_message(event_message, config)
 
         feedback = input_queue.get()
@@ -109,7 +108,7 @@ def create_orchestrator() -> GraphOrchestrator:
         if feedback == "SEND":
             event_message = EventMessage(
                 entity_id=str(uuid4()),
-                data={"content": "Message was sent!", "finish": True},
+                data={"content": "Post was published!", "finish": True},
             )
             send_message(event_message, config)
             return END
@@ -118,7 +117,7 @@ def create_orchestrator() -> GraphOrchestrator:
             print("Get here")
             event_message = EventMessage(
                 entity_id=str(uuid4()),
-                data={"content": "Message was NOT sent!", "finish": True},
+                data={"content": "Post was canceled!", "finish": True},
             )
             send_message(event_message, config)
             return END
@@ -141,7 +140,7 @@ def create_orchestrator() -> GraphOrchestrator:
 def run_orchestrator(orchestrator, queue: Queue, handler) -> RunnableResult:
     """Runs orchestrator"""
     _ = orchestrator.run(
-        input_data={"input": "Write and publish small article"},
+        input_data={"input": "Write and publish small post"},
         config=RunnableConfig(callbacks=[handler]),
         input_queue=queue,
     )
@@ -188,7 +187,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await asyncio.sleep(0.01)
 
                 orchestrator.context["messages"].append(
-                    Message(role="user", content=f"Write small article about {message.content}")
+                    Message(role="user", content=f"Write small post about {message.content}")
                 )
                 asyncio.get_running_loop().run_in_executor(
                     None, run_orchestrator, orchestrator, message_queue, send_handler
