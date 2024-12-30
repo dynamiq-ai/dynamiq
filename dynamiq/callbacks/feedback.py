@@ -117,11 +117,11 @@ class AsyncFeedbackIteratorCallbackHandler(BaseCallbackHandler):
 
 
 def send_message(message: EventMessage, config: RunnableConfig) -> None:
-    """Puts message to the queue of AsyncFeedbackIteratorCallbackHandler or AsyncStreamingIteratorCallbackHandler
+    """Emits message to the queue of AsyncFeedbackIteratorCallbackHandler or AsyncStreamingIteratorCallbackHandler
 
     Args:
         message (EventMessage): Message to send.
-        config (RunnableConfig): Config with callbacks
+        config (RunnableConfig): RunnableConfig with callbacks.
     """
     sender_callback = None
     sender_callback_streaming = None
@@ -138,6 +138,6 @@ def send_message(message: EventMessage, config: RunnableConfig) -> None:
         sender_callback_streaming.queue.put_nowait(message)
     else:
         raise ValueError(
-            "Error: To use 'send_message' either AsyncFeedbackIteratorCallbackHandler "
+            "Error: To use 'send_message' function either AsyncFeedbackIteratorCallbackHandler "
             "or AsyncStreamingIteratorCallbackHandler has to be present in config callbacks. "
         )
