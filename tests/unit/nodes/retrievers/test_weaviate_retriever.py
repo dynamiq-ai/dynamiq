@@ -64,7 +64,36 @@ def test_execute(weaviate_document_retriever):
     result = weaviate_document_retriever.execute(input_data, config)
 
     weaviate_document_retriever.document_retriever.run.assert_called_once_with(
-        input_data.embedding, filters=input_data.filters, top_k=input_data.top_k, content_key=None
+        input_data.embedding,
+        filters=input_data.filters,
+        top_k=input_data.top_k,
+        content_key=None,
+        query=None,
+        alpha=0.5,
+    )
+
+    assert result == {"documents": mock_output["documents"]}
+
+
+def test_execute_hybrid(weaviate_document_retriever):
+    input_data = RetrieverInputSchema(
+        embedding=[0.1, 0.2, 0.3], filters={"field": "value"}, top_k=5, query="query", alpha=0.5
+    )
+    config = RunnableConfig(callbacks=[])
+
+    mock_output = {"documents": [{"id": "1", "content": "Document 1"}]}
+    weaviate_document_retriever.document_retriever = MagicMock(spec=WeaviateDocumentRetrieverComponent)
+    weaviate_document_retriever.document_retriever.run.return_value = mock_output
+
+    result = weaviate_document_retriever.execute(input_data, config)
+
+    weaviate_document_retriever.document_retriever.run.assert_called_once_with(
+        input_data.embedding,
+        filters=input_data.filters,
+        top_k=input_data.top_k,
+        content_key=None,
+        query=input_data.query,
+        alpha=input_data.alpha,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -92,6 +121,8 @@ def test_execute_with_default_filters_and_top_k(weaviate_document_retriever):
         filters=weaviate_document_retriever.filters,
         top_k=weaviate_document_retriever.top_k,
         content_key=None,
+        query=None,
+        alpha=0.5,
     )
 
     assert result == {"documents": mock_output["documents"]}

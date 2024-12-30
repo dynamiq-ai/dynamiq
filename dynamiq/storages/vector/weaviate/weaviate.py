@@ -1,6 +1,7 @@
 import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
+from weaviate.classes.query import HybridFusion
 from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateQueryError
 from weaviate.util import generate_uuid5
 
@@ -483,3 +484,42 @@ class WeaviateVectorStore:
         )
 
         return [self._to_document(doc, content_key=content_key) for doc in result.objects]
+
+    def _hybrid_retrieval(
+        self,
+        query_embedding: list[float],
+        query: str,
+        filters: dict[str, Any] | None = None,
+        top_k: int | None = None,
+        exclude_document_embeddings=True,
+        alpha: float = 0.5,
+        fusion_type: HybridFusion = HybridFusion.RELATIVE_SCORE,
+        content_key: str | None = None,
+    ) -> list[Document]:
+        """
+        Perform hybrid retrieval on the documents.
+
+        Args:
+            query (str): The query string.
+            filters (dict[str, Any] | None): Filters to apply to the query.
+            top_k (int | None): The number of top results to return.
+
+        Returns:
+            list[Document]: A list of retrieved documents.
+        """
+        properties = [p.name for p in self._collection.config.get().properties]
+
+        result = self._collection.query.hybrid(
+            query=query,
+            vector=query_embedding,
+            filters=convert_filters(filters) if filters else None,
+            limit=top_k,
+            include_vector=not exclude_document_embeddings,
+            query_properties=[content_key or self.content_key],
+            return_properties=properties,
+            return_metadata=["score"],
+            alpha=alpha,
+            fusion_type=fusion_type,
+        )
+
+        return [self._to_document(doc) for doc in result.objects]

@@ -91,7 +91,17 @@ class WeaviateDocumentRetriever(Retriever):
         filters = input_data.filters or self.filters
         top_k = input_data.top_k or self.top_k
 
-        output = self.document_retriever.run(query_embedding, filters=filters, top_k=top_k, content_key=content_key)
+        alpha = input_data.alpha
+        query = input_data.query
+
+        output = self.document_retriever.run(
+            query_embedding,
+            filters=filters,
+            top_k=top_k,
+            content_key=content_key,
+            query=query,
+            alpha=alpha,
+        )
 
         return {
             "documents": output["documents"],
