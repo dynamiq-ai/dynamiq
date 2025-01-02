@@ -79,6 +79,31 @@ def test_execute(pgvector_document_retriever):
         top_k=input_data.top_k,
         content_key=None,
         embedding_key=None,
+        query=None,
+        alpha=0.5,
+    )
+
+    assert result == {"documents": mock_output["documents"]}
+
+
+def test_execute_hybrid(pgvector_document_retriever):
+    input_data = RetrieverInputSchema(embedding=[0.1, 0.2, 0.3], query="query", filters={"field": "value"}, top_k=5)
+    config = RunnableConfig(callbacks=[])
+
+    mock_output = {"documents": [{"id": "1", "content": "Document 1"}]}
+    pgvector_document_retriever.document_retriever = MagicMock(spec=PGVectorDocumentRetrieverComponent)
+    pgvector_document_retriever.document_retriever.run.return_value = mock_output
+
+    result = pgvector_document_retriever.execute(input_data, config)
+
+    pgvector_document_retriever.document_retriever.run.assert_called_once_with(
+        input_data.embedding,
+        filters=input_data.filters,
+        top_k=input_data.top_k,
+        content_key=None,
+        embedding_key=None,
+        query=input_data.query,
+        alpha=0.5,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -107,6 +132,8 @@ def test_execute_with_default_filters_and_top_k(pgvector_document_retriever):
         top_k=pgvector_document_retriever.top_k,
         content_key=None,
         embedding_key=None,
+        query=None,
+        alpha=0.5,
     )
 
     assert result == {"documents": mock_output["documents"]}
