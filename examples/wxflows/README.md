@@ -1,4 +1,4 @@
-# Agents Tool Calling with IBM Flow Engine Tools
+# Agent Tool Calling with IBM Flow Engine Tools
 
 ## Prerequisitives
 
