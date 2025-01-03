@@ -1,0 +1,26 @@
+[wxflows.deployment]
+endpoint_name = "api/my-endpoints"
+# Example flows.
+flows="  // You should add your flows here "
+ai_engine = "WATSONX"
+
+
+
+# Endpoint imports provide customized extensions for your flows
+[[wxflows.deployment.endpoint.imports]]
+# import 1
+name = "wikipedia"
+package = "https://raw.githubusercontent.com/IBM/wxflows/refs/heads/main/tools/wikipedia.zip"
+[[wxflows.deployment.endpoint.imports.tools]] # imports 1: tool description 1
+name = "wikipedia"
+description = """Retrieve information from Wikipedia."""
+fields = "search|page"
+
+[[wxflows.deployment.endpoint.imports]]
+# import 2
+name = "weather"
+package = "https://raw.githubusercontent.com/IBM/wxflows/refs/heads/main/tools/weather.zip"
+[[wxflows.deployment.endpoint.imports.tools]] # imports 2: tool description 1
+name = "weather"
+description = """Retrieve detailed weather information."""
+fields = "weatherByCity"
