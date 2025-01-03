@@ -831,10 +831,17 @@ class PostgreSQL(BaseConnection):
     def connect(self):
         try:
             import psycopg
+            from psycopg.rows import dict_row
 
             conn = psycopg.connect(
-                host=self.host, port=self.port, dbname=self.database, user=self.user, password=self.password
+                host=self.host,
+                port=self.port,
+                dbname=self.database,
+                user=self.user,
+                password=self.password,
+                row_factory=dict_row,
             )
+            conn.autocommit = True
             logger.debug(
                 f"Connected to PGVector with host={self.host}, "
                 f"port={str(self.port)}, user={self.user}, "
@@ -928,3 +935,108 @@ class Jina(Http):
         """
         self.headers.update({"Authorization": f"Bearer {self.api_key}"})
         return super().connect()
+
+
+class MySQL(BaseConnection):
+    host: str = Field(default_factory=partial(get_env_var, "MYSQL_HOST", "localhost"))
+    database: str = Field(default_factory=partial(get_env_var, "MYSQL_DATABASE", "db"))
+    user: str = Field(default_factory=partial(get_env_var, "MYSQL_USER", "mysql"))
+    password: str = Field(default_factory=partial(get_env_var, "MYSQL_PASSWORD", "password"))
+
+    def connect(self):
+        import mysql.connector
+
+        try:
+            conn = mysql.connector.connect(host=self.host, database=self.database, user=self.user, passwd=self.password)
+            conn.autocommit = True
+            logger.debug(
+                f"Connected to MySQL with host={self.host}, " f"user={self.user}, " f"database={self.database}."
+            )
+            return conn
+        except ImportError:
+            raise ImportError("Please install mysql-connector-python to use MySQL connection")
+        except mysql.connector.Error as e:
+            raise ConnectionError(f"Failed to connect to MySQL: {str(e)}")
+
+    @property
+    def conn_params(self) -> dict:
+        return {"dictionary": True}
+
+
+class SnowFlake(BaseConnection):
+    user: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_USER", "snowflake"))
+    password: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_PASSWORD", "password"))
+    account: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_ACCOUNT", "account"))
+    warehouse: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_WAREHOUSE", "warehouse"))
+    database: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_DATABASE", "db"))
+    schema: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_SCHEMA", "schema"))
+
+    def connect(self):
+        try:
+            import snowflake.connector
+
+            conn = snowflake.connector.connect(
+                user=self.user,
+                password=self.password,
+                account=self.account,
+                warehouse=self.warehouse,
+                database=self.database,
+                schema=self.schema,
+            )
+            logger.debug(
+                f"Connected to Snowflake using account={self.account}, "
+                f"warehouse={str(self.warehouse)}, user={self.user}, "
+                f"database={self.database}, schema={self.schema}."
+            )
+            return conn
+        except ImportError:
+            raise ImportError("Please install snowflake-connector-python to use Snowflake connection")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Snowflake: {str(e)}")
+
+    @property
+    def conn_params(self) -> dict:
+        from snowflake.connector import DictCursor
+
+        return {"cursor_class": DictCursor}
+
+
+class AWSRedshift(BaseConnection):
+    host: str = Field(
+        default_factory=partial(
+            get_env_var, "REDSHIFT_HOST", "examplecluster.abc123xyz789.us-west-1.redshift.amazonaws.com"
+        )
+    )
+    port: int = Field(default_factory=partial(get_env_var, "REDSHIFT_PORT", 5432))
+    database: str = Field(default_factory=partial(get_env_var, "REDSHIFT_DATABASE", "db"))
+    user: str = Field(default_factory=partial(get_env_var, "REDSHIFT_USER", "awsuser"))
+    password: str = Field(default_factory=partial(get_env_var, "REDSHIFT_PASSWORD", "password"))
+
+    def connect(self):
+        try:
+            import psycopg2
+
+            conn = psycopg2.connect(
+                host=self.host,
+                port=self.port,
+                dbname=self.database,
+                user=self.user,
+                password=self.password,
+            )
+            conn.autocommit = True
+            logger.debug(
+                f"Connected to Amazon Redshift with host={self.host}, "
+                f"port={str(self.port)}, user={self.user}, "
+                f"database={self.database}."
+            )
+            return conn
+        except ImportError:
+            raise ImportError("Please install psycopg2 to use Amazon Redshift connection")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Amazon Redshift : {str(e)}")
+
+    @property
+    def conn_params(self) -> dict:
+        from psycopg2.extras import RealDictCursor
+
+        return {"cursor_factory": RealDictCursor}
