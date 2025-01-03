@@ -25,7 +25,7 @@ wxflows deploy
 ```
 
 ### Setup your API keys
-Put your OPENAI_KEY, FLOWS_ENGINE_API_KEY and URL of endpoint (which you will get when run `deploy` command)
+Put your `OPENAI_KEY`, `FLOWS_ENGINE_API_KEY` and `URL` of endpoint (which you will get when run `deploy` command)
 in `.env` in `wxflows` folder.
 
 ### Run python script
