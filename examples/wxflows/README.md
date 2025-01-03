@@ -21,6 +21,7 @@ STEPZEN_OPEN_WEATHER_MAP_APIKEY=<openweather_api_key>
 
 ### Deploy tools
 ```
+cd wxflows_endpoint
 wxflows deploy
 ```
 
