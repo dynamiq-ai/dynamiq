@@ -21,7 +21,7 @@ class SqlExecutor(ConnectionNode):
         group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
         name (str): The name of the tool.
         description (str): A brief description of the tool.
-        connection (Jina): The connection instance for the specified storage.
+        connection (PostgreSQL|MySQL|SnowFlake|AWSRedshift): The connection instance for the specified storage.
         input_schema (SQLInputSchema): The input schema for the tool.
     """
 
@@ -50,6 +50,8 @@ class SqlExecutor(ConnectionNode):
             )
             cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []
+            if type(self.connection) is AWSRedshift:
+                output = [dict(row) for row in output]
             return {"result": output}
         except Exception as e:
             msg = f"Encountered an error while executing SQL query: {query}. \nError details: {e}"
