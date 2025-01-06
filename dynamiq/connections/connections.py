@@ -1002,11 +1002,7 @@ class SnowFlake(BaseConnection):
 
 
 class AWSRedshift(BaseConnection):
-    host: str = Field(
-        default_factory=partial(
-            get_env_var, "REDSHIFT_HOST", "examplecluster.abc123xyz789.us-west-1.redshift.amazonaws.com"
-        )
-    )
+    host: str = Field(default_factory=partial(get_env_var, "REDSHIFT_HOST"))
     port: int = Field(default_factory=partial(get_env_var, "REDSHIFT_PORT", 5432))
     database: str = Field(default_factory=partial(get_env_var, "REDSHIFT_DATABASE", "db"))
     user: str = Field(default_factory=partial(get_env_var, "REDSHIFT_USER", "awsuser"))

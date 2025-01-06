@@ -7,7 +7,7 @@ def basic_requests_snowflake_example():
 
     snowflake_executor = SqlExecutor(connection=snowflake_connection)
     snowflake_insert = {
-        "query": """INSERT INTO test1 (Name, Desscription)
+        "query": """INSERT INTO test1 (Name, Description)
         VALUES ('Name1', 'Description1'), ('Name2', 'Description2');"""
     }
     snowflake_select = {"query": """select * from test1"""}
