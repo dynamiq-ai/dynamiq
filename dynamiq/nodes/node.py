@@ -475,7 +475,7 @@ class Node(BaseModel, Runnable, ABC):
         feedback_config: StreamingConfig = (
             getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
         )
-        if feedback_config.enabled and feedback_config.mode == StreamingMode.FINAL:
+        if feedback_config.enabled and feedback_config.mode == StreamingMode.OUTPUT:
             event = StreamingEventMessage(
                 run_id=str(get_run_id(kwargs)),
                 wf_run_id=kwargs.get("wf_run_id"),
