@@ -11,7 +11,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
-from dynamiq.callbacks import BaseCallbackHandler
+from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler
 from dynamiq.callbacks.base import get_run_id
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager
@@ -218,6 +218,7 @@ class Node(BaseModel, Runnable, ABC):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[BaseModel] | None] = None
+    callbacks: list[NodeCallbackHandler] = []
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -562,7 +563,7 @@ class Node(BaseModel, Runnable, ABC):
         except Exception as e:
             self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
             logger.error(
-                f"Node {self.name} - {self.id}: execution failed in "
+                f"Node {self.name} - {self.id}: execution failed in {e}"
                 f"{format_duration(time_start, datetime.now())}."
             )
 
@@ -711,7 +712,7 @@ class Node(BaseModel, Runnable, ABC):
         callbacks: list[BaseCallbackHandler],
         input_data: dict[str, Any],
         **kwargs,
-    ):
+    ) -> None:
         """
         Run callbacks on node start.
 
@@ -721,15 +722,18 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs: Additional keyword arguments.
         """
 
-        for callback in callbacks:
-            callback.on_node_start(self.to_dict(), input_data, **kwargs)
+        for callback in callbacks + self.callbacks:
+            try:
+                callback.on_node_start(self.to_dict(), input_data, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_end(
         self,
         callbacks: list[BaseCallbackHandler],
         output_data: dict[str, Any],
         **kwargs,
-    ):
+    ) -> None:
         """
         Run callbacks on node end.
 
@@ -738,15 +742,18 @@ class Node(BaseModel, Runnable, ABC):
             output_data (dict[str, Any]): Output data from the node.
             **kwargs: Additional keyword arguments.
         """
-        for callback in callbacks:
-            callback.on_node_end(self.model_dump(), output_data, **kwargs)
+        for callback in callbacks + self.callbacks:
+            try:
+                callback.on_node_end(self.model_dump(), output_data, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_error(
         self,
         callbacks: list[BaseCallbackHandler],
         error: BaseException,
         **kwargs,
-    ):
+    ) -> None:
         """
         Run callbacks on node error.
 
@@ -755,8 +762,11 @@ class Node(BaseModel, Runnable, ABC):
             error (BaseException): The error that occurred.
             **kwargs: Additional keyword arguments.
         """
-        for callback in callbacks:
-            callback.on_node_error(self.to_dict(), error, **kwargs)
+        for callback in callbacks + self.callbacks:
+            try:
+                callback.on_node_error(self.to_dict(), error, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_skip(
         self,
@@ -764,7 +774,7 @@ class Node(BaseModel, Runnable, ABC):
         skip_data: dict[str, Any],
         input_data: dict[str, Any],
         **kwargs,
-    ):
+    ) -> None:
         """
         Run callbacks on node skip.
 
@@ -774,15 +784,18 @@ class Node(BaseModel, Runnable, ABC):
             input_data (dict[str, Any]): Input data for the node.
             **kwargs: Additional keyword arguments.
         """
-        for callback in callbacks:
-            callback.on_node_skip(self.to_dict(), skip_data, input_data, **kwargs)
+        for callback in callbacks + self.callbacks:
+            try:
+                callback.on_node_skip(self.to_dict(), skip_data, input_data, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_execute_start(
         self,
         callbacks: list[BaseCallbackHandler],
         input_data: dict[str, Any] | BaseModel,
         **kwargs,
-    ):
+    ) -> None:
         """
         Run callbacks on node execute start.
 
@@ -794,15 +807,18 @@ class Node(BaseModel, Runnable, ABC):
         if isinstance(input_data, BaseModel):
             input_data = dict(input_data)
 
-        for callback in callbacks:
-            callback.on_node_execute_start(self.to_dict(), input_data, **kwargs)
+        for callback in callbacks + self.callbacks:
+            try:
+                callback.on_node_execute_start(self.to_dict(), input_data, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_execute_end(
         self,
         callbacks: list[BaseCallbackHandler],
         output_data: dict[str, Any],
         **kwargs,
-    ):
+    ) -> None:
         """
         Run callbacks on node execute end.
 
@@ -811,15 +827,18 @@ class Node(BaseModel, Runnable, ABC):
             output_data (dict[str, Any]): Output data from the node.
             **kwargs: Additional keyword arguments.
         """
-        for callback in callbacks:
-            callback.on_node_execute_end(self.to_dict(), output_data, **kwargs)
+        for callback in callbacks + self.callbacks:
+            try:
+                callback.on_node_execute_end(self.to_dict(), output_data, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_execute_error(
         self,
         callbacks: list[BaseCallbackHandler],
         error: BaseException,
         **kwargs,
-    ):
+    ) -> None:
         """
         Run callbacks on node execute error.
 
@@ -828,14 +847,17 @@ class Node(BaseModel, Runnable, ABC):
             error (BaseException): The error that occurred.
             **kwargs: Additional keyword arguments.
         """
-        for callback in callbacks:
-            callback.on_node_execute_error(self.model_dump(), error, **kwargs)
+        for callback in callbacks + self.callbacks:
+            try:
+                callback.on_node_execute_error(self.model_dump(), error, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_execute_run(
         self,
         callbacks: list[BaseCallbackHandler],
         **kwargs,
-    ):
+    ) -> None:
         """
         Run callbacks on node execute run.
 
@@ -843,15 +865,18 @@ class Node(BaseModel, Runnable, ABC):
             callbacks (list[BaseCallbackHandler]): List of callback handlers.
             **kwargs: Additional keyword arguments.
         """
-        for callback in callbacks:
-            callback.on_node_execute_run(self.to_dict(), **kwargs)
+        for callback in callbacks + self.callbacks:
+            try:
+                callback.on_node_execute_run(self.to_dict(), **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     def run_on_node_execute_stream(
         self,
         callbacks: list[BaseCallbackHandler],
         chunk: dict[str, Any] | None = None,
         **kwargs,
-    ):
+    ) -> None:
         """
         Run callbacks on node execute stream.
 
@@ -860,14 +885,16 @@ class Node(BaseModel, Runnable, ABC):
             chunk (dict[str, Any]): Chunk of streaming data.
             **kwargs: Additional keyword arguments.
         """
-        for callback in callbacks:
-            callback.on_node_execute_stream(self.to_dict(), chunk, **kwargs)
+        for callback in callbacks + self.callbacks:
+            try:
+                callback.on_node_execute_stream(self.to_dict(), chunk, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
     @abstractmethod
     def execute(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs) -> Any:
         """
         Execute the node with the given input.
-
         Args:
             input_data (dict[str, Any]): Input data for the node.
             config (RunnableConfig, optional): Configuration for the runnable.

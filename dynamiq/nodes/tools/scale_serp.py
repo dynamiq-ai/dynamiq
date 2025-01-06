@@ -79,11 +79,11 @@ class ScaleSerpTool(ConnectionNode):
         formatted_results = []
         content_results = results.get("organic_results", [])
 
-        if self.search_type == "news":
+        if self.search_type == SearchType.NEWS:
             content_results = results.get("news_results", [])
-        elif self.search_type == "images":
+        elif self.search_type == SearchType.IMAGES:
             content_results = results.get("image_results", [])
-        elif self.search_type == "videos":
+        elif self.search_type == SearchType.VIDEOS:
             content_results = results.get("video_results", [])
 
         for result in content_results:
@@ -160,11 +160,11 @@ class ScaleSerpTool(ConnectionNode):
 
         formatted_results = self._format_search_results(search_result)
         content_results = search_result.get("organic_results", [])
-        if self.search_type == "news":
+        if self.search_type == SearchType.NEWS:
             content_results = search_result.get("news_results", [])
-        elif self.search_type == "images":
+        elif self.search_type == SearchType.IMAGES:
             content_results = search_result.get("image_results", [])
-        elif self.search_type == "videos":
+        elif self.search_type == SearchType.VIDEOS:
             content_results = search_result.get("video_results", [])
 
         sources_with_url = [
