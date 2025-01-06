@@ -3,7 +3,7 @@ from dynamiq.runnables import RunnableConfig
 
 
 def send_message(message: StreamingEventMessage, config: RunnableConfig) -> None:
-    """Emits message to the queue of AsyncFeedbackIteratorCallbackHandler
+    """Emits message to the queue of AsyncStreamingIteratorCallbackHandler
 
     Args:
         message (StreamingEventMessage): Message to send.
@@ -19,6 +19,6 @@ def send_message(message: StreamingEventMessage, config: RunnableConfig) -> None
         sender_callback.queue.put_nowait(message)
     else:
         raise ValueError(
-            "Error: To use 'send_message' function either AsyncFeedbackIteratorCallbackHandler "
-            "or AsyncStreamingIteratorCallbackHandler has to be present in config callbacks. "
+            "Error: To use 'send_message' function AsyncStreamingIteratorCallbackHandler "
+            "has to be present in config callbacks."
         )
