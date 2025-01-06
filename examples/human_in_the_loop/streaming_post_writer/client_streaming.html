@@ -124,6 +124,11 @@
     socket.onmessage = function(event) {
         console.log(event.data)
         let message = JSON.parse(event.data)
+
+        if (message["event"] == "final_output_event"){
+            return
+        }
+
         let content = message["data"];
 
         if (isFirstChunk){

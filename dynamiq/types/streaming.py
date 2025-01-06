@@ -2,10 +2,11 @@ from enum import Enum
 from functools import cached_property
 from queue import Queue
 from threading import Event
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .message import EventMessage
+from dynamiq.utils import generate_uuid
 
 
 class StreamingMode(str, Enum):
@@ -18,7 +19,7 @@ class StreamingMode(str, Enum):
 STREAMING_EVENT = "streaming"
 
 
-class StreamingEventMessage(EventMessage):
+class StreamingEventMessage(BaseModel):
     """Message for streaming events.
 
     Attributes:
@@ -28,6 +29,12 @@ class StreamingEventMessage(EventMessage):
         data (Any): Data associated with the event.
         event (str | None): Event name. Defaults to "streaming".
     """
+
+    run_id: str | None = None
+    wf_run_id: str | None = Field(default_factory=generate_uuid)
+    entity_id: str
+    data: Any
+    event: str | None = None
 
     @field_validator("event")
     @classmethod
@@ -41,6 +48,22 @@ class StreamingEventMessage(EventMessage):
             str: Event name or default.
         """
         return value or STREAMING_EVENT
+
+    def to_dict(self, **kwargs) -> dict:
+        """Convert to dictionary.
+
+        Returns:
+            dict: Dictionary representation.
+        """
+        return self.model_dump(**kwargs)
+
+    def to_json(self, **kwargs) -> str:
+        """Convert to JSON string.
+
+        Returns:
+            str: JSON string representation.
+        """
+        return self.model_dump_json(**kwargs)
 
 
 class StreamingConfig(BaseModel):

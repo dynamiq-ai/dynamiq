@@ -14,6 +14,7 @@ from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult
 from dynamiq.types.streaming import StreamingConfig, StreamingEventMessage
+from dynamiq.utils.feedback import send_message
 from dynamiq.utils.logger import logger
 
 HOST = "127.0.0.1"
@@ -27,13 +28,6 @@ logging.basicConfig(level=logging.INFO)
 class SocketMessage(BaseModel):
     type: Literal["run", "message"]
     content: str
-
-
-def send_message(message: StreamingEventMessage, config: RunnableConfig):
-    sender_callback_streaming = next(
-        (item for item in config.callbacks if isinstance(item, AsyncStreamingIteratorCallbackHandler)), None
-    )
-    sender_callback_streaming.queue.put_nowait(message)
 
 
 def create_orchestrator() -> GraphOrchestrator:
