@@ -843,7 +843,7 @@ class PGVectorStore:
         base_select = SQL(
             """
             SELECT {fields}, ts_rank_cd(to_tsvector({language}, {content_key}), query) AS score
-            FROM {schema_name}.{table_name}, plainto_tsquery({language}, {query}) query
+            FROM {schema_name}.{table_name}, plainto_tsquery({language}, %s) query
             WHERE to_tsvector({language}, {content_key}) @@ query
             """
         ).format(
@@ -851,7 +851,6 @@ class PGVectorStore:
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
             language=SQLLiteral(self.language),
-            query=SQLLiteral(query),
             content_key=Identifier(content_key),
         )
 
@@ -871,7 +870,7 @@ class PGVectorStore:
 
         with self._get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
-                result = self._execute_sql_query(sql_query, params, cursor=cur)
+                result = self._execute_sql_query(sql_query, (query, *params), cursor=cur)
                 records = result.fetchall()
 
                 documents = self._convert_query_result_to_documents(records)
@@ -921,10 +920,9 @@ class PGVectorStore:
         content_key = content_key or self.content_key
         embedding_key = embedding_key or self.embedding_key
         query = query or self.query
-        
-                # If alpha is 0, perform purely keyword search
+
+        # If alpha is 0, perform purely keyword search
         if alpha == 0:
-            print("Performing purely keyword search")
             return self._keyword_retrieval(
                 query,
                 top_k=top_k,
@@ -935,7 +933,6 @@ class PGVectorStore:
             )
         # If alpha is 1, perform purely embedding search
         elif alpha == 1:
-            print("Performing purely embedding search")
             return self._embedding_retrieval(
                 query_embedding,
                 top_k=top_k,
