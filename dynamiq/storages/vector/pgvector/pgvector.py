@@ -57,8 +57,6 @@ class PGVectorStoreParams(BaseVectorStoreParams):
     dimension: int = 1536
     vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY
     embedding_key: str = "embedding"
-    # query: str | None = None
-    # alpha: float | None = 0.5
 
 
 class PGVectorStoreWriterParams(PGVectorStoreParams, BaseWriterVectorStoreParams):
@@ -805,6 +803,80 @@ class PGVectorStore:
                 documents = self._convert_query_result_to_documents(records)
                 return documents
 
+    def _keyword_retrieval(
+        self,
+        query: str,
+        top_k: int = 10,
+        exclude_document_embeddings: bool = True,
+        filters: dict[str, Any] | None = None,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+    ) -> list[Document]:
+        """
+        Retrieve documents similar to the given query using keyword search.
+
+        Args:
+            query (str): The query string.
+            filters (dict[str, Any] | None): Filters for the query. Defaults to None.
+            top_k (int): Maximum number of documents to retrieve. Defaults to 10.
+            exclude_document_embeddings (bool): Whether to exclude embeddings in results. Defaults to True.
+            content_key (str): The field used to store content in the storage. Defaults to None.
+            embedding_key (str): The field used to store embeddings in the storage. Defaults to None.
+
+        Returns:
+            list[Document]: List of retrieved Document objects.
+
+        Raises:
+            ValueError: If query is empty or filter format is incorrect.
+        """
+        if not query:
+            msg = "query must be provided for keyword retrieval"
+            raise ValueError(msg)
+
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
+
+        # Do not select the embeddings if exclude_document_embeddings is True
+        select_fields = f"id, {content_key}, metadata" if exclude_document_embeddings else "*"
+
+        # Build the base SELECT query with score
+        base_select = SQL(
+            """
+            SELECT {fields}, ts_rank_cd(to_tsvector({language}, {content_key}), query) AS score
+            FROM {schema_name}.{table_name}, plainto_tsquery({language}, {query}) query
+            WHERE to_tsvector({language}, {content_key}) @@ query
+            """
+        ).format(
+            fields=SQL(select_fields),
+            schema_name=Identifier(self.schema_name),
+            table_name=Identifier(self.table_name),
+            language=SQLLiteral(self.language),
+            query=SQLLiteral(query),
+            content_key=Identifier(content_key),
+        )
+
+        # Handle filters if they exist
+        where_clause = SQL("")
+        params = ()
+        if filters:
+            where_clause, params = _convert_filters_to_query(filters)
+
+            where_clause = SQL(where_clause.as_string().replace("WHERE", "AND"))
+
+        # Build the ORDER BY and LIMIT clause
+        order_by = SQL(" ORDER BY score DESC LIMIT {limit}").format(limit=SQLLiteral(top_k))
+
+        # Combine all parts into final query
+        sql_query = base_select + where_clause + order_by
+
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                result = self._execute_sql_query(sql_query, params, cursor=cur)
+                records = result.fetchall()
+
+                documents = self._convert_query_result_to_documents(records)
+                return documents
+
     def _hybrid_retrieval(
         self,
         query: str,
@@ -812,6 +884,7 @@ class PGVectorStore:
         top_k: int = 10,
         exclude_document_embeddings: bool = True,
         keyword_rank_constant: int = 40,
+        top_k_subquery_multiplier: int = 4,
         filters: dict[str, Any] | None = None,
         alpha: float = 0.5,
         content_key: str | None = None,
@@ -848,6 +921,29 @@ class PGVectorStore:
         content_key = content_key or self.content_key
         embedding_key = embedding_key or self.embedding_key
         query = query or self.query
+        
+                # If alpha is 0, perform purely keyword search
+        if alpha == 0:
+            print("Performing purely keyword search")
+            return self._keyword_retrieval(
+                query,
+                top_k=top_k,
+                exclude_document_embeddings=exclude_document_embeddings,
+                filters=filters,
+                content_key=content_key,
+                embedding_key=embedding_key,
+            )
+        # If alpha is 1, perform purely embedding search
+        elif alpha == 1:
+            print("Performing purely embedding search")
+            return self._embedding_retrieval(
+                query_embedding,
+                top_k=top_k,
+                exclude_document_embeddings=exclude_document_embeddings,
+                filters=filters,
+                content_key=content_key,
+                embedding_key=embedding_key,
+            )
 
         query_embedding = self._convert_query_embedding_to_pgvector_format(query_embedding)
 
@@ -863,11 +959,8 @@ class PGVectorStore:
         # as the smaller the distance, the more similar the vectors are
         sort_order = "ASC" if is_distance_metric else "DESC"
 
-        # Set alpha to 0.0001 when it is 0 and 0.9999 when it is 1 to avoid division by zero
-        alpha = min(max(alpha, 0.0001), 0.9999)
-
-        # Set the limit for the subquery to 4 times the top_k
-        top_k_subquery_limit = top_k * 4
+        # Set the limit for the subquery to top_k multiplied by a constant to ensure enough results
+        top_k_subquery_limit = top_k * top_k_subquery_multiplier
 
         # Extract the filters from the query
         where_clause = SQL("")
@@ -885,14 +978,14 @@ class PGVectorStore:
                 SELECT *, RANK() OVER (ORDER BY {score_definition} {sort_order}) AS rank
                 FROM {schema_name}.{table_name}
                 {where_clause}
-                LIMIT {top_k_subquery_limit}
+                LIMIT {top_k_limit}
             ),
             """
         ).format(
             score_definition=SQL(score_definition),
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
-            top_k_subquery_limit=SQLLiteral(top_k * 4),
+            top_k_limit=SQLLiteral(top_k_subquery_limit),
             sort_order=SQL(sort_order),
             where_clause=where_clause,
         )
@@ -905,7 +998,7 @@ class PGVectorStore:
                 FROM {schema_name}.{table_name}, plainto_tsquery({language}, {query}) query
                 WHERE to_tsvector('english', {content_key}) @@ query
                 {where_clause_for_keyword_search}
-                LIMIT {top_k_subquery_limit}
+                LIMIT {top_k_limit}
             )
             """
         ).format(
@@ -914,7 +1007,7 @@ class PGVectorStore:
             content_key=Identifier(content_key),
             language=SQLLiteral(self.language),
             query=SQLLiteral(query),
-            top_k_subquery_limit=SQLLiteral(top_k * 4),
+            top_k_limit=SQLLiteral(top_k_subquery_limit),
             where_clause_for_keyword_search=where_clause_for_keyword_search,
         )
 
@@ -940,18 +1033,10 @@ class PGVectorStore:
             LIMIT {top_k}
             """
         ).format(
-            schema_name=Identifier(self.schema_name),
-            table_name=Identifier(self.table_name),
             content_key=Identifier(content_key),
-            embedding_key=Identifier(embedding_key),
-            query_embedding=SQLLiteral(query_embedding),
             top_k=SQLLiteral(top_k),
-            query=SQLLiteral(query),
             alpha=SQLLiteral(alpha),
             k=SQLLiteral(keyword_rank_constant),
-            score_definition=SQL(score_definition),
-            top_k_subquery_limit=SQLLiteral(top_k_subquery_limit),
-            language=SQLLiteral(self.language),
             embedding_key_select=SQL(embedding_key_select),
         )
 

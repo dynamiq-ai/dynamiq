@@ -409,7 +409,7 @@ class WeaviateVectorStore:
         filters = create_file_id_filter(file_id)
         self.delete_documents_by_filters(filters)
 
-    def _bm25_retrieval(
+    def _keyword_retrieval(
         self,
         query: str,
         filters: dict[str, Any] | None = None,
