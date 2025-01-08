@@ -515,7 +515,7 @@ class Node(BaseModel, Runnable, ABC):
             self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
 
             answer = self.get_input_streaming_event(
-                event=self.approval.event, event_msg_type=self.approval.event_msg_type, config=config
+                event=self.approval.event, config=config
             ).data
 
         elif self.approval.feedback_method == FeedbackMethod.CONSOLE:
