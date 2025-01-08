@@ -2,8 +2,6 @@ from enum import Enum
 
 from pydantic import BaseModel
 
-from dynamiq.types.streaming import StreamingEventMessage
-
 
 class FeedbackMethod(Enum):
     CONSOLE = "console"
