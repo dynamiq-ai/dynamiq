@@ -1,4 +1,3 @@
-import enum
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar, Literal
 
@@ -7,13 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.feedback import FeedbackMethod
 from dynamiq.types.streaming import StreamingEventMessage
 from dynamiq.utils.logger import logger
-
-
-class InputMethod(str, enum.Enum):
-    console = "console"
-    stream = "stream"
 
 
 class HFStreamingInputEventMessageData(BaseModel):
@@ -69,13 +64,13 @@ class HumanFeedbackTool(Node):
         group (Literal[NodeGroup.TOOLS]): The group the node belongs to.
         name (str): The name of the tool.
         description (str): A brief description of the tool's purpose.
-        input_method (InputMethod): The method used to gather user input.
+        input_method (FeedbackMethod | InputMethodCallable): The method used to gather user input.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Human Feedback Tool"
     description: str = "Tool to gather user information. Use it to check actual information or get additional input."
-    input_method: InputMethod | InputMethodCallable = InputMethod.console
+    input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -145,14 +140,14 @@ class HumanFeedbackTool(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         input_text = input_data.input
-        if isinstance(self.input_method, InputMethod):
-            if self.input_method == InputMethod.console:
+        if isinstance(self.input_method, FeedbackMethod):
+            if self.input_method == FeedbackMethod.CONSOLE:
                 result = self.input_method_console(input_text)
-            elif self.input_method == InputMethod.stream:
+            elif self.input_method == FeedbackMethod.STREAM:
                 streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
                 if not streaming.input_streaming_enabled:
                     raise ValueError(
-                        f"'{InputMethod.stream.value}' input method requires enabled input and output streaming."
+                        f"'{FeedbackMethod.STREAM}' input method requires enabled input and output streaming."
                     )
 
                 result = self.input_method_streaming(prompt=input_text, config=config, **kwargs)

@@ -29,6 +29,14 @@ class SocketMessage(BaseModel):
     type: Literal["run", "message"]
     content: str
 
+    def to_json(self, **kwargs) -> str:
+        """Convert to JSON string.
+
+        Returns:
+            str: JSON string representation.
+        """
+        return self.model_dump_json(**kwargs)
+
 
 def create_orchestrator() -> GraphOrchestrator:
     """

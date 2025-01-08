@@ -8,6 +8,7 @@ from queue import Empty
 from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
+from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
@@ -25,6 +26,7 @@ from dynamiq.nodes.exceptions import (
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.vector.base import BaseVectorStoreParams
+from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
 from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEventMessage, StreamingMode
 from dynamiq.utils import format_value, generate_uuid, merge
 from dynamiq.utils.duration import format_duration
@@ -207,6 +209,8 @@ class Node(BaseModel, Runnable, ABC):
     output_transformer: OutputTransformer = Field(default_factory=OutputTransformer)
     caching: CachingConfig = Field(default_factory=CachingConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
+    approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
+
     depends: list[NodeDependency] = []
     metadata: NodeMetadata | None = None
 
@@ -485,6 +489,45 @@ class Node(BaseModel, Runnable, ABC):
             )
             self.run_on_node_execute_stream(callbacks=config.callbacks, chunk=output, event=event, **kwargs)
 
+    def approve_execution(self, input_data: dict, config: RunnableConfig = None, **kwargs) -> None:
+        """
+        Approves or disapproves (cancels) Node execution by requesting feedback.
+
+        Args:
+            config (RunnableConfig, optional): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
+
+        Raises:
+            NodeException: If Node execution was canceled.
+        """
+        message = Template(self.approval.msg_template).render(self.to_dict(), input_data=input_data)
+
+        if self.approval.feedback_method == FeedbackMethod.STREAM:
+            event = StreamingEventMessage(
+                wf_run_id=config.run_id,
+                entity_id=self.id,
+                data=message,
+                event=self.approval.event,
+            )
+
+            logger.info(f"Node {self.name} - {self.id}: sending approval.")
+
+            self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
+
+            answer = self.get_input_streaming_event(
+                event=self.approval.event, event_msg_type=self.approval.event_msg_type, config=config
+            ).data
+
+        elif self.approval.feedback_method == FeedbackMethod.CONSOLE:
+            answer = input(message)
+
+        if answer == self.approval.accept_pattern:
+            return
+
+        else:
+            logger.info(f"Node {self.name} was canceled by human with provided feedback {answer}")
+            raise NodeException(message=f"Execution was canceled by human with feedback: {answer}", recoverable=True)
+
     def run(
         self,
         input_data: Any,
@@ -520,11 +563,13 @@ class Node(BaseModel, Runnable, ABC):
         try:
             try:
                 self.validate_depends(depends_result)
+                if self.approval.enabled:
+                    self.approve_execution(input_data, config=config, **merged_kwargs)
             except NodeException as e:
                 transformed_input = input_data | {
                     k: result.to_tracing_depend_dict() for k, result in depends_result.items()
                 }
-                skip_data = {"failed_dependency": e.failed_depend.to_dict()}
+                skip_data = {"failed_dependency": e.failed_depend.to_dict() if e.failed_depend else None}
                 self.run_on_node_skip(
                     callbacks=config.callbacks,
                     skip_data=skip_data,
@@ -532,12 +577,14 @@ class Node(BaseModel, Runnable, ABC):
                     **merged_kwargs,
                 )
                 logger.info(f"Node {self.name} - {self.id}: execution skipped.")
-                return RunnableResult(status=RunnableStatus.SKIP, input=transformed_input, output=format_value(e))
+                return RunnableResult(
+                    status=RunnableStatus.SKIP,
+                    input=transformed_input,
+                    output=format_value(e, recoverable=e.recoverable),
+                )
 
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
-
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
-
             cache = cache_wf_entity(
                 entity_id=self.id,
                 cache_enabled=self.caching.enabled,
