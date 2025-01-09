@@ -45,7 +45,7 @@ def create_orchestrator() -> GraphOrchestrator:
 
         result = input(
             f"Approve whether to publish by providing nothing or cancel by typing in feedback: "
-            f"{context["messages"][-1]["content"]}"
+            f"{context['messages'][-1]['content']}"
         )
 
         if result:
