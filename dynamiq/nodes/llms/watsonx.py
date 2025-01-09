@@ -12,7 +12,7 @@ class WatsonX(BaseLLM):
         MODEL_PREFIX (str): The prefix for the WatsonX model name.
     """
     connection: WatsonXConnection | None = None
-    MODEL_PREFIX = "watsonx/"
+    MODEL_PREFIX = "watsonx_text/"
 
     def __init__(self, **kwargs):
         """Initialize the WatsonX LLM node.

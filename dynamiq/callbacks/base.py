@@ -3,8 +3,104 @@ from typing import Any
 from uuid import UUID
 
 
-class BaseCallbackHandler(ABC):
-    """Abstract base class for callback handlers."""
+class NodeCallbackHandler(ABC):
+    """Abstract class for node callback handlers."""
+
+    def on_node_start(self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any):
+        """Called when the node starts.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            input_data (dict[str, Any]): Input data for the node.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
+    def on_node_end(self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any):
+        """Called when the node ends.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            output_data (dict[str, Any]): Output data from the node.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
+    def on_node_error(self, serialized: dict[str, Any], error: BaseException, **kwargs: Any):
+        """Called when the node errors.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            error (BaseException): Error encountered.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
+    def on_node_execute_start(self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any):
+        """Called when the node execute starts.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            input_data (dict[str, Any]): Input data for the node.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
+    def on_node_execute_end(self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any):
+        """Called when the node execute ends.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            output_data (dict[str, Any]): Output data from the node.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
+    def on_node_execute_error(self, serialized: dict[str, Any], error: BaseException, **kwargs: Any):
+        """Called when the node execute errors.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            error (BaseException): Error encountered.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
+    def on_node_execute_run(self, serialized: dict[str, Any], **kwargs: Any):
+        """Called when the node execute runs.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
+    def on_node_execute_stream(self, serialized: dict[str, Any], chunk: dict[str, Any] | None = None, **kwargs: Any):
+        """Called when the node execute streams.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            chunk (dict[str, Any] | None): Stream chunk data.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
+    def on_node_skip(
+        self, serialized: dict[str, Any], skip_data: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
+    ):
+        """Called when the node skips.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            skip_data (dict[str, Any]): Data related to the skip.
+            input_data (dict[str, Any]): Input data for the node.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
+
+class BaseCallbackHandler(NodeCallbackHandler, ABC):
+    """Abstract base class for general callback handlers."""
 
     def on_workflow_start(
         self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
@@ -74,114 +170,6 @@ class BaseCallbackHandler(ABC):
         Args:
             serialized (dict[str, Any]): Serialized flow data.
             error (BaseException): Error encountered.
-            **kwargs (Any): Additional arguments.
-        """
-        pass
-
-    def on_node_start(
-        self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
-    ):
-        """Called when the node starts.
-
-        Args:
-            serialized (dict[str, Any]): Serialized node data.
-            input_data (dict[str, Any]): Input data for the node.
-            **kwargs (Any): Additional arguments.
-        """
-        pass
-
-    def on_node_end(
-        self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any
-    ):
-        """Called when the node ends.
-
-        Args:
-            serialized (dict[str, Any]): Serialized node data.
-            output_data (dict[str, Any]): Output data from the node.
-            **kwargs (Any): Additional arguments.
-        """
-        pass
-
-    def on_node_error(
-        self, serialized: dict[str, Any], error: BaseException, **kwargs: Any
-    ):
-        """Called when the node errors.
-
-        Args:
-            serialized (dict[str, Any]): Serialized node data.
-            error (BaseException): Error encountered.
-            **kwargs (Any): Additional arguments.
-        """
-        pass
-
-    def on_node_skip(
-        self,
-        serialized: dict[str, Any],
-        skip_data: dict[str, Any],
-        input_data: dict[str, Any],
-        **kwargs: Any
-    ):
-        """Called when the node skips.
-
-        Args:
-            serialized (dict[str, Any]): Serialized node data.
-            skip_data (dict[str, Any]): Data related to the skip.
-            input_data (dict[str, Any]): Input data for the node.
-            **kwargs (Any): Additional arguments.
-        """
-        pass
-
-    def on_node_execute_start(
-        self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
-    ):
-        """Called when the node execute starts.
-
-        Args:
-            serialized (dict[str, Any]): Serialized node data.
-            input_data (dict[str, Any]): Input data for the node.
-            **kwargs (Any): Additional arguments.
-        """
-        pass
-
-    def on_node_execute_end(
-        self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any
-    ):
-        """Called when the node execute ends.
-
-        Args:
-            serialized (dict[str, Any]): Serialized node data.
-            output_data (dict[str, Any]): Output data from the node.
-            **kwargs (Any): Additional arguments.
-        """
-        pass
-
-    def on_node_execute_error(
-        self, serialized: dict[str, Any], error: BaseException, **kwargs: Any
-    ):
-        """Called when the node execute errors.
-
-        Args:
-            serialized (dict[str, Any]): Serialized node data.
-            error (BaseException): Error encountered.
-            **kwargs (Any): Additional arguments.
-        """
-        pass
-
-    def on_node_execute_run(self, serialized: dict[str, Any], **kwargs: Any):
-        """Called when the node execute runs.
-
-        Args:
-            serialized (dict[str, Any]): Serialized node data.
-            **kwargs (Any): Additional arguments.
-        """
-        pass
-
-    def on_node_execute_stream(self, serialized: dict[str, Any], chunk: dict[str, Any] | None = None, **kwargs: Any):
-        """Called when the node execute streams.
-
-        Args:
-            serialized (dict[str, Any]): Serialized node data.
-            chunk (dict[str, Any] | None): Stream chunk data.
             **kwargs (Any): Additional arguments.
         """
         pass
