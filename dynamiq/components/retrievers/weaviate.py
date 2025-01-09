@@ -44,7 +44,7 @@ class WeaviateDocumentRetriever:
         filters: dict[str, Any] | None = None,
         content_key: str | None = None,
         query: str | None = None,
-        alpha: float | None = None,
+        alpha: float | None = 0.5,
     ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the WeaviateDocumentStore that are similar to the provided query embedding.

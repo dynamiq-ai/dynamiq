@@ -396,14 +396,16 @@ class PGVectorStore:
 
         create_keyword_index_query = SQL(
             """
-            CREATE INDEX IF NOT EXISTS {index_name}
-            ON {schema_name}.{table_name} USING gin(to_tsvector('english', {content_key}));
+            CREATE INDEX {index_name}
+            ON {schema_name}.{table_name} 
+            USING gin(to_tsvector({language}, {content_key}));
             """
         ).format(
             index_name=SQLLiteral(self.keyword_index_name),
             schema_name=SQLLiteral(self.schema_name),
             table_name=SQLLiteral(self.table_name),
             content_key=SQLLiteral(content_key),
+            language=SQLLiteral(self.language),
         )
 
         with conn.cursor() as cur:

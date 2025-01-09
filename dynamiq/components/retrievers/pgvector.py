@@ -47,7 +47,7 @@ class PGVectorDocumentRetriever:
         content_key: str | None = None,
         embedding_key: str | None = None,
         query: str | None = None,
-        alpha: float | None = None,
+        alpha: float | None = 0.5,
     ):
         """
         Retrieves documents from the PGVectorStore that are similar to the provided query embedding.
