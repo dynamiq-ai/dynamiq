@@ -397,7 +397,7 @@ class PGVectorStore:
         create_keyword_index_query = SQL(
             """
             CREATE INDEX {index_name}
-            ON {schema_name}.{table_name} 
+            ON {schema_name}.{table_name}
             USING gin(to_tsvector({language}, {content_key}));
             """
         ).format(
