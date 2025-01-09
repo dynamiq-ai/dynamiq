@@ -3,7 +3,7 @@ from dynamiq.nodes.tools import SqlExecutor
 
 
 def basic_requests_snowflake_example():
-    snowflake_connection = connections.SnowFlake()
+    snowflake_connection = connections.Snowflake()
 
     snowflake_executor = SqlExecutor(connection=snowflake_connection)
     snowflake_insert = {
@@ -16,7 +16,7 @@ def basic_requests_snowflake_example():
     for query in [snowflake_insert, snowflake_select, snowflake_delete]:
         result = snowflake_executor.run(input_data=query)
         print("Query execution results:")
-        print(result.output.get("result"))
+        print(result.output.get("results"))
 
 
 def basic_requests_mysql_example():
@@ -36,7 +36,7 @@ def basic_requests_mysql_example():
     for query in [mysql_insert, mysql_select, mysql_delete]:
         result = mysql_executor.run(input_data=query)
         print("Query execution results:")
-        print(result.output.get("result"))
+        print(result.output.get("results"))
 
 
 if __name__ == "__main__":

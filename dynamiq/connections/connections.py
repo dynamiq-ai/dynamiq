@@ -939,6 +939,7 @@ class Jina(Http):
 
 class MySQL(BaseConnection):
     host: str = Field(default_factory=partial(get_env_var, "MYSQL_HOST", "localhost"))
+    port: int = Field(default_factory=partial(get_env_var, "MYSQL_PORT", 3306))
     database: str = Field(default_factory=partial(get_env_var, "MYSQL_DATABASE", "db"))
     user: str = Field(default_factory=partial(get_env_var, "MYSQL_USER", "mysql"))
     password: str = Field(default_factory=partial(get_env_var, "MYSQL_PASSWORD", "password"))
@@ -947,7 +948,9 @@ class MySQL(BaseConnection):
         import mysql.connector
 
         try:
-            conn = mysql.connector.connect(host=self.host, database=self.database, user=self.user, passwd=self.password)
+            conn = mysql.connector.connect(
+                host=self.host, port=self.port, database=self.database, user=self.user, passwd=self.password
+            )
             conn.autocommit = True
             logger.debug(
                 f"Connected to MySQL with host={self.host}, " f"user={self.user}, " f"database={self.database}."
@@ -963,7 +966,7 @@ class MySQL(BaseConnection):
         return {"dictionary": True}
 
 
-class SnowFlake(BaseConnection):
+class Snowflake(BaseConnection):
     user: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_USER", "snowflake"))
     password: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_PASSWORD", "password"))
     account: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_ACCOUNT", "account"))
@@ -1010,14 +1013,17 @@ class AWSRedshift(BaseConnection):
 
     def connect(self):
         try:
-            import psycopg2
+            import psycopg
+            from psycopg.rows import dict_row
 
-            conn = psycopg2.connect(
+            conn = psycopg.connect(
                 host=self.host,
                 port=self.port,
                 dbname=self.database,
                 user=self.user,
                 password=self.password,
+                client_encoding="utf-8",
+                row_factory=dict_row,
             )
             conn.autocommit = True
             logger.debug(
@@ -1033,6 +1039,4 @@ class AWSRedshift(BaseConnection):
 
     @property
     def conn_params(self) -> dict:
-        from psycopg2.extras import RealDictCursor
-
-        return {"cursor_factory": RealDictCursor}
+        return {}

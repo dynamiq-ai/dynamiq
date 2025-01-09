@@ -2,8 +2,9 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from dynamiq.connections import AWSRedshift, MySQL, PostgreSQL, SnowFlake
+from dynamiq.connections import AWSRedshift, MySQL, PostgreSQL, Snowflake
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -21,7 +22,7 @@ class SqlExecutor(ConnectionNode):
         group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
         name (str): The name of the tool.
         description (str): A brief description of the tool.
-        connection (PostgreSQL|MySQL|SnowFlake|AWSRedshift): The connection instance for the specified storage.
+        connection (PostgreSQL|MySQL|Snowflake|AWSRedshift): The connection instance for the specified storage.
         input_schema (SQLInputSchema): The input schema for the tool.
     """
 
@@ -31,7 +32,7 @@ class SqlExecutor(ConnectionNode):
         "A tool for SQL query execution."
         "You can use this tool to execute the query, specified for PostgreSQL, MySQL, Snowflake, AWS Redshift."
     )
-    connection: PostgreSQL | MySQL | SnowFlake | AWSRedshift
+    connection: PostgreSQL | MySQL | Snowflake | AWSRedshift
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -50,9 +51,8 @@ class SqlExecutor(ConnectionNode):
             )
             cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []
-            if type(self.connection) is AWSRedshift:
-                output = [dict(row) for row in output]
-            return {"result": output}
+            return {"results": output}
         except Exception as e:
-            msg = f"Encountered an error while executing SQL query: {query}. \nError details: {e}"
-            raise AttributeError(msg)
+            raise ToolExecutionException(
+                f"Encountered an error while executing SQL query: {query}. \nError details: {e}", recoverable=True
+            )

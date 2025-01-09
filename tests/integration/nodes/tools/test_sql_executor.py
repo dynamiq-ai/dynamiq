@@ -36,7 +36,7 @@ def mock_cursor_with_select(mocker, mock_fetchall_sql_response):
     [
         connections.PostgreSQL(host="test_host", port=5432, database="db", user="user", password="password"),
         connections.MySQL(host="test_host", database="db", user="user", password="password"),
-        connections.SnowFlake(
+        connections.Snowflake(
             user="user", password="password", database="db", account="account", warehouse="warehouse", schema="schema"
         ),
         connections.AWSRedshift(user="user", host="test_host", port=5439, database="db", password="password"),
@@ -58,7 +58,7 @@ def test_mysql_postgres_select_execute(mock_fetchall_sql_response, connection, m
     mock_cursor_with_select.execute.assert_called_once_with(input_data["query"])
     mock_cursor_with_select.fetchall.assert_called_once()
     output_dump = result.output
-    assert output_dump["result"] == output
+    assert output_dump["results"] == output
 
 
 @pytest.fixture
@@ -72,7 +72,6 @@ def mock_cursor_with_none_description(mocker):
     mocker.patch("mysql.connector.connect", return_value=mock_connection)
     mocker.patch("psycopg.connect", return_value=mock_connection)
     mocker.patch("snowflake.connector.connect", return_value=mock_connection)
-    mocker.patch("psycopg2.connect", return_value=mock_connection)
     return mock_cursor
 
 
@@ -81,7 +80,7 @@ def mock_cursor_with_none_description(mocker):
     [
         connections.PostgreSQL(host="test_host", port=5432, database="db", user="user", password="password"),
         connections.MySQL(host="test_host", database="db", user="user", password="password"),
-        connections.SnowFlake(
+        connections.Snowflake(
             user="user", password="password", database="db", account="account", warehouse="warehouse", schema="schema"
         ),
         connections.AWSRedshift(user="user", host="test_host", port=5439, database="db", password="password"),
@@ -102,4 +101,4 @@ def test_non_select_queries_execution(mock_fetchall_sql_response, connection, mo
 
     mock_cursor_with_none_description.execute.assert_called_once_with(input_data["query"])
     output_dump = result.output
-    assert output_dump["result"] == output
+    assert output_dump["results"] == output
