@@ -7,9 +7,10 @@ from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.retrievers.base import Retriever, RetrieverInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import WeaviateVectorStore
+from dynamiq.storages.vector.weaviate.weaviate import WeaviteRetrieverVectorStoreParams
 
 
-class WeaviateDocumentRetriever(Retriever):
+class WeaviateDocumentRetriever(Retriever, WeaviteRetrieverVectorStoreParams):
     """Document Retriever using Weaviate.
 
     This class implements a document retriever that uses Weaviate as the vector store backend.
@@ -91,7 +92,7 @@ class WeaviateDocumentRetriever(Retriever):
         filters = input_data.filters or self.filters
         top_k = input_data.top_k or self.top_k
 
-        alpha = input_data.alpha
+        alpha = input_data.alpha or self.alpha
         query = input_data.query
 
         output = self.document_retriever.run(

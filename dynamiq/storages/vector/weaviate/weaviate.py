@@ -6,6 +6,7 @@ from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateQueryError
 from weaviate.util import generate_uuid5
 
 from dynamiq.connections import Weaviate
+from dynamiq.storages.vector.base import BaseVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.storages.vector.utils import create_file_id_filter
@@ -27,6 +28,10 @@ DOCUMENT_COLLECTION_PROPERTIES = [
 ]
 
 DEFAULT_QUERY_LIMIT = 9999
+
+
+class WeaviteRetrieverVectorStoreParams(BaseVectorStoreParams):
+    alpha: float = 0.5
 
 
 class WeaviateVectorStore:
