@@ -429,7 +429,7 @@ from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.llms import OpenAI
 
 llm = OpenAI(
-    connection=OpenAIConnection(),
+    connection=OpenAIConnection(api_key="$OPENAI_API_KEY")
     model="gpt-4o",
     temperature=0.1,
 )
