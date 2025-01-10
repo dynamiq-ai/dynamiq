@@ -56,6 +56,12 @@ class WeaviateDocumentRetriever:
             top_k (int, optional): The maximum number of documents to return. Defaults to None.
             filters (Optional[dict[str, Any]]): Filters to apply for retrieving specific documents. Defaults to None.
             content_key (Optional[str]): The field used to store content in the storage.
+            query(Optional[str]): The query string to search for (when using keyword search). Defaults to None.
+            alpha (Optional[float]): The alpha value for hybrid retrieval. Defaults to 0.5.
+
+            When using hybrid retrieval, the alpha value determines the weight of the keyword search score in the
+            final ranking. A value of 0.0 means only keyword search score will be used, and a value of 1.0 means only
+            vector similarity score will be considered.
 
         Returns:
             List[Document]: A list of Document instances sorted by their relevance to the query_embedding.
