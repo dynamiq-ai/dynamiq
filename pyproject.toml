@@ -50,6 +50,8 @@ qdrant-client = "~1.11.3"
 pymilvus = "~2.4.3"
 psycopg = { version = "~3.2.3", extras = ["binary"] }
 pgvector = "~0.3.6"
+rapidfuzz = "~3.11.0"
+sacrebleu = "~2.5.1"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~69.1.1"
