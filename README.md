@@ -437,7 +437,7 @@ llm = OpenAI(
 email_writer = SimpleAgent(
     name="email-writer-agent",
     llm=llm,
-    role="Write personalized emails taking into account feedback. ",
+    role="Write personalized emails taking into account feedback.",
 )
 
 
@@ -451,7 +451,7 @@ def gather_feedback(context: dict[str, Any]):
 
     reiterate = True
 
-    result = f"Gathered feedback {feedback}"
+    result = f"Gathered feedback: {feedback}"
     if feedback == "SEND":
         print("####### Email was sent! #######")
         result = "Email was sent!"
