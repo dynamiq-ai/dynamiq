@@ -1,16 +1,11 @@
 from typing import Any
 
-from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
-from dynamiq.nodes.llms import OpenAI
 from dynamiq.prompts import Message, Prompt
+from examples.llm_setup import setup_llm
 
-llm = OpenAI(
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
-    model="gpt-4o",
-    temperature=0.1,
-)
+llm = setup_llm()
 
 
 def generate_sketch(context: dict[str, Any]):
