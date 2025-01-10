@@ -7,10 +7,10 @@ from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.retrievers.base import Retriever, RetrieverInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PGVectorStore
-from dynamiq.storages.vector.pgvector.pgvector import PGVectorStoreParams
+from dynamiq.storages.vector.pgvector.pgvector import PGVectorStoreParams, PGVectorStoreRetrieverParams
 
 
-class PGVectorDocumentRetriever(Retriever, PGVectorStoreParams):
+class PGVectorDocumentRetriever(Retriever, PGVectorStoreRetrieverParams):
     """
     Document Retriever using PGVector.
 
@@ -103,7 +103,7 @@ class PGVectorDocumentRetriever(Retriever, PGVectorStoreParams):
         filters = input_data.filters or self.filters
         top_k = input_data.top_k or self.top_k
 
-        alpha = input_data.alpha
+        alpha = input_data.alpha or self.alpha
         query = input_data.query
 
         output = self.document_retriever.run(

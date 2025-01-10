@@ -59,6 +59,10 @@ class PGVectorStoreParams(BaseVectorStoreParams):
     embedding_key: str = "embedding"
 
 
+class PGVectorStoreRetrieverParams(PGVectorStoreParams):
+    alpha: float = 0.5
+
+
 class PGVectorStoreWriterParams(PGVectorStoreParams, BaseWriterVectorStoreParams):
     create_if_not_exist: bool = False
 
@@ -82,7 +86,6 @@ class PGVectorStore:
         embedding_key: str = "embedding",
         keyword_index_name: str | None = None,
         language: str = DEFAULT_LANGUAGE,
-        query: str | None = None,
     ):
         """
         Initialize a PGVectorStore instance.
@@ -139,7 +142,6 @@ class PGVectorStore:
 
         self.content_key = content_key
         self.embedding_key = embedding_key
-        self.query = query
 
         if (
             self.index_method == PGVectorIndexMethod.IVFFLAT
