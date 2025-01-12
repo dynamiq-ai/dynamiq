@@ -2,7 +2,7 @@ import logging
 from functools import cached_property
 from typing import Callable
 
-from pydantic import BaseModel, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, PrivateAttr, computed_field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +59,7 @@ class BleuScoreEvaluator(BaseModel):
     # Private attribute to store the sacrebleu corpus_bleu function
     _corpus_bleu: Callable = PrivateAttr()
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @computed_field
     @cached_property
@@ -132,7 +131,8 @@ class BleuScoreEvaluator(BaseModel):
 
             # Compute BLEU score (scale down by 100, as sacrebleu returns a percentage)
             bleu_result = self._corpus_bleu(hypothesis, structured_refs).score / 100.0
-            scores.append(round(float(bleu_result)), 2)
+            bleu_score = round(float(bleu_result), 2)
+            scores.append(bleu_score)
 
         output_data = RunOutput(scores=scores)
         return output_data.scores
