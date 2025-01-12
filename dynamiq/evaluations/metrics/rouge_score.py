@@ -1,15 +1,36 @@
 import logging
+from enum import Enum
 from functools import cached_property
-from typing import Callable, Literal
+from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr, computed_field, model_validator
 
 logger = logging.getLogger(__name__)
 
 
+class RougeType(str, Enum):
+    """
+    Enumeration of supported ROUGE types.
+    """
+
+    rouge1 = "rouge1"
+    rouge2 = "rouge2"
+    rougeL = "rougeL"
+
+
+class MeasureType(str, Enum):
+    """
+    Enumeration of measurement types for ROUGE scores.
+    """
+
+    fmeasure = "fmeasure"
+    precision = "precision"
+    recall = "recall"
+
+
 class RunInput(BaseModel):
     """
-    Input model for the ROUGE score evaluation.
+    Input model for ROUGE score evaluation.
 
     Attributes:
         ground_truth_answers (list[str]): List of reference strings, one per example.
@@ -22,7 +43,7 @@ class RunInput(BaseModel):
     @model_validator(mode="after")
     def check_equal_length(self) -> "RunInput":
         """
-        Validate that the number of ground truth answers matches the number of responses.
+        Validate that the number of ground truth answers matches the number of answers.
 
         Raises:
             ValueError: If the lengths of `ground_truth_answers` and `answers` do not match.
@@ -37,7 +58,7 @@ class RunInput(BaseModel):
 
 class RunOutput(BaseModel):
     """
-    Output model for the ROUGE score evaluation.
+    Output model for ROUGE score evaluation.
 
     Attributes:
         scores (list[float]): List of ROUGE scores, one per reference/response pair.
@@ -51,20 +72,19 @@ class RougeScoreEvaluator(BaseModel):
     Evaluates ROUGE scores using the rouge_score library.
 
     Attributes:
-        name (str): Name of the metric. Defaults to "RougeScore".
-        rouge_type (Literal["rouge1", "rouge2", "rougeL"]): ROUGE variant to compute. Defaults to "rougeL".
-        measure_type (Literal["fmeasure", "precision", "recall"]): The field of the metric to retrieve.
-            Defaults to "fmeasure".
+        name (str): Name of the evaluator. Defaults to "RougeScore".
+        rouge_type (RougeType): ROUGE variant to compute. Defaults to RougeType.rougeL.
+        measure_type (MeasureType): The field of the metric to retrieve. Defaults to MeasureType.fmeasure.
     """
 
     name: str = "RougeScore"
-    rouge_type: Literal["rouge1", "rouge2", "rougeL"] = "rougeL"
-    measure_type: Literal["fmeasure", "precision", "recall"] = "fmeasure"
+    rouge_type: RougeType = RougeType.rougeL
+    measure_type: MeasureType = MeasureType.fmeasure
 
     # Private attribute to store the rouge_scorer.RougeScorer instance
     _scorer: Callable = PrivateAttr()
 
-    # Updated configuration using ConfigDict
+    # Configuration using ConfigDict for Pydantic v2 compliance
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @computed_field
@@ -99,10 +119,10 @@ class RougeScoreEvaluator(BaseModel):
             from rouge_score import rouge_scorer
         except ImportError:
             raise ImportError(
-                "rouge_score is required for RougeScoreEvaluator. " "Please install it using `pip install rouge_score`."
+                "rouge_score is required for RougeScoreEvaluator. " "Please install it using `pip install rouge-score`."
             )
 
-        self._scorer = rouge_scorer.RougeScorer([self.rouge_type], use_stemmer=True)
+        self._scorer = rouge_scorer.RougeScorer([self.rouge_type.value], use_stemmer=True)
 
     def run(self, ground_truth_answers: list[str], answers: list[str]) -> list[float]:
         """
@@ -121,7 +141,7 @@ class RougeScoreEvaluator(BaseModel):
         for ref, resp in zip(input_data.ground_truth_answers, input_data.answers):
             rouge_result = self._scorer.score(ref, resp)
             # e.g., rouge_result["rougeL"].fmeasure / precision / recall
-            metric_value = getattr(rouge_result[self.rouge_type], self.measure_type)
+            metric_value = getattr(rouge_result[self.rouge_type.value], self.measure_type.value)
             rouge_score = round(float(metric_value), 2)
             scores.append(rouge_score)
 
