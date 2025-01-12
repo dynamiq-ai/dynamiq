@@ -1,130 +1,129 @@
 import logging
 from functools import cached_property
-from typing import Literal
+from typing import Callable, Literal
 
-from pydantic import BaseModel, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, PrivateAttr, computed_field, model_validator
 
 logger = logging.getLogger(__name__)
 
-try:
-    from rouge_score import rouge_scorer
-except ImportError as e:
-    raise ImportError(f"{e.name} is required for RougeScore. Please install it using: pip install {e.name}")
 
-
-class SingleTurnMetricInput(BaseModel):
+class RunInput(BaseModel):
     """
-    Input model for a single-turn ROUGE metric.
+    Input model for the ROUGE score evaluation.
 
     Attributes:
-        references (List[str]): List of reference strings, one per example.
-        responses (List[str]): List of response strings, one per example.
+        ground_truth_answers (list[str]): List of reference strings, one per example.
+        answers (list[str]): List of response strings, one per example.
     """
 
-    references: list[str]
-    responses: list[str]
+    ground_truth_answers: list[str]
+    answers: list[str]
 
     @model_validator(mode="after")
-    def check_equal_length(self):
-        if len(self.references) != len(self.responses):
-            raise ValueError("References and responses must have the same length.")
+    def check_equal_length(self) -> "RunInput":
+        """
+        Validate that the number of ground truth answers matches the number of responses.
+
+        Raises:
+            ValueError: If the lengths of `ground_truth_answers` and `answers` do not match.
+
+        Returns:
+            RunInput: The validated instance.
+        """
+        if len(self.ground_truth_answers) != len(self.answers):
+            raise ValueError("ground_truth_answers and answers must have the same length.")
         return self
 
 
-class SingleTurnMetricOutput(BaseModel):
+class RunOutput(BaseModel):
     """
-    Output model for a single-turn ROUGE metric.
+    Output model for the ROUGE score evaluation.
 
     Attributes:
-        scores (List[float]): List of ROUGE scores, one per reference/response pair.
+        scores (list[float]): List of ROUGE scores, one per reference/response pair.
     """
 
     scores: list[float]
 
 
-class BaseStringMetric(BaseModel):
+class RougeScoreEvaluator(BaseModel):
     """
-    Base class for string metrics.
+    Evaluates ROUGE scores using the rouge_score library.
 
     Attributes:
-        name (str): Name of the metric.
-    """
-
-    name: str
-
-    class Config:
-        arbitrary_types_allowed = True
-
-    @cached_property
-    def type(self) -> str:
-        """
-        Returns a string indicating the fully qualified name of this class.
-        """
-        return f"{self.__module__}.{self.__class__.__name__}"
-
-    def run(self, references: list[str], responses: list[str]) -> list[float]:
-        """
-        Runs the metric on the provided references and responses.
-        Must be overridden by subclasses.
-
-        Args:
-            references (List[str]): Ground-truth/reference strings.
-            responses (List[str]): System-generated/response strings.
-
-        Returns:
-            List[float]: Score for each reference/response pair.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
-
-class RougeScoreMetric(BaseStringMetric):
-    """
-    Implements a ROUGE score metric using rouge_score's RougeScorer.
-
-    Attributes:
-        name (str): Name of the metric. Defaults to "rouge_score".
-        rouge_type (Literal["rouge1", "rougeL"]): ROUGE variant to compute. Defaults to "rougeL".
+        name (str): Name of the metric. Defaults to "RougeScore".
+        rouge_type (Literal["rouge1", "rouge2", "rougeL"]): ROUGE variant to compute. Defaults to "rougeL".
         measure_type (Literal["fmeasure", "precision", "recall"]): The field of the metric to retrieve.
             Defaults to "fmeasure".
     """
 
-    name: str = "rouge_score"
-    rouge_type: Literal["rouge1", "rougeL"] = "rougeL"
+    name: str = "RougeScore"
+    rouge_type: Literal["rouge1", "rouge2", "rougeL"] = "rougeL"
     measure_type: Literal["fmeasure", "precision", "recall"] = "fmeasure"
 
-    # Private attribute to store the RougeScorer initialization
-    _scorer_class = PrivateAttr()
+    # Private attribute to store the rouge_scorer.RougeScorer instance
+    _scorer: Callable = PrivateAttr()
+
+    # Updated configuration using ConfigDict
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @computed_field
+    @cached_property
+    def type(self) -> str:
+        """
+        Compute the type identifier for the evaluator.
+
+        Returns:
+            str: A string representing the module and class name.
+        """
+        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     def __init__(self, **data):
+        """
+        Initialize the RougeScoreEvaluator instance and set up the rouge_scorer.RougeScorer.
+
+        Args:
+            **data: Arbitrary keyword arguments for the BaseModel.
+        """
         super().__init__(**data)
         self._initialize_rouge()
 
-    def _initialize_rouge(self):
+    def _initialize_rouge(self) -> None:
         """
-        Initialize the rouge_scorer with the requested rouge_type and a stemmer.
-        """
-        self._scorer_class = rouge_scorer.RougeScorer
+        Initialize the RougeScorer from rouge_score.
 
-    def run(self, references: list[str], responses: list[str]) -> list[float]:
+        Raises:
+            ImportError: If rouge_score is not installed.
         """
-        Compute the ROUGE scores for each reference/response pair.
+        try:
+            from rouge_score import rouge_scorer
+        except ImportError:
+            raise ImportError(
+                "rouge_score is required for RougeScoreEvaluator. " "Please install it using `pip install rouge_score`."
+            )
+
+        self._scorer = rouge_scorer.RougeScorer([self.rouge_type], use_stemmer=True)
+
+    def run(self, ground_truth_answers: list[str], answers: list[str]) -> list[float]:
+        """
+        Compute ROUGE scores for each reference-response pair.
 
         Args:
-            references (List[str]): List of reference strings.
-            responses (List[str]): List of response/hypothesis strings.
+            ground_truth_answers (list[str]): List of reference strings.
+            answers (list[str]): List of response strings.
 
         Returns:
-            List[float]: ROUGE scores, one per pair, extracted from the measure_type (fmeasure, precision, recall).
+            list[float]: ROUGE scores, one per pair.
         """
-        input_data = SingleTurnMetricInput(references=references, responses=responses)
-        scores = []
+        input_data = RunInput(ground_truth_answers=ground_truth_answers, answers=answers)
+        scores: list[float] = []
 
-        for ref, resp in zip(input_data.references, input_data.responses):
-            scorer = self._scorer_class([self.rouge_type], use_stemmer=True)
-            rouge_result = scorer.score(ref, resp)
-            # e.g. rouge_result["rouge1"].fmeasure / precision / recall
+        for ref, resp in zip(input_data.ground_truth_answers, input_data.answers):
+            rouge_result = self._scorer.score(ref, resp)
+            # e.g., rouge_result["rougeL"].fmeasure / precision / recall
             metric_value = getattr(rouge_result[self.rouge_type], self.measure_type)
-            scores.append(metric_value)
+            rouge_score = round(float(metric_value), 2)
+            scores.append(rouge_score)
 
-        output_data = SingleTurnMetricOutput(scores=scores)
+        output_data = RunOutput(scores=scores)
         return output_data.scores
