@@ -1,17 +1,13 @@
 import logging
 from functools import cached_property
+from typing import Callable
 
-from pydantic import BaseModel, PrivateAttr, model_validator
+from pydantic import BaseModel, PrivateAttr, computed_field, model_validator
 
 logger = logging.getLogger(__name__)
 
-try:
-    from sacrebleu import corpus_bleu
-except ImportError:
-    raise ImportError("sacrebleu is required for BleuScore. Please install it using `pip install sacrebleu`")
 
-
-class SingleTurnMetricInput(BaseModel):
+class RunInput(BaseModel):
     """
     Input model for a single-turn BLEU metric.
 
@@ -20,17 +16,17 @@ class SingleTurnMetricInput(BaseModel):
         responses (List[str]): List of response strings, one per example.
     """
 
-    references: list[str]
-    responses: list[str]
+    ground_truth_answers: list[str]
+    answers: list[str]
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        if len(self.references) != len(self.responses):
-            raise ValueError("References and responses must have the same length.")
+        if len(self.ground_truth_answers) != len(self.answers):
+            raise ValueError("Answers and ground truth answers must have the same length.")
         return self
 
 
-class SingleTurnMetricOutput(BaseModel):
+class RunOutput(BaseModel):
     """
     Output model for a single-turn BLEU metric.
 
@@ -41,42 +37,7 @@ class SingleTurnMetricOutput(BaseModel):
     scores: list[float]
 
 
-class BaseStringMetric(BaseModel):
-    """
-    Base class for string metrics.
-
-    Attributes:
-        name (str): Name of the metric.
-    """
-
-    name: str
-
-    class Config:
-        arbitrary_types_allowed = True  # If you want to store custom objects
-
-    @cached_property
-    def type(self) -> str:
-        """
-        Returns a string indicating the fully qualified name of this class.
-        """
-        return f"{self.__module__}.{self.__class__.__name__}"
-
-    def run(self, references: list[str], responses: list[str]) -> list[float]:
-        """
-        Runs the metric on the provided references and responses.
-        Must be overridden by subclasses.
-
-        Args:
-            references (List[str]): Ground-truth/reference strings.
-            responses (List[str]): System-generated/response strings.
-
-        Returns:
-            List[float]: Score for each reference/response pair.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
-
-class BleuScoreMetric(BaseStringMetric):
+class BleuScoreMetric(BaseModel):
     """
     Implements a BLEU score metric using sacrebleu.
 
@@ -89,7 +50,15 @@ class BleuScoreMetric(BaseStringMetric):
     language: str = "english"  # Not used directly in sacrebleu, but can be stored
 
     # Private attribute to store the sacrebleu function
-    _corpus_bleu = PrivateAttr(default=None)
+    _corpus_bleu: Callable = PrivateAttr()
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    @computed_field
+    @cached_property
+    def type(self) -> str:
+        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -99,27 +68,32 @@ class BleuScoreMetric(BaseStringMetric):
         """
         Initialize the corpus_bleu function from sacrebleu.
         """
+        try:
+            from sacrebleu import corpus_bleu
+        except ImportError:
+            raise ImportError("sacrebleu is required for BleuScore. Please install it using `pip install sacrebleu`")
+
         self._corpus_bleu = corpus_bleu
 
     def run(self, references: list[str], responses: list[str]) -> list[float]:
         """
-        Compute BLEU scores for each reference/response pair.
+        Compute BLEU scores for each ground_truth/answer pair.
 
         The reference and response are each split into sentences by '. ' to mimic
         a multi-sentence scenario. The original reference is then wrapped into the
         format needed by sacrebleu, i.e. List[List[str]] for multiple references.
 
         Args:
-            references (List[str]): List of reference strings.
-            responses (List[str]): List of response strings.
+            ground_truth_answers (List[str]): List of reference strings.
+            answers (List[str]): List of response strings.
 
         Returns:
             List[float]: BLEU scores, one per pair.
         """
-        input_data = SingleTurnMetricInput(references=references, responses=responses)
+        input_data = RunInput(ground_truth_answers=references, answers=responses)
         scores = []
 
-        for ref, resp in zip(input_data.references, input_data.responses):
+        for ref, resp in zip(input_data.ground_truth_answers, input_data.answers):
             # Split each into sentences
             ref_sentences = ref.split(". ")
             resp_sentences = resp.split(". ")
@@ -137,5 +111,5 @@ class BleuScoreMetric(BaseStringMetric):
             bleu_result = self._corpus_bleu(hypothesis, structured_refs).score / 100.0
             scores.append(float(bleu_result))
 
-        output_data = SingleTurnMetricOutput(scores=scores)
+        output_data = RunOutput(scores=scores)
         return output_data.scores
