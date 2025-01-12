@@ -69,14 +69,14 @@ def test_workflow_with_depend_nodes_with_tracing(
         "c": encode_bytes(bytes_content),
         "d": encode_bytes(bytes_content_non_utf8),
     }
-    expected_output_openai = {"content": mock_llm_response_text, "tool_calls": None}
+    expected_output_openai = {"content": mock_llm_response_text}
     expected_result_openai = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=expected_input_openai,
         output=expected_output_openai,
     )
     expected_input_anthropic = input_data | {openai_node.id: expected_result_openai.to_tracing_depend_dict()}
-    expected_output_anthropic = {"content": mock_llm_response_text, "tool_calls": None}
+    expected_output_anthropic = {"content": mock_llm_response_text}
     expected_result_anthropic = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=expected_input_anthropic,
@@ -188,6 +188,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert output_node_run.output == format_value(expected_input_output)
     assert output_node_run.status == RunStatus.SUCCEEDED
     assert output_node_run.tags == tags
+    assert output_node_run.executions
 
 
 def test_workflow_with_depend_nodes_and_depend_fail(
@@ -325,6 +326,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     assert output_node_run.output == expected_output_output_node
     assert output_node_run.status == RunStatus.SKIPPED
     assert output_node_run.tags == []
+    assert not output_node_run.executions
 
 
 def test_workflow_with_failed_flow(
@@ -386,7 +388,7 @@ def test_workflow_with_input_mappings(
     )
 
     expected_input_openai = input_data
-    expected_output_openai = {"content": mock_llm_response_text, "tool_calls": None}
+    expected_output_openai = {"content": mock_llm_response_text}
     expected_result_openai = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=expected_input_openai,

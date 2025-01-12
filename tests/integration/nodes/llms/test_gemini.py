@@ -60,7 +60,7 @@ def test_workflow_with_gemini_llm_and_gemini_ai_studio_conn(
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input={},
-        output={"content": mock_llm_response_text, "tool_calls": None},
+        output={"content": mock_llm_response_text},
     ).to_dict()
     expected_output = {wf_gemini_ai_studio.flow.nodes[0].id: expected_result}
     assert response == RunnableResult(
@@ -109,7 +109,7 @@ def test_workflow_with_gemini_llm_and_gemini_vertex_ai_conn(
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input={},
-        output={"content": mock_llm_response_text, "tool_calls": None},
+        output={"content": mock_llm_response_text},
     ).to_dict()
     expected_output = {wf_gemini_vertex_ai.flow.nodes[0].id: expected_result}
     assert response == RunnableResult(

@@ -88,7 +88,7 @@ def main():
             logger.info(f"\nExecuting tool call\n{tool_call}")
             function_name = tool_call["function"]["name"]
             function_to_call = available_functions[function_name]
-            function_args = json.loads(tool_call["function"]["arguments"])
+            function_args = tool_call["function"]["arguments"]
             function_response = function_to_call(
                 location=function_args.get("location"),
             )
