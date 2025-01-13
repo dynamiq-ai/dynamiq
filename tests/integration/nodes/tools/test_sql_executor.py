@@ -57,7 +57,7 @@ def test_mysql_postgres_select_execute(mock_fetchall_sql_response, connection, m
     mock_cursor_with_select.execute.assert_called_once_with(input_data["query"])
     mock_cursor_with_select.fetchall.assert_called_once()
     output_dump = result.output
-    assert output_dump["results"] == output
+    assert output_dump["content"] == output
 
 
 @pytest.fixture
@@ -100,4 +100,4 @@ def test_non_select_queries_execution(mock_fetchall_sql_response, connection, mo
 
     mock_cursor_with_none_description.execute.assert_called_once_with(input_data["query"])
     output_dump = result.output
-    assert output_dump["results"] == output
+    assert output_dump["content"] == output

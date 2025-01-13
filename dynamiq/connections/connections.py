@@ -1028,7 +1028,3 @@ class AWSRedshift(BaseConnection):
             return conn
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Amazon Redshift : {str(e)}")
-
-    @property
-    def conn_params(self) -> dict:
-        return {}

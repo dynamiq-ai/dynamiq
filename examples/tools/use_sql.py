@@ -16,7 +16,7 @@ def basic_requests_snowflake_example():
     for query in [snowflake_insert, snowflake_select, snowflake_delete]:
         result = snowflake_executor.run(input_data=query)
         print("Query execution results:")
-        print(result.output.get("results"))
+        print(result.output.get("content"))
 
 
 def basic_requests_mysql_example():
@@ -36,7 +36,7 @@ def basic_requests_mysql_example():
     for query in [mysql_insert, mysql_select, mysql_delete]:
         result = mysql_executor.run(input_data=query)
         print("Query execution results:")
-        print(result.output.get("results"))
+        print(result.output.get("content"))
 
 
 if __name__ == "__main__":

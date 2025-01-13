@@ -47,12 +47,12 @@ class SqlExecutor(ConnectionNode):
         query = input_data.query
         try:
             cursor = self.client.cursor(
-                **self.connection.conn_params if type(self.connection) is not PostgreSQL else {}
+                **self.connection.conn_params if not isinstance(self.connection, (PostgreSQL, AWSRedshift)) else {}
             )
             cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []
             cursor.close()
-            return {"results": output}
+            return {"content": output}
         except Exception as e:
             raise ToolExecutionException(
                 f"Encountered an error while executing SQL query: {query}. \nError details: {e}", recoverable=True
