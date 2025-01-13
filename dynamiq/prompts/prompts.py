@@ -6,7 +6,7 @@ from typing import Any
 
 import filetype
 from jinja2 import Environment, meta
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.utils import generate_uuid
 
@@ -171,6 +171,9 @@ class Prompt(BasePrompt):
     messages: list[Message | VisionMessage]
     tools: list[Tool] | None = None
     _Template: Any = PrivateAttr()
+    env: Environment = Environment(autoescape=True)
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -179,7 +182,7 @@ class Prompt(BasePrompt):
 
         self._Template = Template
 
-    def get_parameters_for_template(self, template: str, env=Environment(autoescape=True)) -> set[str]:
+    def get_parameters_for_template(self, template: str) -> set[str]:
         """
         Extracts set of parameters for template.
 
@@ -191,7 +194,7 @@ class Prompt(BasePrompt):
             set: Set of required parameters.
         """
 
-        ast = env.parse(template)
+        ast = self.env.parse(template)
         return meta.find_undeclared_variables(ast)
 
     def get_required_parameters(self) -> set[str]:
@@ -202,17 +205,15 @@ class Prompt(BasePrompt):
         """
         parameters = set()
 
-        env = Environment(autoescape=True)
-
         for msg in self.messages:
             if isinstance(msg, Message):
-                parameters |= self.get_parameters_for_template(msg.content, env=env)
+                parameters |= self.get_parameters_for_template(msg.content)
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
-                        parameters |= self.get_parameters_for_template(content.text, env=env)
+                        parameters |= self.get_parameters_for_template(content.text)
                     elif isinstance(content, VisionMessageImageContent):
-                        parameters |= self.get_parameters_for_template(content.image_url.url, env=env)
+                        parameters |= self.get_parameters_for_template(content.image_url.url)
                     else:
                         raise ValueError(f"Invalid content type: {content.type}")
             else:
