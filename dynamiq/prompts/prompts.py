@@ -227,9 +227,6 @@ class Prompt(BasePrompt):
         Args:
             url_template (str): Template for image url.
             kwargs (dict): Dictionary of parameters.
-
-        Returns:
-            dict: Updated parameters.
         """
         params = self.get_parameteres_for_template(url_template)
         for key in params:
