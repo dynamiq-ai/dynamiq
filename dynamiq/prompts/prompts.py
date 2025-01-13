@@ -220,12 +220,13 @@ class Prompt(BasePrompt):
 
         return parameters
 
-    def parse_image_url_parameters(self, url_template, kwargs) -> None:
+    def parse_image_url_parameters(self, url_template: str, kwargs: dict) -> None:
         """
         Converts image url parameters to base64 format, if necessary.
 
         Args:
             url_template (str): Template for image url.
+            kwargs (dict): Dictionary of parameters.
 
         Returns:
             dict: Updated parameters.
