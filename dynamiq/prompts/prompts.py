@@ -210,9 +210,9 @@ class Prompt(BasePrompt):
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
-                        parameters |= self.get_parameteres_for_template(content.text, env=env)
+                        parameters |= self.get_parameters_for_template(content.text, env=env)
                     elif isinstance(content, VisionMessageImageContent):
-                        parameters |= self.get_parameteres_for_template(content.image_url.url, env=env)
+                        parameters |= self.get_parameters_for_template(content.image_url.url, env=env)
                     else:
                         raise ValueError(f"Invalid content type: {content.type}")
             else:
@@ -228,7 +228,7 @@ class Prompt(BasePrompt):
             url_template (str): Template for image url.
             kwargs (dict): Dictionary of parameters.
         """
-        params = self.get_parameteres_for_template(url_template)
+        params = self.get_parameters_for_template(url_template)
         for key in params:
             value = kwargs[key]
             if isinstance(value, io.BytesIO):
