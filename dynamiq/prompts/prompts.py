@@ -179,7 +179,7 @@ class Prompt(BasePrompt):
 
         self._Template = Template
 
-    def get_parameteres_for_template(self, template: str, env=Environment(autoescape=True)) -> set[str]:
+    def get_parameters_for_template(self, template: str, env=Environment(autoescape=True)) -> set[str]:
         """
         Extracts set of parameters for template.
 
@@ -206,7 +206,7 @@ class Prompt(BasePrompt):
 
         for msg in self.messages:
             if isinstance(msg, Message):
-                parameters |= self.get_parameteres_for_template(msg.content, env=env)
+                parameters |= self.get_parameters_for_template(msg.content, env=env)
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
