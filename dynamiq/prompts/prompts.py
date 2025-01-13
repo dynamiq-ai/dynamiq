@@ -181,14 +181,14 @@ class Prompt(BasePrompt):
 
     def get_parameteres_for_template(self, template: str, env=Environment(autoescape=True)) -> set[str]:
         """
-        Extracts set of parameters for tempate
+        Extracts set of parameters for template.
 
         Args:
             template (str): Template to find parameters for.
             env: (Environment, optional): jinja Environment object.
 
         Returns:
-            set: Set of required parameters
+            set: Set of required parameters.
         """
 
         ast = env.parse(template)
@@ -220,9 +220,9 @@ class Prompt(BasePrompt):
 
         return parameters
 
-    def parse_image_url_params(self, url_template, kwargs) -> None:
+    def parse_image_url_parameters(self, url_template, kwargs) -> None:
         """
-        Converts image url parameters to base64 format.
+        Converts image url parameters to base64 format, if necessary.
 
         Args:
             url_template (str): Template for image url.
@@ -274,7 +274,7 @@ class Prompt(BasePrompt):
                             ).model_dump()
                         )
                     elif isinstance(content, VisionMessageImageContent):
-                        self.parse_image_url_params(content.image_url.url, kwargs)
+                        self.parse_image_url_parameters(content.image_url.url, kwargs)
                         out_msg_content.append(
                             VisionMessageImageContent(
                                 image_url=VisionMessageImageURL(
