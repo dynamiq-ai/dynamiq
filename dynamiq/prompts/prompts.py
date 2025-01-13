@@ -1,7 +1,10 @@
+import base64
 import enum
+import io
 from abc import ABC, abstractmethod
 from typing import Any
 
+import filetype
 from jinja2 import Environment, meta
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -176,8 +179,23 @@ class Prompt(BasePrompt):
 
         self._Template = Template
 
+    def get_parameteres_for_template(self, template: str, env=Environment(autoescape=True)) -> set[str]:
+        """
+        Extracts set of parameters for tempate
+
+        Args:
+            template (str): Template to find parameters for.
+            env: (Environment, optional): jinja Environment object.
+
+        Returns:
+            set: Set of required parameters
+        """
+
+        ast = env.parse(template)
+        return meta.find_undeclared_variables(ast)
+
     def get_required_parameters(self) -> set[str]:
-        """Extracts list of parameters required for messages.
+        """Extracts set of parameters required for messages.
 
         Returns:
             set[str]: Set of parameter names.
@@ -188,22 +206,44 @@ class Prompt(BasePrompt):
 
         for msg in self.messages:
             if isinstance(msg, Message):
-                ast = env.parse(msg.content)
-                parameters |= meta.find_undeclared_variables(ast)
+                parameters |= self.get_parameteres_for_template(msg.content, env=env)
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
-                        ast = env.parse(content.text)
-                        parameters |= meta.find_undeclared_variables(ast)
+                        parameters |= self.get_parameteres_for_template(content.text, env=env)
                     elif isinstance(content, VisionMessageImageContent):
-                        ast = env.parse(content.image_url.url)
-                        parameters |= meta.find_undeclared_variables(ast)
+                        parameters |= self.get_parameteres_for_template(content.image_url.url, env=env)
                     else:
                         raise ValueError(f"Invalid content type: {content.type}")
             else:
                 raise ValueError(f"Invalid message type: {type(msg)}")
 
         return parameters
+
+    def parse_image_url_params(self, url_template, kwargs) -> None:
+        """
+        Converts image url parameters to base64 format.
+
+        Args:
+            url_template (str): Template for image url.
+
+        Returns:
+            dict: Updated parameters.
+        """
+        params = self.get_parameteres_for_template(url_template)
+        for key in params:
+            value = kwargs[key]
+            if isinstance(value, io.BytesIO):
+                kwargs[key] = (
+                    f"data:image/{filetype.guess_extension(value)};base64,"
+                    f"{base64.b64encode(value.getvalue()).decode('utf-8')}"
+                )
+            elif isinstance(value, bytes):
+                kwargs[key] = (
+                    f"data:image/{filetype.guess_extension(value)};base64,{base64.b64encode(value).decode('utf-8')}"
+                )
+            else:
+                kwargs[key] = value
 
     def format_messages(self, **kwargs) -> list[dict]:
         """
@@ -234,6 +274,7 @@ class Prompt(BasePrompt):
                             ).model_dump()
                         )
                     elif isinstance(content, VisionMessageImageContent):
+                        self.parse_image_url_params(content.image_url.url, kwargs)
                         out_msg_content.append(
                             VisionMessageImageContent(
                                 image_url=VisionMessageImageURL(
