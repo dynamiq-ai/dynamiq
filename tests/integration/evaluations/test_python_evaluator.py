@@ -27,9 +27,6 @@ def run(input_data):
     # Run evaluator on multiple data points
     python_scores = python_evaluator.run(input_data_list=input_data_list)
 
-    # Print the Python scores
-    print("Perfect Match Python Scores:", python_scores)
-
     # Expected scores based on the user-defined code
     expected_scores = [1.0, 1.0, 1.0]
 
@@ -64,9 +61,6 @@ def run(input_data):
     # Run evaluator on multiple data points
     python_scores = python_evaluator.run(input_data_list=input_data_list)
 
-    # Print the Python scores
-    print("Partial Match Python Scores:", python_scores)
-
     # Expected scores based on the user-defined code
     expected_scores = [1.0, 1.0, 0.0]
 
@@ -100,9 +94,6 @@ def run(input_data):
 
     # Run evaluator on multiple data points
     python_scores = python_evaluator.run(input_data_list=input_data_list)
-
-    # Print the Python scores
-    print("Empty Strings Python Scores:", python_scores)
 
     # Expected scores based on the user-defined code
     expected_scores = [1.0, 0.0, 0.0]
