@@ -51,6 +51,7 @@ class SqlExecutor(ConnectionNode):
             )
             cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []
+            cursor.close()
             return {"results": output}
         except Exception as e:
             raise ToolExecutionException(

@@ -27,7 +27,6 @@ def mock_cursor_with_select(mocker, mock_fetchall_sql_response):
     mocker.patch("mysql.connector.connect", return_value=mock_connection)
     mocker.patch("psycopg.connect", return_value=mock_connection)
     mocker.patch("snowflake.connector.connect", return_value=mock_connection)
-    mocker.patch("psycopg2.connect", return_value=mock_connection)
     return mock_cursor
 
 

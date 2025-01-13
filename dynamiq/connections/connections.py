@@ -848,8 +848,6 @@ class PostgreSQL(BaseConnection):
                 f"database={self.database}."
             )
             return conn
-        except ImportError:
-            raise ImportError("Please install psycopg to use PGVector connection")
         except Exception as e:
             raise ConnectionError(f"Failed to connect to PGVector: {str(e)}")
 
@@ -956,8 +954,6 @@ class MySQL(BaseConnection):
                 f"Connected to MySQL with host={self.host}, " f"user={self.user}, " f"database={self.database}."
             )
             return conn
-        except ImportError:
-            raise ImportError("Please install mysql-connector-python to use MySQL connection")
         except mysql.connector.Error as e:
             raise ConnectionError(f"Failed to connect to MySQL: {str(e)}")
 
@@ -992,8 +988,6 @@ class Snowflake(BaseConnection):
                 f"database={self.database}, schema={self.schema}."
             )
             return conn
-        except ImportError:
-            raise ImportError("Please install snowflake-connector-python to use Snowflake connection")
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Snowflake: {str(e)}")
 
@@ -1005,11 +999,11 @@ class Snowflake(BaseConnection):
 
 
 class AWSRedshift(BaseConnection):
-    host: str = Field(default_factory=partial(get_env_var, "REDSHIFT_HOST"))
-    port: int = Field(default_factory=partial(get_env_var, "REDSHIFT_PORT", 5432))
-    database: str = Field(default_factory=partial(get_env_var, "REDSHIFT_DATABASE", "db"))
-    user: str = Field(default_factory=partial(get_env_var, "REDSHIFT_USER", "awsuser"))
-    password: str = Field(default_factory=partial(get_env_var, "REDSHIFT_PASSWORD", "password"))
+    host: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_HOST"))
+    port: int = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_PORT", 5432))
+    database: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_DATABASE", "db"))
+    user: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_USER", "awsuser"))
+    password: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_PASSWORD", "password"))
 
     def connect(self):
         try:
@@ -1032,8 +1026,6 @@ class AWSRedshift(BaseConnection):
                 f"database={self.database}."
             )
             return conn
-        except ImportError:
-            raise ImportError("Please install psycopg2 to use Amazon Redshift connection")
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Amazon Redshift : {str(e)}")
 
