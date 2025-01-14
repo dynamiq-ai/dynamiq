@@ -1,12 +1,10 @@
-import logging
 from functools import cached_property
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
 
 from dynamiq.nodes.tools.python import Python as PythonNode
-
-logger = logging.getLogger(__name__)
+from dynamiq.utils.logger import logger
 
 
 class PythonEvaluatorSingleInput(BaseModel):

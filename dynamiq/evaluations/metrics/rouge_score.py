@@ -1,11 +1,8 @@
-import logging
 from enum import Enum
 from functools import cached_property
 from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr, computed_field, model_validator
-
-logger = logging.getLogger(__name__)
 
 
 class RougeType(str, Enum):
