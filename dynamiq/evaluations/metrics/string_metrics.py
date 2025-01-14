@@ -1,9 +1,9 @@
 from enum import Enum
-from functools import cached_property
 from typing import Callable
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, PrivateAttr, model_validator
 
+from dynamiq.evaluations import BaseEvaluator
 from dynamiq.utils.logger import logger
 
 
@@ -57,46 +57,7 @@ class RunOutput(BaseModel):
     scores: list[float]
 
 
-class BaseStringEvaluator(BaseModel):
-    """
-    Base class for string evaluators.
-
-    Attributes:
-        name (str): Name of the evaluator.
-    """
-
-    name: str
-
-    # Configuration using ConfigDict for Pydantic v2 compliance
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @computed_field
-    @cached_property
-    def type(self) -> str:
-        """
-        Compute the type identifier for the evaluator.
-
-        Returns:
-            str: A string representing the module and class name.
-        """
-        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
-
-    def run(self, ground_truth_answers: list[str], answers: list[str]) -> list[float]:
-        """
-        Executes the evaluator on the provided ground truth answers and answers.
-        Must be overridden by subclasses.
-
-        Args:
-            ground_truth_answers (list[str]): The ground-truth/reference strings.
-            answers (list[str]): The system-generated/response strings.
-
-        Returns:
-            list[float]: Scores for each reference/answer pair.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
-
-class ExactMatchEvaluator(BaseStringEvaluator):
+class ExactMatchEvaluator(BaseEvaluator):
     """
     An evaluator that checks for exact string matches.
 
@@ -129,7 +90,7 @@ class ExactMatchEvaluator(BaseStringEvaluator):
         return output_data.scores
 
 
-class StringPresenceEvaluator(BaseStringEvaluator):
+class StringPresenceEvaluator(BaseEvaluator):
     """
     An evaluator that checks if the reference string is present (as a substring) in the answer.
 
@@ -163,7 +124,7 @@ class StringPresenceEvaluator(BaseStringEvaluator):
         return output_data.scores
 
 
-class StringSimilarityEvaluator(BaseStringEvaluator):
+class StringSimilarityEvaluator(BaseEvaluator):
     """
     An evaluator that calculates a similarity score (1 - normalized_distance) using RapidFuzz
     between reference and answer strings.
@@ -178,20 +139,6 @@ class StringSimilarityEvaluator(BaseStringEvaluator):
 
     # Private attribute to store the distance functions map
     _distance_map: dict[DistanceMeasure, Callable] = PrivateAttr()
-
-    # Configuration using ConfigDict for Pydantic v2 compliance
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @computed_field
-    @cached_property
-    def type(self) -> str:
-        """
-        Compute the type identifier for the evaluator.
-
-        Returns:
-            str: A string representing the module and class name.
-        """
-        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     def __init__(self, **data):
         """

@@ -1,8 +1,8 @@
-from functools import cached_property
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
+from dynamiq.evaluations import BaseEvaluator
 from dynamiq.nodes.tools.python import Python as PythonNode
 from dynamiq.utils.logger import logger
 
@@ -68,7 +68,7 @@ class PythonEvaluatorOutput(BaseModel):
     scores: list[float]
 
 
-class PythonEvaluator(BaseModel):
+class PythonEvaluator(BaseEvaluator):
     """
     A custom Python evaluator that executes user-defined Python code to compute scores.
 
@@ -92,20 +92,6 @@ class PythonEvaluator(BaseModel):
 
     # Private attribute to hold the PythonNode instance
     _python_node: PythonNode = PrivateAttr()
-
-    # Configuration using ConfigDict for Pydantic v2 compliance
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @computed_field
-    @cached_property
-    def type(self) -> str:
-        """
-        Compute the type identifier for the evaluator.
-
-        Returns:
-            str: A string representing the module and class name.
-        """
-        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     def __init__(self, **data):
         """

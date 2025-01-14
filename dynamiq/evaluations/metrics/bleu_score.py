@@ -1,7 +1,8 @@
-from functools import cached_property
 from typing import Callable
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, PrivateAttr, model_validator
+
+from dynamiq.evaluations import BaseEvaluator
 
 
 class RunInput(BaseModel):
@@ -43,7 +44,7 @@ class RunOutput(BaseModel):
     scores: list[float]
 
 
-class BleuScoreEvaluator(BaseModel):
+class BleuScoreEvaluator(BaseEvaluator):
     """
     Evaluates BLEU scores using the sacrebleu library.
 
@@ -55,19 +56,6 @@ class BleuScoreEvaluator(BaseModel):
 
     # Private attribute to store the sacrebleu corpus_bleu function
     _corpus_bleu: Callable = PrivateAttr()
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @computed_field
-    @cached_property
-    def type(self) -> str:
-        """
-        Compute the type identifier for the evaluator.
-
-        Returns:
-            str: A string representing the module and class name.
-        """
-        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     def __init__(self, **data):
         """

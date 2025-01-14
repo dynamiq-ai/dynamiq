@@ -1,8 +1,9 @@
 from enum import Enum
-from functools import cached_property
 from typing import Callable
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, PrivateAttr, model_validator
+
+from dynamiq.evaluations import BaseEvaluator
 
 
 class RougeType(str, Enum):
@@ -64,7 +65,7 @@ class RunOutput(BaseModel):
     scores: list[float]
 
 
-class RougeScoreEvaluator(BaseModel):
+class RougeScoreEvaluator(BaseEvaluator):
     """
     Evaluates ROUGE scores using the rouge_score library.
 
@@ -80,20 +81,6 @@ class RougeScoreEvaluator(BaseModel):
 
     # Private attribute to store the rouge_scorer.RougeScorer instance
     _scorer: Callable = PrivateAttr()
-
-    # Configuration using ConfigDict for Pydantic v2 compliance
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @computed_field
-    @cached_property
-    def type(self) -> str:
-        """
-        Compute the type identifier for the evaluator.
-
-        Returns:
-            str: A string representing the module and class name.
-        """
-        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     def __init__(self, **data):
         """

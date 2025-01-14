@@ -1,14 +1,11 @@
-import logging
-from functools import cached_property
 from typing import Any
 
-from pydantic import BaseModel, PrivateAttr, computed_field, field_validator, model_validator
+from pydantic import BaseModel, PrivateAttr, field_validator, model_validator
 
 from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
+from dynamiq.evaluations import BaseEvaluator
 from dynamiq.nodes.llms import BaseLLM
-
-# Configure logging
-logger = logging.getLogger(__name__)
+from dynamiq.utils.logger import logger
 
 
 class SimplifyStatementsInput(BaseModel):
@@ -153,7 +150,7 @@ class RunOutput(BaseModel):
     final_scores: list[float]
 
 
-class FaithfulnessEvaluator(BaseModel):
+class FaithfulnessEvaluator(BaseEvaluator):
     """
     Evaluator class for faithfulness metric.
 
@@ -165,14 +162,6 @@ class FaithfulnessEvaluator(BaseModel):
 
     _statement_simplifier: LLMEvaluator = PrivateAttr()
     _nli_evaluator: LLMEvaluator = PrivateAttr()
-
-    class Config:
-        arbitrary_types_allowed = True  # Allow arbitrary types
-
-    @computed_field
-    @cached_property
-    def type(self) -> str:
-        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     def __init__(self, **data):
         super().__init__(**data)
