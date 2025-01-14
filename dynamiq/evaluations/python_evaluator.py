@@ -129,7 +129,7 @@ class PythonEvaluator(BaseModel):
             logger.debug("PythonNode initialized successfully.")
         except Exception as e:
             logger.error(f"Failed to initialize PythonNode: {e}")
-            raise ImportError(f"Failed to initialize PythonNode: {e}") from e
+            raise ValueError(f"Failed to initialize PythonNode: {e}") from e
 
     def run_single(self, input_data: dict[str, Any]) -> float:
         """

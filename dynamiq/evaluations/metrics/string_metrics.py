@@ -210,13 +210,8 @@ class StringSimilarityEvaluator(BaseStringEvaluator):
         Raises:
             ImportError: If rapidfuzz is not installed.
         """
-        try:
-            from rapidfuzz import distance as rapidfuzz_distance
-        except ImportError:
-            raise ImportError(
-                "rapidfuzz is required for StringSimilarityEvaluator. "
-                "Please install it using `pip install rapidfuzz`."
-            )
+        from rapidfuzz import distance as rapidfuzz_distance
+
         self._distance_map = {
             DistanceMeasure.LEVENSHTEIN: rapidfuzz_distance.Levenshtein,
             DistanceMeasure.HAMMING: rapidfuzz_distance.Hamming,

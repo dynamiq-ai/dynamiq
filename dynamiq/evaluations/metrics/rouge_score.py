@@ -112,12 +112,7 @@ class RougeScoreEvaluator(BaseModel):
         Raises:
             ImportError: If rouge_score is not installed.
         """
-        try:
-            from rouge_score import rouge_scorer
-        except ImportError:
-            raise ImportError(
-                "rouge_score is required for RougeScoreEvaluator. " "Please install it using `pip install rouge-score`."
-            )
+        from rouge_score import rouge_scorer
 
         self._scorer = rouge_scorer.RougeScorer([self.rouge_type.value], use_stemmer=True)
 

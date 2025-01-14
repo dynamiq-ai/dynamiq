@@ -86,12 +86,7 @@ class BleuScoreEvaluator(BaseModel):
         Raises:
             ImportError: If sacrebleu is not installed.
         """
-        try:
-            from sacrebleu import corpus_bleu
-        except ImportError:
-            raise ImportError(
-                "sacrebleu is required for BleuScoreEvaluator. " "Please install it using `pip install sacrebleu`."
-            )
+        from sacrebleu import corpus_bleu
 
         self._corpus_bleu = corpus_bleu
 
