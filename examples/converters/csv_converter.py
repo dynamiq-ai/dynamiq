@@ -14,7 +14,6 @@ from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
 
 connection_manager = ConnectionManager()
-global_tracer = TracingCallbackHandler()
 
 REGRESSION_DATA_PATH = ".data/df_final_Cluster_5.csv"
 
@@ -29,10 +28,10 @@ def create_embedder_node(source_node) -> OpenAIDocumentEmbedder:
 
 
 def process_csv_with_embeddings(
-    file_content: BytesIO,
-    delimiter: str = ",",
-    content_column: str = "Target",
-    metadata_columns: list[str] = ["Feature_1", "Feature_2"],
+        file_content: BytesIO,
+        delimiter: str = ",",
+        content_column: str = "Target",
+        metadata_columns: list[str] = ["Feature_1", "Feature_2"],
 ) -> dict:
     """
     Process CSV file and generate embeddings for specified columns.
@@ -46,6 +45,8 @@ def process_csv_with_embeddings(
     Returns:
         dict: Processing results including embeddings
     """
+    local_tracer = TracingCallbackHandler()
+
     csv_node = CSVConverter()
     embedder_node = create_embedder_node(csv_node)
 
@@ -61,10 +62,10 @@ def process_csv_with_embeddings(
             "content_column": content_column,
             "metadata_columns": metadata_columns,
         },
-        config=runnables.RunnableConfig(callbacks=[global_tracer]),
+        config=runnables.RunnableConfig(callbacks=[local_tracer]),
     )
 
-    runs_json = json.dumps({"runs": [run.to_dict() for run in global_tracer.runs.values()]}, cls=JsonWorkflowEncoder)
+    runs_json = json.dumps({"runs": [run.to_dict() for run in local_tracer.runs.values()]}, cls=JsonWorkflowEncoder)
     logger.debug(f"Workflow runs: {runs_json}")
     logger.info(f"CSV workflow result: {result}")
 
@@ -73,7 +74,7 @@ def process_csv_with_embeddings(
 
 def process_unstructured_file(file_content: BytesIO) -> dict:
     """
-    Process unstructured file  and generate embeddings.
+    Process unstructured file and generate embeddings.
 
     Args:
         file_content: File content as BytesIO
@@ -81,6 +82,8 @@ def process_unstructured_file(file_content: BytesIO) -> dict:
     Returns:
         dict: Processing results including embeddings
     """
+    local_tracer = TracingCallbackHandler()
+
     unstructured_connection = connections.Unstructured()
     converter_node = UnstructuredFileConverter(
         connection=unstructured_connection, document_creation_mode=DocumentCreationMode.ONE_DOC_PER_PAGE
@@ -98,11 +101,10 @@ def process_unstructured_file(file_content: BytesIO) -> dict:
 
     result = workflow.run(
         input_data={"files": [file_content]},
-        config=runnables.RunnableConfig(callbacks=[global_tracer]),
+        config=runnables.RunnableConfig(callbacks=[local_tracer]),
     )
 
-    # Log workflow runs
-    runs_json = json.dumps({"runs": [run.to_dict() for run in global_tracer.runs.values()]}, cls=JsonWorkflowEncoder)
+    runs_json = json.dumps({"runs": [run.to_dict() for run in local_tracer.runs.values()]}, cls=JsonWorkflowEncoder)
     logger.debug(f"Workflow runs: {runs_json}")
     logger.info(f"Unstructured workflow result: {result}")
 
