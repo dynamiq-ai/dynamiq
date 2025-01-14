@@ -85,6 +85,8 @@ class CSVConverter(Node):
 
         Processes one or more CSV files according to the input configuration,
         converting each row into a document with specified content and metadata.
+        If some files fail to process but at least one succeeds, logs errors and continues.
+        If all files fail, raises the last encountered error.
 
         Args:
             input_data (CSVConverterInputSchema): Validated input parameters for the conversion.
@@ -102,6 +104,9 @@ class CSVConverter(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         all_documents = []
+        last_error = None
+        success_count = 0
+        total_files = len(input_data.file_paths or []) + len(input_data.files or [])
 
         if input_data.file_paths:
             for path in input_data.file_paths:
@@ -111,9 +116,10 @@ class CSVConverter(Node):
                         rows = list(reader)
                         docs = self._process_rows(rows, path, input_data.content_column, input_data.metadata_columns)
                         all_documents.extend(docs)
+                        success_count += 1
                 except Exception as e:
                     logger.error(f"Error processing file {path}: {str(e)}")
-                    raise
+                    last_error = e
 
         if input_data.files:
             for file_obj in input_data.files:
@@ -126,9 +132,16 @@ class CSVConverter(Node):
                     rows = list(reader)
                     docs = self._process_rows(rows, source_name, input_data.content_column, input_data.metadata_columns)
                     all_documents.extend(docs)
+                    success_count += 1
                 except Exception as e:
                     logger.error(f"Error processing file {source_name}: {str(e)}")
-                    raise
+                    last_error = e
+
+        if success_count == 0 and last_error is not None:
+            raise last_error
+
+        if success_count < total_files:
+            logger.warning(f"Processed {success_count} out of {total_files} files successfully")
 
         return {"documents": all_documents}
 
