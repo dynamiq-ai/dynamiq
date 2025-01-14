@@ -831,7 +831,6 @@ class PostgreSQL(BaseConnection):
     def connect(self):
         try:
             import psycopg
-            from psycopg.rows import dict_row
 
             conn = psycopg.connect(
                 host=self.host,
@@ -839,7 +838,7 @@ class PostgreSQL(BaseConnection):
                 dbname=self.database,
                 user=self.user,
                 password=self.password,
-                row_factory=dict_row,
+                row_factory=psycopg.rows.dict_row,
             )
             conn.autocommit = True
             logger.debug(
@@ -958,7 +957,7 @@ class MySQL(BaseConnection):
             raise ConnectionError(f"Failed to connect to MySQL: {str(e)}")
 
     @property
-    def conn_params(self) -> dict:
+    def cursor_params(self) -> dict:
         return {"dictionary": True}
 
 
@@ -992,7 +991,7 @@ class Snowflake(BaseConnection):
             raise ConnectionError(f"Failed to connect to Snowflake: {str(e)}")
 
     @property
-    def conn_params(self) -> dict:
+    def cursor_params(self) -> dict:
         from snowflake.connector import DictCursor
 
         return {"cursor_class": DictCursor}
@@ -1008,7 +1007,6 @@ class AWSRedshift(BaseConnection):
     def connect(self):
         try:
             import psycopg
-            from psycopg.rows import dict_row
 
             conn = psycopg.connect(
                 host=self.host,
@@ -1017,7 +1015,7 @@ class AWSRedshift(BaseConnection):
                 user=self.user,
                 password=self.password,
                 client_encoding="utf-8",
-                row_factory=dict_row,
+                row_factory=psycopg.rows.dict_row,
             )
             conn.autocommit = True
             logger.debug(
