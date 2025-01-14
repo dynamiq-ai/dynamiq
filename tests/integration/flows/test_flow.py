@@ -188,6 +188,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert output_node_run.output == format_value(expected_input_output)
     assert output_node_run.status == RunStatus.SUCCEEDED
     assert output_node_run.tags == tags
+    assert output_node_run.executions
 
 
 def test_workflow_with_depend_nodes_and_depend_fail(
@@ -325,6 +326,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     assert output_node_run.output == expected_output_output_node
     assert output_node_run.status == RunStatus.SKIPPED
     assert output_node_run.tags == []
+    assert not output_node_run.executions
 
 
 def test_workflow_with_failed_flow(

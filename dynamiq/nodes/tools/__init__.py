@@ -7,5 +7,6 @@ from .llm_summarizer import SummarizerTool
 from .python import Python
 from .retriever import RetrievalTool
 from .scale_serp import ScaleSerpTool
+from .sql_executor import SqlExecutor
 from .tavily import TavilyTool
 from .zenrows import ZenRowsTool

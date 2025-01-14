@@ -272,25 +272,6 @@ class Pass(Node):
     group: Literal[NodeGroup.OPERATORS] = NodeGroup.OPERATORS
     transformers: list[Transformer] = []
 
-    def execute_with_retry(
-        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
-    ):
-        """
-        Executes the pass node with retry logic.
-
-        Args:
-            input_data: The input data for the node.
-            config: The runnable configuration.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            The input data if no transformers are present, otherwise the transformed data.
-        """
-        if self.transformers:
-            return super().execute_with_retry(input_data, config, **kwargs)
-
-        return input_data
-
     def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
         """
         Executes the pass node.
@@ -303,15 +284,12 @@ class Pass(Node):
         Returns:
             The input data if no transformers are present, otherwise the transformed data.
         """
+        config = ensure_config(config)
+        merged_kwargs = {**kwargs, "parent_run_id": kwargs.get("run_id", uuid4())}
+        self.run_on_node_execute_run(config.callbacks, **merged_kwargs)
+
         output = input_data
-        if self.transformers:
-            run_id = kwargs.get("run_id", uuid4())
-            config = ensure_config(config)
-            merged_kwargs = {**kwargs, "parent_run_id": run_id}
-
-            self.run_on_node_execute_run(config.callbacks, **merged_kwargs)
-
-            for transformer in self.transformers:
-                output = self.transform(output, transformer, self.id)
+        for transformer in self.transformers:
+            output = self.transform(output, transformer, self.id)
 
         return output

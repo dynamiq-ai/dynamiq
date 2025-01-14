@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "dynamiq"
-version = "0.6.0"
+version = "0.7.0"
 description = "Dynamiq is an orchestration framework for agentic AI and LLM applications"
 authors = ["Dynamiq Team <hello@getdynamiq.ai>"]
 license = "Apache License 2.0"
@@ -51,7 +51,8 @@ pymilvus = "~2.4.3"
 psycopg = { version = "~3.2.3", extras = ["binary"] }
 pgvector = "~0.3.6"
 elasticsearch = "~8.12.0"
-numpy = "~1.26.0"
+mysql-connector-python = "~9.0.0"
+snowflake-connector-python = "~3.12.4"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~69.1.1"

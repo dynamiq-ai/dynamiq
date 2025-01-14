@@ -15,7 +15,7 @@ def setup_agent():
     embedder = OpenAIDocumentEmbedder(connection=openai_connection)
 
     backend = Pinecone(
-        index_name="test-conv",
+        index_name="oleks-test-conv",
         connection=pinecone_connection,
         embedder=embedder,
         index_type=PineconeIndexType.SERVERLESS,
@@ -40,10 +40,18 @@ def chat_loop(agent):
     print("Welcome to the AI Chat! (Type 'exit' to end)")
     while True:
         user_input = input("You: ")
+        user_id = "oleks"
+        session_id = "oleks_session"
         if user_input.lower() == "exit":
             break
 
-        response = agent.run({"input": user_input})
+        response = agent.run(
+            {
+                "input": user_input,
+                "user_id": user_id,
+                "session_id": session_id,
+            }
+        )
         response_content = response.output.get("content")
         print(f"AI: {response_content}")
 

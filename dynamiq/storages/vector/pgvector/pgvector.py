@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 
@@ -47,6 +48,7 @@ VECTOR_FUNCTION_TO_SCORE_DEFINITION = {
 
 DEFAULT_TABLE_NAME = "dynamiq_vector_store"
 DEFAULT_SCHEMA_NAME = "public"
+DEFAULT_LANGUAGE = "english"
 
 
 class PGVectorStoreParams(BaseVectorStoreParams):
@@ -55,6 +57,10 @@ class PGVectorStoreParams(BaseVectorStoreParams):
     dimension: int = 1536
     vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY
     embedding_key: str = "embedding"
+
+
+class PGVectorStoreRetrieverParams(PGVectorStoreParams):
+    alpha: float = 0.5
 
 
 class PGVectorStoreWriterParams(PGVectorStoreParams, BaseWriterVectorStoreParams):
@@ -78,6 +84,8 @@ class PGVectorStore:
         create_if_not_exist: bool = False,
         content_key: str = "content",
         embedding_key: str = "embedding",
+        keyword_index_name: str | None = None,
+        language: str = DEFAULT_LANGUAGE,
     ):
         """
         Initialize a PGVectorStore instance.
@@ -129,6 +137,8 @@ class PGVectorStore:
         self.dimension = dimension
         self.index_method = index_method
         self.vector_function = vector_function
+        self.keyword_index_name = keyword_index_name
+        self.language = language
 
         self.content_key = content_key
         self.embedding_key = embedding_key
@@ -147,6 +157,7 @@ class PGVectorStore:
                 if self.index_method in [PGVectorIndexMethod.IVFFLAT, PGVectorIndexMethod.HNSW]:
                     self.index_name = index_name or f"{self.index_method}_index"
                     self._create_index(conn)
+                self._create_keyword_index(conn)
         else:
             if not self._check_if_schema_exists(self._conn):
                 msg = f"Schema '{self.schema_name}' does not exist"
@@ -355,6 +366,57 @@ class PGVectorStore:
         with conn.cursor() as cur:
             self._execute_sql_query(query, cursor=cur)
             conn.commit()
+
+    def _create_keyword_index(
+        self,
+        conn: psycopg.Connection,
+        content_key: str | None = None,
+    ) -> None:
+        """
+        Internal method to create the keyword index in the database (if it does not exist).
+
+        Args:
+            conn (psycopg.Connection): The connection to the database.
+            content_key (str | None): The field used to store content in the storage. Defaults to None.
+        """
+
+        content_key = content_key or self.content_key
+
+        check_if_keyword_index_exists_query = SQL(
+            """
+            SELECT 1
+            FROM pg_indexes
+            WHERE schemaname = {schema_name}
+            AND tablename = {table_name}
+            AND indexname = {index_name};
+            """
+        ).format(
+            schema_name=SQLLiteral(self.schema_name),
+            table_name=SQLLiteral(self.table_name),
+            index_name=SQLLiteral(self.keyword_index_name),
+        )
+
+        create_keyword_index_query = SQL(
+            """
+            CREATE INDEX {index_name}
+            ON {schema_name}.{table_name}
+            USING gin(to_tsvector({language}, {content_key}));
+            """
+        ).format(
+            index_name=SQLLiteral(self.keyword_index_name),
+            schema_name=SQLLiteral(self.schema_name),
+            table_name=SQLLiteral(self.table_name),
+            content_key=SQLLiteral(content_key),
+            language=SQLLiteral(self.language),
+        )
+
+        with conn.cursor() as cur:
+            self._execute_sql_query(check_if_keyword_index_exists_query, cursor=cur)
+            index_exists = bool(cur.fetchone())
+
+            if not index_exists:
+                self._execute_sql_query(create_keyword_index_query, cursor=cur)
+                conn.commit()
 
     def _drop_index(self, conn: psycopg.Connection) -> None:
         """
@@ -617,6 +679,9 @@ class PGVectorStore:
 
             if doc.get("score") is not None:
                 document.score = doc["score"]
+
+                if isinstance(doc["score"], Decimal):
+                    document.score = float(doc["score"])
             else:
                 document.score = None
 
@@ -733,6 +798,252 @@ class PGVectorStore:
 
         # Combine all parts into final query
         sql_query = base_select + where_clause + order_by
+
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                result = self._execute_sql_query(sql_query, params, cursor=cur)
+                records = result.fetchall()
+
+                documents = self._convert_query_result_to_documents(records)
+                return documents
+
+    def _keyword_retrieval(
+        self,
+        query: str,
+        top_k: int = 10,
+        exclude_document_embeddings: bool = True,
+        filters: dict[str, Any] | None = None,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+    ) -> list[Document]:
+        """
+        Retrieve documents similar to the given query using keyword search.
+
+        Args:
+            query (str): The query string.
+            filters (dict[str, Any] | None): Filters for the query. Defaults to None.
+            top_k (int): Maximum number of documents to retrieve. Defaults to 10.
+            exclude_document_embeddings (bool): Whether to exclude embeddings in results. Defaults to True.
+            content_key (str): The field used to store content in the storage. Defaults to None.
+            embedding_key (str): The field used to store embeddings in the storage. Defaults to None.
+
+        Returns:
+            list[Document]: List of retrieved Document objects.
+
+        Raises:
+            ValueError: If query is empty or filter format is incorrect.
+        """
+        if not query:
+            msg = "query must be provided for keyword retrieval"
+            raise ValueError(msg)
+
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
+
+        # Do not select the embeddings if exclude_document_embeddings is True
+        select_fields = f"id, {content_key}, metadata" if exclude_document_embeddings else "*"
+
+        # Build the base SELECT query with score
+        base_select = SQL(
+            """
+            SELECT {fields}, ts_rank_cd(to_tsvector({language}, {content_key}), query) AS score
+            FROM {schema_name}.{table_name}, plainto_tsquery({language}, %s) query
+            WHERE to_tsvector({language}, {content_key}) @@ query
+            """
+        ).format(
+            fields=SQL(select_fields),
+            schema_name=Identifier(self.schema_name),
+            table_name=Identifier(self.table_name),
+            language=SQLLiteral(self.language),
+            content_key=Identifier(content_key),
+        )
+
+        # Handle filters if they exist
+        where_clause = SQL("")
+        params = ()
+        if filters:
+            where_clause, params = _convert_filters_to_query(filters)
+
+            where_clause = SQL(where_clause.as_string().replace("WHERE", "AND"))
+
+        # Build the ORDER BY and LIMIT clause
+        order_by = SQL(" ORDER BY score DESC LIMIT {limit}").format(limit=SQLLiteral(top_k))
+
+        # Combine all parts into final query
+        sql_query = base_select + where_clause + order_by
+
+        with self._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                result = self._execute_sql_query(sql_query, (query, *params), cursor=cur)
+                records = result.fetchall()
+
+                documents = self._convert_query_result_to_documents(records)
+                return documents
+
+    def _hybrid_retrieval(
+        self,
+        query: str,
+        query_embedding: list[float],
+        top_k: int = 10,
+        exclude_document_embeddings: bool = True,
+        keyword_rank_constant: int = 40,
+        top_k_subquery_multiplier: int = 4,
+        filters: dict[str, Any] | None = None,
+        alpha: float = 0.5,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+    ) -> list[Document]:
+        """
+        Retrieve documents similar to the given query using a hybrid approach.
+
+        Args:
+            query (str): The query string.
+            query_embedding (list[float] | None): The query embedding vector. Defaults to None.
+            filters (dict[str, Any] | None): Filters for the query. Defaults to None.
+            top_k (int): Maximum number of documents to retrieve. Defaults to 10.
+            alpha (float): The weight to give to the keyword search. Defaults to 0.5.
+            content_key (str): The field used to store content in the storage. Defaults to None.
+            embedding_key (str): The field used to store embeddings in the storage. Defaults to None.
+
+        Returns:
+            list[Document]: List of retrieved Document objects.
+
+        Raises:
+            ValueError: If query_embedding is empty or filter format is incorrect.
+        """
+
+        if not query:
+            msg = "query must be provided for hybrid retrieval"
+            raise ValueError(msg)
+
+        if query_embedding and len(query_embedding) != self.dimension:
+            msg = f"query_embedding must be of dimension {self.dimension}"
+            raise ValueError(msg)
+
+        vector_function = self.vector_function
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
+        query = query or self.query
+
+        # If alpha is 0, perform purely keyword search
+        if alpha == 0:
+            return self._keyword_retrieval(
+                query,
+                top_k=top_k,
+                exclude_document_embeddings=exclude_document_embeddings,
+                filters=filters,
+                content_key=content_key,
+                embedding_key=embedding_key,
+            )
+        # If alpha is 1, perform purely embedding search
+        elif alpha == 1:
+            return self._embedding_retrieval(
+                query_embedding,
+                top_k=top_k,
+                exclude_document_embeddings=exclude_document_embeddings,
+                filters=filters,
+                content_key=content_key,
+                embedding_key=embedding_key,
+            )
+
+        query_embedding = self._convert_query_embedding_to_pgvector_format(query_embedding)
+
+        # Generate the score calculation based on the vector function
+        score_definition = VECTOR_FUNCTION_TO_SCORE_DEFINITION[vector_function].format(
+            embedding_key=embedding_key, query_embedding=query_embedding
+        )
+
+        # Determine sort order based on vector function type
+        is_distance_metric = vector_function in ["l2_distance", "l1_distance"]
+
+        # Sort by score in ascending order if using a distance metric
+        # as the smaller the distance, the more similar the vectors are
+        sort_order = "ASC" if is_distance_metric else "DESC"
+
+        # Set the limit for the subquery to top_k multiplied by a constant to ensure enough results
+        top_k_subquery_limit = top_k * top_k_subquery_multiplier
+
+        # Extract the filters from the query
+        where_clause = SQL("")
+        where_clause_for_keyword_search = SQL("")
+        params = ()
+        if filters:
+            where_clause, params = _convert_filters_to_query(filters)
+
+            where_clause_for_keyword_search = SQL(where_clause.as_string().replace("WHERE", "AND"))
+
+        # Build the semantic search query with rank and filters
+        semantic_search_query = SQL(
+            """
+            WITH semantic_search AS (
+                SELECT *, RANK() OVER (ORDER BY {score_definition} {sort_order}) AS rank
+                FROM {schema_name}.{table_name}
+                {where_clause}
+                LIMIT {top_k_limit}
+            ),
+            """
+        ).format(
+            score_definition=SQL(score_definition),
+            schema_name=Identifier(self.schema_name),
+            table_name=Identifier(self.table_name),
+            top_k_limit=SQLLiteral(top_k_subquery_limit),
+            sort_order=SQL(sort_order),
+            where_clause=where_clause,
+        )
+
+        # Build the keyword search query with filters
+        keyword_search_query = SQL(
+            """
+            keyword_search AS (
+                SELECT *, RANK() OVER (ORDER BY ts_rank_cd(to_tsvector({language}, {content_key}), query) DESC) AS rank
+                FROM {schema_name}.{table_name}, plainto_tsquery({language}, {query}) query
+                WHERE to_tsvector('english', {content_key}) @@ query
+                {where_clause_for_keyword_search}
+                LIMIT {top_k_limit}
+            )
+            """
+        ).format(
+            schema_name=Identifier(self.schema_name),
+            table_name=Identifier(self.table_name),
+            content_key=Identifier(content_key),
+            language=SQLLiteral(self.language),
+            query=SQLLiteral(query),
+            top_k_limit=SQLLiteral(top_k_subquery_limit),
+            where_clause_for_keyword_search=where_clause_for_keyword_search,
+        )
+
+        embedding_key_select = (
+            ""
+            if exclude_document_embeddings
+            else "COALESCE(semantic_search.{embedding_key}, keyword_search.{embedding_key}) AS {embedding_key},"
+        )
+
+        # Build the final query to merge the results and sort them by score
+        merge_query = SQL(
+            """
+            SELECT
+                COALESCE(semantic_search.id, keyword_search.id) AS id,
+                COALESCE(semantic_search.{content_key}, keyword_search.{content_key}) AS {content_key},
+                COALESCE(semantic_search.metadata, keyword_search.metadata) AS metadata,
+                {embedding_key_select}
+                COALESCE({alpha} / ({k} + semantic_search.rank), 0.0) +
+                COALESCE((1 - {alpha}) / ({k} + keyword_search.rank), 0.0) AS score
+            FROM semantic_search
+            FULL OUTER JOIN keyword_search ON semantic_search.id = keyword_search.id
+            ORDER BY score DESC
+            LIMIT {top_k}
+            """
+        ).format(
+            content_key=Identifier(content_key),
+            top_k=SQLLiteral(top_k),
+            alpha=SQLLiteral(alpha),
+            k=SQLLiteral(keyword_rank_constant),
+            embedding_key_select=SQL(embedding_key_select),
+        )
+
+        sql_query = semantic_search_query + keyword_search_query + merge_query
+
+        params = params + params
 
         with self._get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:

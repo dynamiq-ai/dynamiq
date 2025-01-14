@@ -93,7 +93,7 @@ class Agent(Node):
     role: str | None = None
     max_loops: int = 1
     memory: Memory | None = Field(None, description="Memory node for the agent.")
-    memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.ALL
+    memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.BOTH
     verbose: bool = Field(False, description="Whether to print verbose logs.")
 
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
@@ -257,6 +257,17 @@ class Agent(Node):
 
         return execution_result
 
+    @staticmethod
+    def _make_filters(user_id: str | None, session_id: str | None) -> dict | None:
+        """Build a filter dictionary based on user_id and session_id."""
+        filters = {}
+        if user_id:
+            filters["user_id"] = user_id
+        if session_id:
+            filters["session_id"] = session_id
+
+        return filters if filters else None
+
     def _retrieve_memory(self, input_data):
         """
         Retrieves memory based on the selected strategy:
@@ -264,22 +275,31 @@ class Agent(Node):
         - ALL: retrieves all messages in the memory
         - BOTH: retrieves both relevant memory and all messages
         """
-        user_id = input_data.get("user_id", None)
-        filters = {"user_id": user_id} if user_id else None
+        user_id = input_data.get("user_id")
+        session_id = input_data.get("session_id")
 
-        if self.memory_retrieval_strategy == MemoryRetrievalStrategy.RELEVANT:
-            relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
-            self._prompt_variables["relevant_memory"] = relevant_memory
+        user_filters = self._make_filters(user_id, session_id)
 
-        elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.ALL:
-            context = self.memory.get_all_messages_as_string()
-            self._prompt_variables["conversation_history"] = context
+        if session_id:
+            all_session_messages_str = self.memory.get_search_results_as_string(query=None, filters=user_filters)
+            self._prompt_variables["conversation_history"] = all_session_messages_str
 
-        elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.BOTH:
-            relevant_memory = self.memory.get_search_results_as_string(query=input_data.get("input"), filters=filters)
-            context = self.memory.get_all_messages_as_string()
-            self._prompt_variables["relevant_memory"] = relevant_memory
-            self._prompt_variables["conversation_history"] = context
+        else:
+            user_query = input_data.get("input", "")
+
+            if self.memory_retrieval_strategy == MemoryRetrievalStrategy.RELEVANT:
+                relevant_memory = self.memory.get_search_results_as_string(query=user_query, filters=user_filters)
+                self._prompt_variables["relevant_memory"] = relevant_memory
+
+            elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.ALL:
+                all_messages = self.memory.get_all_messages_as_string()
+                self._prompt_variables["conversation_history"] = all_messages
+
+            elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.BOTH:
+                relevant_memory = self.memory.get_search_results_as_string(query=user_query, filters=user_filters)
+                all_messages = self.memory.get_all_messages_as_string()
+                self._prompt_variables["relevant_memory"] = relevant_memory
+                self._prompt_variables["conversation_history"] = all_messages
 
     def _run_llm(self, prompt: str, config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and handles streaming or full responses."""
