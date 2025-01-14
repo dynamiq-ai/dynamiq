@@ -550,7 +550,7 @@ class Unstructured(HttpApiKey):
         default_factory=partial(
             get_env_var,
             "UNSTRUCTURED_API_URL",
-            "https://api.unstructured.io/",
+            "https://api.unstructuredapp.io",
         )
     )
     api_key: str = Field(default_factory=partial(get_env_var, "UNSTRUCTURED_API_KEY"))
