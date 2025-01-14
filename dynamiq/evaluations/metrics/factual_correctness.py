@@ -125,6 +125,7 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
         coverage (str): Level of coverage ('low' or 'high').
     """
 
+    name: str = "FactualCorrectness"
     llm: BaseLLM
     mode: str = "f1"
     beta: float = 1.0

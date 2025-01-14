@@ -147,6 +147,7 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
         weights (List[float]): The weights to combine F1 and similarity scores.
     """
 
+    name: str = "AnswerCorrectness"
     llm: BaseLLM
     weights: list[float] = Field(default_factory=lambda: [0.75, 0.25])
 

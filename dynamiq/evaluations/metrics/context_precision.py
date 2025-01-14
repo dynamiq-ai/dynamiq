@@ -82,6 +82,7 @@ class ContextPrecisionEvaluator(BaseEvaluator):
         llm (BaseLLM): The language model to use for evaluation.
     """
 
+    name: str = "ContextPrecision"
     llm: BaseLLM
 
     # Private attribute (not part of the Pydantic model fields)

@@ -100,6 +100,7 @@ class ContextRecallEvaluator(BaseEvaluator):
         llm (BaseLLM): The language model to use for evaluation.
     """
 
+    name: str = "ContextRecall"
     llm: BaseLLM
 
     # Private attribute

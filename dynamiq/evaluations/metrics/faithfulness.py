@@ -158,6 +158,7 @@ class FaithfulnessEvaluator(BaseEvaluator):
         llm (BaseLLM): The language model to use for evaluation.
     """
 
+    name: str = "Faithfulness"
     llm: BaseLLM
 
     _statement_simplifier: LLMEvaluator = PrivateAttr()
