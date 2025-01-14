@@ -2,7 +2,7 @@
 
 ## RAG - Document Indexing Flow
 
-This workflow takes input PDF files, pre-processes them, converts them to vector embeddings, and stores them in the Pinecone vector database.
+This workflow takes input PDF files, pre-processes them, converts them to vector embeddings, and stores them in a vector database (Pinecone, Elasticsearch, etc.).
 
 ### Step-by-Step Guide
 
@@ -12,11 +12,15 @@ This workflow takes input PDF files, pre-processes them, converts them to vector
 from io import BytesIO
 from dynamiq import Workflow
 from dynamiq.nodes import InputTransformer
-from dynamiq.connections import OpenAI as OpenAIConnection, Pinecone as PineconeConnection
+from dynamiq.connections import (
+    OpenAI as OpenAIConnection,
+    Pinecone as PineconeConnection,
+    Elasticsearch as ElasticsearchConnection
+)
 from dynamiq.nodes.converters import PyPDFConverter
 from dynamiq.nodes.splitters.document import DocumentSplitter
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.nodes.writers import PineconeDocumentWriter
+from dynamiq.nodes.writers import PineconeDocumentWriter, ElasticsearchDocumentWriter
 ```
 
 **Initialize the RAG Workflow**
@@ -69,9 +73,13 @@ embedder = OpenAIDocumentEmbedder(
 rag_wf.flow.add_nodes(embedder)
 ```
 
-**Pinecone Vector Storage**
+**Vector Storage Options**
 
-Store the vector embeddings in the Pinecone vector database. If you already have a created index for your database, you can simply connect to it.
+You can choose between different vector stores for document storage. Here are examples for both Pinecone and Elasticsearch:
+
+### Option 1: Pinecone Vector Storage
+
+Store the vector embeddings in the Pinecone vector database.
 
 ```python
 vector_store = PineconeDocumentWriter(
@@ -128,6 +136,51 @@ vector_store = (
 )
 ```
 
+### Option 2: Elasticsearch Vector Storage
+
+Store the vector embeddings in Elasticsearch.
+
+```python
+# Basic local setup
+vector_store = ElasticsearchDocumentWriter(
+    connection=ElasticsearchConnection(
+        url="http://localhost:9200",
+        username="elastic",
+        password="your_password"
+    ),
+    index_name="documents",
+    dimension=1536,
+    similarity="cosine",  # or "dot_product" or "l2"
+    input_transformer=InputTransformer(
+        selector={
+            "documents": f"${[embedder.id]}.output.documents",
+        },
+    ),
+).depends_on(embedder)
+rag_wf.flow.add_nodes(vector_store)
+```
+
+For Elastic Cloud deployment:
+
+```python
+vector_store = ElasticsearchDocumentWriter(
+    connection=ElasticsearchConnection(
+        cloud_id="your_cloud_id",
+        api_key="your_api_key"
+    ),
+    index_name="documents",
+    dimension=1536,
+    create_if_not_exist=True,
+    index_settings={
+        "number_of_shards": 1,
+        "number_of_replicas": 1
+    },
+    mapping_settings={
+        "dynamic": "strict"
+    }
+).depends_on(embedder)
+```
+
 **Prepare Input PDF Files**
 
 Prepare the input PDF files for processing.
@@ -165,9 +218,13 @@ This simple retrieval RAG flow searches for relevant documents and answers the o
 ```python
 from dynamiq import Workflow
 from dynamiq.nodes import InputTransformer
-from dynamiq.connections import OpenAI as OpenAIConnection, Pinecone as PineconeConnection
+from dynamiq.connections import (
+    OpenAI as OpenAIConnection,
+    Pinecone as PineconeConnection,
+    Elasticsearch as ElasticsearchConnection
+)
 from dynamiq.nodes.embedders import OpenAITextEmbedder
-from dynamiq.nodes.retrievers import PineconeDocumentRetriever
+from dynamiq.nodes.retrievers import PineconeDocumentRetriever, ElasticsearchDocumentRetriever
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.prompts import Message, Prompt
 ```
@@ -198,9 +255,11 @@ embedder = OpenAITextEmbedder(
 retrieval_wf.flow.add_nodes(embedder)
 ```
 
-**Pinecone Document Retriever**
+**Document Retriever Options**
 
-Retrieve relevant documents from the Pinecone vector database.
+You can choose between different retrievers. Here are examples for both Pinecone and Elasticsearch:
+
+### Option 1: Pinecone Document Retriever
 
 ```python
 document_retriever = PineconeDocumentRetriever(
@@ -215,6 +274,46 @@ document_retriever = PineconeDocumentRetriever(
     ),
 ).depends_on(embedder)
 retrieval_wf.flow.add_nodes(document_retriever)
+```
+
+### Option 2: Elasticsearch Document Retriever
+
+```python
+# Vector similarity search with Elasticsearch
+document_retriever = ElasticsearchDocumentRetriever(
+    connection=ElasticsearchConnection(
+        url="http://localhost:9200",
+        username="elastic",
+        password="your_password"
+    ),
+    index_name="documents",
+    top_k=5,
+    input_transformer=InputTransformer(
+        selector={
+            "query": f"${[embedder.id]}.output.embedding",  # Vector query for similarity search
+        },
+    ),
+).depends_on(embedder)
+retrieval_wf.flow.add_nodes(document_retriever)
+```
+
+For cloud deployment with score normalization:
+
+```python
+document_retriever = ElasticsearchDocumentRetriever(
+    connection=ElasticsearchConnection(
+        cloud_id="your_cloud_id",
+        api_key="your_api_key"
+    ),
+    index_name="documents",
+    top_k=5,
+    scale_scores=True,  # Scale scores to 0-1 range
+    input_transformer=InputTransformer(
+        selector={
+            "query": f"${[embedder.id]}.output.embedding",  # Vector query for similarity search
+        },
+    ),
+).depends_on(embedder)
 ```
 
 **Define the Prompt Template**

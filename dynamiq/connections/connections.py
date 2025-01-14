@@ -1026,3 +1026,108 @@ class AWSRedshift(BaseConnection):
             return conn
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Amazon Redshift : {str(e)}")
+
+
+class Elasticsearch(BaseConnection):
+    """
+    Represents a connection to the Elasticsearch service.
+
+    Attributes:
+        url (str): The URL of the Elasticsearch service
+        api_key (str): API key for authentication
+        username (str): Username for basic authentication
+        password (str): Password for basic authentication
+        cloud_id (str): Cloud ID for Elastic Cloud deployment
+        ca_path (str): Path to CA certificate for SSL verification
+        verify_certs (bool): Whether to verify SSL certificates
+        use_ssl (bool): Whether to use SSL for connection
+    """
+
+    url: str = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_URL", "http://localhost:9200"))
+    api_key: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_API_KEY", None))
+    username: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_USERNAME", None))
+    password: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_PASSWORD", None))
+    cloud_id: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_CLOUD_ID", None))
+    ca_path: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_CA_PATH", None))
+    verify_certs: bool = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_VERIFY_CERTS", True))
+    use_ssl: bool = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_USE_SSL", True))
+
+    def connect(self):
+        """
+        Connects to the Elasticsearch service.
+
+        Returns:
+            elasticsearch.Elasticsearch: An instance of the Elasticsearch client.
+
+        Raises:
+            ImportError: If elasticsearch package is not installed
+            ConnectionError: If connection fails
+            ValueError: If neither API key nor basic auth credentials are provided
+        """
+        try:
+            from elasticsearch import Elasticsearch
+
+            # Build connection params
+            conn_params = {}
+
+            # Handle authentication
+            if self.api_key:
+                conn_params["api_key"] = self.api_key
+            elif self.username and self.password:
+                conn_params["basic_auth"] = (self.username, self.password)
+            elif not self.cloud_id:  # Only require auth for non-cloud deployments
+                raise ValueError("Either API key or username/password must be provided")
+
+            # Handle SSL/TLS
+            if self.use_ssl:
+                if self.ca_path:
+                    conn_params["ca_certs"] = self.ca_path
+                conn_params["verify_certs"] = self.verify_certs
+
+            # Handle cloud deployment
+            if self.cloud_id:
+                conn_params["cloud_id"] = self.cloud_id
+            else:
+                conn_params["hosts"] = [self.url]
+
+            # Create client
+            es_client = Elasticsearch(**conn_params)
+
+            # Test connection
+            if not es_client.ping():
+                raise ConnectionError("Failed to connect to Elasticsearch")
+
+            logger.debug(f"Connected to Elasticsearch at {self.url or self.cloud_id}")
+            return es_client
+
+        except ImportError:
+            raise ImportError("Please install elasticsearch package: pip install elasticsearch")
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Elasticsearch: {str(e)}")
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing the connection parameters.
+        """
+        params = {
+            "url": self.url,
+            "use_ssl": self.use_ssl,
+            "verify_certs": self.verify_certs,
+        }
+
+        if self.api_key:
+            params["api_key"] = self.api_key
+        if self.username:
+            params["username"] = self.username
+        if self.password:
+            params["password"] = self.password
+        if self.cloud_id:
+            params["cloud_id"] = self.cloud_id
+        if self.ca_path:
+            params["ca_path"] = self.ca_path
+
+        return params
