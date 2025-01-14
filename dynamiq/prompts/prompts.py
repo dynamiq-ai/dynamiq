@@ -171,7 +171,6 @@ class Prompt(BasePrompt):
     messages: list[Message | VisionMessage]
     tools: list[Tool] | None = None
     _Template: Any = PrivateAttr()
-    env: Environment = Environment(autoescape=True)
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
@@ -182,7 +181,7 @@ class Prompt(BasePrompt):
 
         self._Template = Template
 
-    def get_parameters_for_template(self, template: str) -> set[str]:
+    def get_parameters_for_template(self, template: str, env: Environment | None = None) -> set[str]:
         """
         Extracts set of parameters for template.
 
@@ -193,8 +192,9 @@ class Prompt(BasePrompt):
         Returns:
             set: Set of required parameters.
         """
-
-        ast = self.env.parse(template)
+        if not env:
+            env = Environment(autoescape=True)
+        ast = env.parse(template)
         return meta.find_undeclared_variables(ast)
 
     def get_required_parameters(self) -> set[str]:
@@ -205,15 +205,17 @@ class Prompt(BasePrompt):
         """
         parameters = set()
 
+        env = Environment(autoescape=True)
+
         for msg in self.messages:
             if isinstance(msg, Message):
-                parameters |= self.get_parameters_for_template(msg.content)
+                parameters |= self.get_parameters_for_template(msg.content, env=env)
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
-                        parameters |= self.get_parameters_for_template(content.text)
+                        parameters |= self.get_parameters_for_template(content.text, env=env)
                     elif isinstance(content, VisionMessageImageContent):
-                        parameters |= self.get_parameters_for_template(content.image_url.url)
+                        parameters |= self.get_parameters_for_template(content.image_url.url, env=env)
                     else:
                         raise ValueError(f"Invalid content type: {content.type}")
             else:
