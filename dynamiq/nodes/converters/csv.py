@@ -1,6 +1,6 @@
 import csv
-from io import BytesIO, StringIO
-from typing import Any, ClassVar, Literal
+from io import BytesIO, TextIOWrapper
+from typing import Any, ClassVar, Iterator, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -40,18 +40,6 @@ class CSVConverterInputSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_source(cls, values):
-        """
-        Validates that at least one input source (file paths or file objects) is provided.
-
-        Args:
-            values: The model's field values.
-
-        Returns:
-            The validated values if valid.
-
-        Raises:
-            ValueError: If neither file_paths nor files contains any elements.
-        """
         file_paths, files = values.file_paths, values.files
         if (not file_paths or len(file_paths) == 0) and (not files or len(files) == 0):
             raise ValueError("Either `file_paths` or `files` must be provided.")
@@ -113,9 +101,13 @@ class CSVConverter(Node):
                 try:
                     with open(path, encoding="utf-8") as csv_file:
                         reader = csv.DictReader(csv_file, delimiter=input_data.delimiter)
-                        rows = list(reader)
-                        docs = self._process_rows(rows, path, input_data.content_column, input_data.metadata_columns)
-                        all_documents.extend(docs)
+                        for doc in self._process_rows_generator(
+                            reader,
+                            source=path,
+                            content_column=input_data.content_column,
+                            metadata_columns=input_data.metadata_columns,
+                        ):
+                            all_documents.append(doc)
                         success_count += 1
                 except Exception as e:
                     logger.error(f"Error processing file {path}: {str(e)}")
@@ -127,11 +119,17 @@ class CSVConverter(Node):
                 try:
                     if isinstance(file_obj, bytes):
                         file_obj = BytesIO(file_obj)
-                    content = file_obj.read().decode("utf-8") if isinstance(file_obj, BytesIO) else file_obj
-                    reader = csv.DictReader(StringIO(content), delimiter=input_data.delimiter)
-                    rows = list(reader)
-                    docs = self._process_rows(rows, source_name, input_data.content_column, input_data.metadata_columns)
-                    all_documents.extend(docs)
+
+                    file_text = TextIOWrapper(file_obj, encoding="utf-8")
+                    reader = csv.DictReader(file_text, delimiter=input_data.delimiter)
+
+                    for doc in self._process_rows_generator(
+                        reader,
+                        source=source_name,
+                        content_column=input_data.content_column,
+                        metadata_columns=input_data.metadata_columns,
+                    ):
+                        all_documents.append(doc)
                     success_count += 1
                 except Exception as e:
                     logger.error(f"Error processing file {source_name}: {str(e)}")
@@ -145,34 +143,47 @@ class CSVConverter(Node):
 
         return {"documents": all_documents}
 
-    def _process_rows(
-        self, rows: list[dict], source: str, content_column: str, metadata_columns: list[str]
-    ) -> list[dict]:
+    def _process_rows_generator(
+        self,
+        reader: csv.DictReader,
+        source: str,
+        content_column: str,
+        metadata_columns: list[str],
+    ) -> Iterator[dict]:
         """
-        Processes CSV rows into structured documents.
+        Processes CSV rows into structured document dictionaries in a streaming fashion.
 
-        Converts each row into a document by extracting the content from the specified
-        content column and metadata from the specified metadata columns.
+        This method reads CSV rows one by one from the given DictReader, extracts the
+        specified content and metadata columns, and yields each row as a dictionary
+        with 'content' and 'metadata' fields.
 
         Args:
-            rows (list[dict]): List of dictionaries representing CSV rows.
-            source (str): Source identifier (e.g., file path or name).
-            content_column (str): Name of the column to use as document content.
-            metadata_columns (list[str]): Names of columns to include as metadata.
+            reader (csv.DictReader): The CSV DictReader from which rows are read.
+            source (str): The source identifier for the CSV data, e.g., a file path
+                or name for in-memory data.
+            content_column (str): The name of the column containing the main document content.
+            metadata_columns (list[str]): Column names to include as metadata in the
+                resulting document dictionary.
 
-        Returns:
-            list[dict]: List of documents, each containing 'content' and 'metadata' fields.
+        Yields:
+            dict: A document dictionary with two keys:
+                - 'content': The content extracted from the specified `content_column`.
+                - 'metadata': A dict containing metadata from `metadata_columns`,
+                  plus a 'source' key identifying the file or in-memory data source.
 
         Raises:
-            KeyError: If the specified content column is not found in the CSV.
+            KeyError: If the specified `content_column` is not present in a row of the CSV.
         """
-        documents = []
-        for index, row in enumerate(rows):
+        for index, row in enumerate(reader):
             if content_column not in row:
-                raise KeyError(f"Content column '{content_column}' not found in CSV (source: {source}) at row {index}")
+                raise KeyError(
+                    f"Content column '{content_column}' not found in CSV " f"(source: {source}) at row {index}"
+                )
 
             metadata = {col: row[col] for col in metadata_columns if col in row}
             metadata["source"] = source
 
-            documents.append({"content": row[content_column], "metadata": metadata})
-        return documents
+            yield {
+                "content": row[content_column],
+                "metadata": metadata,
+            }

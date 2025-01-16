@@ -15,7 +15,7 @@ from dynamiq.utils.logger import logger
 
 connection_manager = ConnectionManager()
 
-REGRESSION_DATA_PATH = ".data/df_final_Cluster_5.csv"
+REGRESSION_DATA_PATH = ".data/sample_regression_data.csv"
 
 
 def create_embedder_node(source_node) -> OpenAIDocumentEmbedder:
