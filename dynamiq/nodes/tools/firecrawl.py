@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -118,6 +119,11 @@ class FirecrawlTool(ConnectionNode):
         except Exception as e:
             logger.error(
                 f"Tool {self.name} - {self.id}: failed to get results. Error: {e}"
+            )
+            raise ToolExecutionException(
+                f"Tool '{self.name}' failed to execute the requested action. Error: {str(e)}. "
+                f"Please analyze the error and take appropriate action.",
+                recoverable=True,
             )
             raise
 
