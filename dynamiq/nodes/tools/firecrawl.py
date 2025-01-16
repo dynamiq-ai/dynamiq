@@ -125,7 +125,6 @@ class FirecrawlTool(ConnectionNode):
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
-            raise
 
         if self.is_optimized_for_agents:
             result = f"<Source URL>\n{url}\n<\\Source URL>"
