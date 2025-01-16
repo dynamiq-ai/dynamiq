@@ -286,6 +286,10 @@ class Prompt(BasePrompt):
                         )
                     else:
                         raise ValueError(f"Invalid content type: {content.type}")
+
+                if len(out_msg_content) == 1 and out_msg_content[0]["type"] == VisionMessageType.TEXT:
+                    out_msg_content = out_msg_content[0]["text"]
+
                 out_msg = {
                     "content": out_msg_content,
                     "role": msg.role,
