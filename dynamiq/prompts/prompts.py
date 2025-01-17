@@ -194,7 +194,10 @@ class Prompt(BasePrompt):
         """
         if not env:
             env = Environment(autoescape=True)
+        # Parse the template to get its Abstract Syntax Tree
         ast = env.parse(template)
+
+        # Find and return set of undeclared variables in the template
         return meta.find_undeclared_variables(ast)
 
     def get_required_parameters(self) -> set[str]:
@@ -225,26 +228,51 @@ class Prompt(BasePrompt):
 
     def parse_image_url_parameters(self, url_template: str, kwargs: dict) -> None:
         """
-        Converts image url parameters to base64 format, if necessary.
+        Converts image URL parameters in kwargs to Base64-encoded Data URLs if they contain image data.
 
         Args:
-            url_template (str): Template for image url.
-            kwargs (dict): Dictionary of parameters.
+            url_template (str): Jinja template for the image URL.
+            kwargs (dict): Dictionary of parameters to be used with the template.
+
+        Raises:
+            KeyError: If a required parameter is missing in kwargs.
+            ValueError: If the file type cannot be determined or unsupported data type is provided.
         """
-        params = self.get_parameters_for_template(url_template)
-        for key in params:
-            value = kwargs[key]
+        template_params = self.get_parameters_for_template(url_template)
+
+        for param in template_params:
+            if param not in kwargs:
+                raise KeyError(f"Missing required parameter: '{param}'")
+
+            value = kwargs[param]
+
+            # Initialize as unchanged; will be modified if image data is detected
+            processed_value = value
+
             if isinstance(value, io.BytesIO):
-                kwargs[key] = (
-                    f"data:image/{filetype.guess_extension(value)};base64,"
-                    f"{base64.b64encode(value.getvalue()).decode('utf-8')}"
-                )
+                image_bytes = value.getvalue()
+                extension = filetype.guess_extension(image_bytes)
+                if not extension:
+                    raise ValueError(f"Cannot determine file type for parameter '{param}'.")
+                encoded_str = base64.b64encode(image_bytes).decode("utf-8")
+                processed_value = f"data:image/{extension};base64,{encoded_str}"
+
             elif isinstance(value, bytes):
-                kwargs[key] = (
-                    f"data:image/{filetype.guess_extension(value)};base64,{base64.b64encode(value).decode('utf-8')}"
-                )
+                extension = filetype.guess_extension(value)
+                if not extension:
+                    raise ValueError(f"Cannot determine file type for parameter '{param}'.")
+                encoded_str = base64.b64encode(value).decode("utf-8")
+                processed_value = f"data:image/{extension};base64,{encoded_str}"
+
+            elif isinstance(value, str):
+                pass  # No action needed; assuming it's a regular URL or already a Data URL
+
             else:
-                kwargs[key] = value
+                # Unsupported data type for image parameter
+                raise ValueError(f"Unsupported data type for parameter '{param}': {type(value)}")
+
+            # Update the parameter with the processed value
+            kwargs[param] = processed_value
 
     def format_messages(self, **kwargs) -> list[dict]:
         """
