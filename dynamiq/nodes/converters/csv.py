@@ -41,7 +41,7 @@ class CSVConverterInputSchema(BaseModel):
     @model_validator(mode="after")
     def validate_source(cls, values):
         file_paths, files = values.file_paths, values.files
-        if (not file_paths or len(file_paths) == 0) and (not files or len(files) == 0):
+        if not file_paths and not files:
             raise ValueError("Either `file_paths` or `files` must be provided.")
         return values
 
