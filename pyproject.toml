@@ -52,6 +52,9 @@ psycopg = { version = "~3.2.3", extras = ["binary"] }
 pgvector = "~0.3.6"
 mysql-connector-python = "~9.0.0"
 snowflake-connector-python = "~3.12.4"
+rapidfuzz = "~3.11.0"
+sacrebleu = "~2.5.1"
+rouge-score = "~0.1.2"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~69.1.1"
