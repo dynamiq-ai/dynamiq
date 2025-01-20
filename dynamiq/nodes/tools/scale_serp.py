@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.connections import ScaleSerp
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -156,7 +157,11 @@ class ScaleSerpTool(ConnectionNode):
             logger.error(
                 f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}"
             )
-            raise
+            raise ToolExecutionException(
+                f"Tool '{self.name}' failed to retrieve search results. "
+                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
 
         formatted_results = self._format_search_results(search_result)
         content_results = search_result.get("organic_results", [])

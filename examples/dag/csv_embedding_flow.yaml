@@ -1,0 +1,32 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+nodes:
+  csv-converter:
+    type: dynamiq.nodes.converters.CSVConverter
+    name: CSV Converter
+
+  document-embedder:
+    type: dynamiq.nodes.embedders.OpenAIDocumentEmbedder
+    name: Document Embedder
+    connection: openai-conn
+    model: text-embedding-3-small
+    depends:
+      - node: csv-converter
+    input_transformer:
+      selector:
+        "documents": "$.csv-converter.output.documents"
+
+flows:
+  csv-embedding-flow:
+    name: CSV Embedding Flow
+    nodes:
+      - csv-converter
+      - document-embedder
+
+workflows:
+  csv-embedding-workflow:
+    flow: csv-embedding-flow
+    version: 1

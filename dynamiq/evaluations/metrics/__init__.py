@@ -1,5 +1,8 @@
 from .answer_correctness import AnswerCorrectnessEvaluator
+from .bleu_score import BleuScoreEvaluator
 from .context_precision import ContextPrecisionEvaluator
 from .context_recall import ContextRecallEvaluator
 from .factual_correctness import FactualCorrectnessEvaluator
 from .faithfulness import FaithfulnessEvaluator
+from .rouge_score import RougeScoreEvaluator
+from .string_metrics import DistanceMeasure, ExactMatchEvaluator, StringPresenceEvaluator, StringSimilarityEvaluator

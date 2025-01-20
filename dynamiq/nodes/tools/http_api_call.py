@@ -113,7 +113,8 @@ class HttpApiCall(ConnectionNode):
 
         if response.status_code not in self.success_codes:
             raise ToolExecutionException(
-                f"Request failed with unexpected status code: {response.status_code} and response: {response.text}"
+                f"Request failed with unexpected status code: {response.status_code} and response: {response.text}. "
+                f"Please analyze the error and take appropriate action."
             )
 
         response_type = self.response_type
