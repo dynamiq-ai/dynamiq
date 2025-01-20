@@ -12,8 +12,9 @@ from dynamiq.utils import generate_uuid
 class StreamingMode(str, Enum):
     """Enumeration for streaming modes."""
 
-    FINAL = "final"  # Only final output
-    ALL = "all"  # All intermediate steps and final output
+    FINAL = "final"  # Streams only final output in agents nodes during its execution.
+    ALL = "all"  # Streams all intermediate steps and final output in agents and llms nodes.
+    OUTPUT = "output"  # Streams only final output when node finishes execution.
 
 
 STREAMING_EVENT = "streaming"
@@ -29,6 +30,7 @@ class StreamingEventMessage(BaseModel):
         data (Any): Data associated with the event.
         event (str | None): Event name. Defaults to "streaming".
     """
+
     run_id: str | None = None
     wf_run_id: str | None = Field(default_factory=generate_uuid)
     entity_id: str

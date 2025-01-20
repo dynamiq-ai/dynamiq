@@ -42,7 +42,7 @@ def create_orchestrator(
         temperature=0.1,
     )
 
-    def generate_sketch(context: dict[str, Any]):
+    def generate_sketch(context: dict[str, Any], **kwargs):
         "Generate sketch"
         messages = context.get("messages")
 
@@ -59,7 +59,7 @@ def create_orchestrator(
 
         return {"result": response, **context}
 
-    def accept_sketch(context: dict[str, Any]):
+    def accept_sketch(context: dict[str, Any], **kwargs):
         if context.get("iteration") < 2:
             return "generate_sketch"
 
