@@ -34,7 +34,7 @@ def main():
     bleu_evaluator = BleuScoreEvaluator()
 
     # Run evaluator
-    bleu_scores = bleu_evaluator.run(references=ground_truth_answers, responses=answers)
+    bleu_scores = bleu_evaluator.run(ground_truth_answers=ground_truth_answers, answers=answers)
 
     # Display the results
     for idx, score in enumerate(bleu_scores):

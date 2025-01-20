@@ -22,7 +22,7 @@ def test_bleu_score_evaluator():
     bleu_evaluator = BleuScoreEvaluator()
 
     # Run evaluator
-    bleu_scores = bleu_evaluator.run(references=ground_truth_answers, responses=answers)
+    bleu_scores = bleu_evaluator.run(ground_truth_answers=ground_truth_answers, answers=answers)
 
     expected_scores = [1.0, 0.47, 0.24]  # Replace with actual printed scores
     for computed, expected in zip(bleu_scores, expected_scores):
