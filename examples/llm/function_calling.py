@@ -78,13 +78,13 @@ def main():
         input_data={},
         config=runnables.RunnableConfig(callbacks=[]),
     )
-    tool_calls = response.output[openai_node.id]["output"].get("tool_calls", [])
+    tool_calls = response.output[openai_node.id]["output"].get("tool_calls", {})
     if tool_calls:
         available_functions = {
             "get_current_time": get_current_time,
         }
 
-        for tool_call in tool_calls:
+        for tool_call in tool_calls.values():
             logger.info(f"\nExecuting tool call\n{tool_call}")
             function_name = tool_call["function"]["name"]
             function_to_call = available_functions[function_name]

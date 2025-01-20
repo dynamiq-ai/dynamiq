@@ -363,9 +363,9 @@ class ReActAgent(Agent):
                         action, action_input = self._parse_action(llm_generated_output)
 
                     case InferenceMode.FUNCTION_CALLING:
-                        action = llm_result.output["tool_calls"][0]["function"]["name"].strip()
+                        action = llm_result.output["tool_calls"].values()[0]["function"]["name"].strip()
                         llm_generated_output_json = json.loads(
-                            llm_result.output["tool_calls"][0]["function"]["arguments"]
+                            llm_result.output["tool_calls"].values()[0]["function"]["arguments"]
                         )
                         llm_generated_output = json.dumps(llm_generated_output_json)
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
