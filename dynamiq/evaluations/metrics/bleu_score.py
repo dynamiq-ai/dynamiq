@@ -78,7 +78,7 @@ class BleuScoreEvaluator(BaseEvaluator):
 
         self._corpus_bleu = corpus_bleu
 
-    def run(self, references: list[str], responses: list[str]) -> list[float]:
+    def run(self, ground_truth_answers: list[str], answers: list[str]) -> list[float]:
         """
         Compute BLEU scores for each reference-response pair.
 
@@ -92,7 +92,7 @@ class BleuScoreEvaluator(BaseEvaluator):
         Returns:
             list[float]: BLEU scores, one per pair.
         """
-        input_data = RunInput(ground_truth_answers=references, answers=responses)
+        input_data = RunInput(ground_truth_answers=ground_truth_answers, answers=answers)
         scores: list[float] = []
 
         for ref, resp in zip(input_data.ground_truth_answers, input_data.answers):

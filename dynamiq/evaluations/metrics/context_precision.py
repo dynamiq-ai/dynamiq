@@ -1,7 +1,7 @@
 from pydantic import BaseModel, PrivateAttr, field_validator, model_validator
 
-from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
 from dynamiq.evaluations import BaseEvaluator
+from dynamiq.evaluations.llm_evaluator import LLMEvaluator
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.utils.logger import logger
 

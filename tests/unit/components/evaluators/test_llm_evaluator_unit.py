@@ -1,4 +1,4 @@
-from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
+from dynamiq.evaluations.llm_evaluator import LLMEvaluator
 
 
 def test_prepare_prompt_template():
