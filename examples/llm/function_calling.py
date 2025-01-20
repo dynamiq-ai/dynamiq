@@ -84,7 +84,7 @@ def main():
             "get_current_time": get_current_time,
         }
 
-        for tool_call in tool_calls.values():
+        for tool_call in list(tool_calls.values()):
             logger.info(f"\nExecuting tool call\n{tool_call}")
             function_name = tool_call["function"]["name"]
             function_to_call = available_functions[function_name]
