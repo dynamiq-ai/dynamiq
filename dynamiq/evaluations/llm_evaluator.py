@@ -158,9 +158,7 @@ class LLMEvaluator:
             # No type check on 'type' to allow types from 'typing' module
 
         # Validate examples
-        if not isinstance(examples, list) or not all(
-            isinstance(example, dict) for example in examples
-        ):
+        if not isinstance(examples, list) or not all(isinstance(example, dict) for example in examples):
             msg = f"LLM evaluator expects examples to be a list of dictionaries but received {examples}."
             raise ValueError(msg)
 
@@ -168,11 +166,7 @@ class LLMEvaluator:
             if (
                 not all(k in example for k in ("inputs", "outputs"))
                 or not all(isinstance(example[param], dict) for param in ["inputs", "outputs"])
-                or not all(
-                    isinstance(key, str)
-                    for param in ["inputs", "outputs"]
-                    for key in example[param]
-                )
+                or not all(isinstance(key, str) for param in ["inputs", "outputs"] for key in example[param])
             ):
                 msg = (
                     f"Each example must have 'inputs' and 'outputs' as dictionaries with string keys, "
