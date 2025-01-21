@@ -1026,3 +1026,24 @@ class AWSRedshift(BaseConnection):
             return conn
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Amazon Redshift : {str(e)}")
+
+
+class Coda(HttpApiKey):
+    """
+    Represents a connection to the Coda API.
+
+    Attributes:
+        url (str): Base URL for Coda API.
+        api_key (str): API token for authentication.
+    """
+
+    url: str = Field(default="https://coda.io/apis/v1/")
+    api_key: str = Field(default_factory=partial(get_env_var, "CODA_API_TOKEN"))
+    headers: dict = Field(default_factory=dict)
+
+    def connect(self):
+        """
+        Configures the request authorization header with the API key for authentication.
+        """
+        self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return super().connect()

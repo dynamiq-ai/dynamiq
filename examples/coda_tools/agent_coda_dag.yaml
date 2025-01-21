@@ -1,0 +1,34 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+  coda-conn:
+    type: dynamiq.connections.Coda
+    api_key: ${oc.env:CODA_API_KEY}
+
+nodes:
+  agent:
+    type: dynamiq.nodes.agents.react.ReActAgent
+    llm:
+      id: agent-rag-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+    tools:
+      - id: agent-coda
+        type: dynamiq.nodes.tools.coda.docs.CodaListAvailableDocs
+        name: ListDocsCoda
+        connection: coda-conn
+    role: AI assistant with access to Coda docs, goal is to provide well explained final answers
+
+flows:
+  agent-flow:
+    name: Agent Flow
+    nodes:
+      - agent
+
+workflows:
+  agent-workflow:
+    flow: agent-flow
+    version: 1
