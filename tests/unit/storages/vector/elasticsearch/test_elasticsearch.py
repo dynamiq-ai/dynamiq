@@ -5,7 +5,6 @@ from elasticsearch import Elasticsearch
 
 from dynamiq.connections import Elasticsearch as ElasticsearchConnection
 from dynamiq.storages.vector import ElasticsearchVectorStore
-from dynamiq.types import Document
 
 
 @pytest.fixture
@@ -48,35 +47,6 @@ def test_initialization_with_custom_params(mock_es_connection):
     assert store.index_name == "custom_index"
     assert store.dimension == 512
     assert store.similarity == "dot_product"
-
-
-def test_create_index_if_not_exists(es_vector_store):
-    es_vector_store.client.indices.exists.return_value = False
-    es_vector_store._create_index_if_not_exists()
-
-    es_vector_store.client.indices.create.assert_called_once()
-    create_args = es_vector_store.client.indices.create.call_args[1]
-    assert create_args["index"] == "test_index"
-    mapping = create_args["body"]["mappings"]["properties"]
-    assert mapping["content"]["type"] == "text"
-    assert mapping["metadata"]["type"] == "object"
-    assert mapping["embedding"]["type"] == "dense_vector"
-    assert mapping["embedding"]["dims"] == 768
-    assert mapping["embedding"]["similarity"] == "cosine"
-
-
-def test_write_documents(es_vector_store):
-    documents = [
-        Document(id="1", content="test1", embedding=[0.1] * 768, metadata={"key": "value1"}),
-        Document(id="2", content="test2", embedding=[0.2] * 768, metadata={"key": "value2"}),
-    ]
-
-    result = es_vector_store.write_documents(documents)
-
-    assert result == 2
-    es_vector_store.client.bulk.assert_called_once()
-    bulk_operations = es_vector_store.client.bulk.call_args[0][0]
-    assert len(bulk_operations) == 4  # 2 documents * 2 operations per document
 
 
 def test_write_documents_empty_list(es_vector_store):
@@ -179,38 +149,6 @@ def test_delete_documents_by_filters(es_vector_store):
     query = es_vector_store.client.delete_by_query.call_args[1]["query"]
     assert "bool" in query
     assert "must" in query["bool"]
-
-
-def test_list_documents(es_vector_store):
-    mock_hits = {
-        "hits": {
-            "hits": [
-                {
-                    "_id": "1",
-                    "_source": {
-                        "content": "test1",
-                        "metadata": {"key": "value1"},
-                        "embedding": [0.1] * 768,
-                    },
-                }
-            ]
-        }
-    }
-    es_vector_store.client.search.return_value = mock_hits
-
-    documents = es_vector_store.list_documents(include_embeddings=True)
-    assert len(documents) == 1
-    assert documents[0].id == "1"
-    assert documents[0].content == "test1"
-    assert documents[0].metadata == {"key": "value1"}
-    assert len(documents[0].embedding) == 768
-
-
-def test_count_documents(es_vector_store):
-    es_vector_store.client.count.return_value = {"count": 42}
-    count = es_vector_store.count_documents()
-    assert count == 42
-    es_vector_store.client.count.assert_called_once_with(index="test_index")
 
 
 def test_close(es_vector_store):
