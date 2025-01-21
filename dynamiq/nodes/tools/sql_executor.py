@@ -54,4 +54,7 @@ class SqlExecutor(ConnectionNode):
             cursor.close()
             return {"content": output}
         except Exception as e:
-            raise ToolExecutionException(f"Failed to execute query. Error: {e}", recoverable=True)
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
+            raise ToolExecutionException(
+                f"Tool {self.name} failed to execute query {query}. Error: {e}", recoverable=True
+            )

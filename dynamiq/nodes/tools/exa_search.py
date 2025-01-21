@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import Exa
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -151,7 +152,11 @@ class ExaTool(ConnectionNode):
             search_result = response.json()
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
-            raise
+            raise ToolExecutionException(
+                f"Tool '{self.name}' failed to retrieve search results. Error: {str(e)}. "
+                f"Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
 
         results = search_result.get("results", [])
         formatted_results = self._format_search_results(results)

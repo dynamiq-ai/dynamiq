@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import ZenRows
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -61,7 +62,6 @@ class ZenRowsTool(ConnectionNode):
         }
 
         try:
-            # Perform the HTTP request using the ZenRows connection
             response = self.client.request(
                 method=self.connection.method,
                 url=self.connection.url,
@@ -71,8 +71,11 @@ class ZenRowsTool(ConnectionNode):
             scrape_result = response.text
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {e}")
-
-            raise
+            raise ToolExecutionException(
+                f"Tool '{self.name}' failed to execute the requested action. "
+                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
 
         if self.is_optimized_for_agents:
             result = (

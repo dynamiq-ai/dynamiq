@@ -197,12 +197,11 @@ class BaseLLM(ConnectionNode):
         content = response.choices[0].message.content
         result = {"content": content}
         if tool_calls := response.choices[0].message.tool_calls:
-            tool_calls_parsed = []
+            tool_calls_parsed = {}
             for tc in tool_calls:
                 call = tc.model_dump()
                 call["function"]["arguments"] = json.loads(call["function"]["arguments"])
-                tool_calls_parsed.append(call)
-
+                tool_calls_parsed[call["function"]["name"]] = call
             result["tool_calls"] = tool_calls_parsed
 
         usage_data = self.get_usage_data(model=self.model, completion=response).model_dump()

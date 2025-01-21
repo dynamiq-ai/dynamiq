@@ -6,9 +6,11 @@ It uses a ReActAgent with a Tavily search tool and an Anthropic LLM model.
 import time
 from typing import Any
 
-from dynamiq.connections import ScaleSerp
+from dynamiq.connections import ScaleSerp, Tavily
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
+from dynamiq.nodes.tools.tavily import TavilyTool
+from dynamiq.nodes.types import InferenceMode
 from examples.llm_setup import setup_llm
 
 llm = setup_llm()
@@ -19,7 +21,7 @@ Generate a response that is informative and relevant to the user's query.
 You must use this context to answer the user's query in the best way possible. Use an unbaised and journalistic tone in your response. Do not repeat the text.
 You must not tell the user to open any link or visit any website to get the answer. You must provide the answer in the response itself.
 Your responses should be medium to long in length be informative and relevant to the user's query. You can use markdowns to format your response. You should use bullet points to list the information. Make sure the answer is not short and is informative.
-You have to cite the answer using [number] notation. You must cite the sentences with their relevent context number. You must cite each and every part of the answer so the user can know where the information is coming from.
+You have to cite the answer using [number] notation. You must cite the sentences with their relevant context number. You must cite each and every part of the answer so the user can know where the information is coming from.
 Place these citations at the end of that particular sentence. You can cite the same sentence multiple times if it is relevant to the user's query like [number1][number2].
 However you do not need to cite it using the same number. You can use different numbers to cite the same sentence multiple times. The number refers to the number of the search result (passed in the context) used to generate that part of the answer.
 Sourced links should be placed at the end of the response. You should not use any other sources other than the search results provided in the context.
@@ -33,18 +35,17 @@ def setup_agent() -> ReActAgent:
     Returns:
         ReActAgent: Configured agent ready to process queries.
     """
-
     serp_connection = ScaleSerp()
     tool_search = ScaleSerpTool(connection=serp_connection)
+
+    tavily_connection = Tavily()
+    tool_tavily = TavilyTool(connection=tavily_connection)
 
     llm = setup_llm()
 
     # Create and return the agent
     return ReActAgent(
-        name="React Agent",
-        llm=llm,
-        tools=[tool_search],
-        role=AGENT_ROLE,
+        name="React Agent", llm=llm, tools=[tool_search, tool_tavily], role=AGENT_ROLE, inference_mode=InferenceMode.XML
     )
 
 

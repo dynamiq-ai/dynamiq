@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.embedders.base import TextEmbedder
 from dynamiq.nodes.node import NodeGroup
 from dynamiq.nodes.retrievers.base import Retriever
@@ -118,4 +119,8 @@ class RetrievalTool(Node):
             return {"content": result}
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
-            raise
+            raise ToolExecutionException(
+                f"Tool '{self.name}' failed to retrieve data using the specified action. "
+                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
