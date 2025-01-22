@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from dynamiq.components.evaluators.llm_evaluator import LLMEvaluator
+from dynamiq.evaluations.llm_evaluator import LLMEvaluator
 from dynamiq.nodes.llms import BaseLLM
 
 

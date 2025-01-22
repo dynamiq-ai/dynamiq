@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections import Jina
 from dynamiq.nodes import NodeGroup
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -94,8 +95,11 @@ class JinaScrapeTool(ConnectionNode):
                 scrape_result = response.content
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {e}")
-
-            raise
+            raise ToolExecutionException(
+                f"Tool '{self.name}' failed to execute the requested action. "
+                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
 
         if self.is_optimized_for_agents:
             result = (
@@ -217,8 +221,11 @@ class JinaSearchTool(ConnectionNode):
             search_result = response.json()
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {e}")
-
-            raise
+            raise ToolExecutionException(
+                f"Tool '{self.name}' failed to retrieve search results. "
+                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
 
         formatted_results = self._format_search_results(search_result)
         sources_with_url = [f"[{result.get('title')}]({result.get('url')})" for result in search_result.get("data", [])]

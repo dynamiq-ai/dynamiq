@@ -43,6 +43,8 @@ class WeaviateDocumentRetriever:
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
         content_key: str | None = None,
+        query: str | None = None,
+        alpha: float | None = 0.5,
     ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the WeaviateDocumentStore that are similar to the provided query embedding.
@@ -54,6 +56,12 @@ class WeaviateDocumentRetriever:
             top_k (int, optional): The maximum number of documents to return. Defaults to None.
             filters (Optional[dict[str, Any]]): Filters to apply for retrieving specific documents. Defaults to None.
             content_key (Optional[str]): The field used to store content in the storage.
+            query(Optional[str]): The query string to search for (when using keyword search). Defaults to None.
+            alpha (Optional[float]): The alpha value for hybrid retrieval. Defaults to 0.5.
+
+            When using hybrid retrieval, the alpha value determines the weight of the keyword search score in the
+            final ranking. A value of 0.0 means only keyword search score will be used, and a value of 1.0 means only
+            vector similarity score will be considered.
 
         Returns:
             List[Document]: A list of Document instances sorted by their relevance to the query_embedding.
@@ -61,13 +69,26 @@ class WeaviateDocumentRetriever:
         top_k = top_k or self.top_k
         filters = filters or self.filters
 
-        docs = self.vector_store._embedding_retrieval(
-            query_embedding=query_embedding,
-            filters=filters,
-            top_k=top_k,
-            exclude_document_embeddings=exclude_document_embeddings,
-            content_key=content_key,
-        )
+        if query:
+            docs = self.vector_store._hybrid_retrieval(
+                query_embedding=query_embedding,
+                query=query,
+                filters=filters,
+                top_k=top_k,
+                exclude_document_embeddings=exclude_document_embeddings,
+                content_key=content_key,
+                alpha=alpha,
+            )
+
+        else:
+            docs = self.vector_store._embedding_retrieval(
+                query_embedding=query_embedding,
+                filters=filters,
+                top_k=top_k,
+                exclude_document_embeddings=exclude_document_embeddings,
+                content_key=content_key,
+            )
+
         logger.debug(f"Retrieved {len(docs)} documents from Weaviate Vector Store.")
 
         return {"documents": docs}
