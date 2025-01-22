@@ -40,7 +40,7 @@ class SocketMessage(BaseModel):
 
 PYTHON_TOOL_CODE = """
 def run(inputs):
-    return {"content": "Email sent"}
+    return {"content": "Email was sent."}
 """
 
 
@@ -60,9 +60,11 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
         approval=ApprovalConfig(
             enabled=True,
             feedback_method=FeedbackMethod.STREAM,
-            msg_template="Email sketch: {{input_data.email}}. "
-            "Approve or cancel email sending. Send nothing for approval;"
-            "provide feedback to cancel and regenerate.",
+            msg_template=(
+                "Email sketch: {{input_data.email}}.\n"
+                "Approve or cancel email sending. Send nothing for approval;"
+                "provide feedback to cancel and regenerate."
+            ),
         ),
         streaming=StreamingConfig(enabled=True, input_queue=input_queue),
     )

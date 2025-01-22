@@ -6,7 +6,7 @@ from examples.llm_setup import setup_llm
 
 PYTHON_TOOL_CODE = """
 def run(inputs):
-    return {"content": "Email sent"}
+    return {"content": "Email was sent."}
 """
 
 
@@ -26,9 +26,11 @@ def run_agent(query) -> dict:
         approval=ApprovalConfig(
             enabled=True,
             feedback_method=FeedbackMethod.CONSOLE,
-            msg_template="Email sketch: {{input_data.email}}. "
-            "Approve or cancel email sending. Send nothing for approval;"
-            "provide feedback to cancel and regenerate.",
+            msg_template=(
+                "Email sketch: {{input_data.email}}.\n"
+                "Approve or cancel email sending. Send nothing for approval;"
+                "provide feedback to cancel and regenerate."
+            ),
         ),
     )
 

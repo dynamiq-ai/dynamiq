@@ -22,10 +22,11 @@ async def websocket_client():
         try:
             while True:
                 event_raw = json.loads(await websocket.recv())
-
                 if event_raw["event"] == "approval":
-                    feedback = input(event_raw["data"])
-                    feedback = StreamingEventMessage(entity_id=WF_ID, data=feedback, event=APPROVAL_EVENT).to_json()
+                    feedback = input(event_raw["data"]["template"])
+                    feedback = StreamingEventMessage(
+                        entity_id=WF_ID, data={"feedback": feedback}, event=APPROVAL_EVENT
+                    ).to_json()
 
                 else:
                     feedback = input(event_raw["data"]["prompt"])
