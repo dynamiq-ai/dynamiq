@@ -15,11 +15,6 @@ APPROVAL_EVENT = "approval"
 PLAN_APPROVAL_EVENT = "plan_approval"
 
 
-class ApprovalType(Enum):
-    NODE_EXECUTION = "node_execution"
-    PLANNING = "planning"
-
-
 class ApprovalInputEventData(BaseModel):
     template: str
     data: dict[str, Any]

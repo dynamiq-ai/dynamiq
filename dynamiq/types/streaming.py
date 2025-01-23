@@ -12,7 +12,7 @@ from dynamiq.utils import generate_uuid
 class StreamingMode(str, Enum):
     """Enumeration for streaming modes."""
 
-    FINAL = "final"  # Streams only final output in agents nodes during its execution.
+    FINAL = "final"  # Streams only final output in agents nodes.
     ALL = "all"  # Streams all intermediate steps and final output in agents and llms nodes.
 
 

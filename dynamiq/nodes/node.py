@@ -39,8 +39,6 @@ from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
 
-FINAL_OUTPUT_EVENT = "final_output_event"
-
 
 def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
     """

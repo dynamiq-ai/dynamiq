@@ -201,20 +201,20 @@ class MessageSenderTool(Node):
     name: str = "Message Sender Tool"
     description: str = "Tool can be used send messages to the user."
     output_method: FeedbackMethod | OutputMethodCallable = FeedbackMethod.CONSOLE
-    input_schema: ClassVar[type[HumanFeedbackInputSchema]] = MessageSenderInputSchema
+    input_schema: ClassVar[type[MessageSenderInputSchema]] = MessageSenderInputSchema
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def send_method_console(self, prompt: str) -> None:
+    def output_method_console(self, prompt: str) -> None:
         """
-        Sends message to console using console.
+        Sends message to console.
 
         Args:
             prompt (str): The prompt to display to the user.
         """
         print(prompt)
 
-    def send_method_streaming(self, prompt: str, config: RunnableConfig, **kwargs) -> None:
+    def output_method_streaming(self, prompt: str, config: RunnableConfig, **kwargs) -> None:
         """
         Sends message using streaming method.
 
@@ -258,7 +258,7 @@ class MessageSenderTool(Node):
         input_text = input_data.input
         if isinstance(self.output_method, FeedbackMethod):
             if self.output_method == FeedbackMethod.CONSOLE:
-                self.send_method_console(input_text)
+                self.output_method_console(input_text)
             elif self.output_method == FeedbackMethod.STREAM:
                 streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
                 if not streaming.input_streaming_enabled:
@@ -266,7 +266,7 @@ class MessageSenderTool(Node):
                         f"'{FeedbackMethod.STREAM}' input method requires enabled input and output streaming."
                     )
 
-                self.send_method_streaming(prompt=input_text, config=config, **kwargs)
+                self.output_method_streaming(prompt=input_text, config=config, **kwargs)
             else:
                 raise ValueError(f"Unsupported feedback method: {self.output_method}")
         else:
