@@ -1,5 +1,5 @@
 from dynamiq.nodes.agents import ReActAgent
-from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
+from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool, MessageSenderTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
 from examples.llm_setup import setup_llm
@@ -39,15 +39,22 @@ def run_agent(query) -> dict:
         input_method=FeedbackMethod.CONSOLE,
     )
 
+    message_sender_tool = MessageSenderTool(output_method=FeedbackMethod.CONSOLE)
+
     agent = ReActAgent(
         name="research_agent",
-        role="You are a helpful assistant that has access to the internet using Tavily Tool. ",
+        role=(
+            "You are a helpful assistant that has access to the internet using Tavily Tool."
+            "You can request some clarifications using HumanFeedbackTool and send messages using MessageSenderTool "
+        ),
         llm=llm,
-        tools=[email_sender_tool, human_feedback_tool],
+        tools=[email_sender_tool, human_feedback_tool, message_sender_tool],
     )
 
     return agent.run(
-        input_data={"input": f"Write and send email. {query}"},
+        input_data={
+            "input": f"Write and send email: {query}. Notify user about status of email using MessageSenderTool."
+        },
     ).output["content"]
 
 

@@ -14,7 +14,6 @@ class StreamingMode(str, Enum):
 
     FINAL = "final"  # Streams only final output in agents nodes during its execution.
     ALL = "all"  # Streams all intermediate steps and final output in agents and llms nodes.
-    OUTPUT = "output"  # Streams only final output when node finishes execution.
 
 
 STREAMING_EVENT = "streaming"

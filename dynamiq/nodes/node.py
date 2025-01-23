@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, 
 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler
-from dynamiq.callbacks.base import get_run_id
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.exceptions import (
@@ -32,7 +31,7 @@ from dynamiq.types.feedback import (
     ApprovalStreamingInputEventMessage,
     FeedbackMethod,
 )
-from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEventMessage, StreamingMode
+from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEventMessage
 from dynamiq.utils import format_value, generate_uuid, merge
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
@@ -473,27 +472,6 @@ class Node(BaseModel, Runnable, ABC):
         data["input_mapping"] = format_value(self.input_mapping)
         return data
 
-    def send_final_output(self, output: dict[str, Any], config: RunnableConfig = None, **kwargs) -> None:
-        """Sends final output of the node
-        Args:
-            output (dict[str, Any]): Data that will be sent.
-            config (RunnableConfig, optional): Configuration for the runnable.
-            **kwargs: Additional keyword arguments.
-        """
-
-        feedback_config: StreamingConfig = (
-            getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
-        )
-        if feedback_config.enabled and feedback_config.mode == StreamingMode.OUTPUT:
-            event = StreamingEventMessage(
-                run_id=str(get_run_id(kwargs)),
-                wf_run_id=kwargs.get("wf_run_id"),
-                entity_id=self.id,
-                data=format_value(output),
-                event=FINAL_OUTPUT_EVENT,
-            )
-            self.run_on_node_execute_stream(callbacks=config.callbacks, chunk=output, event=event, **kwargs)
-
     def send_streaming_approval_message(
         self, template: str, input_data: dict, approval_config: ApprovalConfig, config: RunnableConfig = None, **kwargs
     ) -> ApprovalOutputData:
@@ -689,8 +667,6 @@ class Node(BaseModel, Runnable, ABC):
 
             merged_kwargs["is_output_from_cache"] = from_cache
             transformed_output = self.transform_output(output)
-
-            self.send_final_output(transformed_output, config=config, **merged_kwargs)
 
             self.run_on_node_end(config.callbacks, transformed_output, **merged_kwargs)
 

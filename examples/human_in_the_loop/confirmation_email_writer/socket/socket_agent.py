@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
+from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool, MessageSenderTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
@@ -75,14 +75,26 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
         streaming=StreamingConfig(enabled=True, input_queue=input_queue),
     )
 
-    agent = ReActAgent(
-        name="research_agent",
-        role="You are a helpful assistant that has access to the internet using Tavily Tool. ",
-        llm=llm,
-        tools=[email_sender_tool, human_feedback_tool],
+    message_sender_tool = MessageSenderTool(
+        output_method=FeedbackMethod.STREAM, streaming=StreamingConfig(enabled=True, input_queue=input_queue)
     )
 
-    return agent.run(input_data={"input": request}, config=RunnableConfig(callbacks=[send_handler])).output["content"]
+    agent = ReActAgent(
+        name="research_agent",
+        role=(
+            "You are a helpful assistant that has access to the internet using Tavily Tool."
+            "You can request some clarifications using HumanFeedbackTool and send messages using MessageSenderTool "
+        ),
+        llm=llm,
+        tools=[email_sender_tool, human_feedback_tool, message_sender_tool],
+    )
+
+    return agent.run(
+        input_data={
+            "input": f"Write and send email: {request}. Notify user about status of email using MessageSenderTool."
+        },
+        config=RunnableConfig(callbacks=[send_handler]),
+    ).output["content"]
 
 
 async def _send_stream_events_by_ws(websocket: WebSocket, send_handler: Any):
