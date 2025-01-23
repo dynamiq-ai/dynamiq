@@ -56,7 +56,6 @@ class ApprovalConfig(BaseModel):
     """
 
     event: str = APPROVAL_EVENT
-    event_msg_type: type[ApprovalStreamingOutputEventMessage] = ApprovalStreamingOutputEventMessage
     accept_pattern: str = ""
     llm: Any = None
 

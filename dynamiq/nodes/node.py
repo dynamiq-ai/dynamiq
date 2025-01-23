@@ -29,6 +29,7 @@ from dynamiq.types.feedback import (
     ApprovalConfig,
     ApprovalOutputData,
     ApprovalStreamingInputEventMessage,
+    ApprovalStreamingOutputEventMessage,
     FeedbackMethod,
 )
 from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEventMessage
@@ -501,7 +502,7 @@ class Node(BaseModel, Runnable, ABC):
         self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
 
         output: ApprovalOutputData = self.get_input_streaming_event(
-            event=approval_config.event, event_msg_type=approval_config.event_msg_type, config=config
+            event=approval_config.event, event_msg_type=ApprovalStreamingOutputEventMessage, config=config
         ).data
 
         return output
