@@ -63,11 +63,23 @@ Provide a final answer only when:
 3. No further delegation is required to improve the answer.
 
 Important reminders:
+- Escape special XML characters in your response using XML entities:
+  & -> &amp;
+  < -> &lt;
+  > -> &gt;
+  " -> &quot;
+  ' -> &apos;
+- Ensure all XML tags are properly closed
 - Ensure your task breakdown is thorough and considers all available information before making a decision.
 - When delegating tasks, provide clear context and include any relevant information from previous subtasks.
 - Delegate only one action per step.
 - Use the specified XML tags for your response.
 - Always include relevant data or results from previous subtasks when delegating new tasks or providing the final answer.
+
+CRITICAL FORMATTING RULES:
+1. You MUST ALWAYS include EXACTLY ONE <output> block after <task_breakdown>
+2. The <output> block MUST CONTAIN either delegation or final answer
+3. Never omit XML tags - this will cause system errors
 """  # noqa: E501
 
 PROMPT_TEMPLATE_AGENT_MANAGER_FINAL_ANSWER = """
@@ -80,7 +92,7 @@ You have already completed the task using various specialized agents. Here's a s
 
 Here is the original task you were given:
 <original_task>
-{{input_task}}
+{input_task}
 </original_task>
 
 Based on this work, a preliminary answer was generated:
@@ -120,6 +132,14 @@ Include all relevant information to be as informative as possible.
 </output>
 Always close the XML tags properly and ensure your response is well-organized and easy to follow.
 Please ensure your final answer is professional, clear, and directly addresses the original task while incorporating all relevant information from the specialized agents' work.
+Important notes:
+- Escape special XML characters using proper entities (&&amp; for &, &lt; for <, etc.)
+- Never include raw markdown formatting in XML tags
+
+CRITICAL FORMATTING RULES:
+1. You MUST ALWAYS include EXACTLY ONE <output> block after <task_breakdown>
+2. The <output> block MUST CONTAIN either delegation or final answer
+3. Never omit XML tags - this will cause system errors
 """  # noqa: E501
 
 
