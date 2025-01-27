@@ -11,7 +11,7 @@ from dynamiq.utils.logger import logger
 
 
 class SQLInputSchema(BaseModel):
-    query: str = Field(..., description="Parameter to provide a query that needs to be executed.")
+    query: str = Field("", description="Parameter to provide a query that needs to be executed.")
 
 
 class SQLExecutor(ConnectionNode):
@@ -33,6 +33,7 @@ class SQLExecutor(ConnectionNode):
         "You can use this tool to execute the query, specified for PostgreSQL, MySQL, Snowflake, AWS Redshift."
     )
     connection: PostgreSQL | MySQL | Snowflake | AWSRedshift
+    query: str = ""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -44,8 +45,10 @@ class SQLExecutor(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        query = input_data.query
+        query = input_data.query or self.query
         try:
+            if not query:
+                raise ValueError("Query cannot be empty")
             cursor = self.client.cursor(
                 **self.connection.cursor_params if not isinstance(self.connection, (PostgreSQL, AWSRedshift)) else {}
             )
