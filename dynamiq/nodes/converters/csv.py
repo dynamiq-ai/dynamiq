@@ -35,8 +35,7 @@ class CSVConverterInputSchema(BaseModel):
         description="Delimiter used in the CSV files. If not provided, the Node's configured delimiter is used."
     )
     content_column: str | None = Field(
-        default=None,
-        description="Name of the column that will be used as the document's main content. If not provided, the Node's configured content_column is used."
+        default=None, description="Name of the column that will be used as the document's main content."
     )
     metadata_columns: list[str] | None = Field(
         default=None,
@@ -111,9 +110,9 @@ class CSVConverter(Node):
         last_error = None
         success_count = 0
         total_files = len(input_data.file_paths or []) + len(input_data.files or [])
-        delimiter = input_data.delimiter if input_data.delimiter is not None else self.delimiter
-        content_column = input_data.content_column if input_data.content_column is not None else self.content_column
-        metadata_columns = input_data.metadata_columns if input_data.metadata_columns is not None else self.metadata_columns
+        delimiter = input_data.delimiter or self.delimiter
+        content_column = input_data.content_column or self.content_column
+        metadata_columns = input_data.metadata_columns or self.metadata_columns
 
         if input_data.file_paths:
             for path in input_data.file_paths:
