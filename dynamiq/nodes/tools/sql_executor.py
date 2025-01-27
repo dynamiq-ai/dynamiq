@@ -14,7 +14,7 @@ class SQLInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a query that needs to be executed.")
 
 
-class SqlExecutor(ConnectionNode):
+class SQLExecutor(ConnectionNode):
     """
     A tool for SQL query execution.
 
