@@ -11,7 +11,7 @@ from dynamiq.utils.logger import logger
 
 
 class SQLInputSchema(BaseModel):
-    query: str = Field("", description="Parameter to provide a query that needs to be executed.")
+    query: str | None = Field(None, description="Parameter to provide a query that needs to be executed.")
 
 
 class SQLExecutor(ConnectionNode):
@@ -33,7 +33,7 @@ class SQLExecutor(ConnectionNode):
         "You can use this tool to execute the query, specified for PostgreSQL, MySQL, Snowflake, AWS Redshift."
     )
     connection: PostgreSQL | MySQL | Snowflake | AWSRedshift
-    query: str = ""
+    query: str | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
