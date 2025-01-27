@@ -19,9 +19,7 @@ class CSVConverterInputSchema(BaseModel):
     Attributes:
         file_paths (list[str] | None): List of paths to CSV files on the filesystem.
         files (list[BytesIO | bytes] | None): List of file objects or bytes containing CSV data.
-        delimiter (str): Character used to separate fields in the CSV files. Defaults to comma.
-        content_column (str): Name of the column to use as the main document content.
-        metadata_columns (list[str]): Column names to extract as metadata for each document.
+
     """
 
     file_paths: list[str] | None = Field(
@@ -29,11 +27,6 @@ class CSVConverterInputSchema(BaseModel):
     )
     files: list[BytesIO | bytes] | None = Field(
         default=None, description="List of file objects or bytes representing CSV files."
-    )
-    delimiter: str = Field(default=",", description="Delimiter used in the CSV files.")
-    content_column: str = Field(..., description="Name of the column that will be used as the document's main content.")
-    metadata_columns: list[str] = Field(
-        default_factory=list, description="List of column names to extract as metadata for each document."
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -58,11 +51,20 @@ class CSVConverter(Node):
     Attributes:
         name (str): Display name of the node.
         group (NodeGroup.CONVERTERS): Node group classification.
+        delimiter (str): Character used to separate fields in the CSV files. Defaults to comma.
+        content_column (str): Name of the column to use as the main document content.
+        metadata_columns (list[str] | None): Column names to extract as metadata for each document.
         input_schema (type[CSVConverterInputSchema]): Schema for validating input parameters.
     """
 
     name: str = "CSV File Converter"
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
+    delimiter: str = Field(default=",", description="Delimiter used in the CSV files.")
+    content_column: str = Field(..., description="Name of the column that will be used as the document's main content.")
+    metadata_columns: list[str] | None = Field(
+        default=None,
+        description="Optional list of column names to extract as metadata for each document. Can be None.",
+    )
     input_schema: ClassVar[type[CSVConverterInputSchema]] = CSVConverterInputSchema
 
     def execute(
@@ -100,12 +102,12 @@ class CSVConverter(Node):
             for path in input_data.file_paths:
                 try:
                     with open(path, encoding="utf-8") as csv_file:
-                        reader = csv.DictReader(csv_file, delimiter=input_data.delimiter)
+                        reader = csv.DictReader(csv_file, delimiter=self.delimiter)
                         for doc in self._process_rows_generator(
                             reader,
                             source=path,
-                            content_column=input_data.content_column,
-                            metadata_columns=input_data.metadata_columns,
+                            content_column=self.content_column,
+                            metadata_columns=self.metadata_columns,
                         ):
                             all_documents.append(doc)
                         success_count += 1
@@ -121,13 +123,13 @@ class CSVConverter(Node):
                         file_obj = BytesIO(file_obj)
 
                     file_text = TextIOWrapper(file_obj, encoding="utf-8")
-                    reader = csv.DictReader(file_text, delimiter=input_data.delimiter)
+                    reader = csv.DictReader(file_text, delimiter=self.delimiter)
 
                     for doc in self._process_rows_generator(
                         reader,
                         source=source_name,
-                        content_column=input_data.content_column,
-                        metadata_columns=input_data.metadata_columns,
+                        content_column=self.content_column,
+                        metadata_columns=self.metadata_columns,
                     ):
                         all_documents.append(doc)
                     success_count += 1
@@ -148,7 +150,7 @@ class CSVConverter(Node):
         reader: csv.DictReader,
         source: str,
         content_column: str,
-        metadata_columns: list[str],
+        metadata_columns: list[str] | None,
     ) -> Iterator[dict]:
         """
         Processes CSV rows into structured document dictionaries in a streaming fashion.
@@ -162,7 +164,7 @@ class CSVConverter(Node):
             source (str): The source identifier for the CSV data, e.g., a file path
                 or name for in-memory data.
             content_column (str): The name of the column containing the main document content.
-            metadata_columns (list[str]): Column names to include as metadata in the
+            metadata_columns (list[str]|None): Column names to include as metadata in the
                 resulting document dictionary.
 
         Yields:
@@ -174,6 +176,7 @@ class CSVConverter(Node):
         Raises:
             KeyError: If the specified `content_column` is not present in a row of the CSV.
         """
+        metadata_columns = metadata_columns or []
         for index, row in enumerate(reader):
             if content_column not in row:
                 raise KeyError(
