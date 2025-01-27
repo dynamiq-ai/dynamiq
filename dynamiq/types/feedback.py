@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.types.streaming import StreamingEventMessage
 
@@ -15,17 +15,24 @@ APPROVAL_EVENT = "approval"
 PLAN_APPROVAL_EVENT = "plan_approval"
 
 
-class ApprovalInputEventData(BaseModel):
-    template: str
-    data: dict[str, Any]
-    mutable_params: list[str]
+class ApprovalOutputEventData(BaseModel):
+    template: str = Field(..., description="Message template that will be sent.")
+    data: dict[str, Any] = Field(..., description="Data in JSON that will be sent.")
+    mutable_params: list[str] = Field(
+        ...,
+        description=(
+            "List of parameters from 'data'"
+            "field that will be possible to update."
+            "This field is used to secure data that shouldn't be modified."
+        ),
+    )
 
 
-class ApprovalStreamingInputEventMessage(StreamingEventMessage):
-    data: ApprovalInputEventData
+class ApprovalStreamingOutputEventMessage(StreamingEventMessage):
+    data: ApprovalOutputEventData
 
 
-class ApprovalOutputData(BaseModel):
+class ApprovalInputData(BaseModel):
     feedback: str = None
     data: dict[str, Any] = {}
     is_approved: bool | None = None
@@ -37,8 +44,8 @@ class ApprovalOutputData(BaseModel):
         return self
 
 
-class ApprovalStreamingOutputEventMessage(StreamingEventMessage):
-    data: ApprovalOutputData
+class ApprovalStreamingInputEventMessage(StreamingEventMessage):
+    data: ApprovalInputData
 
 
 class ApprovalConfig(BaseModel):

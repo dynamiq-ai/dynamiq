@@ -27,7 +27,7 @@ from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, Runnable
 from dynamiq.storages.vector.base import BaseVectorStoreParams
 from dynamiq.types.feedback import (
     ApprovalConfig,
-    ApprovalOutputData,
+    ApprovalInputData,
     ApprovalStreamingInputEventMessage,
     ApprovalStreamingOutputEventMessage,
     FeedbackMethod,
@@ -473,7 +473,7 @@ class Node(BaseModel, Runnable, ABC):
 
     def send_streaming_approval_message(
         self, template: str, input_data: dict, approval_config: ApprovalConfig, config: RunnableConfig = None, **kwargs
-    ) -> ApprovalOutputData:
+    ) -> ApprovalInputData:
         """
         Sends approval message and waits for response.
 
@@ -485,10 +485,10 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs: Additional keyword arguments.
 
         Return:
-            ApprovalOutputData: Response to approval message.
+            ApprovalInputData: Response to approval message.
 
         """
-        event = ApprovalStreamingInputEventMessage(
+        event = ApprovalStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
             data={"template": template, "data": input_data, "mutable_params": approval_config.mutable_params},
@@ -499,38 +499,38 @@ class Node(BaseModel, Runnable, ABC):
 
         self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
 
-        output: ApprovalOutputData = self.get_input_streaming_event(
-            event=approval_config.event, event_msg_type=ApprovalStreamingOutputEventMessage, config=config
+        output: ApprovalInputData = self.get_input_streaming_event(
+            event=approval_config.event, event_msg_type=ApprovalStreamingInputEventMessage, config=config
         ).data
 
         return output
 
-    def send_console_approval_message(self, template: str) -> ApprovalOutputData:
+    def send_console_approval_message(self, template: str) -> ApprovalInputData:
         """
         Sends approval message in console and waits for response.
 
         Args:
             template (dict): Template to send.
         Returns:
-            ApprovalOutputData: Response to approval message.
+            ApprovalInputData: Response to approval message.
         """
         feedback = input(template)
-        return ApprovalOutputData(feedback=feedback)
+        return ApprovalInputData(feedback=feedback)
 
     def send_approval_message(
         self, approval_config: ApprovalConfig, input_data: dict, config: RunnableConfig = None, **kwargs
-    ) -> ApprovalOutputData:
+    ) -> ApprovalInputData:
         """
         Sends approval message and determines if it was approved or disapproved (canceled).
 
         Args:
-            msg_template (str): Template for message to send.
+            approval_config (ApprovalConfig): Configuration for the approval.
             input_data (dict): Data that will be sent.
             config (RunnableConfig, optional): Configuration for the runnable.
             **kwargs: Additional keyword arguments.
 
         Returns:
-            ApprovalResult: Result of approval.
+            ApprovalInputData: Result of approval.
         """
 
         message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
@@ -576,16 +576,24 @@ class Node(BaseModel, Runnable, ABC):
 
         return approval_result
 
-    def validate_execution_approval(self, input_data, config: RunnableConfig = None, **kwargs) -> None:
+    def get_approved_data_or_origin(
+        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+    ) -> dict[str, Any]:
         """
         Approves or disapproves (cancels) Node execution by requesting feedback.
+        Updates input data according to the feedback or leaves it the same.
+        Raises NodeException if execution was canceled by feedback.
 
         Args:
+            input_data(dict[str, Any]): Input data.
             config (RunnableConfig, optional): Configuration for the runnable.
             **kwargs: Additional keyword arguments.
 
+        Returns:
+            dict[str, Any]: Updated input data.
+
         Raises:
-            NodeException: If Node execution was canceled.
+            NodeException: If Node execution was canceled by feedback.
         """
         if self.approval.enabled:
             approval_result = self.send_approval_message(self.approval, input_data, config=config, **kwargs)
@@ -593,6 +601,7 @@ class Node(BaseModel, Runnable, ABC):
                 raise NodeException(
                     message=f"Execution was canceled by human with feedback {approval_result.feedback}",
                     recoverable=True,
+                    failed_depend=NodeDependency(self, option="Execution was canceled."),
                 )
             return approval_result.data
 
@@ -633,12 +642,12 @@ class Node(BaseModel, Runnable, ABC):
         try:
             try:
                 self.validate_depends(depends_result)
-                input_data = self.validate_execution_approval(input_data, config=config, **merged_kwargs)
+                input_data = self.get_approved_data_or_origin(input_data, config=config, **merged_kwargs)
             except NodeException as e:
                 transformed_input = input_data | {
                     k: result.to_tracing_depend_dict() for k, result in depends_result.items()
                 }
-                skip_data = {"failed_dependency": e.failed_depend.to_dict() if e.failed_depend else None}
+                skip_data = {"failed_dependency": e.failed_depend.to_dict()}
                 self.run_on_node_skip(
                     callbacks=config.callbacks,
                     skip_data=skip_data,
