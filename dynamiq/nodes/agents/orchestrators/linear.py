@@ -1,4 +1,6 @@
+import json
 import re
+from enum import Enum
 from functools import cached_property
 from typing import Any
 
@@ -31,6 +33,28 @@ class Task(BaseModel):
     description: str
     dependencies: list[int]
     output: dict[str, Any] | str
+
+
+class Decision(str, Enum):
+    """
+    Enumeration for possible decisions after analyzing the user input.
+    """
+
+    RESPOND = "respond"
+    PLAN = "plan"
+
+
+class DesicionResult(BaseModel):
+    """
+    Holds the result of analyzing the user input.
+
+    Attributes:
+        decision (Decision): The decision on how to handle the input.
+        message (str): The message or response associated with the decision.
+    """
+
+    decision: Decision
+    message: str
 
 
 class LinearOrchestrator(Orchestrator):
@@ -283,7 +307,8 @@ class LinearOrchestrator(Orchestrator):
             )
             final_result = re.search(r"<final_answer>(.*?)</final_answer>", final_result_content, re.DOTALL)
             if not final_result:
-                raise ActionParseError("No <final_answer> tags found in the response")
+                error_response = f"Orchestrator {self.name} - {self.id}: No <final_answer> tags found in the response"
+                raise ActionParseError(f"{error_response}")
             final_result_answer = final_result.group(1).strip()
             return final_result_answer
 
@@ -300,12 +325,109 @@ class LinearOrchestrator(Orchestrator):
         Returns:
             str: The final answer generated after processing the task.
         """
-        tasks = self.get_tasks(input_task, config=config, **kwargs)
-        self.run_tasks(tasks=tasks, input_task=input_task, config=config, **kwargs)
-        return self.generate_final_answer(input_task, config, **kwargs)
+        analysis = self._analyze_user_input(input_task, config=config, **kwargs)
+        decision = analysis.decision
+        message = analysis.message
+
+        if decision == "respond":
+            return message
+        else:
+            tasks = self.get_tasks(input_task, config=config, **kwargs)
+            self.run_tasks(tasks=tasks, input_task=input_task, config=config, **kwargs)
+            return self.generate_final_answer(input_task, config, **kwargs)
 
     def setup_streaming(self) -> None:
         """Setups streaming for orchestrator."""
         self.manager.streaming = self.streaming
         for agent in self.agents:
             agent.streaming = self.streaming
+
+    def _analyze_user_input(self, input_task: str, config: RunnableConfig = None, **kwargs) -> DesicionResult:
+        """
+        Calls the manager's 'handle_input' action to decide if we should respond
+        immediately or proceed with a plan.
+
+        Args:
+            input_task (str): The user's input or task description.
+            config: Optional configuration object passed to the manager's run method.
+            **kwargs: Additional keyword arguments passed to the manager's run method.
+
+        Returns:
+            DesicionResult: An object containing the decision (as an Enum) and a message.
+        """
+        handle_result = self.manager.run(
+            input_data={
+                "action": "handle_input",
+                "task": input_task,
+                "agents": self.agents_descriptions,
+            },
+            config=config,
+            run_depends=[],
+            **kwargs,
+        )
+
+        if handle_result.status != RunnableStatus.SUCCESS:
+            error_message = (
+                f"Orchestrator {self.name} - {self.id}: Manager failed to analyze input: {handle_result.output}"
+            )
+            logger.error(error_message)
+            return DesicionResult(decision=Decision.RESPOND, message=f"Error analyzing request: {handle_result.output}")
+
+        content = handle_result.output.get("content", {})
+        raw_text = content.get("result", "")
+        if not raw_text:
+            error_message = f"Orchestrator {self.name} - {self.id}: No 'result' field in manager output."
+            logger.error(error_message)
+            return DesicionResult(decision=Decision.RESPOND, message="Manager did not return any result.")
+
+        data = self.extract_json_from_output(result_text=raw_text)
+        if not data:
+            error_message = f"Orchestrator {self.name} - {self.id}: Failed to extract JSON from manager output."
+            logger.error(error_message)
+            _json_prompt_fix = "Please provide a valid JSON response, inside <output>...</output> tags."
+            return self._analyze_user_input(input_task + _json_prompt_fix, config=config, **kwargs)
+
+            return DesicionResult(
+                decision=Decision.RESPOND, message=f"Unable to extract valid JSON from manager: {raw_text}"
+            )
+
+        decision_str = data.get("decision", Decision.RESPOND.value)
+        message = data.get("message", "")
+
+        try:
+            decision = Decision(decision_str)
+        except ValueError:
+            warning_message = (
+                f"Orchestrator {self.name} - {self.id}: Unrecognized decision '{decision_str}', defaulting to RESPOND."
+            )
+            logger.warning(warning_message)
+            decision = Decision.RESPOND
+
+        return DesicionResult(decision=decision, message=message)
+
+    def extract_json_from_output(self, result_text: str) -> dict | None:
+        """
+        Extracts JSON data from the given text by looking for content within
+        <output>...</output> tags. Strips any Markdown code block fences.
+
+        Args:
+            result_text (str): The text from which to extract JSON data.
+
+        Returns:
+            dict | None: The extracted JSON dictionary if successful, otherwise None.
+        """
+        match = re.search(r"<output>(.*?)</output>", result_text, re.DOTALL)
+        if not match:
+            return None
+
+        output_content = match.group(1).strip()
+        output_content = re.sub(r"```(?:json)?", "", output_content)
+        output_content = output_content.replace("```", "")
+
+        try:
+            data = json.loads(output_content)
+            return data
+        except json.JSONDecodeError as e:
+            error_message = f"Orchestrator {self.name} - {self.id}: JSON decoding error: {e}"
+            logger.error(error_message)
+            return None
