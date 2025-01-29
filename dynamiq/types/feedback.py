@@ -17,8 +17,8 @@ PLAN_APPROVAL_EVENT = "plan_approval"
 
 class ApprovalOutputEventData(BaseModel):
     template: str = Field(..., description="Message template that will be sent.")
-    data: dict[str, Any] = Field(..., description="Data in JSON that will be sent.")
-    mutable_params: list[str] = Field(
+    data: dict[str, Any] = Field(..., description="Data that will be sent.")
+    mutable_data_params: list[str] = Field(
         ...,
         description=(
             "List of parameters from 'data'"
@@ -52,26 +52,13 @@ class ApprovalConfig(BaseModel):
     enabled: bool = False
     feedback_method: FeedbackMethod = FeedbackMethod.CONSOLE
 
-    mutable_params: list[str] = []
+    mutable_data_params: list[str] = []
     msg_template: str = """
             Node {{name}}: Approve or cancel execution. Send nothing for approval; provide feedback to cancel.
     """
 
     event: str = APPROVAL_EVENT
     accept_pattern: str = ""
-    llm: Any = None
-
-    def llm_accept(self, feedback: str):
-        """Checks if provided feedback is approval or cancelation using llm.
-
-        Args:
-            feedback (str): Gathered feedback.
-
-        Returns:
-            bool: Whether node execution is approved or not.
-        """
-
-        pass
 
 
 class PlanApprovalConfig(ApprovalConfig):

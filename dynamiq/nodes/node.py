@@ -491,7 +491,7 @@ class Node(BaseModel, Runnable, ABC):
         event = ApprovalStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
-            data={"template": template, "data": input_data, "mutable_params": approval_config.mutable_params},
+            data={"template": template, "data": input_data, "mutable_data_params": approval_config.mutable_data_params},
             event=approval_config.event,
         )
 
@@ -546,21 +546,13 @@ class Node(BaseModel, Runnable, ABC):
 
         update_params = {
             feature_name: approval_result.data[feature_name]
-            for feature_name in approval_config.mutable_params
+            for feature_name in approval_config.mutable_data_params
             if feature_name in approval_result.data
         }
         approval_result.data = {**input_data, **update_params}
 
         if approval_result.is_approved is None:
-            if approval_config.llm and approval_config.accept_llm(approval_result.feedback):
-                logger.info(
-                    f"Node {self.name} action was approved by human "
-                    f"with provided feedback '{approval_result.feedback}'."
-                    "Considered as accepted by llm."
-                )
-                approval_result.is_approved = True
-
-            elif approval_result.feedback == approval_config.accept_pattern or ():
+            if approval_result.feedback == approval_config.accept_pattern or ():
                 logger.info(
                     f"Node {self.name} action was approved by human "
                     f"with provided feedback '{approval_result.feedback}'."
