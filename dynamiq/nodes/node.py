@@ -552,7 +552,7 @@ class Node(BaseModel, Runnable, ABC):
         approval_result.data = {**input_data, **update_params}
 
         if approval_result.is_approved is None:
-            if approval_result.feedback == approval_config.accept_pattern or ():
+            if approval_result.feedback == approval_config.accept_pattern:
                 logger.info(
                     f"Node {self.name} action was approved by human "
                     f"with provided feedback '{approval_result.feedback}'."
