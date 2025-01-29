@@ -46,6 +46,7 @@ class AdaptiveOrchestrator(Orchestrator):
         agents (List[BaseAgent]): List of specialized agents available for task execution.
         objective (Optional[str]): The main objective of the orchestration.
         max_loops (Optional[int]): Maximum number of actions.
+        enable_reflection (Optional[bool]): Enable reflection mode
     """
 
     name: str | None = "AdaptiveOrchestrator"
@@ -53,6 +54,7 @@ class AdaptiveOrchestrator(Orchestrator):
     manager: AdaptiveAgentManager
     agents: list[Agent] = []
     max_loops: int = 15
+    enable_reflection: bool = False
 
     @property
     def to_dict_exclude_params(self):
@@ -121,6 +123,35 @@ class AdaptiveOrchestrator(Orchestrator):
             raise ActionParseError(f"Unable to retrieve the next action from Agent Manager, Error: {error_message}")
 
         manager_content = manager_result.output.get("content").get("result")
+
+        if self.enable_reflection:
+            reflect_result = self.manager.run(
+                input_data={
+                    "action": "reflect",
+                    "agents": self.agents_descriptions,
+                    "chat_history": self.get_history_as_string(),
+                    "plan": manager_content,
+                    "agent_output": "",
+                },
+                config=config,
+                run_depends=self._run_depends,
+                **kwargs,
+            )
+            self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+
+            if reflect_result.status != RunnableStatus.SUCCESS:
+                error_message = (
+                    f"Agent '{self.manager.name}' failed on reflection: {reflect_result.output.get('content')}"
+                )
+                logger.error(error_message)
+                return self._parse_xml_content(manager_content)
+            else:
+                reflect_content = reflect_result.output.get("content").get("result")
+                try:
+                    return self._parse_xml_content(reflect_content)
+                except ActionParseError as e:
+                    logger.error(f"Agent '{self.manager.name}' failed on reflection parsing: {str(e)}")
+                    return self._parse_xml_content(manager_content)
         return self._parse_xml_content(manager_content)
 
     def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
