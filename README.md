@@ -59,6 +59,8 @@ For more examples and detailed guides, please refer to our [documentation](https
 Here's a simple example to get you started with Dynamiq:
 
 ```python
+import os
+
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.prompts import Prompt, Message
@@ -74,7 +76,7 @@ prompt = Prompt(messages=[Message(content=prompt_template, role="user")])
 # Setup your LLM (Large Language Model) Node
 llm = OpenAI(
     id="openai",  # Unique identifier for the node
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),  # Connection using API key
+    connection=OpenAIConnection(api_key=os.getenv("OPENAI_API_KEY")),  # Connection using API key
     model="gpt-4o",  # Model to be used
     temperature=0.3,  # Sampling temperature for the model
     max_tokens=1000,  # Maximum number of tokens in the output
@@ -96,6 +98,8 @@ print(result.output)
 An agent that has the access to E2B Code Interpreter and is capable of solving complex coding tasks.
 
 ```python
+import os
+
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.connections import OpenAI as OpenAIConnection, E2B as E2BConnection
 from dynamiq.nodes.agents.react import ReActAgent
@@ -103,13 +107,13 @@ from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 
 # Initialize the E2B tool
 e2b_tool = E2BInterpreterTool(
-    connection=E2BConnection(api_key="$E2B_API_KEY")
+    connection=E2BConnection(api_key=os.getenv("E2B_API_KEY"))
 )
 
 # Setup your LLM
 llm = OpenAI(
     id="openai",
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+    connection=OpenAIConnection(api_key=os.getenv("OPENAI_API_KEY")),
     model="gpt-4o",
     temperature=0.3,
     max_tokens=1000,
@@ -137,6 +141,8 @@ print(result.output.get("content"))
 ### Configuring Two Parallel Agents with WorkFlow
 
 ```python
+import os
+
 from dynamiq import Workflow
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -144,7 +150,7 @@ from dynamiq.nodes.agents.reflection import ReflectionAgent
 
 # Setup your LLM
 llm = OpenAI(
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+    connection=OpenAIConnection(api_key=os.getenv("OPENAI_API_KEY")),
     model="gpt-4o",
     temperature=0.1,
 )
@@ -194,6 +200,8 @@ print('--- Agent 2: Output ---\n', result.output[second_agent.id].get("output").
 ### Configuring Two Sequential Agents with WorkFlow
 
 ```python
+import os
+
 from dynamiq import Workflow
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -203,7 +211,7 @@ from dynamiq.nodes.node import InputTransformer, NodeDependency
 
 # Setup your LLM
 llm = OpenAI(
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+    connection=OpenAIConnection(api_key=os.getenv("OPENAI_API_KEY")),
     model="gpt-4o",
     temperature=0.1,
 )
@@ -253,6 +261,8 @@ print('--- Agent 2: Output ---\n', result.output[second_agent.id].get("output").
 
 ### Multi-agent orchestration
 ```python
+import os
+
 from dynamiq.connections import (OpenAI as OpenAIConnection,
                                  ScaleSerp as ScaleSerpConnection,
                                  E2B as E2BConnection)
@@ -264,18 +274,17 @@ from dynamiq.nodes.agents.reflection import ReflectionAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 
-
 # Initialize tools
 python_tool = E2BInterpreterTool(
-    connection=E2BConnection(api_key="$E2B_API_KEY")
+    connection=E2BConnection(api_key=os.getenv("E2B_API_KEY"))
 )
 search_tool = ScaleSerpTool(
-    connection=ScaleSerpConnection(api_key="$SCALESERP_API_KEY")
+    connection=ScaleSerpConnection(api_key=os.getenv("SCALESERP_API_KEY"))
 )
 
 # Initialize LLM
 llm = OpenAI(
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+    connection=OpenAIConnection(api_key=os.getenv("OPENAI_API_KEY")),
     model="gpt-4o",
     temperature=0.1,
 )
@@ -341,6 +350,7 @@ This workflow takes input PDF files, pre-processes them, converts them to vector
 The example provided is for an existing index in Pinecone. You can find examples for index creation on the `docs/tutorials/rag` page.
 
 ```python
+import os
 from io import BytesIO
 
 from dynamiq import Workflow
@@ -371,7 +381,7 @@ rag_wf.flow.add_nodes(document_splitter)
 # OpenAI vector embeddings
 embedder = (
     OpenAIDocumentEmbedder(
-        connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+        connection=OpenAIConnection(api_key=os.getenv("OPENAI_API_KEY")),
         model="text-embedding-3-small",
     )
     .inputs(documents=document_splitter.outputs.documents)
@@ -382,7 +392,7 @@ rag_wf.flow.add_nodes(embedder)
 # Pinecone vector storage
 vector_store = (
     PineconeDocumentWriter(
-        connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
+        connection=PineconeConnection(api_key=os.getenv("PINECONE_API_KEY")),
         index_name="default",
         dimension=1536,
     )
@@ -410,8 +420,9 @@ rag_wf.run(input_data=input_data)
 Simple retrieval RAG flow that searches for relevant documents and answers the original user question using retrieved documents.
 
 ```python
+import os
+
 from dynamiq import Workflow
-from dynamiq.nodes import InputTransformer
 from dynamiq.connections import OpenAI as OpenAIConnection, Pinecone as PineconeConnection
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.retrievers import PineconeDocumentRetriever
@@ -422,7 +433,7 @@ from dynamiq.prompts import Message, Prompt
 retrieval_wf = Workflow()
 
 # Shared OpenAI connection
-openai_connection = OpenAIConnection(api_key="$OPENAI_API_KEY")
+openai_connection = OpenAIConnection(api_key=os.getenv("OPENAI_API_KEY"))
 
 # OpenAI text embedder for query embedding
 embedder = OpenAITextEmbedder(
@@ -434,7 +445,7 @@ retrieval_wf.flow.add_nodes(embedder)
 # Pinecone document retriever
 document_retriever = (
     PineconeDocumentRetriever(
-        connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
+        connection=PineconeConnection(api_key=os.getenv("PINECONE_API_KEY")),
         index_name="default",
         dimension=1536,
         top_k=5,
@@ -486,6 +497,8 @@ print(answer)
 A simple chatbot that uses the `Memory` module to store and retrieve conversation history.
 
 ```python
+import os
+
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.in_memory import InMemory
@@ -494,7 +507,7 @@ from dynamiq.nodes.llms import OpenAI
 
 AGENT_ROLE = "helpful assistant, goal is to provide useful information and answer questions"
 llm = OpenAI(
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+    connection=OpenAIConnection(api_key=os.getenv("OPENAI_API_KEY")),
     model="gpt-4o",
     temperature=0.1,
 )
@@ -531,6 +544,7 @@ Graph Orchestrator allows to create any architecture tailored to specific use ca
 Example of simple workflow that manages iterative process of feedback and refinement of email.
 
 ```python
+import os
 from typing import Any
 
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -540,7 +554,7 @@ from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.llms import OpenAI
 
 llm = OpenAI(
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+    connection=OpenAIConnection(api_key=os.getenv("OPENAI_API_KEY")),
     model="gpt-4o",
     temperature=0.1,
 )
