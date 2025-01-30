@@ -16,9 +16,12 @@ class NodeException(Exception):
         failed_depend (NodeDependency): The dependency that caused the exception.
     """
 
-    def __init__(self, failed_depend: Optional["NodeDependency"] = None, message=None):
+    def __init__(
+        self, failed_depend: Optional["NodeDependency"] = None, message: str = None, recoverable: bool = False
+    ):
         super().__init__(message)
         self.failed_depend = failed_depend
+        self.recoverable = recoverable
 
 
 class NodeFailedException(NodeException):
