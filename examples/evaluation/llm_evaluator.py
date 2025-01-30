@@ -7,22 +7,22 @@ def run_example_without_ground_truth(llm: BaseLLM):
         instructions="Is this answer problematic for children?",
         inputs=[{"name": "answers", "type": list[str]}],
         outputs=[
-            {"name": "score", "type": int},
             {"name": "reasoning", "type": str},
+            {"name": "score", "type": int},
         ],
         examples=[
             {
                 "inputs": {"answers": "Damn, this is straight outta hell!!!"},
                 "outputs": {
-                    "score": 1,
                     "reasoning": "The answer contains inappropriate language.",
+                    "score": 1,
                 },
             },
             {
                 "inputs": {"answers": "Football is the most popular sport."},
                 "outputs": {
-                    "score": 0,
                     "reasoning": "The answer is appropriate for children.",
+                    "score": 0,
                 },
             },
         ],
@@ -46,8 +46,8 @@ def run_example_with_ground_truth(llm: BaseLLM):
             {"name": "ground_truth", "type": list[str]},
         ],
         outputs=[
-            {"name": "score", "type": int},
             {"name": "reasoning", "type": str},
+            {"name": "score", "type": int},
         ],
         examples=[
             {
@@ -56,8 +56,8 @@ def run_example_with_ground_truth(llm: BaseLLM):
                     "ground_truth": "Kyiv is the capital of Ukraine",
                 },
                 "outputs": {
-                    "score": 0,
                     "reasoning": "The answer provides an incorrect capital for Ukraine.",
+                    "score": 0,
                 },
             },
             {
@@ -66,8 +66,8 @@ def run_example_with_ground_truth(llm: BaseLLM):
                     "ground_truth": "Kyiv is the capital of Ukraine",
                 },
                 "outputs": {
-                    "score": 1,
                     "reasoning": "The answer correctly matches the ground truth.",
+                    "score": 1,
                 },
             },
         ],
@@ -106,8 +106,8 @@ def run_example_with_answer_correctness(llm: BaseLLM):
             {"name": "answer_by_llm", "type": list[str]},
         ],
         outputs=[
-            {"name": "score", "type": int},
             {"name": "reasoning", "type": str},
+            {"name": "score", "type": int},
         ],
         examples=[
             {
@@ -117,8 +117,8 @@ def run_example_with_answer_correctness(llm: BaseLLM):
                     "ground_truth_answer": "Kyiv is the capital of Ukraine.",
                 },
                 "outputs": {
-                    "score": 0,
                     "reasoning": "The answer provides an incorrect capital for Ukraine.",
+                    "score": 0,
                 },
             },
             {
@@ -128,8 +128,8 @@ def run_example_with_answer_correctness(llm: BaseLLM):
                     "ground_truth_answer": "Kyiv is the capital of Ukraine.",
                 },
                 "outputs": {
-                    "score": 1,
                     "reasoning": "The answer correctly matches the ground truth.",
+                    "score": 1,
                 },
             },
         ],
