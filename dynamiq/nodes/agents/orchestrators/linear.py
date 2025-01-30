@@ -139,7 +139,7 @@ class LinearOrchestrator(Orchestrator):
                 continue
 
             if not self.plan_approval.enabled:
-                break
+                return tasks
             else:
                 approval_result = self.send_approval_message(
                     self.plan_approval, {"tasks": tasks}, config=config, **kwargs

@@ -44,7 +44,7 @@ def create_workflow() -> Workflow:
     """
     llm = setup_llm()
 
-    search_connection = TavilyConnection(api_key="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")
+    search_connection = TavilyConnection()
     tool_search = TavilyTool(connection=search_connection)
 
     agent_researcher = ReActAgent(name="Researcher Analyst", role=AGENT_RESEARCHER_ROLE, llm=llm, tools=[tool_search])
