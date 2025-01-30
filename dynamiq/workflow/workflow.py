@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 
 class Workflow(BaseModel, Runnable):
     """
-    A container for a flow that manages its lifecycle, YAML serialization, and versioning
-    and adds workflow-specific metadata, callbacks, and configuration handling.
+    A container for a flow that manages its lifecycle, YAML serialization,
+    versioning, metadata, callbacks, and configuration.
 
     Attributes:
         id (str): Unique identifier for the workflow.
