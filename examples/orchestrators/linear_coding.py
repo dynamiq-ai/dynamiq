@@ -57,10 +57,13 @@ if __name__ == "__main__":
         llm=llm,
     )
 
+    from dynamiq.types.feedback import PlanApprovalConfig
+
     orchestrator = LinearOrchestrator(
         name="Linear Orchestrator",
         agents=[agent_coding],
         manager=agent_manager,
+        plan_approval=PlanApprovalConfig(enabled=False),
     )
 
     result = orchestrator.run(

@@ -11,6 +11,7 @@ from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentMan
 from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Orchestrator, OrchestratorError
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.utils.chat import format_chat_history
 from dynamiq.utils.logger import logger
 
 
@@ -110,7 +111,7 @@ class AdaptiveOrchestrator(Orchestrator):
             input_data={
                 "action": "plan",
                 "agents": self.agents_descriptions,
-                "chat_history": self.get_history_as_string(),
+                "chat_history": format_chat_history(self._chat_history),
             },
             config=config,
             run_depends=self._run_depends,
@@ -129,7 +130,7 @@ class AdaptiveOrchestrator(Orchestrator):
                 input_data={
                     "action": "reflect",
                     "agents": self.agents_descriptions,
-                    "chat_history": self.get_history_as_string(),
+                    "chat_history": format_chat_history(self._chat_history),
                     "plan": manager_content,
                     "agent_output": "",
                 },
@@ -182,7 +183,7 @@ class AdaptiveOrchestrator(Orchestrator):
                 manager_final_result = self.get_final_result(
                     {
                         "input_task": input_task,
-                        "chat_history": self._chat_history,
+                        "chat_history": format_chat_history(self._chat_history),
                         "preliminary_answer": action.answer,
                     },
                     config=config,
@@ -223,7 +224,7 @@ class AdaptiveOrchestrator(Orchestrator):
                     "action": "respond",
                     "task": action.task,
                     "agents": self.agents_descriptions,
-                    "chat_history": self.get_history_as_string(),
+                    "chat_history": format_chat_history(self._chat_history),
                 },
                 config=config,
                 run_depends=self._run_depends,
@@ -254,7 +255,7 @@ class AdaptiveOrchestrator(Orchestrator):
                 "action": "respond",
                 "task": action.task,
                 "agents": self.agents_descriptions,
-                "chat_history": self.get_history_as_string(),
+                "chat_history": format_chat_history(self._chat_history),
             },
             config=config,
             run_depends=self._run_depends,
@@ -381,6 +382,3 @@ class AdaptiveOrchestrator(Orchestrator):
 
         output_content = output_match.group(1).strip()
         return output_content
-
-    def get_history_as_string(self):
-        return "\n".join([f"{msg['role']}: {msg['content']}" for msg in self._chat_history])

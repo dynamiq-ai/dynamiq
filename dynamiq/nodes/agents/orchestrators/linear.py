@@ -44,7 +44,7 @@ class Decision(str, Enum):
     PLAN = "plan"
 
 
-class DesicionResult(BaseModel):
+class DecisionResult(BaseModel):
     """
     Holds the result of analyzing the user input.
 
@@ -342,7 +342,7 @@ class LinearOrchestrator(Orchestrator):
         for agent in self.agents:
             agent.streaming = self.streaming
 
-    def _analyze_user_input(self, input_task: str, config: RunnableConfig = None, **kwargs) -> DesicionResult:
+    def _analyze_user_input(self, input_task: str, config: RunnableConfig = None, **kwargs) -> DecisionResult:
         """
         Calls the manager's 'handle_input' action to decide if we should respond
         immediately or proceed with a plan.
@@ -353,7 +353,7 @@ class LinearOrchestrator(Orchestrator):
             **kwargs: Additional keyword arguments passed to the manager's run method.
 
         Returns:
-            DesicionResult: An object containing the decision (as an Enum) and a message.
+            DecisionResult: An object containing the decision (as an Enum) and a message.
         """
         handle_result = self.manager.run(
             input_data={
@@ -371,14 +371,14 @@ class LinearOrchestrator(Orchestrator):
                 f"Orchestrator {self.name} - {self.id}: Manager failed to analyze input: {handle_result.output}"
             )
             logger.error(error_message)
-            return DesicionResult(decision=Decision.RESPOND, message=f"Error analyzing request: {handle_result.output}")
+            return DecisionResult(decision=Decision.RESPOND, message=f"Error analyzing request: {handle_result.output}")
 
         content = handle_result.output.get("content", {})
         raw_text = content.get("result", "")
         if not raw_text:
             error_message = f"Orchestrator {self.name} - {self.id}: No 'result' field in manager output."
             logger.error(error_message)
-            return DesicionResult(decision=Decision.RESPOND, message="Manager did not return any result.")
+            return DecisionResult(decision=Decision.RESPOND, message="Manager did not return any result.")
 
         data = self.extract_json_from_output(result_text=raw_text)
         if not data:
@@ -387,7 +387,7 @@ class LinearOrchestrator(Orchestrator):
             _json_prompt_fix = "Please provide a valid JSON response, inside <output>...</output> tags."
             return self._analyze_user_input(input_task + _json_prompt_fix, config=config, **kwargs)
 
-            return DesicionResult(
+            return DecisionResult(
                 decision=Decision.RESPOND, message=f"Unable to extract valid JSON from manager: {raw_text}"
             )
 
@@ -403,7 +403,7 @@ class LinearOrchestrator(Orchestrator):
             logger.warning(warning_message)
             decision = Decision.RESPOND
 
-        return DesicionResult(decision=decision, message=message)
+        return DecisionResult(decision=decision, message=message)
 
     def extract_json_from_output(self, result_text: str) -> dict | None:
         """
