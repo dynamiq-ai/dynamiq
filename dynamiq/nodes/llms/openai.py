@@ -35,10 +35,7 @@ class OpenAI(BaseLLM):
         Returns:
             bool: True if the model is an o_family model, otherwise False.
         """
-        # Ensure self.model is a string before checking membership.
-        if hasattr(self, "model") and isinstance(self.model, str):
-            return "o1" in self.model or "o3" in self.model
-        return False
+        return "o1" in self.model or "o3" in self.model
 
     def execute(
         self,
