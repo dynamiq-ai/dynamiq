@@ -12,9 +12,10 @@ from dynamiq import Workflow, callbacks, connections, flows, prompts
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.nodes import llms
 from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool, InputMethod
+from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.runnables.base import NodeRunnableConfig
+from dynamiq.types.feedback import FeedbackMethod
 from dynamiq.types.streaming import StreamingConfig, StreamingEventMessage
 
 app = FastAPI()
@@ -64,7 +65,7 @@ OPENAI_2_NODE = llms.OpenAI(
 )
 HF_NODE_STREAMING_EVENT = "streaming-hf"
 HF_NODE = HumanFeedbackTool(
-    input_method=InputMethod.stream,
+    input_method=FeedbackMethod.STREAM,
     streaming=StreamingConfig(enabled=True, event=HF_NODE_STREAMING_EVENT, timeout=15),
     depends=[NodeDependency(node=OPENAI_NODE)],
 )
