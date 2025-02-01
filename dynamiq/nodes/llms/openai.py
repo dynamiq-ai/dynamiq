@@ -72,7 +72,7 @@ class OpenAI(BaseLLM):
 
         params = self.connection.conn_params
         if self.client and not isinstance(self.connection, HttpApiKey):
-            params = {"client": self.client}
+            params.update({"client": self.client})
 
         current_inference_mode = inference_mode or self.inference_mode
         current_schema = schema or self.schema_
