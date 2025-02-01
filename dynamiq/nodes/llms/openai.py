@@ -29,13 +29,14 @@ class OpenAI(BaseLLM):
             kwargs["connection"] = OpenAIConnection()
         super().__init__(**kwargs)
 
-    def is_o_family(self) -> bool:
-        """Determine if the model belongs to the o_family (e.g. o1 or o3).
+    def is_o_series_model(self) -> bool:
+        """Determine if the model belongs to the O-series (e.g. o1 or o3).
 
         Returns:
-            bool: True if the model is an o_family model, otherwise False.
+            bool: True if the model is an O-series model, otherwise False.
         """
-        return "o1" in self.model or "o3" in self.model
+        model_lower = self.model.lower()
+        return "o1" in model_lower or "o3" in model_lower
 
     def execute(
         self,
@@ -97,7 +98,7 @@ class OpenAI(BaseLLM):
             **params,
         }
 
-        if self.is_o_family():
+        if self.is_o_series_model():
             common_params["max_completion_tokens"] = self.max_tokens
         else:
             common_params["temperature"] = self.temperature
