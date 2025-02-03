@@ -70,6 +70,8 @@ class LinearOrchestrator(Orchestrator):
         summarize_all_answers (Optional[bool]): Indicates whether to summarize answers to all tasks
              or use only last one. Will only be applied if use_summarizer is set to True.
         max_plan_retries (Optional[int]): Maximum number of plan generation retries.
+        plan_approval (PlanApprovalConfig): Configuration for plan approval.
+        max_user_analyze_retries (Optional[int]): Maximum number of retries for analyzing user input.
     """
 
     name: str | None = "LinearOrchestrator"
@@ -80,7 +82,7 @@ class LinearOrchestrator(Orchestrator):
     summarize_all_answers: bool = False
     max_plan_retries: int = 5
     plan_approval: PlanApprovalConfig = Field(default_factory=PlanApprovalConfig)
-    max_analyze_retries = 3
+    max_user_analyze_retries: int = 3
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -287,7 +289,7 @@ class LinearOrchestrator(Orchestrator):
 
                         success_flag = True
                         break
-                task_per_llm += f"Error occured:{manager_result.output}"
+                task_per_llm += f"Error occurred:{manager_result.output}"
 
             if success_flag:
                 continue
@@ -410,7 +412,7 @@ class LinearOrchestrator(Orchestrator):
         if not data:
             error_message = f"Orchestrator {self.name} - {self.id}: Failed to extract JSON from manager output."
             logger.error(error_message)
-            if attempt >= self.max_analyze_retries:
+            if attempt >= self.max_user_analyze_retries:
                 return DecisionResult(
                     decision=Decision.RESPOND,
                     message="Unable to extract valid JSON from manager output after multiple attempts."
