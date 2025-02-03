@@ -155,7 +155,7 @@ first_agent = ReflectionAgent(
     name="Expert Agent",
     llm=llm,
     role="Professional writer with the goal of producing well-written and informative responses.",
-    id="agent_1",  # Unique ID for this agent
+    id="agent_1",
     max_loops=5
 )
 
@@ -164,7 +164,7 @@ second_agent = ReflectionAgent(
     name="Poetic Rewriter Agent",
     llm=llm,
     role="Professional writer with the goal of rewriting user input as a poem without changing its meaning.",
-    id="agent_2",  # Unique ID for this agent
+    id="agent_2",
     max_loops=5
 )
 
