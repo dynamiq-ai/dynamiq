@@ -109,6 +109,12 @@ Use the following format for your output:
 Ensure that your JSON output is valid and can be parsed by Python.
 Double-check that all inputs to subtasks are properly passed
 and that the final step (creating the JSON output) is performed last.
+
+Here is previous plan:
+{previous_plan}
+
+Feedback from user about previous plan:
+{feedback}
 """
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_ASSIGN = """
 You are a helpful agent responsible for recommending the best agent for a specific task.

@@ -28,21 +28,21 @@ def get_orchestrator_workflow1(model: str, connection: connections.OpenAI, conte
     graph_orchestrator = GraphOrchestrator(manager=agent_manager, final_summarizer=True, context=context_input)
 
     # Task 1
-    def task1(context: dict):
+    def task1(context: dict, **kwargs):
         return {"result": "task 1 completed", "task1": "task 1 result"}
 
     # Task 2
-    def run(context: dict):
+    def run(context: dict, **kwargs):
         return {"result": "task 2 completed", "task2": "task 2 result"}
 
     task2 = Python(code=textwrap.dedent(inspect.getsource(run)))
 
     # Task 3
-    def task3(context: dict):
+    def task3(context: dict, **kwargs):
         return {"result": "task 3 completed", "task3": "task 3 result"}
 
     # Condition
-    def orchestrate(context: dict):
+    def orchestrate(context: dict, **kwargs):
         return "task3" if context.get("task3", False) else END
 
     graph_orchestrator.add_state_by_tasks("task1", [task1])
@@ -78,11 +78,11 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
     )
 
     # Task 1
-    def task1(context: dict):
+    def task1(context: dict, **kwargs):
         return {"result": "task 1 completed", "task1": "task 1 result"}
 
     # Task 2
-    def run(context: dict):
+    def run(context: dict, **kwargs):
         return {"result": "task 2 completed", "task2": "task 2 result"}
 
     task2 = Python(code=textwrap.dedent(inspect.getsource(run)))
