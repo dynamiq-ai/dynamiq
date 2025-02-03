@@ -21,7 +21,7 @@ def save_markdown_as_pdf(md_string: str, output_pdf: str):
     HTML(string=html_content).write_pdf(output_pdf)
 
 
-def set_orchestrator():
+def set_orchestrator() -> GraphOrchestrator:
     """Set up the orchestrator: multi-agent GPT-researcher."""
     llm = OpenAI(
         connection=OpenAIConnection(),
