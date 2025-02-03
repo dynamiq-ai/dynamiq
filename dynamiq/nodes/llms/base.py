@@ -270,6 +270,14 @@ class BaseLLM(ConnectionNode):
 
         return response_format, tools
 
+    def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
+        """
+        This method can be overridden by subclasses to update or modify the
+        parameters passed to the completion method.
+        By default, it does not modify the params.
+        """
+        return params
+
     def execute(
         self,
         input_data: BaseLLMInputSchema,
@@ -304,9 +312,9 @@ class BaseLLM(ConnectionNode):
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
 
         # Use initialized client if it possible
-        params = self.connection.conn_params
+        params = self.connection.conn_params.copy()
         if self.client and not isinstance(self.connection, HttpApiKey):
-            params = {"client": self.client}
+            params.update({"client": self.client})
 
         current_inference_mode = inference_mode or self.inference_mode
         current_schema = schema or self.schema_
@@ -315,23 +323,27 @@ class BaseLLM(ConnectionNode):
         )
         tools = tools or base_tools
 
-        response = self._completion(
-            model=self.model,
-            messages=messages,
-            stream=self.streaming.enabled,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            tools=tools,
-            tool_choice=self.tool_choice,
-            stop=self.stop,
-            top_p=self.top_p,
-            seed=self.seed,
-            presence_penalty=self.presence_penalty,
-            frequency_penalty=self.frequency_penalty,
-            response_format=response_format,
-            drop_params=True,
+        common_params: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": self.streaming.enabled,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "tools": tools,
+            "tool_choice": self.tool_choice,
+            "stop": self.stop,
+            "top_p": self.top_p,
+            "seed": self.seed,
+            "presence_penalty": self.presence_penalty,
+            "frequency_penalty": self.frequency_penalty,
+            "response_format": response_format,
+            "drop_params": True,
             **params,
-        )
+        }
+
+        common_params = self.update_completion_params(common_params)
+
+        response = self._completion(**common_params)
 
         handle_completion = (
             self._handle_streaming_completion_response if self.streaming.enabled else self._handle_completion_response

@@ -1,12 +1,8 @@
-from typing import Any
+from functools import cached_property
+from typing import Any, ClassVar
 
-from dynamiq.connections import HttpApiKey
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.llms.base import BaseLLM, BaseLLMInputSchema
-from dynamiq.nodes.node import ensure_config
-from dynamiq.nodes.types import InferenceMode
-from dynamiq.prompts import Prompt
-from dynamiq.runnables import RunnableConfig
+from dynamiq.nodes.llms.base import BaseLLM
 
 
 class OpenAI(BaseLLM):
@@ -18,6 +14,7 @@ class OpenAI(BaseLLM):
         connection (OpenAIConnection | None): The connection to use for the OpenAI LLM.
     """
     connection: OpenAIConnection | None = None
+    O_SERIES_MODEL_PREFIXES: ClassVar[tuple[str, ...]] = ("o1", "o3")
 
     def __init__(self, **kwargs):
         """Initialize the OpenAI LLM node.
@@ -29,87 +26,22 @@ class OpenAI(BaseLLM):
             kwargs["connection"] = OpenAIConnection()
         super().__init__(**kwargs)
 
+    @cached_property
     def is_o_series_model(self) -> bool:
-        """Determine if the model belongs to the O-series (e.g. o1 or o3).
-
-        Returns:
-            bool: True if the model is an O-series model, otherwise False.
+        """
+        Determine if the model belongs to the O-series (e.g. o1 or o3)
+        by checking if the model starts with any of the O-series prefixes.
         """
         model_lower = self.model.lower()
-        return "o1" in model_lower or "o3" in model_lower
+        return any(model_lower.startswith(prefix) for prefix in self.O_SERIES_MODEL_PREFIXES)
 
-    def execute(
-        self,
-        input_data: BaseLLMInputSchema,
-        config: RunnableConfig = None,
-        prompt: Prompt | None = None,
-        schema: dict | None = None,
-        inference_mode: InferenceMode | None = None,
-        **kwargs,
-    ):
-        """Execute the LLM node.
-
-        This method processes the input data, formats the prompt, and generates a response using
-        the configured LLM.
-
-        Args:
-            input_data (BaseLLMInputSchema): The input data for the LLM.
-            config (RunnableConfig, optional): The configuration for the execution. Defaults to None.
-            prompt (Prompt, optional): The prompt to use for this execution. Defaults to None.
-            schema (Dict[str, Any], optional): schema_ for structured output or function calling.
-                Overrides instance schema_ if provided.
-            inference_mode (InferenceMode, optional): Mode of inference.
-                Overrides instance inference_mode if provided.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            dict: A dictionary containing the generated content and tool calls.
+    def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """
-        config = ensure_config(config)
-        prompt = prompt or self.prompt or Prompt(messages=[], tools=None)
-        messages = prompt.format_messages(**dict(input_data))
-        base_tools = prompt.format_tools(**dict(input_data))
-        self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
-
-        params = self.connection.conn_params
-        if self.client and not isinstance(self.connection, HttpApiKey):
-            params.update({"client": self.client})
-
-        current_inference_mode = inference_mode or self.inference_mode
-        current_schema = schema or self.schema_
-        response_format, tools = self._get_response_format_and_tools(
-            inference_mode=current_inference_mode, schema=current_schema
-        )
-        tools = tools or base_tools
-
-        common_params: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "stream": self.streaming.enabled,
-            "tools": tools,
-            "tool_choice": self.tool_choice,
-            "stop": self.stop,
-            "top_p": self.top_p,
-            "seed": self.seed,
-            "presence_penalty": self.presence_penalty,
-            "frequency_penalty": self.frequency_penalty,
-            "response_format": response_format,
-            "drop_params": True,
-            **params,
-        }
-
-        if self.is_o_series_model():
-            common_params["max_completion_tokens"] = self.max_tokens
-        else:
-            common_params["temperature"] = self.temperature
-            common_params["max_tokens"] = self.max_tokens
-
-        response = self._completion(**common_params)
-
-        handle_completion = (
-            self._handle_streaming_completion_response if self.streaming.enabled else self._handle_completion_response
-        )
-
-        return handle_completion(
-            response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
-        )
+        Override the base method to update the completion parameters for OpenAI.
+        For O-series models, use "max_completion_tokens" instead of "max_tokens".
+        """
+        new_params = params.copy()
+        if self.is_o_series_model:
+            new_params["max_completion_tokens"] = self.max_tokens
+            new_params.pop("max_tokens", None)
+        return new_params
