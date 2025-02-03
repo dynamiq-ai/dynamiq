@@ -1,3 +1,4 @@
+
 <p align="center">
   <a href="https://www.getdynamiq.ai/"><img src="https://github.com/dynamiq-ai/dynamiq/blob/main/docs/img/Dynamiq_Logo_Universal_Github.png?raw=true" alt="Dynamiq"></a>
 </p>
@@ -61,7 +62,6 @@ Here's a simple example to get you started with Dynamiq:
 ```python
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq import Workflow
 from dynamiq.prompts import Prompt, Message
 
 # Define the prompt template for translation
@@ -75,21 +75,15 @@ prompt = Prompt(messages=[Message(content=prompt_template, role="user")])
 # Setup your LLM (Large Language Model) Node
 llm = OpenAI(
     id="openai",  # Unique identifier for the node
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),  # Connection using API key
+    connection=OpenAIConnection(api_key="OPENAI_API_KEY"),  # Connection using API key
     model="gpt-4o",  # Model to be used
     temperature=0.3,  # Sampling temperature for the model
     max_tokens=1000,  # Maximum number of tokens in the output
     prompt=prompt  # Prompt to be used for the model
 )
 
-# Create a Workflow object
-workflow = Workflow()
-
-# Add the LLM node to the workflow
-workflow.flow.add_nodes(llm)
-
-# Run the workflow with the input data
-result = workflow.run(
+# Run the LLM node with the input data
+result = llm.run(
     input_data={
         "text": "Hola Mundo!"  # Text to be translated
     }
@@ -110,13 +104,13 @@ from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 
 # Initialize the E2B tool
 e2b_tool = E2BInterpreterTool(
-    connection=E2BConnection(api_key="$API_KEY")
+    connection=E2BConnection(api_key="E2B_API_KEY")
 )
 
 # Setup your LLM
 llm = OpenAI(
     id="openai",
-    connection=OpenAIConnection(api_key="$API_KEY"),
+    connection=OpenAIConnection(api_key="OPENAI_API_KEY"),
     model="gpt-4o",
     temperature=0.3,
     max_tokens=1000,
@@ -125,10 +119,10 @@ llm = OpenAI(
 # Create the ReAct agent
 agent = ReActAgent(
     name="react-agent",
-    llm=llm,
-    tools=[e2b_tool],
-    role="Senior Data Scientist",
-    max_loops=10,
+    llm=llm, # Language model instance
+    tools=[e2b_tool],  # List of tools that the agent can use
+    role="Senior Data Scientist",  # Role of the agent
+    max_loops=10, # Limit on the number of processing loops
 )
 
 # Run the agent with an input
@@ -139,6 +133,123 @@ result = agent.run(
 )
 
 print(result.output.get("content"))
+```
+
+### Configuring Two Parallel Agents with WorkFlow
+
+```python
+from dynamiq import Workflow
+from dynamiq.nodes.llms import OpenAI
+from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.nodes.agents.reflection import ReflectionAgent
+
+# Setup your LLM
+llm = OpenAI(
+    connection=OpenAIConnection(api_key="OPENAI_API_KEY"),
+    model="gpt-4o",
+    temperature=0.1,
+)
+
+# Define the first agent: a question answering agent
+first_agent = ReflectionAgent(
+    name="Expert Agent",
+    llm=llm,
+    role="Professional writer with the goal of producing well-written and informative responses.",
+    id="agent_1",
+    max_loops=5
+)
+
+# Define the second agent: a poetic writer
+second_agent = ReflectionAgent(
+    name="Poetic Rewriter Agent",
+    llm=llm,
+    role="Professional writer with the goal of rewriting user input as a poem without changing its meaning.",
+    id="agent_2",
+    max_loops=5
+)
+
+
+# Create a workflow to run both agents with the same input
+# The `Workflow` class simplifies setting up and executing a series of nodes in a pipeline.
+# It automatically handles running the agents in parallel where possible.
+wf = Workflow()
+wf.flow.add_nodes(first_agent)
+wf.flow.add_nodes(second_agent)
+
+# Equivalent alternative way to define the workflow:
+# from dynamiq.flows import Flow
+# wf = Workflow(flow=Flow(nodes=[agent_first, agent_second]))
+
+# Run the workflow with an input
+result = wf.run(
+        input_data={"input": "How are sin(x) and cos(x) connected in electrodynamics?"},
+    )
+
+# Print the input and output for both agents
+print('--- Agent 1: Input ---\n', result.output[first_agent.id].get("input").get('input'))
+print('--- Agent 1: Output ---\n', result.output[first_agent.id].get("output").get('content'))
+print('--- Agent 2: Input ---\n', result.output[second_agent.id].get("input").get('input'))
+print('--- Agent 2: Output ---\n', result.output[second_agent.id].get("output").get('content'))
+```
+
+### Configuring Two Sequential Agents with WorkFlow
+
+```python
+from dynamiq import Workflow
+from dynamiq.nodes.llms import OpenAI
+from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.nodes.agents.reflection import ReflectionAgent
+
+from dynamiq.nodes.node import InputTransformer, NodeDependency
+
+# Setup your LLM
+llm = OpenAI(
+    connection=OpenAIConnection(api_key="OPENAI_API_KEY"),
+    model="gpt-4o",
+    temperature=0.1,
+)
+
+first_agent = ReflectionAgent(
+    name="Expert Agent",
+    llm=llm,
+    role="Professional writer with the goal of producing well-written and informative responses.",  # Role of the agent
+    id="agent_1",
+    max_loops=5
+)
+
+second_agent = ReflectionAgent(
+    name="Poetic Rewriter Agent",
+    llm=llm,
+    role="Professional writer with the goal of rewriting user input as a poem without changing its meaning.",  # Role of the agent
+    id="agent_2",
+    depends=[NodeDependency(first_agent)],  # Set dependency on the first agent
+    input_transformer=InputTransformer(
+        selector={"input": f"${[first_agent.id]}.output.content"}  # Extract the output of the first agent as input
+    ),
+    max_loops=5
+)
+
+# Create a workflow to run the agents sequentially based on dependencies.
+# Without a workflow, you would need to run `first_agent`, collect its output,
+# and then manually pass that output as input to `second_agent`. The workflow automates this process.
+wf = Workflow()
+wf.flow.add_nodes(first_agent)
+wf.flow.add_nodes(second_agent)
+
+# Equivalent alternative way to define the workflow:
+# from dynamiq.flows import Flow
+# wf = Workflow(flow=Flow(nodes=[agent_first, agent_second]))
+
+# Run the workflow with an input
+result = wf.run(
+        input_data={"input": "How are sin(x) and cos(x) connected in electrodynamics?"},
+    )
+
+# Print the input and output for both agents
+print('--- Agent 1: Input ---\n', result.output[first_agent.id].get("input").get('input'))
+print('--- Agent 1: Output ---\n', result.output[first_agent.id].get("output").get('content'))
+print('--- Agent 2: Input ---\n', result.output[second_agent.id].get("input").get('input'))
+print('--- Agent 2: Output ---\n', result.output[second_agent.id].get("output").get('content'))
 ```
 
 ### Multi-agent orchestration
@@ -154,18 +265,17 @@ from dynamiq.nodes.agents.reflection import ReflectionAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 
-
 # Initialize tools
 python_tool = E2BInterpreterTool(
-    connection=E2BConnection(api_key="$E2B_API_KEY")
+    connection=E2BConnection(api_key="E2B_API_KEY")
 )
 search_tool = ScaleSerpTool(
-    connection=ScaleSerpConnection(api_key="$SCALESERP_API_KEY")
+    connection=ScaleSerpConnection(api_key="SCALESERP_API_KEY")
 )
 
 # Initialize LLM
 llm = OpenAI(
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+    connection=OpenAIConnection(api_key="OPENAI_API_KEY"),
     model="gpt-4o",
     temperature=0.1,
 )
@@ -261,7 +371,7 @@ rag_wf.flow.add_nodes(document_splitter)
 # OpenAI vector embeddings
 embedder = (
     OpenAIDocumentEmbedder(
-        connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+        connection=OpenAIConnection(api_key="OPENAI_API_KEY"),
         model="text-embedding-3-small",
     )
     .inputs(documents=document_splitter.outputs.documents)
@@ -272,7 +382,7 @@ rag_wf.flow.add_nodes(embedder)
 # Pinecone vector storage
 vector_store = (
     PineconeDocumentWriter(
-        connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
+        connection=PineconeConnection(api_key="PINECONE_API_KEY"),
         index_name="default",
         dimension=1536,
     )
@@ -301,7 +411,6 @@ Simple retrieval RAG flow that searches for relevant documents and answers the o
 
 ```python
 from dynamiq import Workflow
-from dynamiq.nodes import InputTransformer
 from dynamiq.connections import OpenAI as OpenAIConnection, Pinecone as PineconeConnection
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.retrievers import PineconeDocumentRetriever
@@ -312,7 +421,7 @@ from dynamiq.prompts import Message, Prompt
 retrieval_wf = Workflow()
 
 # Shared OpenAI connection
-openai_connection = OpenAIConnection(api_key="$OPENAI_API_KEY")
+openai_connection = OpenAIConnection(api_key="OPENAI_API_KEY")
 
 # OpenAI text embedder for query embedding
 embedder = OpenAITextEmbedder(
@@ -324,7 +433,7 @@ retrieval_wf.flow.add_nodes(embedder)
 # Pinecone document retriever
 document_retriever = (
     PineconeDocumentRetriever(
-        connection=PineconeConnection(api_key="$PINECONE_API_KEY"),
+        connection=PineconeConnection(api_key="PINECONE_API_KEY"),
         index_name="default",
         dimension=1536,
         top_k=5,
@@ -384,12 +493,13 @@ from dynamiq.nodes.llms import OpenAI
 
 AGENT_ROLE = "helpful assistant, goal is to provide useful information and answer questions"
 llm = OpenAI(
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
+    connection=OpenAIConnection(api_key="OPENAI_API_KEY"),
     model="gpt-4o",
     temperature=0.1,
 )
 
 memory = Memory(backend=InMemory())
+
 agent = SimpleAgent(
     name="Agent",
     llm=llm,
@@ -429,7 +539,7 @@ from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.llms import OpenAI
 
 llm = OpenAI(
-    connection=OpenAIConnection(api_key="$OPENAI_API_KEY")
+    connection=OpenAIConnection(api_key="OPENAI_API_KEY"),
     model="gpt-4o",
     temperature=0.1,
 )
@@ -477,12 +587,17 @@ orchestrator = GraphOrchestrator(
     manager=GraphAgentManager(llm=llm),
 )
 
+# Attach tasks to the states. These tasks will be executed when the respective state is triggered.
 orchestrator.add_state_by_tasks("generate_sketch", [email_writer])
 orchestrator.add_state_by_tasks("gather_feedback", [gather_feedback])
 
+# Define the flow between states by adding edges.
+# This configuration creates the sequence of states from START -> "generate_sketch" -> "gather_feedback".
 orchestrator.add_edge(START, "generate_sketch")
 orchestrator.add_edge("generate_sketch", "gather_feedback")
 
+# Add a conditional edge to the "gather_feedback" state, allowing the flow to branch based on a condition.
+# The router function will determine whether the flow should go to "generate_sketch" (reiterate) or END (finish the process).
 orchestrator.add_conditional_edge("gather_feedback", ["generate_sketch", END], router)
 
 
