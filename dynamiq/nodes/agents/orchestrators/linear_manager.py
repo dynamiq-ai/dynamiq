@@ -376,8 +376,8 @@ class LinearAgentManager(AgentManager):
         temp_variables = self._prompt_variables.copy()
         temp_variables.update(kwargs)
         _prompt = self._get_linear_handle_input_prompt()
-        _prompt.replace("task_placeholder", temp_variables.get("task"))
-        _prompt.replace("agents_placeholder", temp_variables.get("agents"))
+        _prompt = _prompt.replace("task_placeholder", temp_variables.get("task"))
+        _prompt = _prompt.replace("agents_placeholder", temp_variables.get("agents"))
         llm_result = self._run_llm(_prompt, config, **kwargs)
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
