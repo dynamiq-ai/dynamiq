@@ -119,7 +119,6 @@ class CSVConverter(Node):
         metadata_columns = input_data.metadata_columns or self.metadata_columns
         external_metadata = input_data.metadata
 
-
         if input_data.file_paths:
             for path in input_data.file_paths:
                 try:
