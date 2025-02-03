@@ -41,6 +41,10 @@ class CSVConverterInputSchema(BaseModel):
         default=None,
         description="Optional list of column names to extract as metadata for each document. Can be None.",
     )
+    metadata: dict | list | None = Field(
+        default=None,
+        description="External metadata to be merged with metadata extracted from CSV rows."
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -113,6 +117,8 @@ class CSVConverter(Node):
         delimiter = input_data.delimiter or self.delimiter
         content_column = input_data.content_column or self.content_column
         metadata_columns = input_data.metadata_columns or self.metadata_columns
+        external_metadata = input_data.metadata
+
 
         if input_data.file_paths:
             for path in input_data.file_paths:
@@ -124,6 +130,8 @@ class CSVConverter(Node):
                             source=path,
                             content_column=content_column,
                             metadata_columns=metadata_columns,
+                            external_metadata=external_metadata,
+
                         ):
                             all_documents.append(doc)
                         success_count += 1
@@ -146,6 +154,8 @@ class CSVConverter(Node):
                         source=source_name,
                         content_column=content_column,
                         metadata_columns=metadata_columns,
+                        external_metadata=external_metadata,
+
                     ):
                         all_documents.append(doc)
                     success_count += 1
@@ -167,6 +177,8 @@ class CSVConverter(Node):
         source: str,
         content_column: str,
         metadata_columns: list[str] | None,
+        external_metadata: dict | list | None,
+
     ) -> Iterator[dict]:
         """
         Processes CSV rows into structured document dictionaries in a streaming fashion.
@@ -182,11 +194,14 @@ class CSVConverter(Node):
             content_column (str): The name of the column containing the main document content.
             metadata_columns (list[str]|None): Column names to include as metadata in the
                 resulting document dictionary.
+            external_metadata (dict | list | None): External metadata to merge with CSV metadata.
+                If a key exists in both, the CSV metadata will override the external metadata.
+
 
         Yields:
             dict: A document dictionary with two keys:
                 - 'content': The content extracted from the specified `content_column`.
-                - 'metadata': A dict containing metadata from `metadata_columns`,
+                - 'metadata': A dict containing merged metadata from CSV and external sources,
                   plus a 'source' key identifying the file or in-memory data source.
 
         Raises:
@@ -199,10 +214,21 @@ class CSVConverter(Node):
                     f"Content column '{content_column}' not found in CSV " f"(source: {source}) at row {index}"
                 )
 
-            metadata = {col: row[col] for col in metadata_columns if col in row}
-            metadata["source"] = source
+            csv_metadata = {col: row[col] for col in metadata_columns if col in row}
+            csv_metadata["source"] = source
+
+            if external_metadata is not None:
+                if isinstance(external_metadata, dict):
+                    merged_metadata = external_metadata.copy()  # create an independent copy
+                    merged_metadata.update(csv_metadata)  # CSV metadata takes precedence on key conflicts
+                else:
+                    # If external_metadata is not a dict (e.g. a list), store it under its own key.
+                    merged_metadata = csv_metadata.copy()
+                    merged_metadata["external"] = external_metadata
+            else:
+                merged_metadata = csv_metadata
 
             yield {
                 "content": row[content_column],
-                "metadata": metadata,
+                "metadata": merged_metadata,
             }
