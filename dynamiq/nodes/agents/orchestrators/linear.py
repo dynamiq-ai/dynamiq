@@ -80,11 +80,11 @@ class LinearOrchestrator(Orchestrator):
     summarize_all_answers: bool = False
     max_plan_retries: int = 5
     plan_approval: PlanApprovalConfig = Field(default_factory=PlanApprovalConfig)
+    MAX_ANALYZE_ATTEMPTS = 3  #
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._results = {}
-        self._run_depends = []
 
     @property
     def to_dict_exclude_params(self):
@@ -186,7 +186,7 @@ class LinearOrchestrator(Orchestrator):
         output_content = output_match.group(1).strip()
 
         try:
-            output_content = output_content.replace("```", "").replace("json", "")
+            output_content = re.sub(r"^```(?:json)?\s*|```$", "", output_content).strip()
         except AttributeError as e:
             logger.warning(
                 f"Orchestrator {self.name} - {self.id}: "
@@ -287,7 +287,7 @@ class LinearOrchestrator(Orchestrator):
 
                         success_flag = True
                         break
-                task_per_llm += f"Error is occured:{manager_result.output}"
+                task_per_llm += f"Error occured:{manager_result.output}"
 
             if success_flag:
                 continue
@@ -352,7 +352,7 @@ class LinearOrchestrator(Orchestrator):
         decision = analysis.decision
         message = analysis.message
 
-        if decision == "respond":
+        if decision == Decision.RESPOND:
             return message
         else:
             tasks = self.get_tasks(input_task, config=config, **kwargs)
@@ -365,7 +365,8 @@ class LinearOrchestrator(Orchestrator):
         for agent in self.agents:
             agent.streaming = self.streaming
 
-    def _analyze_user_input(self, input_task: str, config: RunnableConfig = None, **kwargs) -> DecisionResult:
+    def _analyze_user_input(self, input_task: str, config: RunnableConfig = None, attempt: int = 1,
+                            **kwargs) -> DecisionResult:
         """
         Calls the manager's 'handle_input' action to decide if we should respond
         immediately or proceed with a plan.
@@ -373,11 +374,13 @@ class LinearOrchestrator(Orchestrator):
         Args:
             input_task (str): The user's input or task description.
             config: Optional configuration object passed to the manager's run method.
+            attempt (int): The current attempt number for analyzing user input.
             **kwargs: Additional keyword arguments passed to the manager's run method.
 
         Returns:
             DecisionResult: An object containing the decision (as an Enum) and a message.
         """
+
         handle_result = self.manager.run(
             input_data={
                 "action": "handle_input",
@@ -407,12 +410,13 @@ class LinearOrchestrator(Orchestrator):
         if not data:
             error_message = f"Orchestrator {self.name} - {self.id}: Failed to extract JSON from manager output."
             logger.error(error_message)
-            _json_prompt_fix = "Please provide a valid JSON response, inside <output>...</output> tags."
-            return self._analyze_user_input(input_task + _json_prompt_fix, config=config, **kwargs)
-
-            return DecisionResult(
-                decision=Decision.RESPOND, message=f"Unable to extract valid JSON from manager: {raw_text}"
-            )
+            if attempt >= self.MAX_ANALYZE_ATTEMPTS:
+                return DecisionResult(
+                    decision=Decision.RESPOND,
+                    message="Unable to extract valid JSON from manager output after multiple attempts."
+                )
+            _json_prompt_fix = " Please provide a valid JSON response, inside <output>...</output> tags."
+            return self._analyze_user_input(input_task + _json_prompt_fix, config=config, attempt=attempt + 1, **kwargs)
 
         decision_str = data.get("decision", Decision.RESPOND.value)
         message = data.get("message", "")
@@ -444,8 +448,7 @@ class LinearOrchestrator(Orchestrator):
             return None
 
         output_content = match.group(1).strip()
-        output_content = re.sub(r"```(?:json)?", "", output_content)
-        output_content = output_content.replace("```", "")
+        output_content = re.sub(r"^```(?:json)?\s*|```$", "", output_content).strip()
 
         try:
             data = json.loads(output_content)
