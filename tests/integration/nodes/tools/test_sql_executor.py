@@ -1,7 +1,7 @@
 import pytest
 
 from dynamiq.connections import connections
-from dynamiq.nodes.tools.sql_executor import SqlExecutor
+from dynamiq.nodes.tools.sql_executor import SQLExecutor
 from dynamiq.runnables import RunnableResult, RunnableStatus
 
 
@@ -42,7 +42,7 @@ def mock_cursor_with_select(mocker, mock_fetchall_sql_response):
     ],
 )
 def test_mysql_postgres_select_execute(mock_fetchall_sql_response, connection, mock_cursor_with_select):
-    sql_tool = SqlExecutor(connection=connection)
+    sql_tool = SQLExecutor(connection=connection)
     output = mock_fetchall_sql_response
     input_data = {"query": """select * from test1"""}
 
@@ -86,7 +86,7 @@ def mock_cursor_with_none_description(mocker):
     ],
 )
 def test_non_select_queries_execution(mock_fetchall_sql_response, connection, mock_cursor_with_none_description):
-    sql_tool = SqlExecutor(connection=connection)
+    sql_tool = SQLExecutor(connection=connection)
     output = []
     input_data = {"query": """select * from test1"""}
 

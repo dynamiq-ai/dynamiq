@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Streaming Post Writer</title>
+    <style>
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+.chat-wrapper {
+    align-items: center;
+    height: 110vh;
+    background-color: #f5f5f5;
+    display: flex;
+    justify-content: center;
+}
+
+.chat-container {
+    background-color: #fff;
+    border-radius: 9px;
+    box-shadow: 0 5px 7px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    width: 80%;
+    max-width: 100%;
+    height: 80%;
+}
+
+.messages {
+    padding: 10px;
+    overflow-y: auto;
+    flex-grow: 1;
+}
+
+.message {
+    margin: 6px 0;
+    padding: 11px;
+    border-radius: 14px;
+    word-wrap: break-word;
+    max-width: 80%;
+}
+
+.message.sent {
+    color: white;
+    align-self: flex-end;
+    background-color: #062db8;
+}
+
+.message.received {
+    background-color: #e5e5ea;
+    color: #000;
+    align-self: flex-start;
+}
+
+.input-container {
+    display: flex;
+    border-top: 1px solid #ddd;
+    padding: 11px;
+}
+
+.input-container input {
+    width: 80%;
+    padding: 10px;
+    outline: none;
+    border-radius: 20px;
+    border: 1px solid #ccc;
+}
+
+.input-container button {
+    margin-left: 6px;
+    border-radius: 19px;
+    cursor: pointer;
+    background-color:  #062db8;
+    width: 16%;
+    padding: 11px;
+    color: white;
+    border: none;
+}
+
+.input-container button:hover {
+    background-color:  #062db8;
+}
+
+    </style>
+
+</head>
+<body style="font-family: Arial, sans-serif;">
+
+    <div class="chat-wrapper">
+        <div class="chat-container">
+            <div id="messages" class="messages">
+                <div class="message received">
+                    <p>Hello, provide description of the post you want to write.</p>
+                </div>
+            </div>
+            <div class="input-container">
+                <input type="text" id="messageInput" placeholder="Type a message..." />
+                <button onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+</body>
+
+<script>
+    var parentDiv = document.getElementById('messages');
+    var startMessage = true;
+
+
+    const socket = new WebSocket("ws://127.0.0.1:6001/ws");
+
+    socket.onopen = function(event) {
+        console.log("WebSocket connection established.");
+    };
+
+    var newDiv;
+    var isFirstChunk = true;
+
+
+    socket.onmessage = function(event) {
+        console.log(event.data)
+        let message = JSON.parse(event.data)
+
+        if (message["event"] == "final_output_event"){
+            return
+        }
+
+        let content = message["data"];
+
+        if (isFirstChunk){
+            isFirstChunk = false;
+            newDiv = document.createElement('div');
+            newDiv.classList.add('message');
+            newDiv.classList.add("received");
+            parentDiv.appendChild(newDiv);
+        }
+
+        if (content["content"] == undefined){
+            if (content["choices"][0]["finish_reason"] == "stop"){
+                isFirstChunk = true;
+                return
+            }
+            content = content["choices"][0]["delta"]["content"]
+        }else{
+            if (content["final"]){
+                startMessage = true;
+            }
+            content = content["content"]
+            isFirstChunk = true;
+        }
+
+        newDiv.innerHTML += content;
+
+    };
+
+    socket.onerror = function(error) {
+        console.error("WebSocket error: ", error);
+    };
+
+    socket.onclose = function(event) {
+        console.log("WebSocket connection closed");
+    };
+
+    function sendMessage() {
+        const message = document.getElementById('messageInput').value;
+
+        var newDiv = document.createElement('div');
+
+        newDiv.classList.add('message');
+        newDiv.classList.add("sent");
+        newDiv.innerHTML = message;
+
+        parentDiv.appendChild(newDiv);
+
+        if (message) {
+            if (startMessage){
+                socket.send(JSON.stringify({"type": "run", "content":message}));
+                startMessage = false;
+            }else{
+                socket.send(JSON.stringify({"type": "message", "content":message}));
+            }
+            document.getElementById('messageInput').value = '';
+        } else {
+            alert("Please enter a message!");
+        }
+    }
+</script>
+
+</html>
