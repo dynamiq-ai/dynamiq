@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 
 
-def get_search_queries_prompt():
+def get_search_queries_prompt() -> str:
     """Generates the prompt for refining search queries."""
     current_date = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
@@ -20,7 +20,7 @@ The response should contain ONLY the list.
 """
 
 
-def get_curate_sources_prompt():
+def get_curate_sources_prompt() -> str:
     """Generates the prompt for evaluating and curating sources."""
     return """Your goal is to evaluate and curate the provided scraped content for the research task: {{query}}
 while prioritizing the inclusion of relevant and high-quality information, especially sources containing statistics,
@@ -57,7 +57,7 @@ The response MUST not contain any markdown format or additional text (like ```js
 """
 
 
-def get_research_report_prompt(word_lower_limit=1000, report_format="apa", language="english"):
+def get_research_report_prompt(word_lower_limit=1000, report_format="apa", language="english") -> str:
     """Generates a detailed research report prompt with formatting and citation requirements."""
     return f"""
 Information: "{{{{context}}}}"

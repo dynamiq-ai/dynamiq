@@ -13,7 +13,7 @@ from examples.use_case_gpt_researcher.gpt_researcher.prompts import (
 )
 
 
-def write_report_workflow(source_to_extract: int):
+def write_report_workflow(source_to_extract: int) -> Workflow:
     """Builds a research report generation workflow."""
 
     # Embed the query for document retrieval
@@ -79,21 +79,3 @@ def write_report_workflow(source_to_extract: int):
         workflow.flow.add_nodes(node)
 
     return workflow
-
-
-if __name__ == "__main__":
-    task = {
-        "query": "why is Nvidia stock going up?",
-        "source_to_extract": 20,
-        "limit_sources": 10,
-    }
-
-    workflow = write_report_workflow(task)
-    result = workflow.run(
-        input_data={
-            "query": task.get("query"),
-            "limit_sources": task.get("limit_sources"),
-        }
-    )
-
-    print(result.output["generate_report_node"]["output"]["content"])

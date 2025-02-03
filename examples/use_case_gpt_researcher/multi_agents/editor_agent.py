@@ -111,12 +111,11 @@ If you decide to follow the reviewer's notes,
 please write a new draft and make sure to address all of the points they raised.
 Please keep all other aspects of the draft the same.
 You MUST return nothing but a JSON in the following format:
-"""
-    user_prompt += """
-{
+
+{{
     "draft": The revised draft that you are submitting for review,
     "revision_notes": Your message to the reviewer about the changes you made to the draft based on their feedback
-}
+}}
 """
     system_prompt = "You are an expert writer. Your goal is to revise drafts based on reviewer notes."
 

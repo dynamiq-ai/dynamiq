@@ -167,13 +167,3 @@ def run(input_data):
         workflow.flow.add_nodes(node)
 
     return workflow
-
-
-if __name__ == "__main__":
-    task = {
-        "query": "why is Nvidia stock going up?",
-        "max_iterations": 2,
-    }
-
-    workflow = conduct_research_workflow(task)
-    result = workflow.run(input_data={"query": task.get("query"), "max_iterations": task.get("max_iterations")})
