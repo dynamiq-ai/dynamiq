@@ -21,7 +21,7 @@ class CSVConverterInputSchema(BaseModel):
         files (list[BytesIO | bytes] | None): List of file objects or bytes containing CSV data.
         delimiter (str): Character used to separate fields in the CSV files. Defaults to comma.
         content_column (str): Name of the column to use as the main document content.
-        metadata_columns (list[str]): Column names to extract as metadata for each document.
+        metadata_columns (list[str] | None): Column names to extract as metadata for each document.
     """
 
     file_paths: list[str] | None = Field(
@@ -30,10 +30,20 @@ class CSVConverterInputSchema(BaseModel):
     files: list[BytesIO | bytes] | None = Field(
         default=None, description="List of file objects or bytes representing CSV files."
     )
-    delimiter: str = Field(default=",", description="Delimiter used in the CSV files.")
-    content_column: str = Field(..., description="Name of the column that will be used as the document's main content.")
-    metadata_columns: list[str] = Field(
-        default_factory=list, description="List of column names to extract as metadata for each document."
+    delimiter: str | None = Field(
+        default=None,
+        description="Delimiter used in the CSV files. If not provided, the Node's configured delimiter is used."
+    )
+    content_column: str | None = Field(
+        default=None, description="Name of the column that will be used as the document's main content."
+    )
+    metadata_columns: list[str] | None = Field(
+        default=None,
+        description="Optional list of column names to extract as metadata for each document. Can be None.",
+    )
+    metadata: dict | list | None = Field(
+        default=None,
+        description="External metadata to be merged with metadata extracted from CSV rows."
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -58,11 +68,20 @@ class CSVConverter(Node):
     Attributes:
         name (str): Display name of the node.
         group (NodeGroup.CONVERTERS): Node group classification.
+        delimiter (str): Character used to separate fields in the CSV files. Defaults to comma.
+        content_column (str): Name of the column to use as the main document content.
+        metadata_columns (list[str] | None): Column names to extract as metadata for each document.
         input_schema (type[CSVConverterInputSchema]): Schema for validating input parameters.
     """
 
     name: str = "CSV File Converter"
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
+    delimiter: str = Field(default=",", description="Delimiter used in the CSV files.")
+    content_column: str = Field(..., description="Name of the column that will be used as the document's main content.")
+    metadata_columns: list[str] | None = Field(
+        default=None,
+        description="Optional list of column names to extract as metadata for each document. Can be None.",
+    )
     input_schema: ClassVar[type[CSVConverterInputSchema]] = CSVConverterInputSchema
 
     def execute(
@@ -95,17 +114,23 @@ class CSVConverter(Node):
         last_error = None
         success_count = 0
         total_files = len(input_data.file_paths or []) + len(input_data.files or [])
+        delimiter = input_data.delimiter or self.delimiter
+        content_column = input_data.content_column or self.content_column
+        metadata_columns = input_data.metadata_columns or self.metadata_columns
+        external_metadata = input_data.metadata
 
         if input_data.file_paths:
             for path in input_data.file_paths:
                 try:
                     with open(path, encoding="utf-8") as csv_file:
-                        reader = csv.DictReader(csv_file, delimiter=input_data.delimiter)
+                        reader = csv.DictReader(csv_file, delimiter=delimiter)
                         for doc in self._process_rows_generator(
                             reader,
                             source=path,
-                            content_column=input_data.content_column,
-                            metadata_columns=input_data.metadata_columns,
+                            content_column=content_column,
+                            metadata_columns=metadata_columns,
+                            external_metadata=external_metadata,
+
                         ):
                             all_documents.append(doc)
                         success_count += 1
@@ -121,13 +146,15 @@ class CSVConverter(Node):
                         file_obj = BytesIO(file_obj)
 
                     file_text = TextIOWrapper(file_obj, encoding="utf-8")
-                    reader = csv.DictReader(file_text, delimiter=input_data.delimiter)
+                    reader = csv.DictReader(file_text, delimiter=delimiter)
 
                     for doc in self._process_rows_generator(
                         reader,
                         source=source_name,
-                        content_column=input_data.content_column,
-                        metadata_columns=input_data.metadata_columns,
+                        content_column=content_column,
+                        metadata_columns=metadata_columns,
+                        external_metadata=external_metadata,
+
                     ):
                         all_documents.append(doc)
                     success_count += 1
@@ -148,7 +175,9 @@ class CSVConverter(Node):
         reader: csv.DictReader,
         source: str,
         content_column: str,
-        metadata_columns: list[str],
+        metadata_columns: list[str] | None,
+        external_metadata: dict | list | None,
+
     ) -> Iterator[dict]:
         """
         Processes CSV rows into structured document dictionaries in a streaming fashion.
@@ -162,28 +191,43 @@ class CSVConverter(Node):
             source (str): The source identifier for the CSV data, e.g., a file path
                 or name for in-memory data.
             content_column (str): The name of the column containing the main document content.
-            metadata_columns (list[str]): Column names to include as metadata in the
+            metadata_columns (list[str]|None): Column names to include as metadata in the
                 resulting document dictionary.
+            external_metadata (dict | list | None): External metadata to merge with CSV metadata.
+                If a key exists in both, the CSV metadata will override the external metadata.
+
 
         Yields:
             dict: A document dictionary with two keys:
                 - 'content': The content extracted from the specified `content_column`.
-                - 'metadata': A dict containing metadata from `metadata_columns`,
+                - 'metadata': A dict containing merged metadata from CSV and external sources,
                   plus a 'source' key identifying the file or in-memory data source.
 
         Raises:
             KeyError: If the specified `content_column` is not present in a row of the CSV.
         """
+        metadata_columns = metadata_columns or []
         for index, row in enumerate(reader):
             if content_column not in row:
                 raise KeyError(
                     f"Content column '{content_column}' not found in CSV " f"(source: {source}) at row {index}"
                 )
 
-            metadata = {col: row[col] for col in metadata_columns if col in row}
-            metadata["source"] = source
+            csv_metadata = {col: row[col] for col in metadata_columns if col in row}
+            csv_metadata["source"] = source
+
+            if external_metadata is not None:
+                if isinstance(external_metadata, dict):
+                    merged_metadata = external_metadata.copy()  # create an independent copy
+                    merged_metadata.update(csv_metadata)  # CSV metadata takes precedence on key conflicts
+                else:
+                    # If external_metadata is not a dict (e.g. a list), store it under its own key.
+                    merged_metadata = csv_metadata.copy()
+                    merged_metadata["external"] = external_metadata
+            else:
+                merged_metadata = csv_metadata
 
             yield {
                 "content": row[content_column],
-                "metadata": metadata,
+                "metadata": merged_metadata,
             }
