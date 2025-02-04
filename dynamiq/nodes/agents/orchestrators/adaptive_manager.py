@@ -360,7 +360,6 @@ class AdaptiveAgentManager(AgentManager):
         """Initialize the AdaptiveAgentManager and set up prompt templates."""
         super().__init__(**kwargs)
         self._init_prompt_blocks()
-        self._init_actions()
 
     def _init_actions(self):
         """Extend the default actions with 'respond'."""

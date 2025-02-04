@@ -312,7 +312,6 @@ class LinearAgentManager(AgentManager):
         """
         super().__init__(**kwargs)
         self._init_prompt_blocks()
-        self._init_actions()
 
     def _init_actions(self):
         """

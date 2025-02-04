@@ -47,7 +47,7 @@ class AdaptiveOrchestrator(Orchestrator):
         agents (List[BaseAgent]): List of specialized agents available for task execution.
         objective (Optional[str]): The main objective of the orchestration.
         max_loops (Optional[int]): Maximum number of actions.
-        enable_reflection (Optional[bool]): Enable reflection mode
+        reflection_enabled (Optional[bool]): Enable reflection mode
     """
 
     name: str | None = "AdaptiveOrchestrator"
@@ -55,7 +55,7 @@ class AdaptiveOrchestrator(Orchestrator):
     manager: AdaptiveAgentManager
     agents: list[Agent] = []
     max_loops: int = 15
-    enable_reflection: bool = False
+    reflection_enabled: bool = False
 
     @property
     def to_dict_exclude_params(self):
@@ -125,7 +125,7 @@ class AdaptiveOrchestrator(Orchestrator):
 
         manager_content = manager_result.output.get("content").get("result")
 
-        if self.enable_reflection:
+        if self.reflection_enabled:
             reflect_result = self.manager.run(
                 input_data={
                     "action": "reflect",

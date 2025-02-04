@@ -57,7 +57,7 @@ if __name__ == "__main__":
         name="Adaptive Orchestrator",
         agents=[agent_coding, agent_searcher],
         manager=agent_manager,
-        enable_reflection=True,
+        reflection_enabled=True,
     )
 
     result = orchestrator.run(
