@@ -1,0 +1,54 @@
+nodes:
+  - id: pdf_converter
+    type: dynamiq.nodes.converters.PyPDFConverter
+    params:
+      document_creation_mode: one-doc-per-page
+
+  - id: document_splitter
+    type: dynamiq.nodes.splitters.document.DocumentSplitter
+    params:
+      split_by: sentence
+      split_length: 10
+      split_overlap: 1
+    inputs:
+      documents: ${[pdf_converter]}.output.documents
+    depends_on:
+      - pdf_converter
+
+  - id: embedder
+    type: dynamiq.nodes.embedders.OpenAIDocumentEmbedder
+    params:
+      connection:
+        type: dynamiq.connections.OpenAI
+        params:
+          api_key: $OPENAI_API_KEY
+      model: text-embedding-3-small
+    inputs:
+      documents: ${[document_splitter]}.output.documents
+    depends_on:
+      - document_splitter
+
+  - id: vector_store
+    type: dynamiq.nodes.writers.ElasticsearchDocumentWriter
+    params:
+      connection:
+        type: dynamiq.connections.Elasticsearch
+        params:
+          url: $ELASTICSEARCH_URL
+          username: $ELASTICSEARCH_USERNAME
+          password: $ELASTICSEARCH_PASSWORD
+          use_ssl: true
+          verify_certs: true
+      index_name: documents
+      dimension: 1536
+      similarity: cosine
+      create_if_not_exist: true
+      index_settings:
+        number_of_shards: 1
+        number_of_replicas: 1
+      mapping_settings:
+        dynamic: strict
+    inputs:
+      documents: ${[embedder]}.output.documents
+    depends_on:
+      - embedder
