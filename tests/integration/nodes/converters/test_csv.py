@@ -28,20 +28,14 @@ def sample_csv():
 
     tmp_path = create_test_csv(rows, header)
     yield tmp_path
-    # Cleanup
     if os.path.exists(tmp_path):
         os.remove(tmp_path)
 
 
 def test_csv_loader_basic_functionality(sample_csv):
     """Test basic CSV loader functionality."""
-    csv_loader = CSVConverter()
-    input_data = {
-        "file_paths": [sample_csv],
-        "delimiter": ",",
-        "content_column": "Target",
-        "metadata_columns": ["Feature_1", "Feature_2"],
-    }
+    csv_loader = CSVConverter(delimiter=",", content_column="Target", metadata_columns=["Feature_1", "Feature_2"])
+    input_data = {"file_paths": [sample_csv]}
 
     result = csv_loader.run(input_data=input_data, config=None)
 
@@ -61,13 +55,10 @@ def test_csv_loader_basic_functionality(sample_csv):
 
 def test_csv_loader_missing_metadata_columns(sample_csv):
     """Test CSV loader with missing metadata columns."""
-    csv_loader = CSVConverter()
-    input_data = {
-        "file_paths": [sample_csv],
-        "delimiter": ",",
-        "content_column": "Target",
-        "metadata_columns": ["Feature_1", "NonExistentFeature"],
-    }
+    csv_loader = CSVConverter(
+        delimiter=",", content_column="Target", metadata_columns=["Feature_1", "NonExistentFeature"]
+    )
+    input_data = {"file_paths": [sample_csv]}
 
     result = csv_loader.run(input_data=input_data, config=None)
 
