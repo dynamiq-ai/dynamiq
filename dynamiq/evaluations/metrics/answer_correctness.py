@@ -150,8 +150,8 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
         # --- Statement Extraction Evaluator (unchanged) ---
         extract_instr = (
             "Given a question and an answer, analyze each sentence of the answer and "
-            "break it down into one or more fully understandable unique statements that "
-            "directly answer the question. Replace pronouns with explicit references. "
+            "break it down into one or more fully understandable unique statements. "
+            "Replace pronouns with explicit references. "
             "Output the candidate statements as a JSON array of strings using double quotes."
         )
         self._statement_extractor = LLMEvaluator(
@@ -200,11 +200,9 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
 
         # --- Statement Classification Evaluator (improved with explanation) ---
         classify_instr = (
-            "Given a question, an answer statement, and a reference text (a string of candidate "
-            "statements from the ground truth answer), determine if the core fact of the statement "
-            "is supported by the ground truth answer. The answer statement may include extra details, "
-            "but only the core fact is relevant. Explain briefly why the statement is or is not supported. "
-            "Return a JSON object with keys 'match' (true/false) and 'reasoning' (a short explanation)."
+            "Given a question, an answer statement, and a reference text, determine if the answer statement "
+            "is supported by the reference text. Explain briefly why the statement is or is not supported. "
+            "Return a JSON object with keys 'reasoning' (a short explanation) and 'match' (true/false)"
         )
         self._statement_classifier = LLMEvaluator(
             instructions=classify_instr.strip(),
@@ -219,7 +217,7 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
                     "inputs": {
                         "question": "What is the capital of France?",
                         "answer_statement": "The capital of France is Paris.",
-                        "reference_text": " Paris is the capital of France.",
+                        "reference_text": "Paris is the capital of France.",
                     },
                     "outputs": {
                         "reasoning": "The statement exactly matches the core fact in the reference.",
