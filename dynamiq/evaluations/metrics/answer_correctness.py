@@ -313,7 +313,6 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
 
     def _build_reasoning(
         self,
-        question: str,
         ans_class: list[tuple[str, bool, str]],
         gt_class: list[tuple[str, bool, str]],
         tp: int,
@@ -399,7 +398,7 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-        reasoning = self._build_reasoning(question, ans_class, gt_class, tp, fp, fn, precision, recall, f1)
+        reasoning = self._build_reasoning(ans_class, gt_class, tp, fp, fn, precision, recall, f1)
         return RunResult(score=round(f1, 2), reasoning=reasoning)
 
     def run(
