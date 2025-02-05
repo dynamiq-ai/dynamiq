@@ -999,7 +999,7 @@ class Snowflake(BaseConnection):
 
 class AWSRedshift(BaseConnection):
     host: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_HOST"))
-    port: int = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_PORT", 5432))
+    port: int = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_PORT", 5439))
     database: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_DATABASE", "db"))
     user: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_USER", "awsuser"))
     password: str = Field(default_factory=partial(get_env_var, "AWS_REDSHIFT_PASSWORD", "password"))
