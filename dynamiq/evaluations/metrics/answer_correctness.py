@@ -21,9 +21,6 @@ Overview:
 
 The evaluator outputs both the final (weighted) score and detailed reasoning explaining each step.
 """
-
-import typing as t
-
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from dynamiq.evaluations import BaseEvaluator
@@ -133,25 +130,17 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
          core fact is supported. Similarly, ground truth statements are compared to the answer to detect missing facts.
          The classification step returns, for each statement, a match verdict (true/false) and an explanation.
       3) Metrics (TP, FP, FN, Precision, Recall, F1) are computed.
-      4) A final score is produced. If custom weights (other than [1.0, 0.0]) are provided,
-         the final score is weighted accordingly.
+      4) A final score is produced.
       5) A detailed reasoning output is generated, explaining each step and metric.
     """
     name: str = "AnswerCorrectness"
     llm: BaseLLM
-    weights: list[float] = Field(default_factory=lambda: [1.0, 0.0])
 
     _statement_extractor: LLMEvaluator = PrivateAttr()
     _statement_classifier: LLMEvaluator = PrivateAttr()
 
     def __init__(self, **data):
         super().__init__(**data)
-        if len(self.weights) != 2:
-            raise ValueError("Weights must be a list of two floats.")
-        if all(w == 0.0 for w in self.weights):
-            raise ValueError("At least one weight must be non-zero.")
-        if not all(w >= 0.0 for w in self.weights):
-            raise ValueError("Weights must be non-negative.")
         self._initialize_evaluators()
 
     def _initialize_evaluators(self):
@@ -180,7 +169,13 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
                             )
                         ],
                     },
-                    "outputs": {"statements": ["The capital of France is Paris."]},
+                    "outputs": {
+                        "statements": [
+                            "The capital of France is Paris.",
+                            "Paris is known for its rich history, art, culture, "
+                            "and landmarks such as the Eiffel Tower.",
+                        ]
+                    },
                 },
                 {
                     "inputs": {
@@ -192,7 +187,12 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
                             )
                         ],
                     },
-                    "outputs": {"statements": ["The theory of relativity was developed by Albert Einstein."]},
+                    "outputs": {
+                        "statements": [
+                            "The theory of relativity was developed by Albert Einstein in the early 20th century.",
+                            "The theory of relativity revolutionized our understanding of space and time.",
+                        ]
+                    },
                 },
             ],
             llm=self.llm,
@@ -211,7 +211,7 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
             inputs=[
                 {"name": "question", "type": str},
                 {"name": "answer_statement", "type": str},
-                {"name": "ground_truth_statement", "type": str},
+                {"name": "reference_text", "type": str},
             ],
             outputs=[{"name": "match", "type": bool}, {"name": "reasoning", "type": str}],
             examples=[
@@ -219,47 +219,35 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
                     "inputs": {
                         "question": "What is the capital of France?",
                         "answer_statement": "The capital of France is Paris.",
-                        "ground_truth_statement": "The capital of France is Paris.",
+                        "reference_text": " Paris is the capital of France.",
                     },
                     "outputs": {
-                        "match": True,
                         "reasoning": "The statement exactly matches the core fact in the reference.",
+                        "match": True,
                     },
                 },
                 {
                     "inputs": {
                         "question": "What is the capital of France?",
                         "answer_statement": "Paris is known for its rich history.",
-                        "ground_truth_statement": "The capital of France is Paris.",
+                        "reference_text": "The capital of France is Paris.",
                     },
                     "outputs": {
-                        "match": False,
                         "reasoning": "The statement includes extra details about history "
-                        "that are not part of the core fact.",
+                        "that are not present in reference.",
+                        "match": False,
                     },
                 },
                 {
                     "inputs": {
                         "question": "Who developed the theory of relativity?",
                         "answer_statement": "The theory was developed by Albert Einstein.",
-                        "ground_truth_statement": "The theory of relativity was developed by Albert Einstein.",
+                        "reference_text": "The theory of relativity was developed by Albert Einstein.",
                     },
                     "outputs": {
+                        "reasoning": "The statement conveys the same core fact as the reference "
+                        "despite wording differences.",
                         "match": True,
-                        "reasoning": "The statement conveys the same core fact "
-                        "as the reference despite wording differences.",
-                    },
-                },
-                {
-                    "inputs": {
-                        "question": "Who developed the theory of relativity?",
-                        "answer_statement": "Albert Einstein provided revolutionary ideas to the theory of relativity.",
-                        "ground_truth_statement": "The theory of relativity was developed by Albert Einstein.",
-                    },
-                    "outputs": {
-                        "match": True,
-                        "reasoning": "The statement conveys the core fact that Albert Einstein "
-                        "is responsible, ignoring extra descriptive parts.",
                     },
                 },
             ],
@@ -293,13 +281,13 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
             all_stmts.append(self._unique_candidates(stmts))
         return all_stmts
 
-    def classify_statement(self, question: str, answer_stmt: str, ref_text: str) -> t.Tuple[bool, str]:
+    def classify_statement(self, question: str, answer_stmt: str, ref_text: str) -> tuple[bool, str]:
         """
         Run the classification evaluator.
         The ref_text is the string of candidate statements from the ground truth answer.
         Returns a tuple (match, explanation).
         """
-        data = {"question": [question], "answer_statement": [answer_stmt], "ground_truth_statement": [ref_text]}
+        data = {"question": [question], "answer_statement": [answer_stmt], "reference_text": [ref_text]}
         result = self._statement_classifier.run(**data)
         m = bool(result["results"][0].get("match", False))
         expl = result["results"][0].get("reasoning", "")
@@ -314,9 +302,7 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
             joined += "."
         return joined
 
-    def _evaluate_candidates(
-        self, question: str, candidates: list[str], ref_text: str
-    ) -> list[t.Tuple[str, bool, str]]:
+    def _evaluate_candidates(self, question: str, candidates: list[str], ref_text: str) -> list[tuple[str, bool, str]]:
         """
         Classify each candidate statement against the ground truth answer.
         Returns a list of tuples (statement, match, explanation).
@@ -330,8 +316,8 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
     def _build_reasoning(
         self,
         question: str,
-        ans_class: list[t.Tuple[str, bool, str]],
-        gt_class: list[t.Tuple[str, bool, str]],
+        ans_class: list[tuple[str, bool, str]],
+        gt_class: list[tuple[str, bool, str]],
         tp: int,
         fp: int,
         fn: int,
@@ -346,7 +332,6 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
           • What each symbol (✅/❌) means.
           • How TP, FP, and FN are computed.
           • How Precision, Recall, and F1 Score are calculated.
-          • If custom weights are applied, the final score is computed as a weighted combination.
         """
         lines = []
         lines.append("Reasoning:")
@@ -395,15 +380,6 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
         lines.append("   F1 Score is the harmonic mean of Precision and Recall:")
         lines.append("       F1 Score = 2*(Precision*Recall)/(Precision+Recall)")
         lines.append(f"       F1 Score = {f1:.2f}")
-        if self.weights != [1.0, 0.0]:
-            lines.append("")
-            lines.append("   Note: Custom weights were provided.")
-            lines.append(f"         Weights: {self.weights}")
-            lines.append(
-                "         Final Score is computed as a weighted combination of F1 Score and the secondary metric."
-            )
-            # In this code, we are only using F1 Score, but if a secondary metric were available,
-            # it would be combined using the provided weights.
         lines.append("")
         lines.append(f"Final Score = F1 Score = {round(f1, 2)}")
         lines.append("-" * 50)

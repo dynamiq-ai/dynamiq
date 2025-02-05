@@ -23,7 +23,7 @@ def main():
     answers = [
         (
             "The sun is powered by nuclear fission, similar to nuclear reactors on Earth. "
-            "Its primary function is to provide light to the solar system."
+            "Its primary function is to provide heat and light to the solar system."
         ),
         "The boiling point of water is 100 degrees Celsius at sea level.",
     ]
@@ -53,9 +53,6 @@ def main():
         print("Reasoning:")
         print(result.reasoning)
         print("-" * 50)
-
-    print("Final Evaluation Scores:")
-    print(results)
 
 
 if __name__ == "__main__":
