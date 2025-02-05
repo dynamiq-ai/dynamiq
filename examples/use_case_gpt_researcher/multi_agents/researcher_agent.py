@@ -8,7 +8,7 @@ def run_initial_research(context: dict) -> dict:
     task = context.get("task")
     max_iterations = task.get("max_iterations")
     source_to_extract = task.get("source_to_extract")
-    query = f"{task.get("query")} - {context.get("query")}" if context.get("query") else task.get("query")
+    query = f'{task.get("query")} - {context.get("query")}' if context.get("query") else task.get("query")
 
     conduct_research = conduct_research_workflow()
     conduct_research.run(
