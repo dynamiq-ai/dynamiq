@@ -2,7 +2,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.llms import OpenAI
-from examples.use_case_gpt_researcher.multi_agents import run_initial_research
+from examples.use_case_gpt_researcher.multi_agents.researcher_agent import run_initial_research
 from examples.use_case_gpt_researcher.multi_agents.utils import execute_llm
 
 
@@ -33,7 +33,7 @@ def editor_agent(context: dict, query: str) -> dict:
         manager=GraphAgentManager(llm=llm),
     )
 
-    def orchestrate(context: dict) -> str:
+    def orchestrate(context: dict, **kwargs) -> str:
         return END if context["review"] is None else "reviser"
 
     orchestrator.add_state_by_tasks("researcher", [_run_in_depth_research])

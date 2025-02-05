@@ -34,7 +34,7 @@ def set_orchestrator() -> GraphOrchestrator:
         manager=GraphAgentManager(llm=llm),
     )
 
-    def orchestrate(context: dict) -> str:
+    def orchestrate(context: dict, **kwargs) -> str:
         return (
             "researcher"
             if context["human_feedback"] is None or context["human_feedback"].lower().strip() == "no"

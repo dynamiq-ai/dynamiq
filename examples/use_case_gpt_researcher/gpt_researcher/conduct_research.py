@@ -145,6 +145,7 @@ def run(input_data):
         id="store_documents_node",
         connection=Pinecone(),
         index_name="gpt-researcher",
+        create_if_not_exist=True,
         index_type=PineconeIndexType.SERVERLESS,
         input_transformer=InputTransformer(selector={"documents": f"${[embed_documents_node.id]}.output.documents"}),
         depends=[NodeDependency(embed_documents_node)],
