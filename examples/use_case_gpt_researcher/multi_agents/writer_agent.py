@@ -1,10 +1,10 @@
 import json
 from datetime import datetime
 
-from examples.use_case_gpt_researcher.multi_agents.utils import execute_llm
+from examples.use_case_gpt_researcher.multi_agents.utils import execute_agent
 
 
-def run_writer_agent(context: dict) -> dict:
+def run_writer_agent(context: dict, **kwargs) -> dict:
     """
     Orchestrates the research writing process by generating sections content and revising headers.
     """
@@ -48,7 +48,7 @@ Guidelines:
 
     system_prompt = "You are a research assistant. Your task is to process and generate structured research content."
 
-    result = execute_llm(system_prompt, user_prompt, to_json=True)
+    result = execute_agent(system_prompt, user_prompt, to_json=True)
 
     return {
         "table_of_contents": result.get("table_of_contents", None),
@@ -85,7 +85,7 @@ Headers Data: {json.dumps(default_headers, indent=2)}
 
     system_prompt = "You are a research assistant. Your task is to process and generate structured research content."
 
-    result = execute_llm(system_prompt, user_prompt, to_json=True)
+    result = execute_agent(system_prompt, user_prompt, to_json=True)
     return {
         "headers": result,
     }

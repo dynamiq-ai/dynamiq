@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from examples.use_case_gpt_researcher.multi_agents.utils import execute_llm
+from examples.use_case_gpt_researcher.multi_agents.utils import execute_agent
 
 
 def _plan_research_prompt(
@@ -28,7 +28,7 @@ You must return nothing but a JSON with the fields 'title' (str) and
 sections: ['section header 1', 'section header 2', 'section header 3' ...]}}'."""
 
 
-def plan_research(context: dict) -> dict:
+def plan_research(context: dict, **kwargs) -> dict:
     """Main function to plan the research layout based on the context provided."""
     initial_research = context.get("initial_research")
     human_feedback = context.get("human_feedback")
@@ -43,7 +43,7 @@ def plan_research(context: dict) -> dict:
     )
     user_prompt = _plan_research_prompt(initial_research, include_human_feedback, human_feedback, max_sections)
 
-    response = execute_llm(system_prompt, user_prompt, to_json=True)
+    response = execute_agent(system_prompt, user_prompt, to_json=True)
     return {
         "title": response.get("title"),
         "date": response.get("date"),

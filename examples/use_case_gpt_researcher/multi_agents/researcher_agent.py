@@ -3,7 +3,7 @@ import time
 from examples.use_case_gpt_researcher.gpt_researcher import conduct_research_workflow, write_report_workflow
 
 
-def run_initial_research(context: dict) -> dict:
+def run_initial_research(context: dict, **kwargs) -> dict:
     # Conduct research and gather the relevant information
     task = context.get("task")
     max_iterations = task.get("max_iterations")

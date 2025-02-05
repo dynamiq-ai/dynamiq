@@ -1,4 +1,4 @@
-def run_publisher(context: dict) -> dict:
+def run_publisher(context: dict, **kwargs) -> dict:
     """Generates a formatted research report based on provided context data."""
 
     report_date = context.get("date")
