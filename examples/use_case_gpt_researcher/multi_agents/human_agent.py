@@ -1,4 +1,4 @@
-def review_plan(context: dict) -> dict:
+def review_plan(context: dict, **kwargs) -> dict:
     """Gathers human feedback on the research plan if required."""
     include_human_feedback = context.get("task").get("include_human_feedback")
 

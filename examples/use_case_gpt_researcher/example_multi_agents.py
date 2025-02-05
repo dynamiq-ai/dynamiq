@@ -60,8 +60,8 @@ def set_orchestrator() -> GraphOrchestrator:
 
 if __name__ == "__main__":
     task = {
-        "query": "Machine Learning Trends?",
-        "max_sections": 2,
+        "query": "Why is AI so hyped?",
+        "max_sections": 1,
         "include_human_feedback": False,
         "follow_guidelines": True,
         "guidelines": [
@@ -79,7 +79,8 @@ if __name__ == "__main__":
         "task": task,
     }
     run_result = orchestrator.run(input_data={})
-    report = orchestrator.context["report"]
+    report = orchestrator.context.get("report")
 
-    save_markdown_as_pdf(report, "report.pdf")
-    print(report)
+    if report:
+        save_markdown_as_pdf(report, "report.pdf")
+    print("Report:\n", report)

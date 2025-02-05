@@ -3,10 +3,10 @@ from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrat
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.llms import OpenAI
 from examples.use_case_gpt_researcher.multi_agents.researcher_agent import run_initial_research
-from examples.use_case_gpt_researcher.multi_agents.utils import execute_llm
+from examples.use_case_gpt_researcher.multi_agents.utils import execute_agent
 
 
-def run_parallel_research(context: dict) -> dict:
+def run_parallel_research(context: dict, **kwargs) -> dict:
     """
     Runs research for multiple queries and aggregates the results.
     """
@@ -53,7 +53,7 @@ def editor_agent(context: dict, query: str) -> dict:
     return {"draft": orchestrator.context.get("draft"), "result": ""}
 
 
-def _run_in_depth_research(context: dict) -> dict:
+def _run_in_depth_research(context: dict, **kwargs) -> dict:
     """
     Run GPT Researcher on the given query.
     """
@@ -62,7 +62,7 @@ def _run_in_depth_research(context: dict) -> dict:
     return {"draft": report, "result": ""}
 
 
-def _review_draft(context: dict) -> dict:
+def _review_draft(context: dict, **kwargs) -> dict:
     """
     Reviews the draft based on guidelines and determines if revisions are needed.
     """
@@ -94,11 +94,11 @@ Guidelines: {guidelines}\nDraft: {draft}\n
     system_prompt = """You are an expert research article reviewer.\
     Your goal is to review research drafts and provide feedback to the reviser only based on specific guidelines."""
 
-    response = execute_llm(system_prompt, review_prompt)
+    response = execute_agent(system_prompt, review_prompt)
     return {"review": response, "result": ""}
 
 
-def _revise_draft(context: dict) -> dict:
+def _revise_draft(context: dict, **kwargs) -> dict:
     """
     Revises the draft based on reviewer feedback.
     """
@@ -119,6 +119,6 @@ You MUST return nothing but a JSON in the following format:
 """
     system_prompt = "You are an expert writer. Your goal is to revise drafts based on reviewer notes."
 
-    response = execute_llm(system_prompt, user_prompt, to_json=True)
+    response = execute_agent(system_prompt, user_prompt, to_json=True)
 
     return {"draft": response.get("draft", ""), "revision_notes": response.get("revision_notes", ""), "result": ""}
