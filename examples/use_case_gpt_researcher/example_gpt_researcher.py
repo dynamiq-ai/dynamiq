@@ -8,7 +8,8 @@ from examples.use_case_gpt_researcher.gpt_researcher.write_report import write_r
 
 def clean_pinecone_storage():
     """Deletes all documents in the Pinecone vector storage."""
-    vector_store = PineconeVectorStore(connection=Pinecone(), index_name="gpt-researcher")
+    vector_store = PineconeVectorStore(connection=Pinecone(), index_name="gpt-researcher", create_if_not_exist=True)
+
     vector_store.delete_documents(delete_all=True)
 
 
