@@ -40,13 +40,12 @@ def main():
     )
 
     # Print the results
-    for idx, score in enumerate(correctness_scores):
+    for idx, result in enumerate(correctness_scores.results):
         print(f"Answer: {answers[idx]}")
-        print(f"Factual Correctness Score: {score}")
+        print(f"Factual Correctness Score: {result.score}")
+        print("Reasoning:")
+        print(result.reasoning)
         print("-" * 50)
-
-    print("Factual Correctness Scores:")
-    print(correctness_scores)
 
 
 if __name__ == "__main__":

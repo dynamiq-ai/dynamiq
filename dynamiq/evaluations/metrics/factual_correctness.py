@@ -13,9 +13,8 @@ class DecomposeClaimsInput(BaseModel):
     Input model for decomposing texts into claims.
 
     Attributes:
-        texts (List[str]): List of texts to decompose.
+        texts (list[str]): List of texts to decompose.
     """
-
     texts: list[str]
 
 
@@ -24,9 +23,8 @@ class DecomposeClaimsOutput(BaseModel):
     Output model for claim decomposition.
 
     Attributes:
-        claims_list (List[List[str]]): List of lists of claims.
+        claims_list (list[list[str]]): List of lists of claims.
     """
-
     claims_list: list[list[str]]
 
 
@@ -35,10 +33,9 @@ class VerifyClaimsInput(BaseModel):
     Input model for verifying claims against premises.
 
     Attributes:
-        premises (List[str]): List of premises.
-        claims_list (List[List[str]]): List of lists of claims.
+        premises (list[str]): List of premises.
+        claims_list (list[list[str]]): List of lists of claims.
     """
-
     premises: list[str]
     claims_list: list[list[str]]
 
@@ -48,9 +45,8 @@ class VerifyClaimsOutput(BaseModel):
     Output model for claim verification.
 
     Attributes:
-        verdicts_list (List[List[int]]): List of lists of verdicts (0 or 1).
+        verdicts_list (list[list[int]]): List of lists of verdicts (0 or 1).
     """
-
     verdicts_list: list[list[int]]
 
 
@@ -60,12 +56,12 @@ class RunInput(BaseModel):
 
     Attributes:
         answers (list[str]): List of response texts.
-        contexts (list[str] | list[list[str]]): List of reference texts, or list of lists of reference texts.
+        contexts (list[str] | list[list[str]]): List of reference texts, or list of lists of
+            reference texts.
         mode (str | None): Evaluation mode ('precision', 'recall', or 'f1').
         beta (float | None): Beta value for F-beta score.
         verbose (bool): Flag to enable verbose logging.
     """
-
     answers: list[str]
     contexts: list[str] | list[list[str]]
     mode: str | None = None
@@ -76,30 +72,37 @@ class RunInput(BaseModel):
     def unify_contexts(cls, v):
         """
         Allow contexts to be either list[str] or list[list[str]]. If list[list[str]],
-        each sub-list is joined into one string. Otherwise, if it's already list[str],
-        we leave it as-is.
+        each sub-list is joined into one string. Otherwise, leave as-is.
         """
         if not isinstance(v, list):
-            raise ValueError("contexts must be a list of strings or a list of list of strings.")
-
-        # Check if it's a list[list[str]] -> join each sublist
+            raise ValueError("contexts must be a list of strings or a list of lists of strings.")
         if all(isinstance(item, list) and all(isinstance(x, str) for x in item) for item in v):
             return [" ".join(sublist) for sublist in v]
-
-        # Check if it's already list[str]
         if all(isinstance(item, str) for item in v):
             return v
-
         raise ValueError("contexts must be either a list of strings or a list of lists of strings.")
 
     @model_validator(mode="after")
     def check_equal_length(self):
         """
-        By this time, contexts should be list[str]. Ensure answers and contexts have the same length.
+        Confirm that answers and contexts have the same length.
         """
         if len(self.answers) != len(self.contexts):
             raise ValueError("answers and contexts must have the same length.")
         return self
+
+
+class FactualCorrectnessRunResult(BaseModel):
+    """
+    Result model for factual correctness evaluation.
+
+    Attributes:
+        score (float): The computed factual correctness score.
+        reasoning (str): Detailed reasoning explaining the evaluation.
+    """
+
+    score: float
+    reasoning: str
 
 
 class RunOutput(BaseModel):
@@ -107,15 +110,25 @@ class RunOutput(BaseModel):
     Output model for factual correctness evaluation.
 
     Attributes:
-        final_scores (List[float]): List of factual correctness scores.
+        results (list[FactualCorrectnessRunResult]): List of results with score and reasoning.
     """
 
-    final_scores: list[float]
+    results: list[FactualCorrectnessRunResult]
 
 
 class FactualCorrectnessEvaluator(BaseEvaluator):
     """
     Evaluator class for factual correctness metric.
+
+    Pipeline:
+      1) Claim Decomposition: The answer and context are decomposed into standalone,
+         verifiable claims.
+      2) Claim Verification: The answer claims are verified against the context to compute
+         precision (TP vs. FP). Optionally, context claims are verified against answer for
+         recall (FN).
+      3) Score Computation: Depending on mode, evaluate precision, recall, or F-beta score.
+      4) Detailed Reasoning: Generates a user-friendly explanation describing each step,
+         including claim lists, TP, FP, FN, and metric computations with emojis.
 
     Attributes:
         llm (BaseLLM): The language model to use for evaluation.
@@ -124,7 +137,6 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
         atomicity (str): Level of atomicity ('low' or 'high').
         coverage (str): Level of coverage ('low' or 'high').
     """
-
     name: str = "FactualCorrectness"
     llm: BaseLLM
     mode: str = "f1"
@@ -211,7 +223,7 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
                             {
                                 "claim": "Albert Einstein was a German theoretical physicist.",
                                 "verdict": 1,
-                                "reason": "The premise states he was a German-born theoretical physicist.",
+                                "reason": "The premise states he was a German-born theoretical " "physicist.",
                             },
                             {
                                 "claim": "Albert Einstein developed the theory of relativity.",
@@ -221,7 +233,7 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
                             {
                                 "claim": "Albert Einstein contributed to quantum mechanics.",
                                 "verdict": 0,
-                                "reason": "The premise does not mention contributions to quantum mechanics.",
+                                "reason": "The premise does not mention contributions to quantum " "mechanics.",
                             },
                         ]
                     },
@@ -235,10 +247,10 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
         Decompose each text into claims.
 
         Args:
-            texts (List[str]): List of texts to decompose.
+            texts (list[str]): List of texts to decompose.
 
         Returns:
-            List[List[str]]: List of lists of claims.
+            list[list[str]]: List of lists of claims.
         """
         input_data = DecomposeClaimsInput(texts=texts)
         results = self._claim_decomposer.run(input_text=input_data.texts)
@@ -248,7 +260,6 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
             if isinstance(claims, list):
                 claims_list.append(claims)
             else:
-                # If claims is a single string, wrap it in a list
                 claims_list.append([claims])
         output_data = DecomposeClaimsOutput(claims_list=claims_list)
         return output_data.claims_list
@@ -258,11 +269,11 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
         Verify the claims against the premises.
 
         Args:
-            premises (List[str]): List of premises.
-            claims_list (List[List[str]]): List of lists of claims.
+            premises (list[str]): List of premises.
+            claims_list (list[list[str]]): List of lists of claims.
 
         Returns:
-            List[List[int]]: List of lists of verdicts.
+            list[list[int]]: List of lists of verdicts.
         """
         input_data = VerifyClaimsInput(premises=premises, claims_list=claims_list)
         results = self._nli_evaluator.run(
@@ -300,6 +311,88 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
         score = (1 + beta**2) * precision * recall / (beta**2 * precision + recall + 1e-8)
         return score
 
+    def _build_reasoning(
+        self,
+        answer: str,
+        context: str,
+        answer_claims: list[str],
+        context_claims: list[str],
+        answer_verdicts: list[int],
+        context_verdicts: list[int],
+        tp: int,
+        fp: int,
+        fn: int,
+        score: float,
+        mode: str,
+        beta: float,
+    ) -> str:
+        """
+        Build a detailed reasoning string for factual correctness evaluation.
+
+        Explains:
+          • How the answer and context were decomposed into claims.
+          • How claim verification produced verdicts (TP, FP, FN) with emojis.
+          • The calculation of the final score depending on the mode.
+
+        Args:
+            answer (str): The answer text.
+            context (str): The reference text.
+            answer_claims (list[str]): Claims from the answer.
+            context_claims (list[str]): Claims from the context.
+            answer_verdicts (list[int]): Verdicts from verifying context claims against answer.
+            context_verdicts (list[int]): Verdicts from verifying answer claims against context.
+            tp (int): True positive count.
+            fp (int): False positive count.
+            fn (int): False negative count.
+            score (float): Computed score.
+            mode (str): Evaluation mode.
+            beta (float): Beta value.
+
+        Returns:
+            str: Detailed reasoning.
+        """
+        lines = []
+        lines.append("Reasoning:")
+        lines.append("")
+        lines.append("1. Claim Decomposition:")
+        lines.append("   Answer was decomposed into claims:")
+        for claim in answer_claims:
+            lines.append(f"     - {claim}")
+        lines.append("   Context was decomposed into claims:")
+        for claim in context_claims:
+            lines.append(f"     - {claim}")
+        lines.append("")
+        lines.append("2. Claim Verification:")
+        # Map verdicts to emojis: 1->✅, 0->❌
+        mapped_context = [("✅" if v == 1 else "❌") for v in context_verdicts]
+        lines.append("   Verification of answer claims against context yields:")
+        lines.append(f"     Verdicts: {mapped_context}   (✅ = supported, ❌ = unsupported)")
+        lines.append(f"     TP (supported): {tp}")
+        lines.append(f"     FP (unsupported): {fp}")
+        if mode != "precision":
+            mapped_answer = [("✅" if v == 1 else "❌") for v in answer_verdicts]
+            lines.append("")
+            lines.append("   Verification of context claims against answer yields:")
+            lines.append(f"     Verdicts: {mapped_answer}")
+            lines.append(f"     FN (not supported): {fn}")
+        lines.append("")
+        if mode == "precision":
+            precision = tp / (tp + fp + 1e-8)
+            lines.append(f"Precision = TP/(TP+FP) = {precision:.2f}")
+        elif mode == "recall":
+            recall = tp / (tp + fn + 1e-8)
+            lines.append(f"Recall = TP/(TP+FN) = {recall:.2f}")
+        else:
+            precision = tp / (tp + fp + 1e-8)
+            recall = tp / (tp + fn + 1e-8) if (tp + fn) > 0 else 0.0
+            lines.append(f"Precision = TP/(TP+FP) = {precision:.2f}")
+            lines.append(f"Recall = TP/(TP+FN) = {recall:.2f}")
+            lines.append(f"F-beta Score (beta={beta:.2f}) = {score:.2f}")
+        lines.append("")
+        lines.append(f"Final Score = {score:.2f}")
+        lines.append("-" * 50)
+        return "\n".join(lines)
+
     def run(
         self,
         answers: list[str],
@@ -307,83 +400,88 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
         mode: str | None = None,
         beta: float | None = None,
         verbose: bool = False,
-    ) -> list[float]:
+    ) -> RunOutput:
         """
         Evaluate the factual correctness of answers against contexts.
 
+        Pipeline:
+          1) Decompose both answer and context into claims.
+          2) Verify answer claims against context to compute precision.
+          3) If mode is recall or F1, verify context claims against answer to compute FN.
+          4) Compute the final score based on the selected mode.
+          5) Generate detailed reasoning regarding the claim decomposition,
+             verification, and final metric calculations with emojis.
+
         Args:
-            answers: List of response texts.
-            contexts: Either a list of context strings or a list of lists of context strings.
-            mode: 'precision', 'recall', or 'f1' (if None, defaults to self.mode).
-            beta: Beta value for F-beta score (if None, defaults to self.beta).
-            verbose: Flag for verbose debugging logs.
+            answers (list[str]): List of response texts.
+            contexts (list[str] | list[list[str]]): List of context texts.
+            mode (str | None): Evaluation mode ('precision', 'recall', or 'f1').
+            beta (float | None): Beta value for F-beta score.
+            verbose (bool): Flag for verbose logging.
 
         Returns:
-            List[float]: List of factual correctness scores for each answer/context pair.
+            RunOutput: Contains a list of FactualCorrectnessRunResult.
         """
-        # Validate and normalize the inputs via Pydantic
-        input_data = RunInput(
-            answers=answers,
-            contexts=contexts,
-            mode=mode,
-            beta=beta,
-            verbose=verbose,
-        )
-        # If mode/beta not specified in the input, default to self.mode/self.beta
+        input_data = RunInput(answers=answers, contexts=contexts, mode=mode, beta=beta, verbose=verbose)
         mode = input_data.mode or self.mode
         beta = input_data.beta or self.beta
 
-        final_scores = []
-
+        results_out = []
         for idx in range(len(input_data.answers)):
             answer = input_data.answers[idx]
-            context = input_data.contexts[idx]  # Guaranteed to be a single string now
+            context = input_data.contexts[idx]  # Now a single string
 
-            # Decompose claims from answer and context
+            # Decompose claims for answer and context
             answer_claims_list = self.decompose_claims([answer])
             context_claims_list = self.decompose_claims([context])
-
             answer_claims = answer_claims_list[0]
             context_claims = context_claims_list[0]
 
-            # Verify answer claims against context (precision)
-            context_verdicts_list = self.verify_claims(
-                premises=[context],
-                claims_list=[answer_claims],
-            )
+            # Verify answer claims against context (precision part)
+            context_verdicts_list = self.verify_claims(premises=[context], claims_list=[answer_claims])
             context_verdicts = context_verdicts_list[0]
-
             tp = sum(context_verdicts)
             fp = len(context_verdicts) - tp
 
             if mode != "precision":
-                # If mode is recall or F1, verify context claims against answer (recall)
-                answer_verdicts_list = self.verify_claims(
-                    premises=[answer],
-                    claims_list=[context_claims],
-                )
+                # For recall or F1, verify context claims against answer.
+                answer_verdicts_list = self.verify_claims(premises=[answer], claims_list=[context_claims])
                 answer_verdicts = answer_verdicts_list[0]
                 fn = sum(1 - v for v in answer_verdicts)
             else:
+                answer_verdicts = []
                 fn = 0
 
             if mode == "precision":
                 score = tp / (tp + fp + 1e-8)
             elif mode == "recall":
                 score = tp / (tp + fn + 1e-8)
-            else:  # 'f1' or F-beta
+            else:
                 score = self.fbeta_score(tp, fp, fn, beta)
-
-            final_scores.append(score)
-
-            if input_data.verbose:
+            reasoning = self._build_reasoning(
+                answer=answer,
+                context=context,
+                answer_claims=answer_claims,
+                context_claims=context_claims,
+                answer_verdicts=answer_verdicts,
+                context_verdicts=context_verdicts,
+                tp=tp,
+                fp=fp,
+                fn=fn,
+                score=score,
+                mode=mode,
+                beta=beta,
+            )
+            if verbose:
                 logger.debug(f"Answer: {answer}")
                 logger.debug(f"Context: {context}")
                 logger.debug(f"Answer Claims: {answer_claims}")
                 logger.debug(f"Context Claims: {context_claims}")
                 logger.debug(f"TP: {tp}, FP: {fp}, FN: {fn}")
                 logger.debug(f"Score: {score}")
+                logger.debug(reasoning)
                 logger.debug("-" * 50)
-
-        output_data = RunOutput(final_scores=final_scores)
-        return output_data.final_scores
+            result_item = FactualCorrectnessRunResult(score=round(score, 2), reasoning=reasoning)
+            results_out.append(result_item)
+        output_data = RunOutput(results=results_out)
+        return output_data
