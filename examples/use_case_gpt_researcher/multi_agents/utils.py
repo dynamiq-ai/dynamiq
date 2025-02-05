@@ -1,8 +1,14 @@
 import json
+import re
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.llms import OpenAI
+
+
+def extract_code_block(text):
+    match = re.search(r"```(.*?)```", text, re.DOTALL)
+    return match.group(1).strip() if match else text
 
 
 def execute_agent(system_prompt: str, user_prompt: str, to_json: bool = False) -> dict:
@@ -26,6 +32,7 @@ def execute_agent(system_prompt: str, user_prompt: str, to_json: bool = False) -
 
         if to_json:
             try:
+                response = extract_code_block(response)
                 return json.loads(response.lstrip("'`json").rstrip("'`"))
             except json.JSONDecodeError:
                 return {}
