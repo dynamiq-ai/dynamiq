@@ -128,7 +128,6 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
         """
         Initialize the LLMEvaluators.
         """
-        # --- Statement Extraction Evaluator (unchanged) ---
         extract_instr = (
             "Given a question and an answer, analyze each sentence of the answer and "
             "break it down into one or more fully understandable unique statements. "
