@@ -50,7 +50,6 @@ class ContextPrecisionRunResult(BaseModel):
         score (float): The computed context precision score.
         reasoning (str): Detailed reasoning explaining how the score was derived.
     """
-
     score: float
     reasoning: str
 
@@ -62,7 +61,6 @@ class ContextPrecisionOutput(BaseModel):
     Attributes:
         results (list[ContextPrecisionRunResult]): List of evaluation results.
     """
-
     results: list[ContextPrecisionRunResult]
 
 
@@ -325,11 +323,9 @@ class ContextPrecisionEvaluator(BaseEvaluator):
 
             reasoning_str = self._build_reasoning(question, answer, contexts, verdicts, verdict_details, avg_precision)
 
-            # Append a run result with both score and reasoning.
             results_out.append(ContextPrecisionRunResult(score=avg_precision, reasoning=reasoning_str))
             if input_data.verbose:
                 logger.debug(f"Average Precision Score: {avg_precision}")
                 logger.debug("=" * 50)
 
-        output_data = ContextPrecisionOutput(results=results_out)
-        return output_data
+        return ContextPrecisionOutput(results=results_out)
