@@ -5,12 +5,12 @@ from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.retrievers import PineconeDocumentRetriever
+from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, Prompt
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
-from examples.use_case_gpt_researcher.gpt_researcher.prompts import (
-    get_curate_sources_prompt,
-    get_research_report_prompt,
-)
+from examples.use_case_gpt_researcher.gpt_researcher.prompts import get_research_report_prompt
+
+NUM_SOURCES_MULTIPLIER = 30
 
 
 def write_report_workflow(source_to_extract: int) -> Workflow:
@@ -36,23 +36,39 @@ def write_report_workflow(source_to_extract: int) -> Workflow:
         ),
         cloud="aws",
         region="us-east-1",
-        top_k=source_to_extract,
+        top_k=source_to_extract * NUM_SOURCES_MULTIPLIER,  # Multiplier for retrieving more sources
         depends=[NodeDependency(embed_query_node)],
     )
 
-    # Curate sources from retrieved documents
-    curate_sources_node = OpenAI(
+    curate_sources_node = Python(
+        name="Python: Curate Sources",
         id="curate_sources_node",
-        name="Curate Research Sources",
-        model="gpt-4o-mini",
-        connection=OpenAIConnection(),
-        prompt=Prompt(messages=[Message(role="user", content=get_curate_sources_prompt())]),
-        temperature=0.2,
+        code="""
+def run(input_data):
+    documents = input_data.get("queries", {}).get("documents", [])
+    max_sources = input_data.get("max_sources", float("inf"))
+    max_content_per_source = input_data.get("max_content_per_source")
+
+    grouped_content = {}
+
+    for doc in documents:
+        url = doc.metadata.get("url")
+        content = doc.content
+
+        if url:
+            grouped_content.setdefault(url, []).append(content)
+            if len(grouped_content) >= max_sources:
+                break
+
+    result = [{ "url": url, "content": contents[:max_content_per_source]} for url, contents in grouped_content.items()]
+
+    return result
+        """,
         input_transformer=InputTransformer(
             selector={
-                "sources": f"${[retrieve_documents_node.id]}.output",
-                "max_results": "$.limit_sources",
-                "query": "$.query",
+                "queries": f"${[retrieve_documents_node.id]}.output",
+                "max_sources": "$.max_sources",
+                "max_content_per_source": "$.max_content_per_source",
             }
         ),
         depends=[NodeDependency(retrieve_documents_node)],

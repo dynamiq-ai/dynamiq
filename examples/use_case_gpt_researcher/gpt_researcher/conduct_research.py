@@ -38,7 +38,7 @@ def conduct_research_workflow():
             selector={
                 "task": "$.query",
                 "context": f"${[search_initial_query_node.id]}.output.content.result",
-                "max_iterations": "$.max_iterations",
+                "max_iterations": "$.num_sub_queries",
                 "format": f"{', '.join([f'query {i + 1}' for i in range(3)])}",
             }
         ),
@@ -82,6 +82,7 @@ def run(input_data):
     for query_result in input_data['queries']:
         for el in query_result['content']['raw_response']['results']:
             links.append(el['url'])
+    links = list(set(links))
     links = [{'url': el} for el in links]
     return links
         """,
@@ -124,6 +125,7 @@ def run(input_data):
         id="split_documents_node",
         split_by="character",
         split_length=1000,
+        split_overlap=50,
         input_transformer=InputTransformer(
             selector={"documents": f"${[convert_to_documents_node.id]}.output.content.documents"}
         ),

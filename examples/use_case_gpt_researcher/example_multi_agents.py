@@ -11,14 +11,7 @@ from examples.use_case_gpt_researcher.multi_agents import (
     run_writer_agent,
 )
 
-
-def save_markdown_as_pdf(md_string: str, output_pdf: str):
-    """Save a Markdown string as a PDF."""
-    import markdown
-    from weasyprint import HTML
-
-    html_content = markdown.markdown(md_string)
-    HTML(string=html_content).write_pdf(output_pdf)
+from examples.use_case_gpt_researcher.utils import save_markdown_as_pdf
 
 
 def set_orchestrator() -> GraphOrchestrator:
@@ -59,28 +52,34 @@ def set_orchestrator() -> GraphOrchestrator:
 
 
 if __name__ == "__main__":
+    # If needed - clean Pinecone storage to remove old data
+    # from examples.use_case_gpt_researcher.utils import clean_pinecone_storage
+    # clean_pinecone_storage()
+
     task = {
-        "query": "Why is AI so hyped?",
-        "max_sections": 1,
-        "include_human_feedback": False,
-        "follow_guidelines": True,
+        "query": "AI trends",  # Main topic query
+        "num_sub_queries": 3,  # Number of sub-queries to expand search coverage
+        "max_content_chunks_per_source": 2,  # Max number of content chunks to retrieve per URL from Pinecone
+        "max_sources": 10,  # Max number of unique sources per section to include in the research
+        "max_sections": 3,  # Max number of sections in the research
+        "include_human_feedback": False,  # Adjust section topics based on user feedback
+        "follow_guidelines": True,  # Apply additional guidelines to LLM instructions
         "guidelines": [
             "The report MUST be written in APA format",
             "Each sub section MUST include supporting sources using hyperlinks."
             "If none exist, erase the sub section or rewrite it to be a part of the previous section",
         ],
-        "source_to_extract": 5,
-        "max_iterations": 1,
     }
-    save_report_to_pdf = True
 
     orchestrator = set_orchestrator()
     orchestrator.context = {
         "task": task,
     }
     run_result = orchestrator.run(input_data={})
+
     report = orchestrator.context.get("report")
 
     if report:
-        save_markdown_as_pdf(report, "report.pdf")
+        save_markdown_as_pdf(report, "report_multi_agents.pdf")
+
     print("Report:\n", report)

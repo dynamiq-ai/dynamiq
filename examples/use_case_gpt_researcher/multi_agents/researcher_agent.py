@@ -6,15 +6,17 @@ from examples.use_case_gpt_researcher.gpt_researcher import conduct_research_wor
 def run_initial_research(context: dict, **kwargs) -> dict:
     # Conduct research and gather the relevant information
     task = context.get("task")
-    max_iterations = task.get("max_iterations")
-    source_to_extract = task.get("source_to_extract")
+    num_sub_queries = task.get("num_sub_queries")
+    max_sources = task.get("max_sources")
+    max_content_chunks_per_source = task.get("max_content_chunks_per_source")
+
     query = f'{task.get("query")} - {context.get("query")}' if context.get("query") else task.get("query")
 
     conduct_research = conduct_research_workflow()
     conduct_research.run(
         input_data={
             "query": query,
-            "max_iterations": max_iterations,
+            "num_sub_queries": num_sub_queries,
         }
     )
 
@@ -22,11 +24,12 @@ def run_initial_research(context: dict, **kwargs) -> dict:
     time.sleep(15)
 
     # Generate the research report based on gathered information
-    write_report = write_report_workflow(source_to_extract)
+    write_report = write_report_workflow(max_sources)
     write_report_result = write_report.run(
         input_data={
             "query": query,
-            "limit_sources": source_to_extract,
+            "max_sources": max_sources,
+            "max_content_chunks_per_source": max_content_chunks_per_source,
         }
     )
 
