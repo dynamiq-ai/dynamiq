@@ -58,13 +58,11 @@ def main():
     )
 
     # Print the results
-    for idx, score in enumerate(recall_scores):
+    for idx, result in enumerate(recall_scores.results):
         print(f"Question: {questions[idx]}")
-        print(f"Context Recall Score: {score}")
+        print(f"Context Recall Score: {result.score}")
+        print(result.reasoning)
         print("-" * 50)
-
-    print("Context Recall Scores:")
-    print(recall_scores)
 
 
 if __name__ == "__main__":
