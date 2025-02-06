@@ -265,16 +265,29 @@ class ContextRecallEvaluator(BaseEvaluator):
                 answer=[answer],
             )
 
-            classifications_raw = result["results"][0]["classifications"]
             classifications = []
-            for item in classifications_raw:
-                classification_item = ClassificationItem(
-                    statement=item["statement"],
-                    reason=item["reason"],
-                    attributed=int(item["attributed"]),
-                )
-                classifications.append(classification_item)
+            # Check that we have valid results coming from the evaluator.
+            if "results" not in result or not result["results"]:
+                if input_data.verbose:
+                    logger.debug(f"No results returned for question: {question}, context: {context}.")
+                # Use default behavior: empty classifications list, which will result in a score of 0.0
+            else:
+                # Ensure that classifications are present in the first result.
+                first_result = result["results"][0]
+                if "classifications" not in first_result or not first_result["classifications"]:
+                    if input_data.verbose:
+                        logger.debug(f"No classifications returned for question: {question}, context: {context}.")
+                else:
+                    classifications_raw = first_result["classifications"]
+                    for item in classifications_raw:
+                        classification_item = ClassificationItem(
+                            statement=item["statement"],
+                            reason=item["reason"],
+                            attributed=int(item["attributed"]),
+                        )
+                        classifications.append(classification_item)
 
+            # Calculate recall score.
             attributed_list = [item.attributed for item in classifications]
             num_sentences = len(attributed_list)
             num_attributed = sum(attributed_list)

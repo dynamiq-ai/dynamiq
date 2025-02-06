@@ -422,12 +422,13 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
         Evaluate the factual correctness of answers against contexts.
 
         Pipeline:
-          1) Decompose both answer and context into claims.
-          2) Verify answer claims against context to compute precision.
-          3) If mode is recall or F1, verify context claims against answer to compute FN.
-          4) Compute the final score based on the selected mode.
-          5) Generate detailed reasoning regarding the claim decomposition,
-             verification, and final metric calculations with emojis.
+        1) Decompose both answer and context into claims.
+        2) Verify answer claims against context to compute precision.
+        3) If mode is recall or F1, verify context claims against answer
+            to compute FN.
+        4) Compute the final score based on the selected mode.
+        5) Generate detailed reasoning regarding the claim decomposition,
+            verification, and final metric calculations with emojis.
 
         Args:
             answers (list[str]): List of response texts.
@@ -448,23 +449,50 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
             answer = input_data.answers[idx]
             context = input_data.contexts[idx]  # Now a single string
 
-            # Decompose claims for answer and context
+            # Decompose claims for answer and context.
             answer_claims_list = self.decompose_claims([answer])
-            context_claims_list = self.decompose_claims([context])
-            answer_claims = answer_claims_list[0]
-            context_claims = context_claims_list[0]
+            if not answer_claims_list or answer_claims_list[0] is None:
+                if verbose:
+                    logger.debug(f"No claims decomposed for answer: {answer}. Using empty list.")
+                answer_claims = []
+            else:
+                answer_claims = answer_claims_list[0]
 
-            # Verify answer claims against context (precision part)
+            context_claims_list = self.decompose_claims([context])
+            if not context_claims_list or context_claims_list[0] is None:
+                if verbose:
+                    logger.debug(f"No claims decomposed for context: {context}. Using empty list.")
+                context_claims = []
+            else:
+                context_claims = context_claims_list[0]
+
+            # Verify answer claims against context (precision part).
             context_verdicts_list = self.verify_claims(premises=[context], claims_list=[answer_claims])
-            context_verdicts = context_verdicts_list[0]
+            if not context_verdicts_list or context_verdicts_list[0] is None:
+                if verbose:
+                    logger.debug(
+                        "No verdicts returned when verifying answer claims against context " f"for answer: {answer}"
+                    )
+                context_verdicts = []
+            else:
+                context_verdicts = context_verdicts_list[0]
+
             tp = sum(context_verdicts)
             fp = len(context_verdicts) - tp
 
             if mode != "precision":
                 # For recall or F1, verify context claims against answer.
                 answer_verdicts_list = self.verify_claims(premises=[answer], claims_list=[context_claims])
-                answer_verdicts = answer_verdicts_list[0]
-                fn = sum(1 - v for v in answer_verdicts)
+                if not answer_verdicts_list or answer_verdicts_list[0] is None:
+                    if verbose:
+                        logger.debug(
+                            "No verdicts returned when verifying context claims against answer " f"for answer: {answer}"
+                        )
+                    answer_verdicts = []
+                    fn = 0
+                else:
+                    answer_verdicts = answer_verdicts_list[0]
+                    fn = sum(1 - v for v in answer_verdicts)
             else:
                 answer_verdicts = []
                 fn = 0
@@ -475,6 +503,7 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
                 score = tp / (tp + fn + 1e-8)
             else:
                 score = self.fbeta_score(tp, fp, fn, beta)
+
             reasoning = self._build_reasoning(
                 answer_claims=answer_claims,
                 context_claims=context_claims,
@@ -487,6 +516,7 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
                 mode=mode,
                 beta=beta,
             )
+
             if verbose:
                 logger.debug(f"Answer: {answer}")
                 logger.debug(f"Context: {context}")
@@ -496,7 +526,9 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
                 logger.debug(f"Score: {score}")
                 logger.debug(reasoning)
                 logger.debug("-" * 50)
+
             result_item = FactualCorrectnessRunResult(score=round(score, 2), reasoning=reasoning)
             results_out.append(result_item)
+
         output_data = RunOutput(results=results_out)
         return output_data

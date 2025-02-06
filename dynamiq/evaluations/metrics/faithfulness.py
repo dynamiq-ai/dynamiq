@@ -387,16 +387,20 @@ class FaithfulnessEvaluator(BaseEvaluator):
         return "\n".join(lines)
 
     def run(
-        self, questions: list[str], answers: list[str], contexts: list[str] | list[list[str]], verbose: bool = False
+        self,
+        questions: list[str],
+        answers: list[str],
+        contexts: list[str] | list[list[str]],
+        verbose: bool = False,
     ) -> RunOutput:
         """
         Evaluate the faithfulness of answers given contexts.
 
         Pipeline:
-          1) Simplify the answer into clear candidate statements.
-          2) Evaluate each statement via NLI against the context.
-          3) Compute the faithfulness score as the ratio of faithful statements.
-          4) Generate detailed reasoning explaining the process and final score.
+        1) Simplify the answer into clear candidate statements.
+        2) Evaluate each statement via NLI against the context.
+        3) Compute the faithfulness score as the ratio of faithful statements.
+        4) Generate detailed reasoning explaining the process and final score.
 
         Args:
             questions (list[str]): List of questions.
@@ -413,13 +417,29 @@ class FaithfulnessEvaluator(BaseEvaluator):
             question = input_data.questions[idx]
             answer = input_data.answers[idx]
             context = input_data.contexts[idx]
+
+            # Simplify the answer (using question and answer)
             statements_list = self.simplify_statements([question], [answer])
-            statements = statements_list[0]
+            if not statements_list or statements_list[0] is None:
+                if verbose:
+                    logger.debug(f"No simplified statements for answer: {answer}. Using empty list.")
+                statements = []
+            else:
+                statements = statements_list[0]
+
+            # Evaluate faithfulness via NLI
             nli_results_list = self.check_faithfulness([context], [statements])
-            nli_results = nli_results_list[0]
+            if not nli_results_list or nli_results_list[0] is None:
+                if verbose:
+                    logger.debug("No NLI results for context or statements. " "Using empty list for NLI evaluation.")
+                nli_results = []
+            else:
+                nli_results = nli_results_list[0]
+
             num_statements = len(nli_results)
             num_faithful = sum(item.verdict for item in nli_results)
             score = num_faithful / num_statements if num_statements else 0.0
+
             reasoning = self._build_reasoning(
                 statements=statements,
                 nli_results=nli_results,

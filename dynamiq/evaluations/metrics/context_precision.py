@@ -292,7 +292,6 @@ class ContextPrecisionEvaluator(BaseEvaluator):
         for idx in range(len(input_data.questions)):
             question = input_data.questions[idx]
             answer = input_data.answers[idx]
-            # contexts is now a list[str] for each question.
             contexts = input_data.contexts_list[idx]
 
             verdicts = []
@@ -304,18 +303,35 @@ class ContextPrecisionEvaluator(BaseEvaluator):
                     answer=[answer],
                     context=[context],
                 )
+                # Check if results are present.
+                if ("results" not in result) or (not result["results"]):
+                    # if no results are returned, assign a default verdict and note in details.
+                    default_verdict = 0
+                    verdicts.append(default_verdict)
+                    verdict_details.append("No results returned from evaluator.")
+                    if input_data.verbose:
+                        logger.debug(
+                            f"Missing results for context: {context}. Defaulting verdict to {default_verdict}."
+                        )
+                    continue
+
                 res = result["results"][0]
-                verdict_raw = res["verdict"]
-                verdict = int(verdict_raw) if not isinstance(verdict_raw, str) else int(verdict_raw.strip())
+                verdict_raw = res.get("verdict", "0")
+                try:
+                    # Convert verdict to int.
+                    verdict = int(verdict_raw) if not isinstance(verdict_raw, str) else int(verdict_raw.strip())
+                except (ValueError, AttributeError):
+                    # In case conversion fails, default the verdict.
+                    verdict = 0
                 verdicts.append(verdict)
-                verdict_details.append(res["reason"])
+                verdict_details.append(res.get("reason", "No reasoning provided"))
 
                 if input_data.verbose:
                     logger.debug(f"Question: {question}")
                     logger.debug(f"Answer: {answer}")
                     logger.debug(f"Context: {context}")
                     logger.debug(f"Verdict: {verdict}")
-                    logger.debug(f"Reason: {res['reason']}")
+                    logger.debug(f"Reason: {res.get('reason', 'No reasoning provided')}")
                     logger.debug("-" * 50)
 
             avg_precision = self.calculate_average_precision(verdicts)
