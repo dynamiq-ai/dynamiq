@@ -179,13 +179,13 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
             llm=self.llm,
         )
 
-        classify_instr = (
+        classify_instructions = (
             "Given a question, an answer statement, and a reference text, determine if the answer statement "
             "is supported by the reference text. Explain briefly why the statement is or is not supported. "
             "Return a JSON object with keys 'reasoning' (a short explanation) and 'match' (true/false)"
         )
         self._statement_classifier = LLMEvaluator(
-            instructions=classify_instr.strip(),
+            instructions=classify_instructions.strip(),
             inputs=[
                 {"name": "question", "type": str},
                 {"name": "answer_statement", "type": str},
@@ -232,7 +232,7 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
             llm=self.llm,
         )
 
-    def _unique_candidates(self, candidates: list[str]) -> list[str]:
+    def _get_unique_candidates(self, candidates: list[str]) -> list[str]:
         """
         Return unique candidate statements preserving order.
         Comparison is done on lowercased, stripped strings.
@@ -256,7 +256,7 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
             stmts = res.get("statements", [])
             if not isinstance(stmts, list):
                 stmts = [stmts]
-            all_stmts.append(self._unique_candidates(stmts))
+            all_stmts.append(self._get_unique_candidates(stmts))
         return all_stmts
 
     def classify_statement(self, question: str, answer_stmt: str, ref_text: str) -> tuple[bool, str]:
@@ -390,8 +390,8 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
         """
         Evaluate one question by comparing candidate statements.
         """
-        unique_ans = self._unique_candidates(answer_stmts)
-        unique_gt = self._unique_candidates(gt_stmts)
+        unique_ans = self._get_unique_candidates(answer_stmts)
+        unique_gt = self._get_unique_candidates(gt_stmts)
         gt_text = self._join_candidates(unique_gt)
         ans_class = self._evaluate_candidates(question, unique_ans, gt_text)
         ans_text = self._join_candidates(unique_ans)
