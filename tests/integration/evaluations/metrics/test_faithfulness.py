@@ -11,12 +11,12 @@ def test_faithfulness_evaluator(openai_node):
             "He was a German-born theoretical physicist, widely acknowledged to be one "
             "of the greatest and most influential physicists of all time. "
             "He was best known for developing the theory of relativity, he also made "
-            "important contributions to the development of the theory of quantum mechanics."
+            "important contributions to the development of the theory of quantum "
+            "mechanics."
         ),
         (
-            "The Great Wall of China is a large wall in China. "
-            "It was built to keep out invaders. "
-            "It is visible from space."
+            "The Great Wall of China is a large wall in China. It was built to keep out "
+            "invaders. It is visible from space."
         ),
     ]
     contexts = [
@@ -40,22 +40,22 @@ def test_faithfulness_evaluator(openai_node):
     # Mock the statement simplifier
     evaluator._statement_simplifier.run = MagicMock(
         side_effect=[
-            # First call to simplify statements for the first answer
+            # First call: simplify statements for the first answer
             {
                 "results": [
                     {
                         "statements": [
                             "Albert Einstein was a German-born theoretical physicist.",
-                            "He is widely acknowledged to be one of the greatest"
-                            " and most influential physicists of all time.",
+                            "He is widely acknowledged to be one of the greatest and "
+                            "most influential physicists of all time.",
                             "He was best known for developing the theory of relativity.",
-                            "He also made important contributions to the development"
-                            " of the theory of quantum mechanics.",
+                            "He also made important contributions to the development of "
+                            "the theory of quantum mechanics.",
                         ]
                     }
                 ]
             },
-            # Second call to simplify statements for the second answer
+            # Second call: simplify statements for the second answer
             {
                 "results": [
                     {
@@ -84,8 +84,8 @@ def test_faithfulness_evaluator(openai_node):
                                 "reason": "This is mentioned in the context.",
                             },
                             {
-                                "statement": "He is widely acknowledged to be one of the greatest"
-                                " and most influential physicists of all time.",
+                                "statement": "He is widely acknowledged to be one of the greatest and "
+                                "most influential physicists of all time.",
                                 "verdict": "1",
                                 "reason": "This is mentioned in the context.",
                             },
@@ -95,8 +95,8 @@ def test_faithfulness_evaluator(openai_node):
                                 "reason": "This is mentioned in the context.",
                             },
                             {
-                                "statement": "He also made important contributions to the development"
-                                " of the theory of quantum mechanics.",
+                                "statement": "He also made important contributions to the development of "
+                                "the theory of quantum mechanics.",
                                 "verdict": "1",
                                 "reason": "This is mentioned in the context.",
                             },
@@ -132,51 +132,53 @@ def test_faithfulness_evaluator(openai_node):
     )
 
     # Run the evaluator
-    faithfulness_scores = evaluator.run(questions=questions, answers=answers, contexts=contexts, verbose=False)
+    run_output = evaluator.run(questions=questions, answers=answers, contexts=contexts, verbose=False)
+    # Extract computed scores and reasoning from output results
+    faithfulness_scores = [res.score for res in run_output.results]
+    reasonings = [res.reasoning for res in run_output.results]
 
-    # Expected scores based on the mocked data
-    expected_scores = [
-        1.0,  # For the first question: 4 out of 4 statements are faithful
-        0.6667,  # For the second question: 2 out of 3 statements are faithful
-    ]
+    # Expected scores based on the mocked data:
+    # For the first question: 4 out of 4 statements are faithful -> score 1.0.
+    # For the second question: 2 out of 3 statements are faithful -> score 0.6667.
+    expected_scores = [1.0, 0.6667]
 
-    # Assert that the faithfulness scores are as expected
-    for computed, expected in zip(faithfulness_scores, expected_scores):
+    # Assert the computed scores are as expected and reasoning is provided.
+    for computed, expected, reason in zip(faithfulness_scores, expected_scores, reasonings):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
+        assert isinstance(reason, str) and reason.strip() != "", "Reasoning is empty."
 
 
 def test_faithfulness_evaluator_with_list_of_lists(openai_node):
     """
     Test that the FaithfulnessEvaluator can handle contexts as list[list[str]].
-    Each sub-list should get joined into a single string for each question/answer pair.
+    Each sub-list should be joined into a single string for evaluation.
     """
-
-    # The same questions/answers but contexts is now list[list[str]]
     questions = ["Who was Albert Einstein and what is he best known for?", "Tell me about the Great Wall of China."]
     answers = [
         (
             "He was a German-born theoretical physicist, widely acknowledged to be one "
             "of the greatest and most influential physicists of all time. "
             "He was best known for developing the theory of relativity, he also made "
-            "important contributions to the development of the theory of quantum mechanics."
+            "important contributions to the development of the theory of quantum "
+            "mechanics."
         ),
         (
-            "The Great Wall of China is a large wall in China. "
-            "It was built to keep out invaders. "
-            "It is visible from space."
+            "The Great Wall of China is a large wall in China. It was built to keep out "
+            "invaders. It is visible from space."
         ),
     ]
     contexts = [
         [
-            "Albert Einstein (14 March 1879 - 18 April 1955) was a German-born theoretical physicist, "
-            "widely held to be one of the greatest and most influential scientists of all time.",
-            "Best known for developing the theory of relativity, he also made important contributions "
-            "to quantum mechanics.",
+            "Albert Einstein (14 March 1879 - 18 April 1955) was a German-born theoretical "
+            "physicist, widely held to be one of the greatest and most influential scientists "
+            "of all time.",
+            "Best known for developing the theory of relativity, he also made important "
+            "contributions to quantum mechanics.",
         ],
         [
             "The Great Wall of China is a series of fortifications that were built across the "
-            "historical northern borders of ancient Chinese states and Imperial China as protection "
-            "against various nomadic groups."
+            "historical northern borders of ancient Chinese states and Imperial China as "
+            "protection against various nomadic groups."
         ],
     ]
 
@@ -186,7 +188,7 @@ def test_faithfulness_evaluator_with_list_of_lists(openai_node):
     # Mock the statement simplifier
     evaluator._statement_simplifier.run = MagicMock(
         side_effect=[
-            # Simplify statements for the first answer
+            # First call: simplify statements for the first answer
             {
                 "results": [
                     {
@@ -199,7 +201,7 @@ def test_faithfulness_evaluator_with_list_of_lists(openai_node):
                     }
                 ]
             },
-            # Simplify statements for the second answer
+            # Second call: simplify statements for the second answer
             {
                 "results": [
                     {
@@ -228,8 +230,8 @@ def test_faithfulness_evaluator_with_list_of_lists(openai_node):
                                 "reason": "This is mentioned in the context.",
                             },
                             {
-                                "statement": "He is widely acknowledged to be one of the greatest "
-                                "and most influential physicists of all time.",
+                                "statement": "He is widely acknowledged to be one of the greatest and "
+                                "most influential physicists of all time.",
                                 "verdict": "1",
                                 "reason": "This is mentioned in the context.",
                             },
@@ -239,8 +241,8 @@ def test_faithfulness_evaluator_with_list_of_lists(openai_node):
                                 "reason": "This is mentioned in the context.",
                             },
                             {
-                                "statement": "He also made important contributions to the development "
-                                "of the theory of quantum mechanics.",
+                                "statement": "He also made important contributions to the development of "
+                                "the theory of quantum mechanics.",
                                 "verdict": "1",
                                 "reason": "This is mentioned in the context.",
                             },
@@ -275,17 +277,15 @@ def test_faithfulness_evaluator_with_list_of_lists(openai_node):
         ]
     )
 
-    # Run
-    faithfulness_scores = evaluator.run(
-        questions=questions, answers=answers, contexts=contexts, verbose=False  # list[list[str]]
-    )
+    # Run the evaluator with contexts passed as list[list[str]]
+    run_output = evaluator.run(questions=questions, answers=answers, contexts=contexts, verbose=False)
+    # Extract computed scores and reasoning from output results
+    faithfulness_scores = [res.score for res in run_output.results]
+    reasonings = [res.reasoning for res in run_output.results]
 
-    # Expected scores based on the mocked data
-    expected_scores = [
-        1.0,  # First question: 4/4 statements faithful
-        0.6667,  # Second question: 2/3 statements faithful
-    ]
+    # Expected scores based on the mocked data:
+    expected_scores = [1.0, 0.6667]
 
-    # Check final scores
-    for computed, expected in zip(faithfulness_scores, expected_scores):
+    for computed, expected, reason in zip(faithfulness_scores, expected_scores, reasonings):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
+        assert isinstance(reason, str) and reason.strip() != "", "Reasoning is empty."

@@ -11,7 +11,7 @@ def test_factual_correctness_evaluator(openai_node):
             "He developed the theory of relativity and contributed "
             "to quantum mechanics."
         ),
-        ("The Eiffel Tower is located in Berlin, Germany. " "It was constructed in 1889."),
+        ("The Eiffel Tower is located in Berlin, Germany. It was constructed in 1889."),
     ]
     contexts = [
         ("Albert Einstein was a German-born theoretical physicist. " "He developed the theory of relativity."),
@@ -24,7 +24,7 @@ def test_factual_correctness_evaluator(openai_node):
     # Mock the run method of the claim decomposer
     evaluator._claim_decomposer.run = MagicMock(
         side_effect=[
-            # First call to decompose claims from responses
+            # First call (answer claim decomposition for 1st answer)
             {
                 "results": [
                     {
@@ -36,7 +36,7 @@ def test_factual_correctness_evaluator(openai_node):
                     }
                 ]
             },
-            # Second call to decompose claims from references
+            # Second call (context claim decomposition for 1st context)
             {
                 "results": [
                     {
@@ -47,13 +47,18 @@ def test_factual_correctness_evaluator(openai_node):
                     }
                 ]
             },
-            # Third call to decompose claims from responses
+            # Third call (answer claim decomposition for 2nd answer)
             {
                 "results": [
-                    {"claims": ["The Eiffel Tower is located in Berlin, Germany.", "It was constructed in 1889."]}
+                    {
+                        "claims": [
+                            "The Eiffel Tower is located in Berlin, Germany.",
+                            "It was constructed in 1889.",
+                        ]
+                    }
                 ]
             },
-            # Fourth call to decompose claims from references
+            # Fourth call (context claim decomposition for 2nd context)
             {
                 "results": [
                     {
@@ -71,7 +76,7 @@ def test_factual_correctness_evaluator(openai_node):
     # Mock the run method of the NLI evaluator
     evaluator._nli_evaluator.run = MagicMock(
         side_effect=[
-            # First call: Verify response claims against reference (precision)
+            # First call: Verify answer claims (1st answer) against 1st context (precision)
             {
                 "results": [
                     {
@@ -95,7 +100,7 @@ def test_factual_correctness_evaluator(openai_node):
                     }
                 ]
             },
-            # Second call: Verify reference claims against response (recall)
+            # Second call: Verify context claims (1st context) against 1st answer (recall)
             {
                 "results": [
                     {
@@ -103,7 +108,7 @@ def test_factual_correctness_evaluator(openai_node):
                             {
                                 "claim": "Albert Einstein was a German-born theoretical physicist.",
                                 "verdict": "1",
-                                "reason": "The response claims he was a German theoretical physicist.",
+                                "reason": "The response asserts he was a German theoretical physicist.",
                             },
                             {
                                 "claim": "He developed the theory of relativity.",
@@ -114,7 +119,7 @@ def test_factual_correctness_evaluator(openai_node):
                     }
                 ]
             },
-            # Third call: Verify response claims against reference (precision)
+            # Third call: Verify answer claims (2nd answer) against 2nd context (precision)
             {
                 "results": [
                     {
@@ -133,7 +138,7 @@ def test_factual_correctness_evaluator(openai_node):
                     }
                 ]
             },
-            # Fourth call: Verify reference claims against response (recall)
+            # Fourth call: Verify context claims (2nd context) against 2nd answer (recall)
             {
                 "results": [
                     {
@@ -146,7 +151,7 @@ def test_factual_correctness_evaluator(openai_node):
                             {
                                 "claim": "It was constructed in 1887.",
                                 "verdict": "0",
-                                "reason": "The response does not mention construction start year.",
+                                "reason": "The response does not mention the construction start year.",
                             },
                             {
                                 "claim": "It opened in 1889.",
@@ -161,12 +166,20 @@ def test_factual_correctness_evaluator(openai_node):
     )
 
     # Run the evaluator
-    correctness_scores = evaluator.run(answers=answers, contexts=contexts, verbose=False)
+    run_output = evaluator.run(answers=answers, contexts=contexts, verbose=False)
+    # Extract computed scores from output results
+    correctness_scores = [res.score for res in run_output.results]
 
-    # Expected scores based on the mocked data
-    expected_scores = [0.8, 0.4]  # For the first item  # For the second item
+    # Expected scores based on the mocked data:
+    # For first item: 2 out of 3 answer claims are supported => TP=2, FP=1.
+    # For recall: 2 out of 2 context claims are supported => FN=0.
+    # F1 = (2*precision*recall)/(precision+recall) = (2*0.667*1)/(0.667+1)=0.8 (approx).
+    # For second item: 1 out of 2 answer claims supported => TP=1, FP=1.
+    # For recall: 1 out of 3 context claims supported => FN=2.
+    # F1 = (2*0.5*0.333)/(0.5+0.333)=0.4 (approx).
+    expected_scores = [0.8, 0.4]
 
-    # Assert that the correctness scores are as expected
+    # Assert that the correctness scores are as expected.
     for computed, expected in zip(correctness_scores, expected_scores):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
 
@@ -174,17 +187,15 @@ def test_factual_correctness_evaluator(openai_node):
 def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
     """
     Test that the FactualCorrectnessEvaluator can handle contexts passed as list[list[str]].
-    It should join each sub-list into a single string under the hood, then proceed as normal.
+    The evaluator should join each sub-list into a single string and proceed as normal.
     """
-
-    # Same answers as in the original test
     answers = [
         (
             "Albert Einstein was a German theoretical physicist. "
             "He developed the theory of relativity and contributed "
             "to quantum mechanics."
         ),
-        ("The Eiffel Tower is located in Berlin, Germany. " "It was constructed in 1889."),
+        ("The Eiffel Tower is located in Berlin, Germany. It was constructed in 1889."),
     ]
 
     # contexts passed as list[list[str]] instead of list[str]
@@ -199,7 +210,7 @@ def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
         ],
     ]
 
-    # Initialize evaluator with the provided openai_node
+    # Initialize evaluator
     evaluator = FactualCorrectnessEvaluator(llm=openai_node)
 
     # Mock the run method of the claim decomposer (decompose_claims)
@@ -265,7 +276,7 @@ def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
                             {
                                 "claim": "Albert Einstein was a German theoretical physicist.",
                                 "verdict": "1",
-                                "reason": "The reference mentions he was German-born.",
+                                "reason": "Reference mentions he was German-born.",
                             },
                             {
                                 "claim": "He developed the theory of relativity.",
@@ -275,7 +286,7 @@ def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
                             {
                                 "claim": "He contributed to quantum mechanics.",
                                 "verdict": "0",
-                                "reason": "The reference doesn't mention quantum mechanics.",
+                                "reason": "Reference does not mention quantum mechanics.",
                             },
                         ]
                     }
@@ -289,7 +300,7 @@ def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
                             {
                                 "claim": "Albert Einstein was a German-born theoretical physicist.",
                                 "verdict": "1",
-                                "reason": "The response says 'German theoretical physicist'.",
+                                "reason": "Response states 'German theoretical physicist'.",
                             },
                             {
                                 "claim": "He developed the theory of relativity.",
@@ -308,12 +319,12 @@ def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
                             {
                                 "claim": "The Eiffel Tower is located in Berlin, Germany.",
                                 "verdict": "0",
-                                "reason": "Reference says it's in Paris, France.",
+                                "reason": "Reference states it's in Paris, France.",
                             },
                             {
                                 "claim": "It was constructed in 1889.",
                                 "verdict": "1",
-                                "reason": "Reference mentions it opened in 1889 (close enough).",
+                                "reason": "Reference mentions it opened in 1889.",
                             },
                         ]
                     }
@@ -327,12 +338,12 @@ def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
                             {
                                 "claim": "The Eiffel Tower is located in Paris, France.",
                                 "verdict": "0",
-                                "reason": "Response says Berlin, Germany.",
+                                "reason": "Response states Berlin, Germany.",
                             },
                             {
                                 "claim": "It was constructed in 1887.",
                                 "verdict": "0",
-                                "reason": "Response doesn't mention 1887 start date.",
+                                "reason": "Response does not mention 1887.",
                             },
                             {
                                 "claim": "It opened in 1889.",
@@ -346,12 +357,12 @@ def test_factual_correctness_evaluator_with_list_of_lists(openai_node):
         ]
     )
 
-    # Run the evaluator
-    correctness_scores = evaluator.run(answers=answers, contexts=contexts, verbose=False)
+    # Run the evaluator with contexts passed as list[list[str]]
+    run_output = evaluator.run(answers=answers, contexts=contexts, verbose=False)
+    correctness_scores = [res.score for res in run_output.results]
 
-    # Expected scores based on the mocked data
-    expected_scores = [0.8, 0.4]  # same as in the original test
+    # Expected scores (same as before): [0.8, 0.4]
+    expected_scores = [0.8, 0.4]
 
-    # Assert that the correctness scores match our expectations
     for computed, expected in zip(correctness_scores, expected_scores):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"

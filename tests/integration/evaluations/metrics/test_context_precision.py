@@ -58,10 +58,9 @@ def test_context_precision_evaluator(openai_node):
         ],
     ]
 
-    # Initialize evaluator with the provided openai_node
     evaluator = ContextPrecisionEvaluator(llm=openai_node)
 
-    # Prepare the mocked results for each context evaluation
+    # Prepare mocked results for each context evaluation (6 results total)
     mocked_run_results = [
         # First question, first context
         {
@@ -77,8 +76,10 @@ def test_context_precision_evaluator(openai_node):
             "results": [
                 {
                     "verdict": "1",
-                    "reason": """ The context includes details about Einstein's famous equation,
-                                which is relevant to the answer.""",
+                    "reason": (
+                        "The context includes details about Einstein's famous equation, "
+                        "which is relevant to the answer."
+                    ),
                 }
             ]
         },
@@ -103,25 +104,39 @@ def test_context_precision_evaluator(openai_node):
         # Third question, first context
         {
             "results": [
-                {"verdict": "0", "reason": "The context is about the Andes, not relevant to the tallest mountain."}
+                {
+                    "verdict": "0",
+                    "reason": "The context is about the Andes, not relevant to the tallest mountain.",
+                }
             ]
         },
         # Third question, second context
-        {"results": [{"verdict": "0", "reason": "The context is about Mount Kilimanjaro, not the tallest mountain."}]},
+        {
+            "results": [
+                {
+                    "verdict": "0",
+                    "reason": "The context is about Mount Kilimanjaro, not the tallest mountain.",
+                }
+            ]
+        },
     ]
 
-    # Mock the run method of the evaluator's internal LLMEvaluator
     evaluator._context_precision_evaluator.run = MagicMock(side_effect=mocked_run_results)
 
-    # Run the evaluator
-    correctness_scores = evaluator.run(questions=questions, answers=answers, contexts_list=contexts_list, verbose=False)
+    output = evaluator.run(
+        questions=questions,
+        answers=answers,
+        contexts_list=contexts_list,
+        verbose=False,
+    )
 
-    # Expected scores based on the mocked data
+    # Extract scores from each run result.
+    results = output.results
     expected_scores = [1.0, 1.0, 0.0]
-
-    # Assert that the correctness scores are as expected
-    for computed, expected in zip(correctness_scores, expected_scores):
-        assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
+    for result, expected in zip(results, expected_scores):
+        assert abs(result.score - expected) < 0.01, f"Expected {expected}, got {result.score}"
+        # Also assert that reasoning is not empty.
+        assert result.reasoning.strip() != "", "Reasoning should not be empty"
 
 
 def test_context_precision_evaluator_single_list_of_contexts(openai_node):
@@ -129,10 +144,9 @@ def test_context_precision_evaluator_single_list_of_contexts(openai_node):
     Test that the ContextPrecisionEvaluator can accept contexts_list as list[str].
     We'll provide one question, one answer, and multiple context strings in a single list.
     """
-
     question = ["Tell me about Python programming language."]
     answer = ["Python is a high-level, interpreted programming language known for its readability."]
-    # Here is the single list[str] of contexts:
+    # Provide a single list of contexts (list[str])
     contexts_list = [
         "Python is an interpreted language created by Guido van Rossum, first released in 1991.",
         "It's dynamically typed and garbage-collected, and supports multiple programming paradigms.",
@@ -141,8 +155,7 @@ def test_context_precision_evaluator_single_list_of_contexts(openai_node):
 
     evaluator = ContextPrecisionEvaluator(llm=openai_node)
 
-    # Mocked results for each context string
-    # Assume we want the first two contexts to be relevant (verdict=1), last one not relevant (verdict=0).
+    # Expected mocked results for each context string
     mocked_run_results = [
         {
             "results": [
@@ -154,23 +167,31 @@ def test_context_precision_evaluator_single_list_of_contexts(openai_node):
             "results": [
                 {
                     "verdict": "0",
-                    "reason": "Context is about Python indentation only, not fully relevant to the answer.",
+                    "reason": (
+                        "Context is focused on Python indentation only, which is only a part "
+                        "of its design philosophy, hence less relevant."
+                    ),
                 }
             ]
         },
     ]
 
-    # Mock the run method
     evaluator._context_precision_evaluator.run = MagicMock(side_effect=mocked_run_results)
 
-    # Run the evaluator
-    precision_scores = evaluator.run(
-        questions=question, answers=answer, contexts_list=contexts_list, verbose=False  # list[str] for contexts
+    output = evaluator.run(
+        questions=question,
+        answers=answer,
+        contexts_list=contexts_list,
+        verbose=False,
     )
 
-    # We expect two correct contexts (1, 1) and one incorrect (0) -> average = 2/3.
-    expected_score = [1, 1, 0]  # This is the final score for the single question.
+    # Since we have three contexts for the single question,
+    # compute expected average precision.
+    # Our mocked verdicts are [1, 1, 0]:
+    # For i=0: precision= 1/1=1, for i=1: precision=2/2=1; sum=2, total relevant=2 => avg=1.0.
+    expected_final_score = 1.0
 
-    # Compare computed result with expected
-    for computed, expected in zip(precision_scores, expected_score):
-        assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
+    # There is only one result.
+    result = output.results[0]
+    assert abs(result.score - expected_final_score) < 0.01, f"Expected {expected_final_score}, got {result.score}"
+    assert result.reasoning.strip() != "", "Reasoning should not be empty"

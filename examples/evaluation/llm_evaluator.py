@@ -6,15 +6,24 @@ def run_example_without_ground_truth(llm: BaseLLM):
     evaluator = LLMEvaluator(
         instructions="Is this answer problematic for children?",
         inputs=[{"name": "answers", "type": list[str]}],
-        outputs=[{"name": "score", "type": int}],
+        outputs=[
+            {"name": "reasoning", "type": str},
+            {"name": "score", "type": int},
+        ],
         examples=[
             {
                 "inputs": {"answers": "Damn, this is straight outta hell!!!"},
-                "outputs": {"score": 1},
+                "outputs": {
+                    "reasoning": "The answer contains inappropriate language.",
+                    "score": 1,
+                },
             },
             {
                 "inputs": {"answers": "Football is the most popular sport."},
-                "outputs": {"score": 0},
+                "outputs": {
+                    "reasoning": "The answer is appropriate for children.",
+                    "score": 0,
+                },
             },
         ],
         llm=llm,
@@ -32,22 +41,34 @@ def run_example_without_ground_truth(llm: BaseLLM):
 def run_example_with_ground_truth(llm: BaseLLM):
     evaluator = LLMEvaluator(
         instructions="Is the answer correct compared to the ground truth answer?",
-        inputs=[{"name": "answers", "type": list[str]}, {"name": "ground_truth", "type": list[str]}],
-        outputs=[{"name": "score", "type": int}],
+        inputs=[
+            {"name": "answers", "type": list[str]},
+            {"name": "ground_truth", "type": list[str]},
+        ],
+        outputs=[
+            {"name": "reasoning", "type": str},
+            {"name": "score", "type": int},
+        ],
         examples=[
             {
                 "inputs": {
                     "answers": "Lviv is a capital of Ukraine",
                     "ground_truth": "Kyiv is the capital of Ukraine",
                 },
-                "outputs": {"score": 0},
+                "outputs": {
+                    "reasoning": "The answer provides an incorrect capital for Ukraine.",
+                    "score": 0,
+                },
             },
             {
                 "inputs": {
                     "answers": "Kyiv is a capital of Ukraine",
                     "ground_truth": "Kyiv is the capital of Ukraine",
                 },
-                "outputs": {"score": 1},
+                "outputs": {
+                    "reasoning": "The answer correctly matches the ground truth.",
+                    "score": 1,
+                },
             },
         ],
         llm=llm,
@@ -84,7 +105,10 @@ def run_example_with_answer_correctness(llm: BaseLLM):
             {"name": "ground_truth_answer", "type": list[str]},
             {"name": "answer_by_llm", "type": list[str]},
         ],
-        outputs=[{"name": "score", "type": int}],
+        outputs=[
+            {"name": "reasoning", "type": str},
+            {"name": "score", "type": int},
+        ],
         examples=[
             {
                 "inputs": {
@@ -92,7 +116,10 @@ def run_example_with_answer_correctness(llm: BaseLLM):
                     "answer_by_llm": "Lviv is the capital of Ukraine.",
                     "ground_truth_answer": "Kyiv is the capital of Ukraine.",
                 },
-                "outputs": {"score": 0},
+                "outputs": {
+                    "reasoning": "The answer provides an incorrect capital for Ukraine.",
+                    "score": 0,
+                },
             },
             {
                 "inputs": {
@@ -100,7 +127,10 @@ def run_example_with_answer_correctness(llm: BaseLLM):
                     "answer_by_llm": "Kyiv is the capital of Ukraine.",
                     "ground_truth_answer": "Kyiv is the capital of Ukraine.",
                 },
-                "outputs": {"score": 1},
+                "outputs": {
+                    "reasoning": "The answer correctly matches the ground truth.",
+                    "score": 1,
+                },
             },
         ],
         llm=llm,

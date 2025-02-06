@@ -53,13 +53,13 @@ def main():
     )
 
     # Print the results
-    for idx, score in enumerate(faithfulness_scores):
+    for idx, result in enumerate(faithfulness_scores.results):
         print(f"Question: {questions[idx]}")
-        print(f"Faithfulness Score: {score}")
-        print("-" * 50)
+        print(f"Faithfulness Score: {result.score}")
+        print("Reasoning:")
+        print(result.reasoning)
 
-    print("Faithfulness Scores:")
-    print(faithfulness_scores)
+        print("-" * 50)
 
 
 if __name__ == "__main__":

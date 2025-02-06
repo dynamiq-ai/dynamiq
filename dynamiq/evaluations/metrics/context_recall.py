@@ -19,41 +19,27 @@ class ContextRecallInput(BaseModel):
         answers (list[str]): List of answers.
         verbose (bool): Flag to enable verbose logging.
     """
-
     questions: list[str]
     contexts: list[str] | list[list[str]]
     answers: list[str]
     verbose: bool = False
 
-    # mode="before" -> run this validator before creating the model
     @field_validator("contexts", mode="before")
     def unify_contexts(cls, v):
         """
         If we receive a list of lists of strings, join each sublist into a single string.
         Otherwise, if it's already list[str], do nothing.
         """
-        # Ensure "contexts" is at least a list
         if not isinstance(v, list):
             raise ValueError("contexts must be either a list[str] or a list[list[str]].")
-
-        # Check if list[list[str]] (all items are lists, each sublist all strings)
         if all(isinstance(item, list) and all(isinstance(x, str) for x in item) for item in v):
-            # Convert each sublist into a single string by joining with a space
             return [" ".join(sublist) for sublist in v]
-
-        # Check if already list[str]
         if all(isinstance(item, str) for item in v):
             return v
-
-        # Otherwise, invalid data structure
         raise ValueError("contexts must be either a list[str] or a list[list[str]].")
 
     @model_validator(mode="after")
     def check_equal_length(self):
-        """
-        After the model is created (and 'contexts' is normalized),
-        ensure that questions, contexts, and answers are the same length.
-        """
         if not (len(self.questions) == len(self.contexts) == len(self.answers)):
             raise ValueError("Questions, contexts, and answers must have the same length.")
         return self
@@ -68,7 +54,6 @@ class ClassificationItem(BaseModel):
         reason (str): Reason for the classification.
         attributed (int): 1 if attributed to context, 0 otherwise.
     """
-
     statement: str
     reason: str
     attributed: int
@@ -81,15 +66,28 @@ class ClassificationItem(BaseModel):
         return v
 
 
+class ContextRecallRunResult(BaseModel):
+    """
+    Result model for the context recall evaluation.
+
+    Attributes:
+        score (float): The computed context recall score.
+        reasoning (str): Detailed reasoning explaining how the score was derived.
+    """
+
+    score: float
+    reasoning: str
+
+
 class ContextRecallOutput(BaseModel):
     """
     Output model for context recall evaluation.
 
     Attributes:
-        final_scores (List[float]): List of context recall scores.
+        results (list[ContextRecallRunResult]): Detailed run results.
     """
 
-    final_scores: list[float]
+    results: list[ContextRecallRunResult]
 
 
 class ContextRecallEvaluator(BaseEvaluator):
@@ -99,11 +97,9 @@ class ContextRecallEvaluator(BaseEvaluator):
     Attributes:
         llm (BaseLLM): The language model to use for evaluation.
     """
-
     name: str = "ContextRecall"
     llm: BaseLLM
 
-    # Private attribute
     _classification_evaluator: LLMEvaluator = PrivateAttr()
 
     def __init__(self, **data):
@@ -112,16 +108,14 @@ class ContextRecallEvaluator(BaseEvaluator):
 
     def _initialize_evaluator(self):
         class_instructions = (
-            'Given a "Question", "Context", and "Answer", analyze each sentence '
-            "in the Answer and classify if the sentence can be attributed to the "
-            "given Context or not.\n"
+            'Given a "Question", "Context", and "Answer", analyze each sentence in the '
+            "Answer and classify if the sentence can be attributed to the given Context "
+            "or not.\n"
             "- Use '1' (Yes) or '0' (No) for classification.\n"
             '- Provide a brief "reason" for each classification.\n'
-            '- Output as a JSON object with key "classifications", where the value '
-            'is a list of dictionaries with keys "statement", "reason", and '
-            '"attributed".\n'
-            "- Ensure your response is valid JSON, using double quotes for "
-            "all strings."
+            '- Output as a JSON object with key "classifications", where the value is a list '
+            'of dictionaries with keys "statement", "reason", and "attributed".\n'
+            "- Ensure your response is valid JSON, using double quotes for all strings."
         )
 
         self._classification_evaluator = LLMEvaluator(
@@ -140,40 +134,20 @@ class ContextRecallEvaluator(BaseEvaluator):
                         "question": ["What can you tell me about Albert Einstein?"],
                         "context": [
                             (
-                                "Albert Einstein (14 March 1879 - 18 April 1955) "
-                                "was a German-born theoretical physicist, widely "
-                                "held to be one of the greatest and most influential "
-                                "scientists of all time. Best known for developing "
-                                "the theory of relativity, he also made important "
-                                "contributions to quantum mechanics, and was thus a "
-                                "central figure in the revolutionary reshaping of the "
-                                "scientific understanding of nature that modern "
-                                "physics accomplished in the first decades of the "
-                                "twentieth century. His mass-energy equivalence "
-                                "formula E = mc^2, which arises from relativity "
-                                "theory, has been called 'the world's most famous "
-                                "equation'. He received the 1921 Nobel Prize in "
-                                "Physics 'for his services to theoretical physics, "
-                                "and especially for his discovery of the law of the "
-                                "photoelectric effect', a pivotal step in the "
-                                "development of quantum theory. His work is also "
-                                "known for its influence on the philosophy of science. "
-                                "In a 1999 poll of 130 leading physicists worldwide by "
-                                "the British journal Physics World, Einstein was ranked "
-                                "the greatest physicist of all time. His intellectual "
-                                "achievements and originality have made Einstein "
-                                "synonymous with genius."
+                                "Albert Einstein (14 March 1879 - 18 April 1955) was a German-born "
+                                "theoretical physicist, widely held to be one of the greatest and most "
+                                "influential scientists of all time. Best known for developing the theory "
+                                "of relativity, he also made important contributions to quantum mechanics, "
+                                "and was thus a pivotal figure in modern physics."
                             )
                         ],
                         "answer": [
                             (
-                                "Albert Einstein, born on 14 March 1879, was a "
-                                "German-born theoretical physicist, widely held to be "
-                                "one of the greatest and most influential scientists "
-                                "of all time. He received the 1921 Nobel Prize in "
-                                "Physics for his services to theoretical physics. He "
-                                "published 4 papers in 1905. Einstein moved to "
-                                "Switzerland in 1895."
+                                "Albert Einstein, born on 14 March 1879, was a German-born theoretical "
+                                "physicist, widely held to be one of the greatest and most influential "
+                                "scientists of all time. He received the 1921 Nobel Prize in Physics for his "
+                                "services to theoretical physics. He published 4 papers in 1905. Einstein "
+                                "moved to Switzerland in 1895."
                             )
                         ],
                     },
@@ -181,25 +155,24 @@ class ContextRecallEvaluator(BaseEvaluator):
                         "classifications": [
                             {
                                 "statement": (
-                                    "Albert Einstein, born on 14 March 1879, was a "
-                                    "German-born theoretical physicist, widely held to "
-                                    "be one of the greatest and most influential "
+                                    "Albert Einstein, born on 14 March 1879, was a German-born theoretical "
+                                    "physicist, widely held to be one of the greatest and most influential "
                                     "scientists of all time."
                                 ),
-                                "reason": "The date of birth of Einstein is mentioned in the context.",
+                                "reason": "The birth date and status as a theoretical physicist are mentioned.",
                                 "attributed": 1,
                             },
                             {
                                 "statement": (
-                                    "He received the 1921 Nobel Prize in Physics for "
-                                    "his services to theoretical physics."
+                                    "He received the 1921 Nobel Prize in Physics for his services to theoretical "
+                                    "physics."
                                 ),
-                                "reason": "The exact sentence is present in the given context.",
+                                "reason": "The sentence is present in the context.",
                                 "attributed": 1,
                             },
                             {
                                 "statement": "He published 4 papers in 1905.",
-                                "reason": "There is no mention about papers he wrote in the context.",
+                                "reason": "There is no mention of his papers in the context.",
                                 "attributed": 0,
                             },
                             {
@@ -214,27 +187,65 @@ class ContextRecallEvaluator(BaseEvaluator):
             llm=self.llm,
         )
 
+    def _build_reasoning(self, classifications: list[ClassificationItem], score: float) -> str:
+        """
+        Build a detailed reasoning string for context recall evaluation.
+
+        Explains:
+        • Each sentence in the answer is classified (using emojis: ✅ for attributed, ❌ for not).
+        • A corresponding explanation is provided for each classification.
+        • The final context recall score is computed as the ratio of attributable sentences.
+
+        Args:
+            classifications (list[ClassificationItem]): List of classification results.
+            score (float): The computed recall score.
+
+        Returns:
+            str: Detailed reasoning.
+        """
+        lines = []
+        lines.extend(["Reasoning:", "", "Classifications:"])
+
+        for item in classifications:
+            mark = "✅" if item.attributed == 1 else "❌"
+            lines.extend(
+                [
+                    f" - Statement: {item.statement}",
+                    f"   Verdict: {mark} (value: {item.attributed})",
+                    f"   Explanation: {item.reason}",
+                    "",
+                ]
+            )
+
+        lines.extend(
+            [
+                f"Context Recall Score = {score:.2f}",
+            ]
+        )
+
+        return "\n".join(lines)
+
     def run(
         self,
         questions: list[str],
         contexts: list[str] | list[list[str]],
         answers: list[str],
         verbose: bool = False,
-    ) -> list[float]:
+    ) -> ContextRecallOutput:
         """
         Evaluate the context recall for each question.
 
         Args:
             questions (list[str]): List of questions.
-            contexts (list[str] or list[list[str]]): Could be a single list of context strings
-                or a list of sublists (each sublist is for one question).
+            contexts (list[str] or list[list[str]]): Either a single list of context strings or a list
+                of context strings (one per question).
             answers (list[str]): List of answers.
-            verbose (bool): Flag to enable verbose logging.
+            verbose (bool): Flag to enable verbose logging (for internal logging only).
 
         Returns:
-            list[float]: List of context recall scores for each question.
+            ContextRecallOutput: Contains a list of context recall run results.
         """
-        # Pass everything to the Pydantic model, which will unify "contexts".
+        # Pass everything to the Pydantic model, which normalizes "contexts".
         input_data = ContextRecallInput(
             questions=questions,
             contexts=contexts,
@@ -242,37 +253,47 @@ class ContextRecallEvaluator(BaseEvaluator):
             verbose=verbose,
         )
 
-        final_scores = []
-
+        results_out = []
         for idx in range(len(input_data.questions)):
             question = input_data.questions[idx]
-            context = input_data.contexts[idx]  # Now guaranteed to be a single string
+            context = input_data.contexts[idx]  # Guaranteed to be a single string
             answer = input_data.answers[idx]
 
-            # Evaluate classification
             result = self._classification_evaluator.run(
                 question=[question],
                 context=[context],
                 answer=[answer],
             )
 
-            # Extract classifications
-            classifications_raw = result["results"][0]["classifications"]
             classifications = []
-            for item in classifications_raw:
-                classification_item = ClassificationItem(
-                    statement=item["statement"],
-                    reason=item["reason"],
-                    attributed=int(item["attributed"]),
-                )
-                classifications.append(classification_item)
+            # Check that we have valid results coming from the evaluator.
+            if "results" not in result or not result["results"]:
+                if input_data.verbose:
+                    logger.debug(f"No results returned for question: {question}, context: {context}.")
+                # Use default behavior: empty classifications list, which will result in a score of 0.0
+            else:
+                # Ensure that classifications are present in the first result.
+                first_result = result["results"][0]
+                if "classifications" not in first_result or not first_result["classifications"]:
+                    if input_data.verbose:
+                        logger.debug(f"No classifications returned for question: {question}, context: {context}.")
+                else:
+                    classifications_raw = first_result["classifications"]
+                    for item in classifications_raw:
+                        classification_item = ClassificationItem(
+                            statement=item["statement"],
+                            reason=item["reason"],
+                            attributed=int(item["attributed"]),
+                        )
+                        classifications.append(classification_item)
 
-            # Compute the score
+            # Calculate recall score.
             attributed_list = [item.attributed for item in classifications]
             num_sentences = len(attributed_list)
             num_attributed = sum(attributed_list)
             score = num_attributed / num_sentences if num_sentences > 0 else 0.0
-            final_scores.append(score)
+
+            reasoning_str = self._build_reasoning(classifications, score)
 
             if input_data.verbose:
                 logger.debug(f"Question: {question}")
@@ -283,5 +304,6 @@ class ContextRecallEvaluator(BaseEvaluator):
                 logger.debug(f"Context Recall Score: {score}")
                 logger.debug("-" * 50)
 
-        output_data = ContextRecallOutput(final_scores=final_scores)
-        return output_data.final_scores
+            results_out.append(ContextRecallRunResult(score=score, reasoning=reasoning_str))
+
+        return ContextRecallOutput(results=results_out)

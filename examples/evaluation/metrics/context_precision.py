@@ -79,17 +79,15 @@ def main():
         questions=questions,
         answers=answers,
         contexts_list=contexts_list,
-        verbose=False,  # Set to True to enable verbose logging
+        verbose=True,  # Set to True to enable verbose logging
     )
 
     # Print the results
-    for idx, score in enumerate(correctness_scores):
+    for idx, result in enumerate(correctness_scores.results):
         print(f"Question: {questions[idx]}")
-        print(f"Context Precision Score: {score}")
+        print(f"Context Precision Score: {result.score}")
+        print(result.reasoning)
         print("-" * 50)
-
-    print("Context Precision Scores:")
-    print(correctness_scores)
 
 
 if __name__ == "__main__":
