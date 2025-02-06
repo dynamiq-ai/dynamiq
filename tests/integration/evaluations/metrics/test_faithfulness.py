@@ -194,9 +194,9 @@ def test_faithfulness_evaluator_with_list_of_lists(openai_node):
                     {
                         "statements": [
                             "Albert Einstein was a German-born theoretical physicist.",
-                            "He is widely acknowledged to be one of the most influential " "physicists of all time.",
+                            "He is widely acknowledged to be one of the most influential physicists of all time.",
                             "He was best known for developing the theory of relativity.",
-                            "He made important contributions to the development of the theory " "of quantum mechanics.",
+                            "He made important contributions to the development of the theory of quantum mechanics.",
                         ]
                     }
                 ]

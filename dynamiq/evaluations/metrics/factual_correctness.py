@@ -223,7 +223,7 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
                             {
                                 "claim": "Albert Einstein was a German theoretical physicist.",
                                 "verdict": 1,
-                                "reason": "The premise states he was a German-born theoretical " "physicist.",
+                                "reason": "The premise states he was a German-born theoretical physicist.",
                             },
                             {
                                 "claim": "Albert Einstein developed the theory of relativity.",
@@ -233,7 +233,7 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
                             {
                                 "claim": "Albert Einstein contributed to quantum mechanics.",
                                 "verdict": 0,
-                                "reason": "The premise does not mention contributions to quantum " "mechanics.",
+                                "reason": "The premise does not mention contributions to quantum mechanics.",
                             },
                         ]
                     },

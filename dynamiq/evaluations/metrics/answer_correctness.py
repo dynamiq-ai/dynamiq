@@ -1,34 +1,9 @@
-"""
-Evaluator for computing answer correctness using candidate statements with
-explanation of match decisions and weighted scoring.
-
-Overview:
-  • The evaluator splits both the answer and the ground truth answer into a set of
-    core fact “candidate statements.”
-  • It then compares each statement from the answer with the statements from the ground
-    truth answer to decide if the core fact is present. A "✅" indicates that the statement
-    is supported by the ground truth, whereas a "❌" indicates it is not.
-  • Similarly, ground truth statements are checked against the answer to see if any are missing.
-  • Based on these comparisons, the metrics are computed:
-      - TP (True Positive): Number of answer statements that are correctly supported.
-      - FP (False Positive): Number of answer statements that are not supported.
-      - FN (False Negative): Number of ground truth statements missing from the answer.
-      - Precision = TP / (TP + FP)
-      - Recall    = TP / (TP + FN)
-      - F1 Score  = 2 * (Precision * Recall) / (Precision + Recall)
-  • Furthermore, if custom weight values are provided (other than the default [1.0, 0.0]),
-    the final score is computed as a weighted combination of the F1 score and the secondary metric.
-
-The evaluator outputs both the final (weighted) score and detailed reasoning explaining each step.
-"""
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from dynamiq.evaluations import BaseEvaluator
 from dynamiq.evaluations.llm_evaluator import LLMEvaluator
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.utils.logger import logger
-
-# ------------------------ Models ---------------------------
 
 
 class ExtractStatementsInput(BaseModel):
@@ -117,21 +92,27 @@ class RunOutput(BaseModel):
     results: list[RunResult]
 
 
-# ------------------ Evaluator -------------------------------
-
-
 class AnswerCorrectnessEvaluator(BaseEvaluator):
     """
-    Evaluator for computing answer correctness.
+    Evaluator for computing answer correctness using candidate statements with
+    explanation of match decisions and weighted scoring.
 
-    Pipeline:
-      1) Statement Extraction: The answer and ground truth answer are split into candidate statements.
-      2) Statement Classification: Each answer statement is compared to the ground truth answer to see if the
-         core fact is supported. Similarly, ground truth statements are compared to the answer to detect missing facts.
-         The classification step returns, for each statement, a match verdict (true/false) and an explanation.
-      3) Metrics (TP, FP, FN, Precision, Recall, F1) are computed.
-      4) A final score is produced.
-      5) A detailed reasoning output is generated, explaining each step and metric.
+    Overview:
+    • The evaluator splits both the answer and the ground truth answer into a set of
+        core fact “candidate statements.”
+    • It then compares each statement from the answer with the statements from the ground
+        truth answer to decide if the core fact is present. A "✅" indicates that the statement
+        is supported by the ground truth, whereas a "❌" indicates it is not.
+    • Similarly, ground truth statements are checked against the answer to see if any are missing.
+    • Based on these comparisons, the metrics are computed:
+        - TP (True Positive): Number of answer statements that are correctly supported.
+        - FP (False Positive): Number of answer statements that are not supported.
+        - FN (False Negative): Number of ground truth statements missing from the answer.
+        - Precision = TP / (TP + FP)
+        - Recall    = TP / (TP + FN)
+        - F1 Score  = 2 * (Precision * Recall) / (Precision + Recall)
+
+    The evaluator outputs both the final score and detailed reasoning explaining each step.
     """
     name: str = "AnswerCorrectness"
     llm: BaseLLM
@@ -198,7 +179,6 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
             llm=self.llm,
         )
 
-        # --- Statement Classification Evaluator (improved with explanation) ---
         classify_instr = (
             "Given a question, an answer statement, and a reference text, determine if the answer statement "
             "is supported by the reference text. Explain briefly why the statement is or is not supported. "
