@@ -313,8 +313,6 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
 
     def _build_reasoning(
         self,
-        answer: str,
-        context: str,
         answer_claims: list[str],
         context_claims: list[str],
         answer_verdicts: list[int],
@@ -330,9 +328,9 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
         Build a detailed reasoning string for factual correctness evaluation.
 
         Explains:
-          • How the answer and context were decomposed into claims.
-          • How claim verification produced verdicts (TP, FP, FN) with emojis.
-          • The calculation of the final score depending on the mode.
+        • How the answer and context were decomposed into claims.
+        • How claim verification produced verdicts (TP, FP, FN) with emojis.
+        • The calculation of the final score depending on the mode.
 
         Args:
             answer (str): The answer text.
@@ -352,45 +350,64 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
             str: Detailed reasoning.
         """
         lines = []
-        lines.append("Reasoning:")
-        lines.append("")
-        lines.append("1. Claim Decomposition:")
-        lines.append("   Answer was decomposed into claims:")
+        lines.extend(["Reasoning:", "", "1. Claim Decomposition:", "   Answer was decomposed into claims:"])
         for claim in answer_claims:
             lines.append(f"     - {claim}")
-        lines.append("   Context was decomposed into claims:")
+
+        lines.extend(["   Context was decomposed into claims:"])
         for claim in context_claims:
             lines.append(f"     - {claim}")
-        lines.append("")
-        lines.append("2. Claim Verification:")
-        # Map verdicts to emojis: 1->✅, 0->❌
+
+        lines.extend(["", "2. Claim Verification:"])
+        # Map verdicts to emojis: 1 -> ✅, 0 -> ❌
         mapped_context = [("✅" if v == 1 else "❌") for v in context_verdicts]
-        lines.append("   Verification of answer claims against context yields:")
-        lines.append(f"     Verdicts: {mapped_context}   (✅ = supported, ❌ = unsupported)")
-        lines.append(f"     TP (supported): {tp}")
-        lines.append(f"     FP (unsupported): {fp}")
+
+        lines.extend(
+            [
+                "   Verification of answer claims against context yields:",
+                f"     Verdicts: {mapped_context}   (✅ = supported, ❌ = unsupported)",
+                f"     TP (supported): {tp}",
+                f"     FP (unsupported): {fp}",
+            ]
+        )
+
         if mode != "precision":
             mapped_answer = [("✅" if v == 1 else "❌") for v in answer_verdicts]
-            lines.append("")
-            lines.append("   Verification of context claims against answer yields:")
-            lines.append(f"     Verdicts: {mapped_answer}")
-            lines.append(f"     FN (not supported): {fn}")
+            lines.extend(
+                [
+                    "",
+                    "   Verification of context claims against answer yields:",
+                    f"     Verdicts: {mapped_answer}",
+                    f"     FN (not supported): {fn}",
+                ]
+            )
+
         lines.append("")
+
         if mode == "precision":
             precision = tp / (tp + fp + 1e-8)
-            lines.append(f"Precision = TP/(TP+FP) = {precision:.2f}")
+            lines.extend([f"Precision = TP/(TP+FP) = {precision:.2f}"])
         elif mode == "recall":
             recall = tp / (tp + fn + 1e-8)
-            lines.append(f"Recall = TP/(TP+FN) = {recall:.2f}")
+            lines.extend([f"Recall = TP/(TP+FN) = {recall:.2f}"])
         else:
             precision = tp / (tp + fp + 1e-8)
             recall = tp / (tp + fn + 1e-8) if (tp + fn) > 0 else 0.0
-            lines.append(f"Precision = TP/(TP+FP) = {precision:.2f}")
-            lines.append(f"Recall = TP/(TP+FN) = {recall:.2f}")
-            lines.append(f"F-beta Score (beta={beta:.2f}) = {score:.2f}")
-        lines.append("")
-        lines.append(f"Final Score = {score:.2f}")
-        lines.append("-" * 50)
+            lines.extend(
+                [
+                    f"Precision = TP/(TP+FP) = {precision:.2f}",
+                    f"Recall = TP/(TP+FN) = {recall:.2f}",
+                    f"F-beta Score (beta={beta:.2f}) = {score:.2f}",
+                ]
+            )
+
+        lines.extend(
+            [
+                "",
+                f"Final Score = {score:.2f}",
+            ]
+        )
+
         return "\n".join(lines)
 
     def run(
@@ -459,8 +476,6 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
             else:
                 score = self.fbeta_score(tp, fp, fn, beta)
             reasoning = self._build_reasoning(
-                answer=answer,
-                context=context,
                 answer_claims=answer_claims,
                 context_claims=context_claims,
                 answer_verdicts=answer_verdicts,

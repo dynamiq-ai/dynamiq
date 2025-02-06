@@ -229,9 +229,9 @@ class ContextPrecisionEvaluator(BaseEvaluator):
         Build a detailed reasoning string for context precision evaluation.
 
         Explains:
-          • Each context is evaluated with a verdict (emojis used: ✅ for supported, ❌ for not).
-          • The corresponding explanation for each verdict.
-          • How the average precision is calculated.
+        • Each context is evaluated with a verdict (emojis used: ✅ for supported, ❌ for not).
+        • The corresponding explanation for each verdict.
+        • How the average precision is calculated.
 
         Args:
             question (str): The evaluation question.
@@ -244,22 +244,21 @@ class ContextPrecisionEvaluator(BaseEvaluator):
         Returns:
             str: Detailed reasoning.
         """
-        lines = []
-        lines.append("Reasoning:")
-        lines.append("")
-        lines.append(f"Question: {question}")
-        lines.append(f"Answer: {answer}")
-        lines.append("")
-        lines.append("Context Evaluations:")
+        reasoning_strs = ["Reasoning:", "", f"Question: {question}", f"Answer: {answer}", "", "Context Evaluations:"]
+
         for ctx, v, detail in zip(contexts, verdicts, verdict_details):
             mark = "✅" if v == 1 else "❌"
-            lines.append(f" - Context: {ctx}")
-            lines.append(f"   Verdict: {mark} (value: {v})")
-            lines.append(f"   Explanation: {detail}")
-            lines.append("")
-        lines.append(f"Average Precision Score = {average_precision:.2f}")
-        lines.append("-" * 50)
-        return "\n".join(lines)
+            reasoning_strs.extend(
+                [f" - Context: {ctx}", f"   Verdict: {mark} (value: {v})", f"   Explanation: {detail}", ""]
+            )
+
+        reasoning_strs.extend(
+            [
+                f"Average Precision Score = {average_precision:.2f}",
+            ]
+        )
+
+        return "\n".join(reasoning_strs)
 
     def run(
         self,

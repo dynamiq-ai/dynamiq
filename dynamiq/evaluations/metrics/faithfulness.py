@@ -337,14 +337,11 @@ class FaithfulnessEvaluator(BaseEvaluator):
         Build detailed reasoning for the faithfulness evaluation.
 
         This explanation covers:
-          • How the answer was simplified into candidate statements.
-          • The NLI verdict for each statement along with brief reasons.
-          • The calculation of the final faithfulness score.
+        • How the answer was simplified into candidate statements.
+        • The NLI verdict for each statement along with brief reasons.
+        • The calculation of the final faithfulness score.
 
         Args:
-            question (str): The evaluation question.
-            answer (str): The original answer.
-            context (str): The context text.
             statements (list[str]): Simplified candidate statements.
             nli_results (list[NLIResultItem]): NLI results.
             num_statements (int): Total number of statements.
@@ -355,28 +352,38 @@ class FaithfulnessEvaluator(BaseEvaluator):
             str: Detailed reasoning.
         """
         lines = []
-        lines.append("Reasoning:")
-        lines.append("")
-        lines.append("Overview:")
-        lines.append("  The answer is first simplified into clear statements (without pronouns).")
-        lines.append("  Each statement is then evaluated for faithfulness against the context via NLI.")
-        lines.append("  A '✅' indicates the statement is faithful; '❌' indicates it is not.")
-        lines.append("")
-        lines.append("1. Simplified Statements:")
-        for stmt in statements:
-            lines.append(f"   - {stmt}")
-        lines.append("")
-        lines.append("2. NLI Evaluation Results:")
+        lines.extend(
+            [
+                "Reasoning:",
+                "",
+                "Overview:",
+                "  The answer is first simplified into clear statements (without pronouns).",
+                "  Each statement is then evaluated for faithfulness against the context via NLI.",
+                "  A '✅' indicates the statement is faithful; '❌' indicates it is not.",
+                "",
+                "1. Simplified Statements:",
+            ]
+        )
+
+        # Add each simplified statement
+        lines.extend([f"   - {stmt}" for stmt in statements])
+
+        lines.extend(["", "2. NLI Evaluation Results:"])
+
+        # Add each NLI result with its verdict and explanation
         for res in nli_results:
             mark = "✅" if res.verdict == 1 else "❌"
-            lines.append(f" {mark} - {res.statement}")
-            lines.append(f"     Explanation: {res.reason}")
-            lines.append("")
-        lines.append(f" -> Faithful Statements = {num_faithful} out of {num_statements}")
-        lines.append(f" -> Faithfulness Score = {score:.2f} (faithful/total)")
-        lines.append("")
-        lines.append(f"Final Score = {score:.2f}")
-        lines.append("-" * 50)
+            lines.extend([f" {mark} - {res.statement}", f"     Explanation: {res.reason}", ""])
+
+        lines.extend(
+            [
+                f" -> Faithful Statements = {num_faithful} out of {num_statements}",
+                f" -> Faithfulness Score = {score:.2f} (faithful/total)",
+                "",
+                f"Final Score = {score:.2f}",
+            ]
+        )
+
         return "\n".join(lines)
 
     def run(

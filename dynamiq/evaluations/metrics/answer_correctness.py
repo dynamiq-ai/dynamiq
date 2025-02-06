@@ -305,61 +305,85 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
         """
         Build a detailed reasoning string.
         This section explains:
-          • How the answer was split into statements and compared to the ground truth answer.
-          • What each symbol (✅/❌) means.
-          • How TP, FP, and FN are computed.
-          • How Precision, Recall, and F1 Score are calculated.
+        • How the answer was split into statements and compared to the ground truth answer.
+        • What each symbol (✅/❌) means.
+        • How TP, FP, and FN are computed.
+        • How Precision, Recall, and F1 Score are calculated.
         """
         lines = []
-        lines.append("Reasoning:")
-        lines.append("")
-        lines.append("Overview:")
-        lines.append("  The evaluator splits the answer and the ground truth answer into core fact statements.")
-        lines.append("  Each statement from the answer is compared to the ground truth answer to determine if")
-        lines.append("  the core fact is supported. Similarly, the ground truth statements are checked for their")
-        lines.append("  presence in the answer. '✅' indicates support/presence, while '❌' indicates lack thereof.")
-        lines.append("")
-        lines.append("1. Answer Statements Analysis:")
-        lines.append("   The answer is split into statements and compared to the ground truth answer.")
-        lines.append("   '✅' means the statement's core fact is supported; '❌' means it is not.")
-        lines.append("")
-        lines.append("Answer Statements Classification:")
+        lines.extend(
+            [
+                "Reasoning:",
+                "",
+                "Overview:",
+                "  The evaluator splits the answer and the ground truth answer into core fact statements.",
+                "  Each statement from the answer is compared to the ground truth answer to determine if",
+                "  the core fact is supported. Similarly, the ground truth statements are checked for their",
+                "  presence in the answer. '✅' indicates support/presence, while '❌' indicates lack thereof.",
+                "",
+                "1. Answer Statements Analysis:",
+                "   The answer is split into statements and compared to the ground truth answer.",
+                "   '✅' means the statement's core fact is supported; '❌' means it is not.",
+                "",
+                "Answer Statements Classification:",
+            ]
+        )
+
         for stmt, m, expl in ans_class:
             mark = "✅" if m else "❌"
-            lines.append(f" {mark} - {stmt}")
-            lines.append(f"     Explanation: {expl}")
-            lines.append("")
-        lines.append(f" -> TP (supported) = {tp}  (correctly supported statements)")
-        lines.append(f" -> FP (not supported) = {fp}  (unsupported statements)")
+            lines.extend([f" {mark} - {stmt}", f"     Explanation: {expl}", ""])
+
+        lines.extend(
+            [
+                f" -> TP (supported) = {tp}  (correctly supported statements)",
+                f" -> FP (not supported) = {fp}  (unsupported statements)",
+            ]
+        )
+
         if (tp + fp) > 0:
             lines.append(f" -> Precision = TP/(TP+FP) = {precision:.2f}")
         else:
             lines.append(" -> Precision = 0.00")
-        lines.append("")
-        lines.append("2. Ground Truth Statements Analysis:")
-        lines.append("   The ground truth answer is split into statements and compared to the answer.")
-        lines.append("   '✅' means the statement is present in the answer; '❌' means it is missing.")
-        lines.append("")
-        lines.append("Ground Truth Statements Classification:")
+
+        lines.extend(
+            [
+                "",
+                "2. Ground Truth Statements Analysis:",
+                "   The ground truth answer is split into statements and compared to the answer.",
+                "   '✅' means the statement is present in the answer; '❌' means it is missing.",
+                "",
+                "Ground Truth Statements Classification:",
+            ]
+        )
+
         for stmt, m, expl in gt_class:
             mark = "✅" if m else "❌"
-            lines.append(f" {mark} - {stmt}")
-            lines.append(f"     Explanation: {expl}")
-            lines.append("")
-        lines.append(f" -> TP (present) = {tp}  (ground truth statements found in answer)")
-        lines.append(f" -> FN (missing) = {fn}  (ground truth statements not found)")
+            lines.extend([f" {mark} - {stmt}", f"     Explanation: {expl}", ""])
+
+        lines.extend(
+            [
+                f" -> TP (present) = {tp}  (ground truth statements found in answer)",
+                f" -> FN (missing) = {fn}  (ground truth statements not found)",
+            ]
+        )
+
         if (tp + fn) > 0:
             lines.append(f" -> Recall = TP/(TP+FN) = {recall:.2f}")
         else:
             lines.append(" -> Recall = 0.00")
-        lines.append("")
-        lines.append("3. Final Metrics:")
-        lines.append("   F1 Score is the harmonic mean of Precision and Recall:")
-        lines.append("       F1 Score = 2*(Precision*Recall)/(Precision+Recall)")
-        lines.append(f"       F1 Score = {f1:.2f}")
-        lines.append("")
-        lines.append(f"Final Score = F1 Score = {round(f1, 2)}")
-        lines.append("-" * 50)
+
+        lines.extend(
+            [
+                "",
+                "3. Final Metrics:",
+                "   F1 Score is the harmonic mean of Precision and Recall:",
+                "       F1 Score = 2*(Precision*Recall)/(Precision+Recall)",
+                f"       F1 Score = {f1:.2f}",
+                "",
+                f"Final Score = F1 Score = {round(f1, 2)}",
+            ]
+        )
+
         return "\n".join(lines)
 
     def _evaluate_question(self, question: str, answer_stmts: list[str], gt_stmts: list[str]) -> RunResult:

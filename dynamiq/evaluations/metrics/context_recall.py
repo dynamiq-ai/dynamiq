@@ -192,14 +192,11 @@ class ContextRecallEvaluator(BaseEvaluator):
         Build a detailed reasoning string for context recall evaluation.
 
         Explains:
-          • Each sentence in the answer is classified (using emojis: ✅ for attributed, ❌ for not).
-          • A corresponding explanation is provided for each classification.
-          • The final context recall score is computed as the ratio of attributable sentences.
+        • Each sentence in the answer is classified (using emojis: ✅ for attributed, ❌ for not).
+        • A corresponding explanation is provided for each classification.
+        • The final context recall score is computed as the ratio of attributable sentences.
 
         Args:
-            question (str): The evaluation question.
-            answer (str): The answer text.
-            context (str): The context string.
             classifications (list[ClassificationItem]): List of classification results.
             score (float): The computed recall score.
 
@@ -207,17 +204,25 @@ class ContextRecallEvaluator(BaseEvaluator):
             str: Detailed reasoning.
         """
         lines = []
-        lines.append("Reasoning:")
-        lines.append("")
-        lines.append("Classifications:")
+        lines.extend(["Reasoning:", "", "Classifications:"])
+
         for item in classifications:
             mark = "✅" if item.attributed == 1 else "❌"
-            lines.append(f" - Statement: {item.statement}")
-            lines.append(f"   Verdict: {mark} (value: {item.attributed})")
-            lines.append(f"   Explanation: {item.reason}")
-            lines.append("")
-        lines.append(f"Context Recall Score = {score:.2f}")
-        lines.append("-" * 50)
+            lines.extend(
+                [
+                    f" - Statement: {item.statement}",
+                    f"   Verdict: {mark} (value: {item.attributed})",
+                    f"   Explanation: {item.reason}",
+                    "",
+                ]
+            )
+
+        lines.extend(
+            [
+                f"Context Recall Score = {score:.2f}",
+            ]
+        )
+
         return "\n".join(lines)
 
     def run(
