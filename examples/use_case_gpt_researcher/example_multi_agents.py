@@ -1,4 +1,5 @@
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.llms import OpenAI
@@ -10,12 +11,19 @@ from examples.use_case_gpt_researcher.multi_agents import (
     run_publisher,
     run_writer_agent,
 )
-
 from examples.use_case_gpt_researcher.utils import save_markdown_as_pdf
 
 
 def set_orchestrator() -> GraphOrchestrator:
     """Set up the orchestrator: multi-agent GPT-researcher."""
+
+    def orchestrate(context: dict, **kwargs) -> str:
+        return (
+            "researcher"
+            if context["human_feedback"] is None or context["human_feedback"].lower().strip() == "no"
+            else "planner"
+        )
+
     llm = OpenAI(
         connection=OpenAIConnection(),
         model="gpt-4o-mini",
@@ -26,13 +34,6 @@ def set_orchestrator() -> GraphOrchestrator:
         name="Graph orchestrator",
         manager=GraphAgentManager(llm=llm),
     )
-
-    def orchestrate(context: dict, **kwargs) -> str:
-        return (
-            "researcher"
-            if context["human_feedback"] is None or context["human_feedback"].lower().strip() == "no"
-            else "planner"
-        )
 
     orchestrator.add_state_by_tasks("browser", [run_initial_research])
     orchestrator.add_state_by_tasks("planner", [plan_research])
@@ -48,6 +49,11 @@ def set_orchestrator() -> GraphOrchestrator:
     orchestrator.add_edge("researcher", "writer")
     orchestrator.add_edge("writer", "publisher")
     orchestrator.add_edge("publisher", END)
+
+    for i in range(len(orchestrator.states)):
+        if orchestrator.states[i].id not in ["START", "END"]:
+            orchestrator.states[i].tasks[0].error_handling = ErrorHandling(timeout_seconds=None)
+
     return orchestrator
 
 
@@ -59,9 +65,9 @@ if __name__ == "__main__":
     task = {
         "query": "AI trends",  # Main topic query
         "num_sub_queries": 3,  # Number of sub-queries to expand search coverage
-        "max_content_chunks_per_source": 2,  # Max number of content chunks to retrieve per URL from Pinecone
+        "max_content_chunks_per_source": 5,  # Max number of content chunks to retrieve per URL from Pinecone
         "max_sources": 10,  # Max number of unique sources per section to include in the research
-        "max_sections": 3,  # Max number of sections in the research
+        "max_sections": 5,  # Max number of sections in the research
         "include_human_feedback": False,  # Adjust section topics based on user feedback
         "follow_guidelines": True,  # Apply additional guidelines to LLM instructions
         "guidelines": [
