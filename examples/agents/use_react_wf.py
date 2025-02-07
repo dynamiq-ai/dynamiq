@@ -139,11 +139,13 @@ def setup_react_agent_rag() -> ReActAgent:
         name="visit DUBAI data",
         text_embedder=text_embedder,
         document_retriever=retriever_dubai,
+        is_optimized_for_agents=True,
     )
     tool_retrieval_rta = RetrievalTool(
         name="visit DUBAI data",
         text_embedder=text_embedder,
         document_retriever=retriever_customs,
+        is_optimized_for_agents=True,
     )
 
     llm = setup_llm()

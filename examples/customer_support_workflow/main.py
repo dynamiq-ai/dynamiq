@@ -33,6 +33,7 @@ def run_workflow(input: str) -> str:
         name="Bank FAQ Search",
         text_embedder=text_embedder,
         document_retriever=document_retriever,
+        is_optimized_for_agents=True,
     )
 
     # Create a ReActAgent for handling bank documentation queries

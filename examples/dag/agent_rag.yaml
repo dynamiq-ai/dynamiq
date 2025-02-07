@@ -29,6 +29,7 @@ nodes:
           name: Weaviate Document Retriever
           connection: weaviate-conn
           index_name: default
+        is_optimized_for_agents: true
     role: AI assistant with knowledge about Dubai city, goal is provide well explained final answers
 
 flows:
