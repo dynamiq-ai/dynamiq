@@ -18,11 +18,8 @@ def set_orchestrator() -> GraphOrchestrator:
     """Set up the orchestrator: multi-agent GPT-researcher."""
 
     def orchestrate(context: dict, **kwargs) -> str:
-        return (
-            "researcher"
-            if context["human_feedback"] is None or context["human_feedback"].lower().strip() == "no"
-            else "planner"
-        )
+        human_feedback = context.get("human_feedback")
+        return "researcher" if human_feedback is None or human_feedback.lower().strip() == "no" else "planner"
 
     llm = OpenAI(
         connection=OpenAIConnection(),

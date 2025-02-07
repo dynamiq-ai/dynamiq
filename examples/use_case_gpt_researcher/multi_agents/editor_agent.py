@@ -34,7 +34,7 @@ def editor_agent(context: dict, query: str) -> dict:
     )
 
     def orchestrate(context: dict, **kwargs) -> str:
-        return END if context["review"] is None else "reviser"
+        return END if context.get("review") is None else "reviser"
 
     orchestrator.add_state_by_tasks("researcher", [_run_in_depth_research])
     orchestrator.add_state_by_tasks("reviewer", [_review_draft])
