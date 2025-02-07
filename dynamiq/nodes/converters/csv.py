@@ -68,16 +68,18 @@ class CSVConverter(Node):
     Attributes:
         name (str): Display name of the node.
         group (NodeGroup.CONVERTERS): Node group classification.
-        delimiter (str): Character used to separate fields in the CSV files. Defaults to comma.
-        content_column (str): Name of the column to use as the main document content.
+        delimiter (str | None): Character used to separate fields in the CSV files. Defaults to comma.
+        content_column (str | None): Name of the column to use as the main document content.
         metadata_columns (list[str] | None): Column names to extract as metadata for each document.
         input_schema (type[CSVConverterInputSchema]): Schema for validating input parameters.
     """
 
     name: str = "CSV File Converter"
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
-    delimiter: str = Field(default=",", description="Delimiter used in the CSV files.")
-    content_column: str = Field(..., description="Name of the column that will be used as the document's main content.")
+    delimiter: str | None = Field(default=",", description="Delimiter used in the CSV files.")
+    content_column: str | None = Field(
+        ..., description="Name of the column that will be used as the document's main content."
+    )
     metadata_columns: list[str] | None = Field(
         default=None,
         description="Optional list of column names to extract as metadata for each document. Can be None.",
