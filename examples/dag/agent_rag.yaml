@@ -18,7 +18,7 @@ nodes:
       model: gpt-4o
     tools:
       - id: agent-rag-tool
-        type: dynamiq.nodes.tools.RetrievalTool
+        type: dynamiq.nodes.tools.VectorStoreRetriever
         text_embedder:
           type: dynamiq.nodes.embedders.OpenAITextEmbedder
           name: OpenAI Text Embedder

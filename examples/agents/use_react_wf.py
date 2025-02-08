@@ -9,10 +9,10 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.retrievers import WeaviateDocumentRetriever
+from dynamiq.nodes.retrievers.retriever import VectorStoreRetriever
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
 from dynamiq.nodes.tools.python import Python
-from dynamiq.nodes.tools.retriever import RetrievalTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import WeaviateVectorStore
@@ -135,13 +135,13 @@ def setup_react_agent_rag() -> ReActAgent:
         top_k=2, vector_store=WeaviateVectorStore(index_name="Dubai_customs_policies_and_notices")
     )
 
-    tool_retrieval_sports = RetrievalTool(
+    tool_retrieval_sports = VectorStoreRetriever(
         name="visit DUBAI data",
         text_embedder=text_embedder,
         document_retriever=retriever_dubai,
         is_optimized_for_agents=True,
     )
-    tool_retrieval_rta = RetrievalTool(
+    tool_retrieval_rta = VectorStoreRetriever(
         name="visit DUBAI data",
         text_embedder=text_embedder,
         document_retriever=retriever_customs,

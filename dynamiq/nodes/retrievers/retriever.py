@@ -13,12 +13,17 @@ from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
-class RetrievalInputSchema(BaseModel):
+class VectorStoreRetrieverInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a query to retrieve documents.")
+    alpha: float = Field(default=0.0, description="Parameter to provide alpha for hybrid retrieval.")
+    filters: dict[str, Any] = Field(
+        default={}, description="Parameter to provided filters to apply for retrieving specific documents."
+    )
+    top_k: int = Field(default=0, description="Parameter to provided how many documents to retrieve.")
 
 
-class RetrievalTool(Node):
-    """Tool for retrieving relevant documents based on a query.
+class VectorStoreRetriever(Node):
+    """Node for retrieving relevant documents based on a query.
 
     Attributes:
         group (Literal[NodeGroup.TOOLS]): Group for the node. Defaults to NodeGroup.TOOLS.
@@ -27,18 +32,26 @@ class RetrievalTool(Node):
         error_handling (ErrorHandling): Error handling configuration.
         text_embedder (TextEmbedder): Text embedder node.
         document_retriever (Retriever): Document retriever node.
+        filters (dict[str, Any] | None): Filters for document retrieval.
+        top_k (int): The maximum number of documents to return.
+        alpha (float): The alpha parameter for hybrid retrieval.
     """
+
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Retrieval Tool"
-    description: str = "A tool for retrieving relevant documents based on a query."
+    name: str = "VectorStore Retriever"
+    description: str = "A node for retrieving relevant documents based on a query."
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     text_embedder: TextEmbedder
     document_retriever: Retriever
-    input_schema: ClassVar[type[RetrievalInputSchema]] = RetrievalInputSchema
+    filters: dict[str, Any] = {}
+    top_k: int = 0
+    alpha: float = 0.0
+
+    input_schema: ClassVar[type[VectorStoreRetrieverInputSchema]] = VectorStoreRetrieverInputSchema
 
     def __init__(self, **kwargs):
         """
-        Initializes the RetrievalTool with the given parameters.
+        Initializes the VectorStoreRetriever with the given parameters.
 
         Args:
             **kwargs: Additional keyword arguments to be passed to the parent class constructor.
@@ -110,7 +123,7 @@ class RetrievalTool(Node):
         return "\n\n".join(formatted_docs)
 
     def execute(
-        self, input_data: RetrievalInputSchema, config: RunnableConfig | None = None, **kwargs
+        self, input_data: VectorStoreRetrieverInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Execute the retrieval tool.
 
@@ -128,16 +141,30 @@ class RetrievalTool(Node):
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
+        filters = input_data.filters or self.filters
+        top_k = input_data.top_k or self.top_k
+
+        alpha = input_data.alpha or self.alpha
+        query = input_data.query
         try:
             kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
             text_embedder_output = self.text_embedder.run(
-                input_data={"query": input_data.query}, run_depends=self._run_depends, config=config, **kwargs
+                input_data={"query": query}, run_depends=self._run_depends, config=config, **kwargs
             )
             self._run_depends = [NodeDependency(node=self.text_embedder).to_dict()]
             embedding = text_embedder_output.output.get("embedding")
 
             document_retriever_output = self.document_retriever.run(
-                input_data={"embedding": embedding}, run_depends=self._run_depends, config=config, **kwargs
+                input_data={
+                    "embedding": embedding,
+                    "top_k": top_k,
+                    "filters": filters,
+                    "alpha": alpha,
+                    **({"query": query} if alpha else {}),
+                },
+                run_depends=self._run_depends,
+                config=config,
+                **kwargs,
             )
             self._run_depends = [NodeDependency(node=self.document_retriever).to_dict()]
             retrieved_documents = document_retriever_output.output.get("documents", [])
