@@ -17,7 +17,7 @@ class VectorStoreRetrieverInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a query to retrieve documents.")
     alpha: float = Field(default=0.0, description="Parameter to provide alpha for hybrid retrieval.")
     filters: dict[str, Any] = Field(
-        default={}, description="Parameter to provided filters to apply for retrieving specific documents."
+        default_factory=dict, description="Parameter to provide filters to apply for retrieving specific documents."
     )
     top_k: int = Field(default=0, description="Parameter to provided how many documents to retrieve.")
 
