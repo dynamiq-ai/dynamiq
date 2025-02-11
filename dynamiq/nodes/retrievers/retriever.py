@@ -173,10 +173,7 @@ class VectorStoreRetriever(Node):
             result = self.format_content(retrieved_documents)
             logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
-            if self.is_optimized_for_agents:
-                return {"content": result}
-            else:
-                return {"documents": retrieved_documents}
+            return {"content": result, "documents": retrieved_documents}
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: execution error: {str(e)}", exc_info=True)
             raise ToolExecutionException(
