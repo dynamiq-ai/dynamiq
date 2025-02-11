@@ -1,3 +1,4 @@
+import copy
 import importlib
 import io
 from typing import Any, ClassVar, Literal
@@ -113,15 +114,16 @@ def get_restricted_globals() -> dict:
     }
 
 
-def compile_and_execute(code: str, globals_dict: dict) -> dict:
+def compile_and_execute(code: str, globals: dict) -> dict:
     """
-    Compile the code using RestrictedPython and execute it in globals_dict.
-    Returns the updated globals_dict.
+    Compile the code using RestrictedPython and execute it in globals.
+    Returns the updated globals.
     """
+    code_globals = copy.deepcopy(globals)
     try:
         byte_code = compile_restricted(code, "<inline>", "exec")
-        exec(byte_code, globals_dict)  # nosec
-        return globals_dict
+        exec(byte_code, code_globals)  # nosec
+        return code_globals
     except Exception as e:
         logger.error(f"Error during restricted execution: {e}")
         raise
@@ -185,8 +187,7 @@ class Python(Node):
         )
 
         try:
-            byte_code = compile_restricted(self.code, "<inline>", "exec")
-            exec(byte_code, restricted_globals)  # nosec
+            restricted_globals = compile_and_execute(self.code, restricted_globals)
             if "run" not in restricted_globals:
                 raise ValueError("The 'run' function is not defined in the provided code.")
             result = restricted_globals["run"](dict(input_data))
