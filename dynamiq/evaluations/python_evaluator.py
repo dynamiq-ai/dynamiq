@@ -1,33 +1,30 @@
+import re
 from typing import Any
 
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.evaluations import BaseEvaluator
-from dynamiq.nodes.tools.python import Python as PythonNode
+from dynamiq.nodes.tools.python import compile_and_execute, get_restricted_globals
 from dynamiq.utils.logger import logger
 
 
 class PythonEvaluatorSingleInput(BaseModel):
     """
-    Input model for a single data point to the custom Python evaluator.
-
-    Allows the user-defined Python code to access input data arbitrarily.
+    Model for a single evaluation input.
 
     Attributes:
-        data (dict[str, Any]): Arbitrary dictionary containing input data for evaluation.
+        data (dict[str, Any]): A dictionary with input parameters.
     """
-
     data: dict[str, Any] = Field(default_factory=dict)
 
 
 class PythonEvaluatorInput(BaseModel):
     """
-    Input model for multiple data points to the custom Python evaluator.
+    Model for batch evaluation input.
 
     Attributes:
-        data_list (list[dict[str, Any]]): A list of dictionaries containing input data points.
+        data_list (list[dict[str, Any]]): A list of input dictionaries.
     """
-
     data_list: list[dict[str, Any]]
 
     @model_validator(mode="after")
@@ -41,137 +38,190 @@ class PythonEvaluatorInput(BaseModel):
         Returns:
             PythonEvaluatorInput: The validated instance.
         """
-        if len(self.data_list) == 0:
-            raise ValueError("data_list cannot be empty.")
+        if not self.data_list:
+            raise ValueError("The data_list must not be empty.")
         return self
 
 
 class PythonEvaluatorSingleOutput(BaseModel):
     """
-    Output model for a single data point metric run.
+    Model for a single evaluation output.
 
     Attributes:
-        score (float): A numeric metric score for the single input.
+        score (float): Numeric metric value for the input.
     """
-
     score: float
 
 
 class PythonEvaluatorOutput(BaseModel):
     """
-    Output model for multiple data points metric run.
+    Model for batch evaluation output.
 
     Attributes:
-        scores (list[float]): A list of metric scores for each input in data_list.
+        scores (list[float]): A list of computed metric scores.
     """
-
     scores: list[float]
 
 
 class PythonEvaluator(BaseEvaluator):
     """
-    A custom Python evaluator that executes user-defined Python code to compute scores.
+    Evaluator that executes custom user-defined code inside a safe sandbox.
 
-    The Python code must define a 'run(input_data: dict)' function that returns
-    an integer, float, or a value convertible to float.
+    The user code must define a function named "evaluate" with any parameters.
+    This evaluator uses regex to extract the function parameters and then calls it
+    with input values passed as keyword arguments. It validates that the provided
+    input contains all required keys, and does not include unexpected keys.
 
-    Example usage of user-defined code in code_str:
-        def run(input_data):
-            # Retrieve arbitrary values from input_data
-            answer = input_data.get("answer")
-            expected = input_data.get("expected")
+    Example user code:
+        def evaluate(answer: int, expected: int = 42) -> float:
             return 1.0 if answer == expected else 0.0
 
     Attributes:
-        name (str): Name of the evaluator. Defaults to "python_metric".
-        code (str): User-defined Python code as a string.
+        name (str): Evaluator name; defaults to "python_metric".
+        code (str): The user-defined Python code as a string.
     """
-
     name: str = "python_metric"
     code: str = Field(..., description="User-defined Python code as a string.")
 
-    # Private attribute to hold the PythonNode instance
-    _python_node: PythonNode = PrivateAttr()
+    def __init__(self, **data: Any):
+        super().__init__(**data)
+        self._compile_user_code()
 
-    def __init__(self, **data):
+    def _compile_user_code(self) -> None:
         """
-        Initialize the PythonEvaluator instance and set up the PythonNode with user-defined code.
+        Compile the user code using restricted execution. Save the compiled
+        globals and parse the "evaluate" function's parameter names.
+        """
+        self._compiled_globals: dict = get_restricted_globals()
+        try:
+            compile_and_execute(self.code, self._compiled_globals)
+        except Exception as compile_error:
+            logger.error(f"User code compilation error: {compile_error}")
+            raise ValueError(f"User code compilation error: {compile_error}") from compile_error
+
+        if "evaluate" not in self._compiled_globals or not callable(self._compiled_globals["evaluate"]):
+            raise ValueError("User code must define a callable function 'evaluate'.")
+
+        (required_params, all_params) = self._extract_function_parameters(self.code)
+        self._required_params: set[str] = set(required_params)
+        self._all_params: set[str] = set(all_params)
+        logger.debug(f"Extracted required parameters: {self._required_params}")
+        logger.debug(f"Extracted all parameters: {self._all_params}")
+
+    @staticmethod
+    def _extract_function_parameters(code_str: str) -> tuple[list[str], list[str]]:
+        """
+        Extract parameter names from a function named "evaluate" in the given code string.
+
+        Returns a tuple:
+            (required_params, all_params)
+        where 'required_params' is a list of parameter names without default values,
+        and 'all_params' is a list of all parameter names declared in the function.
+
+        Uses a regex pattern to locate the function signature.
+        """
+        function_pattern = re.compile(
+            r"^\s*def\s+evaluate\s*\((.*?)\)\s*(?:->\s*.*?)?\s*:",
+            re.MULTILINE | re.DOTALL,
+        )
+        matches = function_pattern.findall(code_str)
+        if not matches:
+            raise ValueError("No function named 'evaluate' found in the code.")
+        if len(matches) > 1:
+            raise ValueError("Multiple definitions of function 'evaluate' were found.")
+
+        params_section = matches[0].strip()
+        if not params_section:
+            return ([], [])
+
+        raw_params = [param.strip() for param in params_section.split(",") if param.strip()]
+        required_params: list[str] = []
+        all_params: list[str] = []
+        for param in raw_params:
+            has_default = "=" in param
+            param_name = re.split(r"[:=]", param, maxsplit=1)[0].strip()
+            if param_name:
+                all_params.append(param_name)
+                if not has_default:
+                    required_params.append(param_name)
+        return (required_params, all_params)
+
+    def _validate_input_keys(self, provided_keys: set[str]) -> None:
+        """
+        Validate that provided_keys contains all required keys and no unexpected keys.
 
         Args:
-            **data: Arbitrary keyword arguments for the BaseModel.
-        """
-        super().__init__(**data)
-        self._initialize_python_node()
-
-    def _initialize_python_node(self) -> None:
-        """
-        Initialize the PythonNode with the provided user-defined Python code.
+            provided_keys (Set[str]): Keys present in the user input.
 
         Raises:
-            ImportError: If the PythonNode fails to initialize due to invalid code.
+            ValueError: If any required keys are missing or if unexpected keys are found.
         """
-        try:
-            self._python_node = PythonNode(code=self.code)
-            logger.debug("PythonNode initialized successfully.")
-        except Exception as e:
-            logger.error(f"Failed to initialize PythonNode: {e}")
-            raise ValueError(f"Failed to initialize PythonNode: {e}") from e
+        missing_keys = self._required_params - provided_keys
+        if missing_keys:
+            raise ValueError(f"Missing required keys: {sorted(missing_keys)}")
+        extra_keys = provided_keys - self._all_params
+        if extra_keys:
+            raise ValueError(f"Unexpected keys provided: {sorted(extra_keys)}")
 
     def run_single(self, input_data: dict[str, Any]) -> float:
         """
-        Run the evaluator on a single input_data dictionary.
+        Evaluate the metric for a single input dictionary.
+
+        The provided input_data must contain all required keys; optional keys may be omitted.
 
         Args:
-            input_data (dict[str, Any]): Arbitrary dictionary passed to the user code.
+            input_data (dict[str, Any]): Input parameters as a dictionary.
 
         Returns:
-            float: Metric score for this single data point.
+            float: The computed metric score.
 
         Raises:
-            ValueError: If the user-defined code does not return a numeric value.
+            ValueError: If key validation fails, or the function returns no value
+                        or a non-numeric value.
         """
-        single_input = PythonEvaluatorSingleInput(data=input_data)
-
-        # Execute the user-defined Python code
-        output = self._python_node.run(input_data=single_input.data)
-
-        # The PythonNode places the return value in output.output['content']
-        metric_value = output.output.get("content")
-        if metric_value is None:
-            raise ValueError("User-defined code did not return a value in 'content'.")
+        input_model = PythonEvaluatorSingleInput(data=input_data)
+        provided_keys = set(input_model.data.keys())
+        self._validate_input_keys(provided_keys)
 
         try:
-            metric_score = round(float(metric_value), 2)
-        except (TypeError, ValueError):
-            raise ValueError("User-defined code returned a non-numeric value.")
+            result = self._compiled_globals["evaluate"](**input_model.data)
+        except Exception as func_error:
+            logger.error(f"Error during evaluation: {func_error}")
+            raise ValueError(f"Error during evaluation: {func_error}") from func_error
 
-        logger.debug(f"Computed metric score: {metric_score} for input_data: {input_data}")
-        return metric_score
+        if result is None:
+            raise ValueError("User-defined 'evaluate' function returned no value.")
+        try:
+            score = round(float(result), 2)
+        except (TypeError, ValueError) as conv_err:
+            raise ValueError("User-defined function returned a non-numeric value.") from conv_err
+
+        logger.debug(f"Computed score: {score} for input: {input_data}")
+        return score
 
     def run(self, input_data_list: list[dict[str, Any]]) -> list[float]:
         """
-        Run the evaluator on multiple input data dictionaries sequentially.
+        Evaluate the metric for a list of input dictionaries sequentially.
 
         Args:
-            input_data_list (list[dict[str, Any]]): A list of dictionaries containing input data points.
+            input_data_list (list[dict[str, Any]]): A list of input dictionaries.
 
         Returns:
-            list[float]: A list of metric scores, one per dictionary.
+            list[float]: A list of computed metric scores.
 
         Raises:
-            ValueError: If input_data_list is empty or if any evaluation fails.
+            ValueError: If input_data_list is empty or any evaluation fails.
         """
-        multiple_input = PythonEvaluatorInput(data_list=input_data_list)
+        batch_input = PythonEvaluatorInput(data_list=input_data_list)
         scores: list[float] = []
-
-        for idx, single_dict in enumerate(multiple_input.data_list, start=1):
+        for idx, data_dict in enumerate(batch_input.data_list, start=1):
             try:
-                score = self.run_single(single_dict)
+                score = self.run_single(data_dict)
                 scores.append(score)
-                logger.info(f"Processed pair {idx}: Score = {score}")
-            except Exception as e:
-                logger.error(f"Failed to process pair {idx}: {e}")
-                raise ValueError(f"Failed to process pair {idx}: {e}") from e
+                logger.info(f"Processed input {idx} with score = {score}")
+            except Exception as error:
+                logger.error(f"Failed processing input {idx}: {error}")
+                raise ValueError(f"Failed processing input {idx}: {error}") from error
 
-        output_data = PythonEvaluatorOutput(scores=scores)
-        return output_data.scores
+        output_model = PythonEvaluatorOutput(scores=scores)
+        return output_model.scores

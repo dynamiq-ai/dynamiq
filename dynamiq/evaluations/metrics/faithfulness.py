@@ -439,6 +439,7 @@ class FaithfulnessEvaluator(BaseEvaluator):
             num_statements = len(nli_results)
             num_faithful = sum(item.verdict for item in nli_results)
             score = num_faithful / num_statements if num_statements else 0.0
+            score = round(float(score), 2)
 
             reasoning = self._build_reasoning(
                 statements=statements,

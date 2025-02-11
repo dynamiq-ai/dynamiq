@@ -214,7 +214,7 @@ class ContextPrecisionEvaluator(BaseEvaluator):
                 precision_at_i = cumulative_hits / (i + 1)
                 numerator += precision_at_i
         average_precision = numerator / total_relevant
-        return average_precision
+        return round(float(average_precision), 2)
 
     def _build_reasoning(
         self,

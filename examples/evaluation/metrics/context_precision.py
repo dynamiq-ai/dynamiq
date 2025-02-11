@@ -1,25 +1,13 @@
-import logging
-import sys
-
 from dotenv import find_dotenv, load_dotenv
-
 from dynamiq.evaluations.metrics import ContextPrecisionEvaluator
 from dynamiq.nodes.llms import OpenAI
 
 
 def main():
-    # Load environment variables for OpenAI API
     load_dotenv(find_dotenv())
 
-    # Configure logging level (set to DEBUG to see verbose output)
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-    # Uncomment the following line to enable verbose logging
-    # logging.getLogger().setLevel(logging.DEBUG)
-
-    # Initialize the LLM (replace 'gpt-4o-mini' with your available model)
     llm = OpenAI(model="gpt-4o-mini")
 
-    # Sample data (can be replaced with your data)
     questions = [
         "What can you tell me about Albert Einstein?",
         "Who won the 2020 ICC World Cup?",
@@ -36,7 +24,6 @@ def main():
     ]
     contexts_list = [
         [
-            # Contexts for the first question
             (
                 "Albert Einstein (14 March 1879 – 18 April 1955) was a German-born theoretical "
                 "physicist, widely held to be one of the greatest and most influential scientists "
@@ -50,7 +37,6 @@ def main():
             ),
         ],
         [
-            # Contexts for the second question
             (
                 "The 2022 ICC Men's T20 World Cup, held from October 16 to November 13, 2022, in "
                 "Australia, was the eighth edition of the tournament. Originally scheduled for "
@@ -64,7 +50,6 @@ def main():
             ),
         ],
         [
-            # Contexts for the third question
             (
                 "The Andes is the longest continental mountain range in the world, located in "
                 "South America. It features many high peaks but not the tallest in the world."
@@ -73,17 +58,15 @@ def main():
         ],
     ]
 
-    # Initialize evaluator
     evaluator = ContextPrecisionEvaluator(llm=llm)
-    correctness_scores = evaluator.run(
+    results = evaluator.run(
         questions=questions,
         answers=answers,
         contexts_list=contexts_list,
-        verbose=True,  # Set to True to enable verbose logging
+        verbose=True,
     )
 
-    # Print the results
-    for idx, result in enumerate(correctness_scores.results):
+    for idx, result in enumerate(results.results):
         print(f"Question: {questions[idx]}")
         print(f"Context Precision Score: {result.score}")
         print(result.reasoning)
