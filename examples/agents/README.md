@@ -15,7 +15,7 @@ This directory contains examples demonstrating how to use different types of age
     - **`E2BInterpreterTool`**: For executing code.
     - **`Python`**: For custom Python code execution.
     - **`HttpApiCall`**: For interacting with external APIs.
-    - **`RetrievalTool`**: For retrieving information from a vector database (Weaviate in this case).
+    - **`VectorStoreRetriever`**: For retrieving information from a vector database (Weaviate in this case).
 
 ### Reflection Agent
 
