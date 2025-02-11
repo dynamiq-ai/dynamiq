@@ -1,4 +1,3 @@
-import copy
 import importlib
 import io
 from typing import Any, ClassVar, Literal
@@ -119,11 +118,10 @@ def compile_and_execute(code: str, globals: dict) -> dict:
     Compile the code using RestrictedPython and execute it in globals.
     Returns the updated globals.
     """
-    code_globals = copy.deepcopy(globals)
     try:
         byte_code = compile_restricted(code, "<inline>", "exec")
-        exec(byte_code, code_globals)  # nosec
-        return code_globals
+        exec(byte_code, globals)  # nosec
+        return globals
     except Exception as e:
         logger.error(f"Error during restricted execution: {e}")
         raise
