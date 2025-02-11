@@ -76,7 +76,7 @@ class CSVConverter(Node):
 
     name: str = "CSV File Converter"
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
-    delimiter: str | None = Field(default=",", description="Delimiter used in the CSV files.")
+    delimiter: str | None = Field(default=None, description="Delimiter used in the CSV files.")
     content_column: str | None = Field(
         ..., description="Name of the column that will be used as the document's main content."
     )
