@@ -113,15 +113,15 @@ def get_restricted_globals() -> dict:
     }
 
 
-def compile_and_execute(code: str, globals: dict) -> dict:
+def compile_and_execute(code: str, restricted_globals: dict) -> dict:
     """
     Compile the code using RestrictedPython and execute it in globals.
     Returns the updated globals.
     """
     try:
         byte_code = compile_restricted(code, "<inline>", "exec")
-        exec(byte_code, globals)  # nosec
-        return globals
+        exec(byte_code, restricted_globals)  # nosec
+        return restricted_globals
     except Exception as e:
         logger.error(f"Error during restricted execution: {e}")
         raise
