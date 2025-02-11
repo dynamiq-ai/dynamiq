@@ -115,8 +115,8 @@ def get_restricted_globals() -> dict:
 
 def compile_and_execute(code: str, restricted_globals: dict) -> dict:
     """
-    Compile the code using RestrictedPython and execute it in globals.
-    Returns the updated globals.
+    Compile the code using RestrictedPython and execute it in restricted_globals.
+    Returns the updated restricted_globals.
     """
     try:
         byte_code = compile_restricted(code, "<inline>", "exec")
