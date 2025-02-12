@@ -1,15 +1,20 @@
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 from elasticsearch import NotFoundError
 
 from dynamiq.connections import Elasticsearch
 from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.elasticsearch.filters import _normalize_filters
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
+from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
+
+if TYPE_CHECKING:
+    from elasticsearch import Elasticsearch as ElasticsearchClient
 
 
 class ElasticsearchSimilarityMetric(str, Enum):
@@ -17,7 +22,8 @@ class ElasticsearchSimilarityMetric(str, Enum):
 
     COSINE = "cosine"
     DOT_PRODUCT = "dot_product"
-    L2 = "l2"
+    L2 = "l2_norm"
+    MAX_INNER_PRODUCT = "max_inner_product"
 
 
 class ElasticsearchVectorStoreParams(BaseVectorStoreParams):
@@ -50,7 +56,7 @@ class ElasticsearchVectorStore:
     def __init__(
         self,
         connection: Elasticsearch | None = None,
-        client: Elasticsearch | None = None,
+        client: Optional["ElasticsearchClient"] | None = None,
         index_name: str = "default",
         dimension: int = 1536,
         similarity: ElasticsearchSimilarityMetric = ElasticsearchSimilarityMetric.COSINE,
@@ -187,6 +193,7 @@ class ElasticsearchVectorStore:
         documents: list[Document],
         policy: DuplicatePolicy = DuplicatePolicy.FAIL,
         batch_size: int | None = None,
+        content_key: str | None = None,
     ) -> int:
         """Write documents to Elasticsearch.
 
@@ -194,6 +201,7 @@ class ElasticsearchVectorStore:
             documents: Documents to write
             policy: Policy for handling duplicates
             batch_size: Size of batches for bulk operations
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             Number of documents written
@@ -215,6 +223,7 @@ class ElasticsearchVectorStore:
 
         # Process in batches
         batch_size = batch_size or self.write_batch_size
+        content_key = content_key or self.content_key
         total_written = 0
 
         for i in range(0, len(documents), batch_size):
@@ -225,7 +234,7 @@ class ElasticsearchVectorStore:
                     [
                         {"index": {"_index": self.index_name, "_id": doc.id}},
                         {
-                            self.content_key: doc.content,
+                            content_key: doc.content,
                             "metadata": doc.metadata,
                             self.embedding_key: doc.embedding,
                         },
@@ -259,16 +268,17 @@ class ElasticsearchVectorStore:
             # Convert to similarity score
             return 1 / (1 + score)
 
-    def search_by_vector(
+    def _embedding_retrieval(
         self,
         query_embedding: list[float],
         top_k: int = 10,
         exclude_document_embeddings: bool = True,
         filters: dict[str, Any] | None = None,
         scale_scores: bool = False,
-        score_threshold: float | None = None,
+        content_key: str | None = None,
     ) -> list[Document]:
-        """Retrieve documents by vector similarity.
+        """
+        Retrieve documents by vector similarity.
 
         Args:
             query_embedding (List[float]): Query vector.
@@ -276,7 +286,7 @@ class ElasticsearchVectorStore:
             exclude_document_embeddings (bool): Exclude embeddings in response. Defaults to True.
             filters (dict[str, Any] | None): Metadata filters. Defaults to None.
             scale_scores (bool): Whether to scale scores to 0-1 range. Defaults to False.
-            score_threshold (float | None): Minimum score threshold. Defaults to None.
+            content_key (Optional[str]): The field used to store content in the storage.
 
         Returns:
             List[Document]: Retrieved documents.
@@ -290,23 +300,20 @@ class ElasticsearchVectorStore:
         if len(query_embedding) != self.dimension:
             raise ValueError(f"query_embedding must have dimension {self.dimension}")
 
-        # Build the query with score threshold if provided
+        # Build the query
         query = {
             "knn": {
                 "field": self.embedding_key,
                 "query_vector": query_embedding,
                 "k": top_k,
                 "num_candidates": top_k * 2,
-                **({"min_score": score_threshold} if score_threshold is not None else {}),
             }
         }
 
-        # Add filters if provided
         if filters:
-            bool_query = {"bool": {"must": [query]}}
-            for key, value in filters.items():
-                bool_query["bool"]["must"].append({"match": {f"metadata.{key}": value}})
-            query = bool_query
+            # Normalise filters to Elasticsearch format
+            filters = _normalize_filters(filters)
+            query["knn"]["filter"] = {"bool": filters}
 
         # Execute search
         response = self.client.search(
@@ -315,6 +322,7 @@ class ElasticsearchVectorStore:
             size=top_k,
             _source_excludes=([self.embedding_key] if exclude_document_embeddings else None),
         )
+        content_key = content_key or self.content_key
 
         # Convert results to Documents with optional score scaling
         documents = []
@@ -323,9 +331,12 @@ class ElasticsearchVectorStore:
             if scale_scores:
                 score = self._scale_score(score, self.similarity)
 
+            if content_key not in hit["_source"]:
+                continue
+
             doc = Document(
                 id=hit["_id"],
-                content=hit["_source"][self.content_key],
+                content=hit["_source"][content_key],
                 metadata=hit["_source"]["metadata"],
                 score=score,
             )
@@ -349,7 +360,9 @@ class ElasticsearchVectorStore:
             for doc_id in document_ids:
                 operations.append({"delete": {"_index": self.index_name, "_id": doc_id}})
             if operations:
-                self.client.bulk(operations, refresh=True)
+                self.client.bulk(operations=operations, refresh=True)
+        else:
+            logger.warning("No document IDs provided. No documents will be deleted.")
 
     def delete_documents_by_filters(self, filters: dict[str, Any]) -> None:
         """Delete documents matching filters.
@@ -361,11 +374,80 @@ class ElasticsearchVectorStore:
             logger.warning("No filters provided. No documents will be deleted.")
             return
 
-        bool_query = {"bool": {"must": []}}
-        for key, value in filters.items():
-            bool_query["bool"]["must"].append({"match": {f"metadata.{key}": value}})
+        filters = _normalize_filters(filters)
+        bool_query = {"bool": filters}
 
         self.client.delete_by_query(index=self.index_name, query=bool_query, refresh=True)
+
+    def delete_documents_by_file_id(self, file_id: str):
+        """
+        Delete documents from the Pinecone vector store by file ID.
+            file_id should be located in the metadata of the document.
+
+        Args:
+            file_id (str): The file ID to filter by.
+        """
+        filters = create_file_id_filter(file_id)
+        self.delete_documents_by_filters(filters)
+
+    def list_documents(
+        self, include_embeddings: bool = False, content_key: str | None = None, scale_scores: bool = False
+    ) -> list[Document]:
+        """
+        List documents in the Pinecone vector store.
+
+        Args:
+            include_embeddings (bool): Whether to include embeddings in the results. Defaults to False.
+            content_key (Optional[str]): The field used to store content in the storage.
+            scale_scores (bool): Whether to scale scores to 0-1 range. Defaults to False.
+
+        Returns:
+            list[Document]: List of Document objects retrieved.
+        """
+
+        response = self.client.search(
+            index=self.index_name,
+            query={"match_all": {}},
+            _source_excludes=([self.embedding_key] if not include_embeddings else None),
+        )
+        content_key = content_key or self.content_key
+
+        # Convert results to Documents with optional score scaling
+        all_documents = []
+        for hit in response["hits"]["hits"]:
+            score = hit["_score"]
+            if scale_scores:
+                score = self._scale_score(score, self.similarity)
+
+            if content_key not in hit["_source"]:
+                continue
+
+            doc = Document(
+                id=hit["_id"],
+                content=hit["_source"][content_key],
+                metadata=hit["_source"]["metadata"],
+                score=score,
+            )
+            if include_embeddings:
+                doc.embedding = hit["_source"][self.embedding_key]
+            all_documents.append(doc)
+
+        return all_documents
+
+    def count_documents(self) -> int:
+        """
+        Count the number of documents in the store.
+
+        Returns:
+            int: The number of documents in the store.
+        """
+        response = self.client.search(
+            index=self.index_name,
+            query={"match_all": {}},
+            _source_excludes=([self.embedding_key]),
+        )
+        count = response["hits"]["total"]["value"]
+        return count
 
     def close(self) -> None:
         """Close the client connection."""

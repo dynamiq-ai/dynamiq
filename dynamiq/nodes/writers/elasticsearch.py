@@ -80,11 +80,11 @@ class ElasticsearchDocumentWriter(Writer, ElasticsearchVectorStoreWriterParams):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        written_count = self.vector_store.write_documents(
+        upserted_count = self.vector_store.write_documents(
             documents=input_data.documents, policy=DuplicatePolicy.FAIL, batch_size=None
         )
-        logger.debug(f"Written {written_count} documents to Elasticsearch Vector Store.")
+        logger.debug(f"Upserted {upserted_count} documents to Elasticsearch Vector Store.")
 
         return {
-            "written_count": written_count,
+            "upserted_count": upserted_count,
         }
