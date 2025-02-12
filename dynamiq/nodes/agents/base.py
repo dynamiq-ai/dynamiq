@@ -76,8 +76,6 @@ class AgentInputSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_input_fields(self, context):
-
-        print(context)
         messages = [context.context.get("input_message")]
         if context_message := context.context.get("context_message"):
             messages.append(context_message)
@@ -264,8 +262,6 @@ class Agent(Node):
         context_message = context_message or self.context_message
 
         input_message.role = MessageRole.USER
-        if not input_message:
-            raise ValueError("Error: No input_message for the agent found.")
 
         input_message = input_message.format_message(**dict(input_data))
 
@@ -342,7 +338,7 @@ class Agent(Node):
                 self._prompt_variables["relevant_memory"] = relevant_memory
                 self._prompt_variables["conversation_history"] = all_messages
 
-    def _run_llm(self, messages: list[Message, VisionMessage], config: RunnableConfig | None = None, **kwargs) -> str:
+    def _run_llm(self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and handles streaming or full responses."""
 
         try:

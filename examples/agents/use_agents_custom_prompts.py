@@ -47,7 +47,7 @@ def run_reflection_agent_workflow() -> tuple[str, dict]:
         verbose=True,
         context_message=Message(
             role=MessageRole.SYSTEM,
-            content="You are helpfull assistant that answers on question about art."
+            content="You are helpful assistant that answers on question about art."
             "Take into account style of response: {{context}}",
         ),
         input_message=VisionMessage(
@@ -105,7 +105,7 @@ def run_react_agent_workflow() -> tuple[str, dict]:
         verbose=True,
         context_message=Message(
             role=MessageRole.SYSTEM,
-            content="You are helpfull assistant that answers on question about art."
+            content="You are helpful assistant that answers on question about art."
             "Take into account style of response: {{context}}",
         ),
         input_message=VisionMessage(
@@ -163,7 +163,7 @@ def run_simple_agent_workflow() -> tuple[str, dict]:
         verbose=True,
         context_message=Message(
             role=MessageRole.SYSTEM,
-            content="You are helpfull assistant that answers on question about art."
+            content="You are helpful assistant that answers on question about art."
             "Take into account style of response: {{context}}",
         ),
         input_message=VisionMessage(

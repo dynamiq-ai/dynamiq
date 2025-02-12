@@ -472,7 +472,6 @@ class ReActAgent(Agent):
                             tool_result = f"{type(e).__name__}: {e}"
 
                         observation = f"\nObservation: {tool_result}\n"
-                        observation
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content=observation,
