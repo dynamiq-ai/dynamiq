@@ -47,6 +47,7 @@ def get_parameters_for_template(template: str, env: Environment | None = None) -
     # Find and return set of undeclared variables in the template
     return meta.find_undeclared_variables(ast)
 
+
 class Message(BaseModel):
     """
     Represents a message in a conversation.
@@ -173,7 +174,6 @@ class VisionMessage(BaseModel):
             # Update the parameter with the processed value
             kwargs[param] = processed_value
 
-
     def format_message(self, **kwargs):
         out_msg_content = []
         for content in self.content:
@@ -292,7 +292,6 @@ class Prompt(BasePrompt):
 
     def __init__(self, **data):
         super().__init__(**data)
-
 
     def get_required_parameters(self) -> set[str]:
         """Extracts set of parameters required for messages.

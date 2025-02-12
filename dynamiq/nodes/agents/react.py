@@ -374,12 +374,6 @@ class ReActAgent(Agent):
                                     **kwargs,
                                 )
 
-                            print("***************")
-                            for m in messages:
-                                print(m)
-                                print("")
-                            print("***************")
-
                             return final_answer
                         action, action_input = self._parse_action(llm_generated_output)
 

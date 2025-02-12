@@ -345,12 +345,6 @@ class Agent(Node):
     def _run_llm(self, messages: list[Message, VisionMessage], config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and handles streaming or full responses."""
 
-        print("*****************")
-        for m in messages:
-            print(m)
-            print("")
-        print("*****************")
-
         try:
             llm_result = self.llm.run(
                 input_data={},

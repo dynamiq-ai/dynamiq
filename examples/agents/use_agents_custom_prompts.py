@@ -25,6 +25,7 @@ AGENT_ROLE = (
     "Professional writer with the goal of producing well-written and informative responses about art"
 )
 INPUT_QUESTION = "Describe main idea of this piece of art."
+IMAGE_URL = "IMAGE_URL"
 
 
 def run_reflection_agent_workflow() -> tuple[str, dict]:
@@ -46,7 +47,8 @@ def run_reflection_agent_workflow() -> tuple[str, dict]:
         verbose=True,
         context_message=Message(
             role=MessageRole.SYSTEM,
-            content="You are helpfull assistant that answers on question about art. Take into account style of response: {{context}}",
+            content="You are helpfull assistant that answers on question about art."
+            "Take into account style of response: {{context}}",
         ),
         input_message=VisionMessage(
             content=[
@@ -66,7 +68,7 @@ def run_reflection_agent_workflow() -> tuple[str, dict]:
         result = wf.run(
             input_data={
                 "request": INPUT_QUESTION,
-                "url": "https://cdn.britannica.com/78/43678-050-F4DC8D93/Starry-Night-canvas-Vincent-van-Gogh-New-1889.jpg",
+                "url": IMAGE_URL,
                 "context": "Keep answer short and simple",
             },
             config=RunnableConfig(callbacks=[tracing]),
@@ -103,7 +105,8 @@ def run_react_agent_workflow() -> tuple[str, dict]:
         verbose=True,
         context_message=Message(
             role=MessageRole.SYSTEM,
-            content="You are helpfull assistant that answers on question about art. Take into account style of response: {{context}}",
+            content="You are helpfull assistant that answers on question about art."
+            "Take into account style of response: {{context}}",
         ),
         input_message=VisionMessage(
             content=[
@@ -123,7 +126,7 @@ def run_react_agent_workflow() -> tuple[str, dict]:
         result = wf.run(
             input_data={
                 "request": INPUT_QUESTION,
-                "url": "https://cdn.britannica.com/78/43678-050-F4DC8D93/Starry-Night-canvas-Vincent-van-Gogh-New-1889.jpg",
+                "url": IMAGE_URL,
                 "context": "Keep answer short and simple",
             },
             config=RunnableConfig(callbacks=[tracing]),
@@ -160,7 +163,8 @@ def run_simple_agent_workflow() -> tuple[str, dict]:
         verbose=True,
         context_message=Message(
             role=MessageRole.SYSTEM,
-            content="You are helpfull assistant that answers on question about art. Take into account style of response: {{context}}",
+            content="You are helpfull assistant that answers on question about art."
+            "Take into account style of response: {{context}}",
         ),
         input_message=VisionMessage(
             content=[
@@ -180,7 +184,7 @@ def run_simple_agent_workflow() -> tuple[str, dict]:
         result = wf.run(
             input_data={
                 "request": INPUT_QUESTION,
-                "url": "https://cdn.britannica.com/78/43678-050-F4DC8D93/Starry-Night-canvas-Vincent-van-Gogh-New-1889.jpg",
+                "url": IMAGE_URL,
                 "context": "Keep answer short and simple",
             },
             config=RunnableConfig(callbacks=[tracing]),
@@ -198,7 +202,6 @@ def run_simple_agent_workflow() -> tuple[str, dict]:
         return "", {}
 
 
-
 if __name__ == "__main__":
     output, _ = run_reflection_agent_workflow()
     print(output)
@@ -207,4 +210,4 @@ if __name__ == "__main__":
     print(output)
 
     output, _ = run_simple_agent_workflow()
-    print(output)    
+    print(output)
