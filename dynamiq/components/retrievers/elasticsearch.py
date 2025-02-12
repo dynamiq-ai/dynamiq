@@ -41,7 +41,6 @@ class ElasticsearchDocumentRetriever:
         content_key: str | None = None,
         embedding_key: str | None = None,
         scale_scores: bool = False,
-        score_threshold: float | None = None,
     ) -> dict[str, list[Document]]:
         """Retrieve documents from ElasticsearchVectorStore.
 
@@ -53,7 +52,6 @@ class ElasticsearchDocumentRetriever:
             content_key: Field used to store content
             embedding_key: Field used to store vector
             scale_scores: Whether to scale scores to 0-1 range
-            score_threshold: Minimum score threshold for results
 
         Returns:
             Dictionary containing list of retrieved documents
@@ -64,13 +62,12 @@ class ElasticsearchDocumentRetriever:
         top_k = top_k or self.top_k
         filters = filters or self.filters
 
-        docs = self.vector_store.search_by_vector(
+        docs = self.vector_store._embedding_retrieval(
             query_embedding=query,
             filters=filters,
             top_k=top_k,
             exclude_document_embeddings=exclude_document_embeddings,
             scale_scores=scale_scores,
-            score_threshold=score_threshold,
         )
 
         logger.debug(f"Retrieved {len(docs)} documents from Elasticsearch Vector Store")
