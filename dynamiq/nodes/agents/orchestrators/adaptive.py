@@ -1,5 +1,6 @@
 import re
 from enum import Enum
+from typing import Any
 from xml.etree import ElementTree as ET  # nosec B405
 
 from pydantic import BaseModel
@@ -155,7 +156,7 @@ class AdaptiveOrchestrator(Orchestrator):
                     return self._parse_xml_content(manager_content)
         return self._parse_xml_content(manager_content)
 
-    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
+    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Process the given task using the manager agent logic.
 
@@ -164,7 +165,7 @@ class AdaptiveOrchestrator(Orchestrator):
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
-            str: The final answer generated after processing the task.
+            dict[str, Any]: The final output generated after processing the task.
         """
         self._chat_history.append({"role": "user", "content": input_task})
 
@@ -177,7 +178,7 @@ class AdaptiveOrchestrator(Orchestrator):
             elif action.command == ActionCommand.RESPOND:
                 respond_result = self._handle_respond(action=action)
                 respond_final_result = self.parse_xml_final_answer(respond_result)
-                return respond_final_result
+                return {"content": respond_final_result}
 
             elif action.command == ActionCommand.FINAL_ANSWER:
                 manager_final_result = self.get_final_result(
@@ -190,7 +191,7 @@ class AdaptiveOrchestrator(Orchestrator):
                     **kwargs,
                 )
                 final_result = self.parse_xml_final_answer(manager_final_result)
-                return final_result
+                return {"content": final_result}
 
     def _handle_delegation(self, action: Action, config: RunnableConfig = None, **kwargs) -> None:
         """
