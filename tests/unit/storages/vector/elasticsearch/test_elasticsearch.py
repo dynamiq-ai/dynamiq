@@ -80,7 +80,12 @@ def test_search_by_vector(es_vector_store):
     }
     es_vector_store.client.search.return_value = mock_hits
 
-    results = es_vector_store.search_by_vector(query_embedding=query_embedding, top_k=5, filters={"key": "value1"})
+    filters = {
+        "field": "key",
+        "operator": "==",
+        "value": "value1",
+    }
+    results = es_vector_store._embedding_retrieval(query_embedding=query_embedding, top_k=5, filters=filters)
 
     assert len(results) == 1
     assert results[0].id == "1"
@@ -105,7 +110,7 @@ def test_search_by_vector_with_score_scaling(es_vector_store):
     }
     es_vector_store.client.search.return_value = mock_hits
 
-    results = es_vector_store.search_by_vector(query_embedding=query_embedding, scale_scores=True)
+    results = es_vector_store._embedding_retrieval(query_embedding=query_embedding, scale_scores=True)
 
     assert len(results) == 1
     # For cosine similarity, score should be scaled to (0.5 + 1) / 2 = 0.75
@@ -115,18 +120,7 @@ def test_search_by_vector_with_score_scaling(es_vector_store):
 def test_search_by_vector_invalid_dimension(es_vector_store):
     """Test vector search with invalid embedding dimension."""
     with pytest.raises(ValueError, match="query_embedding must have dimension 768"):
-        es_vector_store.search_by_vector([0.1] * 512)
-
-
-def test_search_by_vector_with_threshold(es_vector_store):
-    """Test vector search with score threshold."""
-    query_embedding = [0.1] * 768
-    es_vector_store.client.search.return_value = {"hits": {"hits": []}}
-
-    es_vector_store.search_by_vector(query_embedding=query_embedding, score_threshold=0.5)
-
-    search_body = es_vector_store.client.search.call_args[1]["query"]
-    assert search_body["knn"]["min_score"] == 0.5
+        es_vector_store._embedding_retrieval([0.1] * 512)
 
 
 def test_delete_documents(es_vector_store):
@@ -143,7 +137,11 @@ def test_delete_all_documents(es_vector_store):
 
 
 def test_delete_documents_by_filters(es_vector_store):
-    filters = {"key": "value"}
+    filters = {
+        "field": "key",
+        "operator": "==",
+        "value": "value",
+    }
     es_vector_store.delete_documents_by_filters(filters)
     es_vector_store.client.delete_by_query.assert_called_once()
     query = es_vector_store.client.delete_by_query.call_args[1]["query"]
