@@ -16,6 +16,7 @@ INPUT_TASK = (
     "We'll focus on the last month and build a predictive model to determine "
     "whether I should invest or not, considering the latest news as well."
 )
+INPUT_TASK = "I'm in Warsaw. Can you suggest the best cinemas I can visit today?"
 
 
 if __name__ == "__main__":

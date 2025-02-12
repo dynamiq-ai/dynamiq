@@ -244,7 +244,7 @@ If user asks about some code, reports, or tables, please include them in the fin
 Include all relevant information to be as informative as possible.
 ]
 </output>
-Always close the XML tags properly, be sure that you use the correct fromat like <output>Final answer is here.</output>.
+Always close the XML tags properly, and make sure to use the correct format, such as <output>Final answer is here.</output>.
 Please ensure your final answer is professional, clear, and directly addresses the original task while incorporating all relevant information from the specialized agents' work.
 """  # noqa: E501
 
