@@ -555,7 +555,7 @@ def gather_feedback(context: dict[str, Any], **kwargs):
     """Gather feedback about email draft."""
     feedback = input(
         f"Email draft:\n"
-        f"{context["history"][-1]['content']}\n"
+        f"{context.get('history', [{}])[-1].get('content', 'No draft')}\n"
         f"Type in SEND to send email, CANCEL to exit, or provide feedback to refine email: \n"
     )
 
