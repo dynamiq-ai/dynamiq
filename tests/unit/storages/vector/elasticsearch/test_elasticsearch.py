@@ -1,45 +1,53 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from elasticsearch import Elasticsearch
 
-from dynamiq.connections import Elasticsearch as ElasticsearchConnection
 from dynamiq.storages.vector import ElasticsearchVectorStore
+from dynamiq.types import Document
 
 
 @pytest.fixture
 def mock_es_client():
-    return MagicMock(spec=Elasticsearch)
+    return MagicMock()
 
 
 @pytest.fixture
-def mock_es_connection():
-    connection = MagicMock(spec=ElasticsearchConnection)
-    connection.connect.return_value = MagicMock(spec=Elasticsearch)
-    return connection
+def es_vector_store(mock_es_client):
+    with patch("elasticsearch.Elasticsearch", return_value=mock_es_client):
+        return ElasticsearchVectorStore(
+            content_key="content",
+            index_name="test_index",
+            dimension=768,
+            similarity="cosine",
+        )
 
 
-@pytest.fixture
-def es_vector_store(mock_es_connection):
-    return ElasticsearchVectorStore(
-        connection=mock_es_connection,
-        index_name="test_index",
-        dimension=768,
-        similarity="cosine",
-    )
+@pytest.fixture()
+def mock_es_filters():
+    return {
+        "operator": "AND",
+        "conditions": [
+            {"field": "company", "operator": "==", "value": "BMW"},
+            {"field": "year", "operator": ">", "value": 2010},
+        ],
+    }
 
 
-def test_initialization_with_connection(mock_es_connection):
-    store = ElasticsearchVectorStore(connection=mock_es_connection)
-    assert store.client == mock_es_connection.connect.return_value
+def test_initialization(es_vector_store):
+    assert es_vector_store.client is not None
+
+
+def test_initialization_with_connection(mock_es_client):
+    store = ElasticsearchVectorStore(connection=mock_es_client)
+    assert store.client == mock_es_client.connect.return_value
     assert store.index_name == "default"
     assert store.dimension == 1536
     assert store.similarity == "cosine"
 
 
-def test_initialization_with_custom_params(mock_es_connection):
+def test_initialization_with_custom_params(mock_es_client):
     store = ElasticsearchVectorStore(
-        connection=mock_es_connection,
+        connection=mock_es_client,
         index_name="custom_index",
         dimension=512,
         similarity="dot_product",
@@ -47,6 +55,58 @@ def test_initialization_with_custom_params(mock_es_connection):
     assert store.index_name == "custom_index"
     assert store.dimension == 512
     assert store.similarity == "dot_product"
+
+
+def test_count_documents(es_vector_store, mock_es_client):
+    mock_es_client.count.return_value = {"count": 5}
+    assert es_vector_store.count_documents() == 5
+
+
+def test_delete_documents(es_vector_store, mock_es_client):
+    document_ids = ["1", "2", "3"]
+    es_vector_store.delete_documents(document_ids=document_ids)
+    mock_es_client.bulk.assert_called_once()
+
+
+def test_delete_all_documents(es_vector_store, mock_es_client):
+    es_vector_store.delete_documents(delete_all=True)
+
+    mock_es_client.delete_by_query.assert_called_once_with(
+        index=es_vector_store.index_name, query={"match_all": {}}, refresh=True
+    )
+
+
+def test_delete_documents_by_filters(es_vector_store, mock_es_client, mock_es_filters):
+    norm_filters = {"must": [{"match": {"company": "BMW"}}, {"range": {"year": {"gt": 2010}}}]}
+
+    es_vector_store.delete_documents_by_filters(mock_es_filters)
+
+    mock_es_client.delete_by_query.assert_called_once_with(
+        index=es_vector_store.index_name, query={"bool": norm_filters}, refresh=True
+    )
+
+
+def test_delete_documents_by_file_id(es_vector_store, mock_es_client, mock_es_filters):
+    file_id = "file_id"
+    with patch(
+        "dynamiq.storages.vector.elasticsearch.elasticsearch.create_file_id_filter", return_value=mock_es_filters
+    ):
+        es_vector_store.delete_documents_by_file_id(file_id)
+    norm_filters = {"must": [{"match": {"company": "BMW"}}, {"range": {"year": {"gt": 2010}}}]}
+
+    mock_es_client.delete_by_query.assert_called_once_with(
+        index=es_vector_store.index_name, query={"bool": norm_filters}, refresh=True
+    )
+
+
+def test_write_documents(es_vector_store, mock_es_client):
+    mock_es_client.bulk.return_value = {"upsert_count": 2}
+    documents = [
+        Document(id="123", content="Document 1", embedding=[0.1, 0.2], metadata={"type": "test"}),
+        Document(id="234", content="Document 2", embedding=[0.3, 0.4], metadata={"type": "test"}),
+    ]
+    assert es_vector_store.write_documents(documents, policy="overwrite") == 2
+    mock_es_client.bulk.assert_called_once()
 
 
 def test_write_documents_empty_list(es_vector_store):
@@ -121,32 +181,6 @@ def test_search_by_vector_invalid_dimension(es_vector_store):
     """Test vector search with invalid embedding dimension."""
     with pytest.raises(ValueError, match="query_embedding must have dimension 768"):
         es_vector_store._embedding_retrieval([0.1] * 512)
-
-
-def test_delete_documents(es_vector_store):
-    document_ids = ["1", "2"]
-    es_vector_store.delete_documents(document_ids=document_ids)
-    es_vector_store.client.bulk.assert_called_once()
-
-
-def test_delete_all_documents(es_vector_store):
-    es_vector_store.delete_documents(delete_all=True)
-    es_vector_store.client.delete_by_query.assert_called_once_with(
-        index="test_index", query={"match_all": {}}, refresh=True
-    )
-
-
-def test_delete_documents_by_filters(es_vector_store):
-    filters = {
-        "field": "key",
-        "operator": "==",
-        "value": "value",
-    }
-    es_vector_store.delete_documents_by_filters(filters)
-    es_vector_store.client.delete_by_query.assert_called_once()
-    query = es_vector_store.client.delete_by_query.call_args[1]["query"]
-    assert "bool" in query
-    assert "must" in query["bool"]
 
 
 def test_close(es_vector_store):

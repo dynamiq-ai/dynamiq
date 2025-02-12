@@ -22,7 +22,6 @@ class ElasticsearchRetrieverInputSchema(BaseModel):
     top_k: int = Field(default=0, description="Number of documents to retrieve")
     exclude_document_embeddings: bool = Field(default=True, description="Whether to exclude embeddings in response")
     scale_scores: bool = Field(default=False, description="Whether to scale scores to 0-1 range")
-    score_threshold: float | None = Field(default=None, description="Minimum score threshold")
 
 
 class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
@@ -108,7 +107,6 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
                 - top_k: Number of documents to retrieve
                 - exclude_document_embeddings: Whether to exclude embeddings
                 - scale_scores: Whether to scale scores to 0-1 range
-                - score_threshold: Minimum score threshold
             config (RunnableConfig, optional): The configuration for the execution.
             **kwargs: Additional keyword arguments.
 
@@ -124,7 +122,6 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
             top_k=input_data.top_k or self.top_k,
             exclude_document_embeddings=input_data.exclude_document_embeddings,
             scale_scores=input_data.scale_scores,
-            score_threshold=input_data.score_threshold,
         )
 
         return {
