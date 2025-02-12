@@ -10,7 +10,6 @@ from dynamiq.nodes.tools.zenrows import ZenRowsTool
 from dynamiq.nodes.types import InferenceMode
 from examples.llm_setup import setup_llm
 
-INPUT_TASK = "I'm in Warsaw. Can you suggest the best cinemas I can visit today?"
 
 INPUT_TASK = (
     "Let's gather some data about NVIDIA stocks and use Python to analyze it."
@@ -31,14 +30,14 @@ if __name__ == "__main__":
         connection=E2BConnection(),
     )
 
-    llm = setup_llm()
+    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=1)
 
     agent_coding = ReActAgent(
         name="Coding Agent",
         llm=llm,
         tools=[python_tool],
         max_loops=7,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.DEFAULT,
     )
 
     agent_searcher = ReActAgent(
@@ -46,7 +45,7 @@ if __name__ == "__main__":
         llm=llm,
         tools=[tavily_tool, zenrows_tool],
         max_loops=7,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.DEFAULT,
     )
 
     agent_manager = AdaptiveAgentManager(

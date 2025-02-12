@@ -1,3 +1,4 @@
+import re
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
@@ -146,3 +147,19 @@ class Orchestrator(Node, ABC):
 
         logger.info(f"Orchestrator {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
         return {"content": result}
+
+    def _extract_output_content(self, text: str) -> str:
+        """
+        Extracts the content of the <output> tag. If a properly closed tag is not found,
+        fall back to extracting everything after the first occurrence of <output>.
+        """
+        match = re.search(r"<output>(.*?)</output>", text, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+
+        start = text.find("<output>")
+        if start != -1:
+            fallback_content = text[start + len("<output>") :].strip()
+            if fallback_content:
+                return fallback_content
+        raise ActionParseError("No <output> tags found in the response.")
