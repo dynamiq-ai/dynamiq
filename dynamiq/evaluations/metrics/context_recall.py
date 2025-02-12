@@ -292,6 +292,7 @@ class ContextRecallEvaluator(BaseEvaluator):
             num_sentences = len(attributed_list)
             num_attributed = sum(attributed_list)
             score = num_attributed / num_sentences if num_sentences > 0 else 0.0
+            score = round(float(score), 2)
 
             reasoning_str = self._build_reasoning(classifications, score)
 
