@@ -87,7 +87,6 @@ def test_execute_basic_search(elasticsearch_document_retriever):
         top_k=input_data.top_k,
         exclude_document_embeddings=input_data.exclude_document_embeddings,
         scale_scores=input_data.scale_scores,
-        score_threshold=input_data.score_threshold,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -118,7 +117,6 @@ def test_execute_with_default_filters_and_top_k(elasticsearch_document_retriever
         top_k=elasticsearch_document_retriever.top_k,
         exclude_document_embeddings=input_data.exclude_document_embeddings,
         scale_scores=input_data.scale_scores,
-        score_threshold=input_data.score_threshold,
     )
 
     assert result == {"documents": mock_output["documents"]}
