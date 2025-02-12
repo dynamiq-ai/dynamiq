@@ -8,6 +8,7 @@ from queue import Empty
 from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
+from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
@@ -24,6 +25,13 @@ from dynamiq.nodes.exceptions import (
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.vector.base import BaseVectorStoreParams
+from dynamiq.types.feedback import (
+    ApprovalConfig,
+    ApprovalInputData,
+    ApprovalStreamingInputEventMessage,
+    ApprovalStreamingOutputEventMessage,
+    FeedbackMethod,
+)
 from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEventMessage
 from dynamiq.utils import format_value, generate_uuid, merge
 from dynamiq.utils.duration import format_duration
@@ -204,6 +212,8 @@ class Node(BaseModel, Runnable, ABC):
     output_transformer: OutputTransformer = Field(default_factory=OutputTransformer)
     caching: CachingConfig = Field(default_factory=CachingConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
+    approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
+
     depends: list[NodeDependency] = []
     metadata: NodeMetadata | None = None
 
@@ -461,6 +471,134 @@ class Node(BaseModel, Runnable, ABC):
         data["input_mapping"] = format_value(self.input_mapping)
         return data
 
+    def send_streaming_approval_message(
+        self, template: str, input_data: dict, approval_config: ApprovalConfig, config: RunnableConfig = None, **kwargs
+    ) -> ApprovalInputData:
+        """
+        Sends approval message and waits for response.
+
+        Args:
+            template (str): Template to send.
+            input_data (dict): Data that will be sent.
+            approval_config (ApprovalConfig): Configuration for approval.
+            config (RunnableConfig, optional): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
+
+        Return:
+            ApprovalInputData: Response to approval message.
+
+        """
+        event = ApprovalStreamingOutputEventMessage(
+            wf_run_id=config.run_id,
+            entity_id=self.id,
+            data={"template": template, "data": input_data, "mutable_data_params": approval_config.mutable_data_params},
+            event=approval_config.event,
+        )
+
+        logger.info(f"Node {self.name} - {self.id}: sending approval.")
+
+        self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
+
+        output: ApprovalInputData = self.get_input_streaming_event(
+            event=approval_config.event, event_msg_type=ApprovalStreamingInputEventMessage, config=config
+        ).data
+
+        return output
+
+    def send_console_approval_message(self, template: str) -> ApprovalInputData:
+        """
+        Sends approval message in console and waits for response.
+
+        Args:
+            template (dict): Template to send.
+        Returns:
+            ApprovalInputData: Response to approval message.
+        """
+        feedback = input(template)
+        return ApprovalInputData(feedback=feedback)
+
+    def send_approval_message(
+        self, approval_config: ApprovalConfig, input_data: dict, config: RunnableConfig = None, **kwargs
+    ) -> ApprovalInputData:
+        """
+        Sends approval message and determines if it was approved or disapproved (canceled).
+
+        Args:
+            approval_config (ApprovalConfig): Configuration for the approval.
+            input_data (dict): Data that will be sent.
+            config (RunnableConfig, optional): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            ApprovalInputData: Result of approval.
+        """
+
+        message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
+        match approval_config.feedback_method:
+            case FeedbackMethod.STREAM:
+                approval_result = self.send_streaming_approval_message(
+                    message, input_data, approval_config, config=config, **kwargs
+                )
+            case FeedbackMethod.CONSOLE:
+                approval_result = self.send_console_approval_message(message)
+            case _:
+                raise ValueError(f"Error: Incorrect feedback method is chosen {approval_config.feedback_method}.")
+
+        update_params = {
+            feature_name: approval_result.data[feature_name]
+            for feature_name in approval_config.mutable_data_params
+            if feature_name in approval_result.data
+        }
+        approval_result.data = {**input_data, **update_params}
+
+        if approval_result.is_approved is None:
+            if approval_result.feedback == approval_config.accept_pattern:
+                logger.info(
+                    f"Node {self.name} action was approved by human "
+                    f"with provided feedback '{approval_result.feedback}'."
+                )
+                approval_result.is_approved = True
+
+            else:
+                approval_result.is_approved = False
+                logger.info(
+                    f"Node {self.name} action was canceled by human"
+                    f"with provided feedback '{approval_result.feedback}'."
+                )
+
+        return approval_result
+
+    def get_approved_data_or_origin(
+        self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs
+    ) -> dict[str, Any]:
+        """
+        Approves or disapproves (cancels) Node execution by requesting feedback.
+        Updates input data according to the feedback or leaves it the same.
+        Raises NodeException if execution was canceled by feedback.
+
+        Args:
+            input_data(dict[str, Any]): Input data.
+            config (RunnableConfig, optional): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict[str, Any]: Updated input data.
+
+        Raises:
+            NodeException: If Node execution was canceled by feedback.
+        """
+        if self.approval.enabled:
+            approval_result = self.send_approval_message(self.approval, input_data, config=config, **kwargs)
+            if not approval_result.is_approved:
+                raise NodeException(
+                    message=f"Execution was canceled by human with feedback {approval_result.feedback}",
+                    recoverable=True,
+                    failed_depend=NodeDependency(self, option="Execution was canceled."),
+                )
+            return approval_result.data
+
+        return input_data
+
     def run(
         self,
         input_data: Any,
@@ -496,6 +634,7 @@ class Node(BaseModel, Runnable, ABC):
         try:
             try:
                 self.validate_depends(depends_result)
+                input_data = self.get_approved_data_or_origin(input_data, config=config, **merged_kwargs)
             except NodeException as e:
                 transformed_input = input_data | {
                     k: result.to_tracing_depend_dict() for k, result in depends_result.items()
@@ -508,12 +647,14 @@ class Node(BaseModel, Runnable, ABC):
                     **merged_kwargs,
                 )
                 logger.info(f"Node {self.name} - {self.id}: execution skipped.")
-                return RunnableResult(status=RunnableStatus.SKIP, input=transformed_input, output=format_value(e))
+                return RunnableResult(
+                    status=RunnableStatus.SKIP,
+                    input=transformed_input,
+                    output=format_value(e, recoverable=e.recoverable),
+                )
 
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
-
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
-
             cache = cache_wf_entity(
                 entity_id=self.id,
                 cache_enabled=self.caching.enabled,
@@ -526,6 +667,7 @@ class Node(BaseModel, Runnable, ABC):
 
             merged_kwargs["is_output_from_cache"] = from_cache
             transformed_output = self.transform_output(output)
+
             self.run_on_node_end(config.callbacks, transformed_output, **merged_kwargs)
 
             logger.info(

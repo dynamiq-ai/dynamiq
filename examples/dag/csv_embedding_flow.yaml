@@ -7,6 +7,11 @@ nodes:
   csv-converter:
     type: dynamiq.nodes.converters.CSVConverter
     name: CSV Converter
+    delimiter: ","
+    content_column: "Target"
+    metadata_columns:
+      - "Feature_1"
+      - "Feature_2"
 
   document-embedder:
     type: dynamiq.nodes.embedders.OpenAIDocumentEmbedder

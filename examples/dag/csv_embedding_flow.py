@@ -18,12 +18,7 @@ def run_csv_embedding_workflow(csv_file_path: str, yaml_file_path: str):
     """
     tracer = TracingCallbackHandler()
 
-    input_data = {
-        "file_paths": [csv_file_path],
-        "delimiter": ",",
-        "content_column": "Target",
-        "metadata_columns": ["Feature_1", "Feature_2"],
-    }
+    input_data = {"file_paths": [csv_file_path]}
 
     with get_connection_manager() as cm:
         workflow = Workflow.from_yaml_file(file_path=yaml_file_path, connection_manager=cm, init_components=True)

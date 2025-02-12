@@ -18,7 +18,7 @@ from dynamiq.utils.logger import logger
 
 class Flow(BaseFlow):
     """
-    Represents a flow of nodes to be executed.
+    A class for managing and executing a graph-like structure of nodes.
 
     Attributes:
         nodes (list[Node]): List of nodes in the flow.

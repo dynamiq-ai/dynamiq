@@ -9,9 +9,9 @@ from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.retrievers import PineconeDocumentRetriever
+from dynamiq.nodes.retrievers.retriever import VectorStoreRetriever
 from dynamiq.nodes.tools.http_api_call import HttpApiCall
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
-from dynamiq.nodes.tools.retriever import RetrievalTool
 
 
 def run_workflow(input: str) -> str:
@@ -29,10 +29,11 @@ def run_workflow(input: str) -> str:
         top_k=3,
     )
 
-    bank_retriever_tool = RetrievalTool(
+    bank_retriever_tool = VectorStoreRetriever(
         name="Bank FAQ Search",
         text_embedder=text_embedder,
         document_retriever=document_retriever,
+        is_optimized_for_agents=True,
     )
 
     # Create a ReActAgent for handling bank documentation queries

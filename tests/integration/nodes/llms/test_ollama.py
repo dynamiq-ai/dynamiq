@@ -51,6 +51,7 @@ def test_workflow_with_ollama_llm(mock_llm_response_text, mock_llm_executor, mod
     model = model
     connection = connections.Ollama(
         id=str(uuid.uuid4()),
+
     )
     wf_ollama_ai = get_ollama_workflow(model=model, connection=connection)
 
@@ -87,4 +88,5 @@ def test_workflow_with_ollama_llm(mock_llm_response_text, mock_llm_executor, mod
         response_format=None,
         drop_params=True,
         client=ANY,
+        api_base='http://localhost:11434',
     )

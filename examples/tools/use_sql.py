@@ -1,11 +1,11 @@
 from dynamiq.connections import connections
-from dynamiq.nodes.tools import SqlExecutor
+from dynamiq.nodes.tools import SQLExecutor
 
 
 def basic_requests_snowflake_example():
     snowflake_connection = connections.Snowflake()
 
-    snowflake_executor = SqlExecutor(connection=snowflake_connection)
+    snowflake_executor = SQLExecutor(connection=snowflake_connection)
     snowflake_insert = {
         "query": """INSERT INTO test1 (Name, Description)
         VALUES ('Name1', 'Description1'), ('Name2', 'Description2');"""
@@ -22,7 +22,7 @@ def basic_requests_snowflake_example():
 def basic_requests_mysql_example():
     mysql_connection = connections.MySQL()
 
-    mysql_executor = SqlExecutor(connection=mysql_connection)
+    mysql_executor = SQLExecutor(connection=mysql_connection)
     mysql_insert = {
         "query": """
     INSERT INTO test1 (`Name`, `Description`)

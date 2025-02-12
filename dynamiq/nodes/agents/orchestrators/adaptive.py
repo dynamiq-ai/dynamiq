@@ -11,6 +11,7 @@ from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentMan
 from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Orchestrator, OrchestratorError
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.utils.chat import format_chat_history
 from dynamiq.utils.logger import logger
 
 
@@ -22,15 +23,14 @@ class AgentNotFoundError(OrchestratorError):
 
 class ActionCommand(str, Enum):
     DELEGATE = "delegate"
-    CLARIFY = "clarify"
     FINAL_ANSWER = "final_answer"
+    RESPOND = "respond"
 
 
 class Action(BaseModel):
     command: ActionCommand
     agent: str | None = None
     task: str | None = None
-    question: str | None = None
     answer: str | None = None
 
 
@@ -47,6 +47,7 @@ class AdaptiveOrchestrator(Orchestrator):
         agents (List[BaseAgent]): List of specialized agents available for task execution.
         objective (Optional[str]): The main objective of the orchestration.
         max_loops (Optional[int]): Maximum number of actions.
+        reflection_enabled (Optional[bool]): Enable reflection mode
     """
 
     name: str | None = "AdaptiveOrchestrator"
@@ -54,6 +55,7 @@ class AdaptiveOrchestrator(Orchestrator):
     manager: AdaptiveAgentManager
     agents: list[Agent] = []
     max_loops: int = 15
+    reflection_enabled: bool = False
 
     @property
     def to_dict_exclude_params(self):
@@ -104,13 +106,12 @@ class AdaptiveOrchestrator(Orchestrator):
         Raises:
             ActionParseError: If there is an error parsing the action from the LLM response.
         """
-        prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self._chat_history])
 
         manager_result = self.manager.run(
             input_data={
                 "action": "plan",
                 "agents": self.agents_descriptions,
-                "chat_history": prompt,
+                "chat_history": format_chat_history(self._chat_history),
             },
             config=config,
             run_depends=self._run_depends,
@@ -123,6 +124,35 @@ class AdaptiveOrchestrator(Orchestrator):
             raise ActionParseError(f"Unable to retrieve the next action from Agent Manager, Error: {error_message}")
 
         manager_content = manager_result.output.get("content").get("result")
+
+        if self.reflection_enabled:
+            reflect_result = self.manager.run(
+                input_data={
+                    "action": "reflect",
+                    "agents": self.agents_descriptions,
+                    "chat_history": format_chat_history(self._chat_history),
+                    "plan": manager_content,
+                    "agent_output": "",
+                },
+                config=config,
+                run_depends=self._run_depends,
+                **kwargs,
+            )
+            self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+
+            if reflect_result.status != RunnableStatus.SUCCESS:
+                error_message = (
+                    f"Agent '{self.manager.name}' failed on reflection: {reflect_result.output.get('content')}"
+                )
+                logger.error(error_message)
+                return self._parse_xml_content(manager_content)
+            else:
+                reflect_content = reflect_result.output.get("content").get("result")
+                try:
+                    return self._parse_xml_content(reflect_content)
+                except ActionParseError as e:
+                    logger.error(f"Agent '{self.manager.name}' failed on reflection parsing: {str(e)}")
+                    return self._parse_xml_content(manager_content)
         return self._parse_xml_content(manager_content)
 
     def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
@@ -143,11 +173,17 @@ class AdaptiveOrchestrator(Orchestrator):
             logger.info(f"Orchestrator {self.name} - {self.id}: Loop {i + 1} - Action: {action.dict()}")
             if action.command == ActionCommand.DELEGATE:
                 self._handle_delegation(action=action, config=config, **kwargs)
+
+            elif action.command == ActionCommand.RESPOND:
+                respond_result = self._handle_respond(action=action)
+                respond_final_result = self.parse_xml_final_answer(respond_result)
+                return respond_final_result
+
             elif action.command == ActionCommand.FINAL_ANSWER:
                 manager_final_result = self.get_final_result(
                     {
                         "input_task": input_task,
-                        "chat_history": self._chat_history,
+                        "chat_history": format_chat_history(self._chat_history),
                         "preliminary_answer": action.answer,
                     },
                     config=config,
@@ -184,7 +220,12 @@ class AdaptiveOrchestrator(Orchestrator):
             )
         else:
             result = self.manager.run(
-                input_data={"action": "run", "simple_prompt": action.task},
+                input_data={
+                    "action": "respond",
+                    "task": action.task,
+                    "agents": self.agents_descriptions,
+                    "chat_history": format_chat_history(self._chat_history),
+                },
                 config=config,
                 run_depends=self._run_depends,
                 **kwargs,
@@ -203,6 +244,38 @@ class AdaptiveOrchestrator(Orchestrator):
                     "content": f"LLM result: {result.output.get('content')}",
                 }
             )
+
+    def _handle_respond(self, action: Action, config: RunnableConfig = None, **kwargs):
+        """
+        A direct response from the Manager, delegated to the manager agent.
+        """
+
+        manager_result = self.manager.run(
+            input_data={
+                "action": "respond",
+                "task": action.task,
+                "agents": self.agents_descriptions,
+                "chat_history": format_chat_history(self._chat_history),
+            },
+            config=config,
+            run_depends=self._run_depends,
+            **kwargs,
+        )
+        self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+
+        if manager_result.status != RunnableStatus.SUCCESS:
+            error_message = f"Manager agent '{self.manager.name}' failed: {manager_result.output.get('content')}"
+            raise OrchestratorError(f"Failed to execute respond action with manager, due to error: {error_message}")
+
+        manager_result_content = manager_result.output.get("content").get("result")
+
+        self._chat_history.append(
+            {
+                "role": "system",
+                "content": f"[Manager agent '{self.manager.name} - quick response]: {manager_result_content}",
+            }
+        )
+        return manager_result_content
 
     def setup_streaming(self) -> None:
         """Setups streaming for orchestrator."""
@@ -228,14 +301,20 @@ class AdaptiveOrchestrator(Orchestrator):
 
             output_match = re.search(r"<output>(.*?)</output>", content, re.DOTALL)
             if not output_match:
-                raise ActionParseError("No <output> tags found in the response")
+                error_message = (
+                    f"Orchestrator {self.name} - {self.id}: XML parsing error: No <output> tags found in the response"
+                )
+                raise ActionParseError(error_message)
 
             output_content = output_match.group(1).strip()
             root = ET.fromstring(f"<root>{output_content}</root>")  # nosec B314
 
             action_elem = root.find("action")
             if action_elem is None:
-                raise ActionParseError("No <action> tag found in the response")
+                error_message = (
+                    f"Orchestrator {self.name} - {self.id}: XML parsing error: No <action> tag found in the response"
+                )
+                raise ActionParseError(error_message)
 
             action_type = action_elem.text.strip().lower()
 
@@ -245,7 +324,11 @@ class AdaptiveOrchestrator(Orchestrator):
                 task_data_elem = root.find("task_data")
 
                 if agent_elem is None or task_elem is None:
-                    raise ActionParseError("Delegate action missing required agent or task tags")
+                    error_message = (
+                        f"Orchestrator {self.name} - {self.id}: XML parsing error: "
+                        f"Delegate action missing required <agent> or <task> tags"
+                    )
+                    raise ActionParseError(error_message)
 
                 return Action(
                     command=ActionCommand.DELEGATE,
@@ -257,23 +340,45 @@ class AdaptiveOrchestrator(Orchestrator):
             elif action_type == "final_answer":
                 answer_elem = root.find("final_answer")
                 if answer_elem is None:
-                    raise ActionParseError("Final answer action missing required final_answer tag")
+                    error_message = (
+                        f"Orchestrator {self.name} - {self.id}: XML parsing error: "
+                        f"Final answer action missing <final_answer> tag"
+                    )
+                    raise ActionParseError(error_message)
 
-                return Action(command=ActionCommand.FINAL_ANSWER, answer=answer_elem.text.strip())
+            elif action_type == "respond":
+                task_elem = root.find("task")
 
+                if task_elem is None:
+                    error_message = (
+                        f"Orchestrator {self.name} - {self.id}: XML parsing error: Respond action missing <task> tag"
+                    )
+                    raise ActionParseError(error_message)
+
+                return Action(
+                    command=ActionCommand.RESPOND,
+                    task=task_elem.text.strip(),
+                )
             else:
                 raise ActionParseError(f"Unknown action type: {action_type}")
 
+            return Action(command=ActionCommand.FINAL_ANSWER, answer=answer_elem.text.strip())
+
         except ET.ParseError as e:
-            raise ActionParseError(f"XML parsing error: {str(e)}")
+            error_message = f"Orchestrator {self.name} - {self.id}: XML parsing error: {str(e)}"
+            raise ActionParseError(error_message)
         except Exception as e:
-            raise ActionParseError(f"Error parsing action: {str(e)}")
+            error_message = f"Orchestrator {self.name} - {self.id}: Error parsing action: {str(e)}"
+            raise ActionParseError(error_message)
 
     def parse_xml_final_answer(self, content: str) -> str:
         output_match = re.search(r"<output>(.*?)</output>", content, re.DOTALL)
         if not output_match:
-            error_response = f"Error parsing final answer: No <output> tags found in the response {content}"
-            raise ActionParseError(f"Error: {error_response}")
+            error_message = (
+                f"Orchestrator {self.name} - {self.id}: Error parsing final answer: "
+                f"No <output> tags found in the response {content}"
+            )
+            raise ActionParseError(error_message)
 
         output_content = output_match.group(1).strip()
         return output_content
