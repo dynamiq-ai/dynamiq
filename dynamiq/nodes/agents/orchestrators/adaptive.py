@@ -395,4 +395,4 @@ class AdaptiveOrchestrator(Orchestrator):
             except Exception as e:
                 error_message = f"Error parsing final answer: {str(e)}. Falling back to plain text extraction."
                 logger.error(error_message)
-                return output_content
+                return content

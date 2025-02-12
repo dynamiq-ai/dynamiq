@@ -338,9 +338,9 @@ class LinearOrchestrator(Orchestrator):
             except Exception as e:
                 error_response = f"Orchestrator {self.name} - {self.id}: Error parsing final answer: {e}"
                 logger.error(error_response)
-                if "final_answer" in final_result:
+                if "final_answer" in final_result_content:
                     logger.info(f"Orchestrator {self.name} - {self.id}: Return raw answer")
-                    return final_result
+                    return final_result_content
                 else:
                     raise ActionParseError(f"{error_response}")
         return tasks_outputs
