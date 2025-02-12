@@ -562,11 +562,13 @@ def gather_feedback(context: dict[str, Any], **kwargs):
     reiterate = True
 
     result = f"Gathered feedback: {feedback}"
-    if feedback.strip().lower() == "send":
+
+    feedback = feedback.strip().lower()
+    if feedback == "send":
         print("####### Email was sent! #######")
         result = "Email was sent!"
         reiterate = False
-    elif feedback.strip().lower() == "cancel":
+    elif feedback == "cancel":
         print("####### Email was canceled! #######")
         result = "Email was canceled!"
         reiterate = False
