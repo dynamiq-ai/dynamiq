@@ -4,7 +4,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.base import Agent
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
@@ -25,7 +25,7 @@ def run_simple_workflow() -> tuple[str, dict]:
         Exception: Captures and prints any errors during workflow execution.
     """
     llm = setup_llm()
-    agent = SimpleAgent(
+    agent = ReActAgent(
         name=" Agent",
         llm=llm,
         role=AGENT_ROLE,
@@ -109,5 +109,5 @@ if __name__ == "__main__":
     output, traces = run_simple_workflow()
     print(output)
 
-    output, traces = run_simple_custom_workflow()
-    print(output)
+    # output, traces = run_simple_custom_workflow()
+    # print(output)

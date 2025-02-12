@@ -41,6 +41,20 @@ class Message(BaseModel):
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
 
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Import and initialize Jinja2 Template here
+        from jinja2 import Template
+
+        self._Template = Template
+
+    def format_message(self, **kwargs) -> "Message":
+        "Returns formated copy of message"
+        return Message(
+            role=self.role,
+            content=self._Template(self.content).render(**kwargs),
+        )
+
 
 class VisionMessageTextContent(BaseModel):
     """
@@ -91,6 +105,40 @@ class VisionMessage(BaseModel):
 
     content: list[VisionMessageTextContent | VisionMessageImageContent]
     role: MessageRole = MessageRole.USER
+
+    def format_message(self, **kwargs):
+        out_msg_content = []
+        for content in self.content:
+            if isinstance(content, VisionMessageTextContent):
+                out_msg_content.append(
+                    VisionMessageTextContent(
+                        text=self._Template(content.text).render(**kwargs),
+                    )
+                )
+            elif isinstance(content, VisionMessageImageContent):
+                self.parse_image_url_parameters(content.image_url.url, kwargs)
+                out_msg_content.append(
+                    VisionMessageImageContent(
+                        image_url=VisionMessageImageURL(
+                            url=self._Template(content.image_url.url).render(**kwargs),
+                            detail=content.image_url.detail,
+                        )
+                    )
+                )
+            else:
+                raise ValueError(f"Invalid content type: {content.type}")
+
+        if len(out_msg_content) == 1 and out_msg_content[0]["type"] == VisionMessageType.TEXT:
+            out_msg_content = out_msg_content[0]["text"]
+
+        return VisionMessage(role=self.role, content=out_msg_content)
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Import and initialize Jinja2 Template here
+        from jinja2 import Template
+
+        self._Template = Template
 
     def to_dict(self, **kwargs) -> dict:
         """
@@ -176,10 +224,6 @@ class Prompt(BasePrompt):
 
     def __init__(self, **data):
         super().__init__(**data)
-        # Import and initialize Jinja2 Template here
-        from jinja2 import Template
-
-        self._Template = Template
 
     def get_parameters_for_template(self, template: str, env: Environment | None = None) -> set[str]:
         """
@@ -287,42 +331,9 @@ class Prompt(BasePrompt):
         out: list[dict] = []
         for msg in self.messages:
             if isinstance(msg, Message):
-                out.append(
-                    Message(
-                        role=msg.role,
-                        content=self._Template(msg.content).render(**kwargs),
-                    ).model_dump(exclude={"metadata"})
-                )
+                out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
             elif isinstance(msg, VisionMessage):
-                out_msg_content = []
-                for content in msg.content:
-                    if isinstance(content, VisionMessageTextContent):
-                        out_msg_content.append(
-                            VisionMessageTextContent(
-                                text=self._Template(content.text).render(**kwargs),
-                            ).model_dump()
-                        )
-                    elif isinstance(content, VisionMessageImageContent):
-                        self.parse_image_url_parameters(content.image_url.url, kwargs)
-                        out_msg_content.append(
-                            VisionMessageImageContent(
-                                image_url=VisionMessageImageURL(
-                                    url=self._Template(content.image_url.url).render(**kwargs),
-                                    detail=content.image_url.detail,
-                                )
-                            ).model_dump()
-                        )
-                    else:
-                        raise ValueError(f"Invalid content type: {content.type}")
-
-                if len(out_msg_content) == 1 and out_msg_content[0]["type"] == VisionMessageType.TEXT:
-                    out_msg_content = out_msg_content[0]["text"]
-
-                out_msg = {
-                    "content": out_msg_content,
-                    "role": msg.role,
-                }
-                out.append(out_msg)
+                out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
             else:
                 raise ValueError(f"Invalid message type: {type(msg)}")
 
