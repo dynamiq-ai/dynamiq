@@ -441,13 +441,12 @@ class ElasticsearchVectorStore:
         Returns:
             int: The number of documents in the store.
         """
-        response = self.client.search(
+        response = self.client.count(
             index=self.index_name,
             query={"match_all": {}},
             _source_excludes=([self.embedding_key]),
         )
-        count = response["hits"]["total"]["value"]
-        return count
+        return response.get("count", 0)
 
     def close(self) -> None:
         """Close the client connection."""
