@@ -10,7 +10,7 @@ from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
-from dynamiq.nodes.types import Behavior
+from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.utils.logger import logger
 from examples.trip_planner.prompts import generate_customer_prompt, generate_simple_customer_prompt
 
@@ -70,6 +70,7 @@ def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini", use_
         tools=[tool_search],
         max_loops=10,
         behavior_on_max_loops=Behavior.RETURN,
+        inference_mode=InferenceMode.XML,
     )
 
     agent_city_guide = ReActAgent(
