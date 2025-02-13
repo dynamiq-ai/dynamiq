@@ -55,6 +55,7 @@ snowflake-connector-python = "~3.12.4"
 rapidfuzz = "~3.11.0"
 sacrebleu = "~2.5.1"
 rouge-score = "~0.1.2"
+lxml = "^5.3.1"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~69.1.1"

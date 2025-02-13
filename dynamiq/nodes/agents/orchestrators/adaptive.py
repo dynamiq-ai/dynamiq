@@ -1,7 +1,7 @@
 import re
 from enum import Enum
-from xml.etree import ElementTree as ET  # nosec B405
 
+from lxml import etree as LET  # nosec B410
 from pydantic import BaseModel
 
 from dynamiq.connections.managers import ConnectionManager
@@ -297,20 +297,20 @@ class AdaptiveOrchestrator(Orchestrator):
             ActionParseError: If XML parsing fails or required tags are missing
         """
         try:
-            content = content.replace("```", "").strip()
+            cleaned_content = content.replace("```", "").strip()
+            output_content = self._extract_output_content(cleaned_content)
+            wrapped_content = f"<root>{output_content}</root>"
+            parser = LET.XMLParser(recover=True)  # nosec B320
+            root = LET.fromstring(wrapped_content, parser=parser)  # nosec B320
+        except Exception as e:
+            error_message = f"XML parsing error: {str(e)} in content: {content}"
+            logger.error(error_message)
+            raise ActionParseError(error_message)
 
-            output_match = re.search(r"<output>(.*?)</output>", content, re.DOTALL)
-            if not output_match:
-                error_message = (
-                    f"Orchestrator {self.name} - {self.id}: XML parsing error: No <output> tags found in the response"
-                )
-                raise ActionParseError(error_message)
-
-            output_content = output_match.group(1).strip()
-            root = ET.fromstring(f"<root>{output_content}</root>")  # nosec B314
-
-            action_elem = root.find("action")
-            if action_elem is None:
+        try:
+            # Use recursive search (".//") for tags in case they are nested.
+            action_elem = root.find(".//action")
+            if action_elem is None or not action_elem.text:
                 error_message = (
                     f"Orchestrator {self.name} - {self.id}: XML parsing error: No <action> tag found in the response"
                 )
@@ -319,9 +319,9 @@ class AdaptiveOrchestrator(Orchestrator):
             action_type = action_elem.text.strip().lower()
 
             if action_type == "delegate":
-                agent_elem = root.find("agent")
-                task_elem = root.find("task")
-                task_data_elem = root.find("task_data")
+                agent_elem = root.find(".//agent")
+                task_elem = root.find(".//task")
+                task_data_elem = root.find(".//task_data")
 
                 if agent_elem is None or task_elem is None:
                     error_message = (
@@ -334,27 +334,26 @@ class AdaptiveOrchestrator(Orchestrator):
                     command=ActionCommand.DELEGATE,
                     agent=agent_elem.text.strip(),
                     task=task_elem.text.strip()
-                    + (f" {task_data_elem.text.strip()}" if task_data_elem is not None else ""),
+                    + (f" {task_data_elem.text.strip()}" if task_data_elem is not None and task_data_elem.text else ""),
                 )
 
             elif action_type == "final_answer":
-                answer_elem = root.find("final_answer")
-                if answer_elem is None:
+                answer_elem = root.find(".//final_answer")
+                if answer_elem is None or not answer_elem.text:
                     error_message = (
                         f"Orchestrator {self.name} - {self.id}: XML parsing error: "
                         f"Final answer action missing <final_answer> tag"
                     )
                     raise ActionParseError(error_message)
+                return Action(command=ActionCommand.FINAL_ANSWER, answer=answer_elem.text.strip())
 
             elif action_type == "respond":
-                task_elem = root.find("task")
-
-                if task_elem is None:
+                task_elem = root.find(".//task")
+                if task_elem is None or not task_elem.text:
                     error_message = (
                         f"Orchestrator {self.name} - {self.id}: XML parsing error: Respond action missing <task> tag"
                     )
                     raise ActionParseError(error_message)
-
                 return Action(
                     command=ActionCommand.RESPOND,
                     task=task_elem.text.strip(),
@@ -362,9 +361,7 @@ class AdaptiveOrchestrator(Orchestrator):
             else:
                 raise ActionParseError(f"Unknown action type: {action_type}")
 
-            return Action(command=ActionCommand.FINAL_ANSWER, answer=answer_elem.text.strip())
-
-        except ET.ParseError as e:
+        except LET.ParseError as e:
             error_message = f"Orchestrator {self.name} - {self.id}: XML parsing error: {str(e)}"
             raise ActionParseError(error_message)
         except Exception as e:
@@ -372,13 +369,30 @@ class AdaptiveOrchestrator(Orchestrator):
             raise ActionParseError(error_message)
 
     def parse_xml_final_answer(self, content: str) -> str:
-        output_match = re.search(r"<output>(.*?)</output>", content, re.DOTALL)
-        if not output_match:
-            error_message = (
-                f"Orchestrator {self.name} - {self.id}: Error parsing final answer: "
-                f"No <output> tags found in the response {content}"
-            )
-            raise ActionParseError(error_message)
-
-        output_content = output_match.group(1).strip()
-        return output_content
+        try:
+            parser = LET.XMLParser(recover=True)  # nosec B320
+            cleaned_content = content.replace("```", "").strip()
+            output_content = self._extract_output_content(cleaned_content)
+            wrapped_content = f"<root>{output_content}</root>"
+            root = LET.fromstring(wrapped_content, parser=parser)  # nosec B320
+            final_answer_elem = root.find(".//final_answer")
+            if final_answer_elem is None or not final_answer_elem.text:
+                raise ActionParseError("Final answer tag <final_answer> missing.")
+            return final_answer_elem.text.strip()
+        except Exception as e:
+            error_message = f"Error parsing final answer: {str(e)}. Falling back to regex extraction."
+            logger.error(error_message)
+            try:
+                output_match = re.search(r"<output>(.*?)</output>", content, re.DOTALL)
+                if not output_match:
+                    error_message = (
+                        f"Orchestrator {self.name} - {self.id}: Error parsing final answer: "
+                        f"No <output> tags found in the response {content}"
+                    )
+                    raise ActionParseError(error_message)
+                output_content = output_match.group(1).strip()
+                return output_content
+            except Exception as e:
+                error_message = f"Error parsing final answer: {str(e)}. Falling back to plain text extraction."
+                logger.error(error_message)
+                return content
