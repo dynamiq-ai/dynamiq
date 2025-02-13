@@ -68,6 +68,8 @@ class ElasticsearchDocumentRetriever:
             top_k=top_k,
             exclude_document_embeddings=exclude_document_embeddings,
             scale_scores=scale_scores,
+            content_key=content_key,
+            embedding_key=embedding_key,
         )
 
         logger.debug(f"Retrieved {len(docs)} documents from Elasticsearch Vector Store")
