@@ -631,7 +631,7 @@ class AgentManager(Agent):
         """Executes the 'plan' action."""
         prompt = self.generate_prompt(block_names=["plan"])
 
-        llm_result = self._run_llm([Message(role = MessageRole.USER, content = prompt)], config, **kwargs)
+        llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs)
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
         return llm_result
@@ -639,7 +639,7 @@ class AgentManager(Agent):
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'assign' action."""
         prompt = self.generate_prompt(block_names=["assign"])
-        llm_result = self._run_llm([Message(role = MessageRole.USER, content = prompt)], config, **kwargs)
+        llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs)
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
         return llm_result
@@ -647,7 +647,7 @@ class AgentManager(Agent):
     def _final(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'final' action."""
         prompt = self.generate_prompt(block_names=["final"])
-        llm_result = self._run_llm([Message(role=MessageRole.USER, content = prompt)], config, **kwargs)
+        llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs)
         if self.streaming.enabled:
             return self.stream_content(content=llm_result, step="answer", source=self.name, config=config, **kwargs)
         return llm_result

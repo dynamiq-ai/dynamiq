@@ -461,6 +461,9 @@ class ReActAgent(Agent):
                                 )
                             return final_answer
                         action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
+
+                messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
+
                 if action:
                     if self.tools:
                         try:
@@ -490,11 +493,10 @@ class ReActAgent(Agent):
                         )
                         messages.append(Message(role=MessageRole.USER, content=observation))
 
-                messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
-
             except ActionParsingException as e:
                 messages.append(Message(role=MessageRole.ASSISTANT, content=f"{type(e).__name__}: {e}"))
                 continue
+
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
                 f"Agent {self.name} (ID: {self.id}) has reached the maximum loop limit of {self.max_loops} without finding a final answer. "  # noqa: E501
