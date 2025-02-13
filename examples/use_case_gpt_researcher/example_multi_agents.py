@@ -78,7 +78,7 @@ if __name__ == "__main__":
     orchestrator.context = {
         "task": task,
     }
-    run_result = orchestrator.run(input_data={})
+    orchestrator.run(input_data={})
 
     report = orchestrator.context.get("report")
 

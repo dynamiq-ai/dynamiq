@@ -71,8 +71,8 @@ def main(
 
         # Aggregate Evaluation Metrics
         eval_metrics = {
-            "context_recall": recall_scores[0],
-            "faithfulness": faithfulness_scores[0],
+            "context_recall": recall_scores.results[0].score,
+            "faithfulness": faithfulness_scores.results[0].score,
         }
 
         # Log the results

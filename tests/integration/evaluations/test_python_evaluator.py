@@ -1,103 +1,101 @@
+import pytest
+
 from dynamiq.evaluations import PythonEvaluator
 
 
 def test_python_evaluator_perfect_matches():
-    """
-    Test the PythonEvaluator to ensure it correctly identifies perfect matches.
-    """
-    # Sample user-defined Python code
     user_code = """
-def run(input_data):
-    # Retrieve arbitrary values from input_data
-    answer = input_data.get("answer")
-    expected = input_data.get("expected")
+def evaluate(answer, expected):
     return 1.0 if answer == expected else 0.0
 """
-
-    # Sample data: all answers match expected
     input_data_list = [
         {"answer": "Paris", "expected": "Paris"},
         {"answer": "Berlin", "expected": "Berlin"},
         {"answer": "Madrid", "expected": "Madrid"},
     ]
-
-    # Initialize PythonEvaluator with user-defined code
-    python_evaluator = PythonEvaluator(code=user_code)
-
-    # Run evaluator on multiple data points
-    python_scores = python_evaluator.run(input_data_list=input_data_list)
-
-    # Expected scores based on the user-defined code
+    evaluator = PythonEvaluator(code=user_code)
+    scores = evaluator.run(input_data_list=input_data_list)
     expected_scores = [1.0, 1.0, 1.0]
-
-    # Assert that the evaluator's scores match the expected scores
-    for computed, expected in zip(python_scores, expected_scores):
+    for computed, expected in zip(scores, expected_scores):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
 
 
 def test_python_evaluator_partial_matches():
-    """
-    Test the PythonEvaluator to ensure it correctly identifies partial matches.
-    """
-    # Sample user-defined Python code
     user_code = """
-def run(input_data):
-    # Retrieve arbitrary values from input_data
-    answer = input_data.get("answer")
-    expected = input_data.get("expected")
+def evaluate(answer, expected):
     return 1.0 if answer == expected else 0.0
 """
-
-    # Sample data: some answers match expected, some do not
     input_data_list = [
-        {"answer": "Paris", "expected": "Paris"},  # Match
-        {"answer": "Berlin", "expected": "Berlin"},  # Match
-        {"answer": "Madrid", "expected": "Barcelona"},  # No Match
+        {"answer": "Paris", "expected": "Paris"},
+        {"answer": "Berlin", "expected": "Berlin"},
+        {"answer": "Madrid", "expected": "Barcelona"},
     ]
-
-    # Initialize PythonEvaluator with user-defined code
-    python_evaluator = PythonEvaluator(code=user_code)
-
-    # Run evaluator on multiple data points
-    python_scores = python_evaluator.run(input_data_list=input_data_list)
-
-    # Expected scores based on the user-defined code
+    evaluator = PythonEvaluator(code=user_code)
+    scores = evaluator.run(input_data_list=input_data_list)
     expected_scores = [1.0, 1.0, 0.0]
-
-    # Assert that the evaluator's scores match the expected scores
-    for computed, expected in zip(python_scores, expected_scores):
+    for computed, expected in zip(scores, expected_scores):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
 
 
 def test_python_evaluator_empty_strings():
-    """
-    Test the PythonEvaluator with empty strings to ensure it handles edge cases gracefully.
-    """
-    # Sample user-defined Python code
     user_code = """
-def run(input_data):
-    # Retrieve arbitrary values from input_data
-    answer = input_data.get("answer")
-    expected = input_data.get("expected")
+def evaluate(answer, expected):
     return 1.0 if answer == expected else 0.0
 """
-
-    # Sample data: empty answers and expected
     input_data_list = [
-        {"answer": "", "expected": ""},  # Match (both empty)
-        {"answer": "New York", "expected": ""},  # No Match
-        {"answer": "", "expected": "Los Angeles"},  # No Match
+        {"answer": "", "expected": ""},
+        {"answer": "New York", "expected": ""},
+        {"answer": "", "expected": "Los Angeles"},
     ]
-
-    # Initialize PythonEvaluator with user-defined code
-    python_evaluator = PythonEvaluator(code=user_code)
-
-    # Run evaluator on multiple data points
-    python_scores = python_evaluator.run(input_data_list=input_data_list)
-
-    # Expected scores based on the user-defined code
+    evaluator = PythonEvaluator(code=user_code)
+    scores = evaluator.run(input_data_list=input_data_list)
     expected_scores = [1.0, 0.0, 0.0]
-
-    # Assert that the evaluator's scores match the expected scores
-    for computed, expected in zip(python_scores, expected_scores):
+    for computed, expected in zip(scores, expected_scores):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
+
+
+def test_python_evaluator_missing_keys():
+    user_code = """
+def evaluate(answer, expected):
+    return 1.0 if answer == expected else 0.0
+"""
+    # Missing the "expected" key.
+    input_data = {"answer": "Paris"}
+    evaluator = PythonEvaluator(code=user_code)
+    with pytest.raises(ValueError, match="Missing required keys"):
+        evaluator.run_single(input_data)
+
+
+def test_python_evaluator_extra_keys():
+    user_code = """
+def evaluate(answer, expected):
+    return 1.0 if answer == expected else 0.0
+"""
+    # Extra key "extra"
+    input_data = {"answer": "Paris", "expected": "Paris", "extra": "unexpected"}
+    evaluator = PythonEvaluator(code=user_code)
+    with pytest.raises(ValueError, match="Unexpected keys provided"):
+        evaluator.run_single(input_data)
+
+
+def test_python_evaluator_default_parameters():
+    user_code = """
+def evaluate(answer, expected=42):
+    return 1.0 if answer == expected else 0.0
+"""
+    # "expected" is optional.
+    input_data = {"answer": 42}
+    evaluator = PythonEvaluator(code=user_code)
+    score = evaluator.run_single(input_data)
+    assert abs(score - 1.0) < 0.01, f"Expected score 1.0, got {score}"
+
+
+def test_python_evaluator_non_numeric():
+    user_code = """
+def evaluate(answer, expected):
+    return "invalid"
+"""
+    input_data = {"answer": "Paris", "expected": "Paris"}
+    evaluator = PythonEvaluator(code=user_code)
+    with pytest.raises(ValueError, match="non-numeric"):
+        evaluator.run_single(input_data)
