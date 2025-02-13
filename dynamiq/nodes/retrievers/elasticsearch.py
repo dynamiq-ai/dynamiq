@@ -22,6 +22,8 @@ class ElasticsearchRetrieverInputSchema(BaseModel):
     top_k: int = Field(default=0, description="Number of documents to retrieve")
     exclude_document_embeddings: bool = Field(default=True, description="Whether to exclude embeddings in response")
     scale_scores: bool = Field(default=False, description="Whether to scale scores to 0-1 range")
+    content_key: str = Field(default="content", description="Key to use for content in response")
+    embedding_key: str = Field(default="embedding", description="Key to use for embedding in response")
 
 
 class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
@@ -122,6 +124,8 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
             top_k=input_data.top_k or self.top_k,
             exclude_document_embeddings=input_data.exclude_document_embeddings,
             scale_scores=input_data.scale_scores,
+            content_key=input_data.content_key,
+            embedding_key=input_data.embedding_key,
         )
 
         return {

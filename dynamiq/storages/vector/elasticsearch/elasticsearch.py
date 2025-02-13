@@ -194,6 +194,7 @@ class ElasticsearchVectorStore:
         policy: DuplicatePolicy = DuplicatePolicy.FAIL,
         batch_size: int | None = None,
         content_key: str | None = None,
+        embedding_key: str | None = None,
     ) -> int:
         """Write documents to Elasticsearch.
 
@@ -224,6 +225,7 @@ class ElasticsearchVectorStore:
         # Process in batches
         batch_size = batch_size or self.write_batch_size
         content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
         total_written = 0
 
         for i in range(0, len(documents), batch_size):
@@ -236,7 +238,7 @@ class ElasticsearchVectorStore:
                         {
                             content_key: doc.content,
                             "metadata": doc.metadata,
-                            self.embedding_key: doc.embedding,
+                            embedding_key: doc.embedding,
                         },
                     ]
                 )
@@ -276,6 +278,7 @@ class ElasticsearchVectorStore:
         filters: dict[str, Any] | None = None,
         scale_scores: bool = False,
         content_key: str | None = None,
+        embedding_key: str | None = None,
     ) -> list[Document]:
         """
         Retrieve documents by vector similarity.
@@ -300,10 +303,11 @@ class ElasticsearchVectorStore:
         if len(query_embedding) != self.dimension:
             raise ValueError(f"query_embedding must have dimension {self.dimension}")
 
+        embedding_key = embedding_key or self.embedding_key
         # Build the query
         query = {
             "knn": {
-                "field": self.embedding_key,
+                "field": embedding_key,
                 "query_vector": query_embedding,
                 "k": top_k,
                 "num_candidates": top_k * 2,
@@ -320,7 +324,7 @@ class ElasticsearchVectorStore:
             index=self.index_name,
             query=query,
             size=top_k,
-            _source_excludes=([self.embedding_key] if exclude_document_embeddings else None),
+            _source_excludes=([embedding_key] if exclude_document_embeddings else None),
         )
         content_key = content_key or self.content_key
 
@@ -341,7 +345,7 @@ class ElasticsearchVectorStore:
                 score=score,
             )
             if not exclude_document_embeddings:
-                doc.embedding = hit["_source"][self.embedding_key]
+                doc.embedding = hit["_source"][embedding_key]
             documents.append(doc)
 
         return documents
@@ -391,7 +395,11 @@ class ElasticsearchVectorStore:
         self.delete_documents_by_filters(filters)
 
     def list_documents(
-        self, include_embeddings: bool = False, content_key: str | None = None, scale_scores: bool = False
+        self,
+        include_embeddings: bool = False,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+        scale_scores: bool = False,
     ) -> list[Document]:
         """
         List documents in the Pinecone vector store.
@@ -404,13 +412,14 @@ class ElasticsearchVectorStore:
         Returns:
             list[Document]: List of Document objects retrieved.
         """
+        embedding_key = embedding_key or self.embedding_key
+        content_key = content_key or self.content_key
 
         response = self.client.search(
             index=self.index_name,
             query={"match_all": {}},
-            _source_excludes=([self.embedding_key] if not include_embeddings else None),
+            _source_excludes=([embedding_key] if not include_embeddings else None),
         )
-        content_key = content_key or self.content_key
 
         # Convert results to Documents with optional score scaling
         all_documents = []
@@ -429,7 +438,7 @@ class ElasticsearchVectorStore:
                 score=score,
             )
             if include_embeddings:
-                doc.embedding = hit["_source"][self.embedding_key]
+                doc.embedding = hit["_source"][embedding_key]
             all_documents.append(doc)
 
         return all_documents

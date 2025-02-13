@@ -52,7 +52,13 @@ def test_run_basic_search(retriever, mock_vector_store, mock_es_filters):
     result = retriever.run(query=query, filters=mock_es_filters, top_k=5)
 
     mock_vector_store._embedding_retrieval.assert_called_once_with(
-        query_embedding=query, filters=mock_es_filters, top_k=5, exclude_document_embeddings=True, scale_scores=False
+        query_embedding=query,
+        filters=mock_es_filters,
+        top_k=5,
+        exclude_document_embeddings=True,
+        scale_scores=False,
+        content_key=None,
+        embedding_key=None,
     )
     assert "documents" in result
     assert len(result["documents"]) == 1
@@ -61,7 +67,7 @@ def test_run_basic_search(retriever, mock_vector_store, mock_es_filters):
 def test_run_with_score_scaling(retriever, mock_vector_store):
     """Test vector search with score scaling enabled."""
     query = [0.1] * 768
-    result = retriever.run(query=query, scale_scores=True)
+    result = retriever.run(query=query, scale_scores=True, content_key="content", embedding_key="embedding")
 
     mock_vector_store._embedding_retrieval.assert_called_once_with(
         query_embedding=query,
@@ -69,6 +75,8 @@ def test_run_with_score_scaling(retriever, mock_vector_store):
         top_k=retriever.top_k,
         exclude_document_embeddings=True,
         scale_scores=True,
+        content_key="content",
+        embedding_key="embedding",
     )
     assert "documents" in result
 
@@ -84,6 +92,8 @@ def test_run_with_document_embeddings(retriever, mock_vector_store):
         top_k=retriever.top_k,
         exclude_document_embeddings=False,
         scale_scores=False,
+        content_key=None,
+        embedding_key=None,
     )
     assert "documents" in result
 
@@ -99,5 +109,7 @@ def test_run_with_default_parameters(retriever, mock_vector_store):
         top_k=retriever.top_k,
         exclude_document_embeddings=True,
         scale_scores=False,
+        content_key=None,
+        embedding_key=None,
     )
     assert "documents" in result
