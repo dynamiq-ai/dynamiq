@@ -345,7 +345,7 @@ class LinearOrchestrator(Orchestrator):
                     raise ActionParseError(f"{error_response}")
         return tasks_outputs
 
-    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
+    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Process the given task using the manager agent logic.
 
@@ -354,18 +354,18 @@ class LinearOrchestrator(Orchestrator):
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
-            str: The final answer generated after processing the task.
+            dict[str, Any]: The final output generated after processing the task.
         """
         analysis = self._analyze_user_input(input_task, config=config, **kwargs)
         decision = analysis.decision
         message = analysis.message
 
         if decision == Decision.RESPOND:
-            return message
+            return {"content": message}
         else:
             tasks = self.get_tasks(input_task, config=config, **kwargs)
             self.run_tasks(tasks=tasks, input_task=input_task, config=config, **kwargs)
-            return self.generate_final_answer(input_task, config, **kwargs)
+            return {"content": self.generate_final_answer(input_task, config, **kwargs)}
 
     def setup_streaming(self) -> None:
         """Setups streaming for orchestrator."""

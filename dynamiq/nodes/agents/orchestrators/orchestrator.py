@@ -1,6 +1,6 @@
 import re
 from abc import ABC, abstractmethod
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
@@ -96,7 +96,7 @@ class Orchestrator(Node, ABC):
         self._chat_history = []
 
     @abstractmethod
-    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
+    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Process the given task.
 
@@ -105,7 +105,7 @@ class Orchestrator(Node, ABC):
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
-            str: The final answer generated after processing the task.
+            dict[str, Any]: The final output generated after processing the task.
         """
         pass
 
@@ -139,14 +139,14 @@ class Orchestrator(Node, ABC):
         if self.streaming.enabled:
             self.setup_streaming()
 
-        result = self.run_flow(
+        output = self.run_flow(
             input_task=input_task,
             config=config,
             **kwargs,
         )
 
-        logger.info(f"Orchestrator {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
-        return {"content": result}
+        logger.info(f"Orchestrator {self.name} - {self.id}: finished with RESULT:\n{str(output)[:200]}...")
+        return output
 
     def _extract_output_content(self, text: str) -> str:
         """
