@@ -6,12 +6,6 @@ from dynamiq.storages.vector import ElasticsearchVectorStore
 from dynamiq.types import Document
 
 
-@pytest.fixture(autouse=True)
-def set_dummy_es_credentials(monkeypatch):
-    monkeypatch.setenv("ELASTICSEARCH_USERNAME", "test_user")
-    monkeypatch.setenv("ELASTICSEARCH_PASSWORD", "test_pass")
-
-
 @pytest.fixture
 def mock_es_client():
     client = MagicMock()
