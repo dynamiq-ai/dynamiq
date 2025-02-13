@@ -171,29 +171,29 @@ class Choice(Node):
             )
         # boolean
         elif cond.operator == ConditionOperator.BOOLEAN_EQUALS:
-            return value == cond.value and not cond.is_not
+            return (value == cond.value) == (not cond.is_not)
         # numeric
         if cond.operator == ConditionOperator.NUMERIC_EQUALS:
-            return value == cond.value and not cond.is_not
+            return (value == cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.NUMERIC_GREATER_THAN:
-            return value > cond.value and not cond.is_not
+            return (value > cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.NUMERIC_GREATER_THAN_OR_EQUALS:
-            return value >= cond.value and not cond.is_not
+            return (value >= cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.NUMERIC_LESS_THAN:
-            return value < cond.value and not cond.is_not
+            return (value < cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.NUMERIC_LESS_THAN_OR_EQUALS:
-            return value <= cond.value and not cond.is_not
+            return (value <= cond.value) == (not cond.is_not)
         # string
         elif cond.operator == ConditionOperator.STRING_EQUALS:
-            return value == cond.value and not cond.is_not
+            return (value == cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.STRING_GREATER_THAN:
-            return value > cond.value and not cond.is_not
+            return (value > cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.STRING_GREATER_THAN_OR_EQUALS:
-            return value >= cond.value and not cond.is_not
+            return (value >= cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.STRING_LESS_THAN:
-            return value < cond.value and not cond.is_not
+            return (value < cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.STRING_LESS_THAN_OR_EQUALS:
-            return value <= cond.value and not cond.is_not
+            return (value <= cond.value) == (not cond.is_not)
         else:
             raise ValueError(f"Operator {cond.operator} not supported.")
 

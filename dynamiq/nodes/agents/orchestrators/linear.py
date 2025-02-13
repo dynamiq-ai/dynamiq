@@ -330,16 +330,22 @@ class LinearOrchestrator(Orchestrator):
                 config=config,
                 **kwargs,
             )
-            final_result = re.search(r"<final_answer>(.*?)</final_answer>", final_result_content, re.DOTALL)
-            if not final_result:
-                error_response = f"Orchestrator {self.name} - {self.id}: No <final_answer> tags found in the response"
-                raise ActionParseError(f"{error_response}")
-            final_result_answer = final_result.group(1).strip()
-            return final_result_answer
 
+            try:
+                final_result = re.search(r"<final_answer>(.*?)</final_answer>", final_result_content, re.DOTALL)
+                final_result_answer = final_result.group(1).strip()
+                return final_result_answer
+            except Exception as e:
+                error_response = f"Orchestrator {self.name} - {self.id}: Error parsing final answer: {e}"
+                logger.error(error_response)
+                if "final_answer" in final_result_content:
+                    logger.info(f"Orchestrator {self.name} - {self.id}: Return raw answer")
+                    return final_result_content
+                else:
+                    raise ActionParseError(f"{error_response}")
         return tasks_outputs
 
-    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
+    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Process the given task using the manager agent logic.
 
@@ -348,18 +354,18 @@ class LinearOrchestrator(Orchestrator):
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
-            str: The final answer generated after processing the task.
+            dict[str, Any]: The final output generated after processing the task.
         """
         analysis = self._analyze_user_input(input_task, config=config, **kwargs)
         decision = analysis.decision
         message = analysis.message
 
         if decision == Decision.RESPOND:
-            return message
+            return {"content": message}
         else:
             tasks = self.get_tasks(input_task, config=config, **kwargs)
             self.run_tasks(tasks=tasks, input_task=input_task, config=config, **kwargs)
-            return self.generate_final_answer(input_task, config, **kwargs)
+            return {"content": self.generate_final_answer(input_task, config, **kwargs)}
 
     def setup_streaming(self) -> None:
         """Setups streaming for orchestrator."""
@@ -445,11 +451,7 @@ class LinearOrchestrator(Orchestrator):
         Returns:
             dict | None: The extracted JSON dictionary if successful, otherwise None.
         """
-        match = re.search(r"<output>(.*?)</output>", result_text, re.DOTALL)
-        if not match:
-            return None
-
-        output_content = match.group(1).strip()
+        output_content = self.extract_output_content(result_text)
         output_content = re.sub(r"^```(?:json)?\s*|```$", "", output_content).strip()
 
         try:

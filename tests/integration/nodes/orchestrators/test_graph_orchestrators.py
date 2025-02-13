@@ -100,29 +100,29 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
 
 
 @pytest.mark.parametrize(
-    ("get_orchestrator_workflow", "context_input", "outputs", "context_output"),
+    ("get_orchestrator_workflow", "context_input", "outputs"),
     [
         (
             get_orchestrator_workflow1,
             {},
-            {"content": "mocked_response"},
-            {"task1": "task 1 result", "task2": "task 2 result"},
+            {"content": "mocked_response", "context": {"task1": "task 1 result", "task2": "task 2 result"}},
         ),
         (
             get_orchestrator_workflow1,
             {"task3": True},
-            {"content": "mocked_response"},
-            {"task1": "task 1 result", "task2": "task 2 result", "task3": "task 3 result"},
+            {
+                "content": "mocked_response",
+                "context": {"task1": "task 1 result", "task2": "task 2 result", "task3": "task 3 result"},
+            },
         ),
         (
             get_orchestrator_workflow2,
             {},
-            {"content": "mocked_response"},
-            {"task1": "task 1 result", "task2": "task 2 result"},
+            {"content": "mocked_response", "context": {"task1": "task 1 result", "task2": "task 2 result"}},
         ),
     ],
 )
-def test_workflow_with_map_node(get_orchestrator_workflow, context_input, outputs, context_output):
+def test_workflow_with_map_node(get_orchestrator_workflow, context_input, outputs):
     model = "gpt-3.5-turbo"
     connection = connections.OpenAI(
         api_key="api_key",
@@ -146,5 +146,3 @@ def test_workflow_with_map_node(get_orchestrator_workflow, context_input, output
         output=expected_output,
     )
     assert json.dumps({"runs": [run.to_dict() for run in tracing.runs.values()]}, cls=JsonWorkflowEncoder)
-
-    assert wf_orchestrator.flow.nodes[0].context == context_output

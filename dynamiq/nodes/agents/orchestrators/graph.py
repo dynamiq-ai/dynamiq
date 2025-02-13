@@ -301,7 +301,7 @@ class GraphOrchestrator(Orchestrator):
             [f"'{self._state_by_id[state].name}': {self._state_by_id[state].description}" for state in states]
         )
 
-    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> str:
+    def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Process the graph workflow.
 
@@ -310,7 +310,7 @@ class GraphOrchestrator(Orchestrator):
             config (RunnableConfig): Configuration for the runnable.
 
         Returns:
-            str: The final answer generated after processing the task.
+            dict[str, Any]: The final output generated after processing the task and inner context of orchestrator.
         """
 
         self._chat_history.append({"role": "user", "content": input_task})
@@ -320,7 +320,7 @@ class GraphOrchestrator(Orchestrator):
             logger.info(f"GraphOrchestrator {self.id}: Next state: {state.id}")
 
             if state.id == END:
-                return self.get_final_result(
+                final_output = self.get_final_result(
                     {
                         "input_task": input_task,
                         "chat_history": self._chat_history,
@@ -328,6 +328,7 @@ class GraphOrchestrator(Orchestrator):
                     config=config,
                     **kwargs,
                 )
+                return {"content": final_output, "context": self.context}
 
             elif state.id != START:
 

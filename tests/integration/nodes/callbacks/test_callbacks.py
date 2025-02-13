@@ -83,36 +83,40 @@ def create_orchestrator(
 
 
 @pytest.mark.parametrize(
-    ("get_orchestrator_workflow", "context_input", "outputs", "context_output"),
+    ("get_orchestrator_workflow", "context_input", "outputs"),
     [
         (
             create_orchestrator,
             {"iteration": 0, "messages": [Message(role="user", content="Answer on question")]},
-            {"content": "mocked_response"},
             {
-                "iteration": 2,
-                "messages": [
-                    {"content": "Answer on question", "metadata": None, "role": MessageRole.USER},
-                    {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
-                    {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
-                ],
+                "content": "mocked_response",
+                "context": {
+                    "iteration": 2,
+                    "messages": [
+                        {"content": "Answer on question", "metadata": None, "role": MessageRole.USER},
+                        {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
+                        {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
+                    ],
+                },
             },
         ),
         (
             create_orchestrator,
             {"iteration": 1, "messages": [Message(role="user", content="Answer on question")]},
-            {"content": "mocked_response"},
             {
-                "iteration": 2,
-                "messages": [
-                    {"content": "Answer on question", "role": MessageRole.USER, "metadata": None},
-                    {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
-                ],
+                "content": "mocked_response",
+                "context": {
+                    "iteration": 2,
+                    "messages": [
+                        {"content": "Answer on question", "role": MessageRole.USER, "metadata": None},
+                        {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
+                    ],
+                },
             },
         ),
     ],
 )
-def test_workflow_with_map_node(get_orchestrator_workflow, context_input, outputs, context_output):
+def test_workflow_with_map_node(get_orchestrator_workflow, context_input, outputs):
     model = "gpt-3.5-turbo"
     connection = connections.OpenAI(
         api_key="api_key",
@@ -138,7 +142,5 @@ def test_workflow_with_map_node(get_orchestrator_workflow, context_input, output
         output=expected_output,
     )
     assert json.dumps({"runs": [run.to_dict() for run in tracing.runs.values()]}, cls=JsonWorkflowEncoder)
-
-    assert wf_orchestrator.flow.nodes[0].context == context_output
 
     assert human_feedback_callback.mock_callback.call_count == 2 - context_input.get("iteration")
