@@ -1,8 +1,19 @@
+import enum
 from functools import cached_property
 from typing import Any, ClassVar
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms.base import BaseLLM
+
+
+class ReasoningEffort(str, enum.Enum):
+    """
+    The reasoning effort to use for the OpenAI LLM.
+    """
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 
 class OpenAI(BaseLLM):
@@ -14,6 +25,7 @@ class OpenAI(BaseLLM):
         connection (OpenAIConnection | None): The connection to use for the OpenAI LLM.
     """
     connection: OpenAIConnection | None = None
+    reasoning_effort: ReasoningEffort | None = ReasoningEffort.MEDIUM
     O_SERIES_MODEL_PREFIXES: ClassVar[tuple[str, ...]] = ("o1", "o3")
 
     def __init__(self, **kwargs):
@@ -43,6 +55,7 @@ class OpenAI(BaseLLM):
         new_params = params.copy()
         if self.is_o_series_model:
             new_params["max_completion_tokens"] = self.max_tokens
+            new_params["reasoning_effort"] = self.reasoning_effort
             new_params.pop("max_tokens", None)
             new_params.pop("temperature", None)
         return new_params
