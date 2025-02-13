@@ -163,7 +163,6 @@ REACT_BLOCK_OUTPUT_FORMAT = (
     "Simply give a clear and concise answer."
 )
 
-REACT_BLOCK_REQUEST = "User request: {input}"
 REACT_BLOCK_CONTEXT = "Below is the conversation: {context}"
 
 
@@ -656,7 +655,6 @@ class ReActAgent(Agent):
             "tools": REACT_BLOCK_TOOLS if self.tools else REACT_BLOCK_NO_TOOLS,
             "instructions": REACT_BLOCK_INSTRUCTIONS if self.tools else REACT_BLOCK_INSTRUCTIONS_NO_TOOLS,
             "output_format": REACT_BLOCK_OUTPUT_FORMAT,
-            "request": REACT_BLOCK_REQUEST,
         }
 
         match self.inference_mode:
