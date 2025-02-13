@@ -44,4 +44,5 @@ class OpenAI(BaseLLM):
         if self.is_o_series_model:
             new_params["max_completion_tokens"] = self.max_tokens
             new_params.pop("max_tokens", None)
+            new_params.pop("temperature", None)
         return new_params
