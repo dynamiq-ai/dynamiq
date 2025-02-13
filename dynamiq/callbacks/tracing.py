@@ -138,6 +138,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
     client: BaseTracingClient | None = None
     runs: dict[UUID, Run] = {}
     tags: list[str] = []
+    metadata: dict = {}
 
     installed_pkgs: list[str] = Field(
         ["dynamiq"],
@@ -192,7 +193,12 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             session_id=self.session_id,
             start_time=datetime.now(UTC),
             parent_run_id=parent_run_id,
-            metadata={"node": serialized, "run_depends": kwargs.get("run_depends", []), "host": self.host},
+            metadata={
+                "node": serialized,
+                "run_depends": kwargs.get("run_depends", []),
+                "host": self.host,
+                **self.metadata,
+            },
             tags=self.tags,
             input=format_value(kwargs.get("input_data")),
         )
@@ -221,6 +227,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             metadata={
                 "workflow": {"id": serialized.get("id"), "version": serialized.get("version")},
                 "host": self.host,
+                **self.metadata,
             },
             tags=self.tags,
         )
@@ -283,7 +290,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             start_time=datetime.now(UTC),
             parent_run_id=parent_run_id,
             input=format_value(input_data),
-            metadata={"flow": {"id": serialized.get("id")}, "host": self.host},
+            metadata={"flow": {"id": serialized.get("id")}, "host": self.host, **self.metadata},
             tags=self.tags,
         )
 
