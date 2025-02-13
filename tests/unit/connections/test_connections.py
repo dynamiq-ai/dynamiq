@@ -8,6 +8,12 @@ from dynamiq.connections.connections import Qdrant as QdrantConnection
 
 
 @pytest.fixture
+def set_dummy_es_credentials(monkeypatch):
+    monkeypatch.setenv("ELASTICSEARCH_USERNAME", "test_user")
+    monkeypatch.setenv("ELASTICSEARCH_PASSWORD", "test_pass")
+
+
+@pytest.fixture
 def mock_qdrant_env_vars(monkeypatch):
     monkeypatch.setenv("QDRANT_URL", "http://mocked_qdrant_url")
     monkeypatch.setenv("QDRANT_API_KEY", "mocked_api_key")

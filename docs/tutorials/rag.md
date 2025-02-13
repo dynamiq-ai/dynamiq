@@ -104,7 +104,7 @@ If you have a `serverless` Pinecone deployment, your vector store initialization
 vector_store = (
     PineconeDocumentWriter(
         connection=PineconeConnection(),
-        index_name="quickstart",  # your new index
+        index_name="quickstart",
         dimension=1536,
         create_if_not_exist=True,
         index_type="serverless",
@@ -123,7 +123,7 @@ If you have a pod-based deployment, your vector store initialization could look 
 vector_store = (
     PineconeDocumentWriter(
         connection=PineconeConnection(),
-        index_name="quickstart",  # your new index
+        index_name="quickstart",
         dimension=1536,
         create_if_not_exist=True,
         index_type="pod",
@@ -140,17 +140,16 @@ vector_store = (
 
 Store the vector embeddings in Elasticsearch.
 
+For local setup:
 ```python
-# Basic local setup
 vector_store = ElasticsearchDocumentWriter(
     connection=ElasticsearchConnection(
-        url="http://localhost:9200",
-        username="elastic",
-        password="your_password"
+        url="$ELASTICSEARCH_URL",
+        api_key="$ELASTICSEARCH_API_KEY",
     ),
     index_name="documents",
     dimension=1536,
-    similarity="cosine",  # or "dot_product" or "l2"
+    similarity="cosine",
     input_transformer=InputTransformer(
         selector={
             "documents": f"${[embedder.id]}.output.documents",
@@ -165,8 +164,9 @@ For Elastic Cloud deployment:
 ```python
 vector_store = ElasticsearchDocumentWriter(
     connection=ElasticsearchConnection(
-        cloud_id="your_cloud_id",
-        api_key="your_api_key"
+        username="$PINECONE_API_KEY",
+        password="$PINECONE_API_KEY",
+        cloud_id="$ELASTICSEARCH_CLOUD_ID",
     ),
     index_name="documents",
     dimension=1536,
@@ -278,13 +278,14 @@ retrieval_wf.flow.add_nodes(document_retriever)
 
 ### Option 2: Elasticsearch Document Retriever
 
+For local setup:
+
 ```python
 # Vector similarity search with Elasticsearch
 document_retriever = ElasticsearchDocumentRetriever(
     connection=ElasticsearchConnection(
-        url="http://localhost:9200",
-        username="elastic",
-        password="your_password"
+        url="$ELASTICSEARCH_URL",
+        api_key="$ELASTICSEARCH_API_KEY",
     ),
     index_name="documents",
     top_k=5,
@@ -302,8 +303,9 @@ For cloud deployment with score normalization:
 ```python
 document_retriever = ElasticsearchDocumentRetriever(
     connection=ElasticsearchConnection(
-        cloud_id="your_cloud_id",
-        api_key="your_api_key"
+        username="$PINECONE_API_KEY",
+        password="$PINECONE_API_KEY",
+        cloud_id="$ELASTICSEARCH_CLOUD_ID",
     ),
     index_name="documents",
     top_k=5,

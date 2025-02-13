@@ -8,7 +8,6 @@ This example demonstrates:
 5. Answer generation using retrieved context
 """
 
-import os
 from io import BytesIO
 
 from dynamiq import Workflow
@@ -23,16 +22,10 @@ from dynamiq.nodes.writers import ElasticsearchDocumentWriter
 from dynamiq.prompts import Message, Prompt
 
 # Initialize Elasticsearch connection
-es_connection = ElasticsearchConnection(
-    url=os.getenv("ELASTICSEARCH_URL", "https://localhost:9200"),
-    username=os.getenv("ELASTICSEARCH_USERNAME", "elastic"),
-    password=os.getenv("ELASTICSEARCH_PASSWORD"),
-    use_ssl=True,
-    verify_certs=False,
-)
+es_connection = ElasticsearchConnection()
 
 # Initialize OpenAI connection
-openai_connection = OpenAIConnection(api_key=os.getenv("OPENAI_API_KEY"))
+openai_connection = OpenAIConnection()
 
 
 def create_indexing_workflow(files: list[str]) -> None:
@@ -169,7 +162,7 @@ def create_retrieval_workflow(question: str) -> str:
 
 def main():
     # Example usage
-    files = [r"C:\Users\vlad\Desktop\dba40afe-9b0a-4932-9e2b-0e427324beea.sandwich.pdf"]  # Replace with your PDF files
+    files = ["example_file.pdf"]
 
     # Index documents
     create_indexing_workflow(files)
