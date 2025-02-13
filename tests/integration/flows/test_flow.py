@@ -56,7 +56,8 @@ def test_workflow_with_depend_nodes_with_tracing(
     input_data = {"a": 1, "b": {"files": files}, "c": bytes_content, "d": bytes_content_non_utf8}
 
     tags = ["test1", "test2"]
-    tracing = TracingCallbackHandler(tags=tags)
+    metadata = {"app_id": "0.0.1", "runtime_id": "0.0.1"}
+    tracing = TracingCallbackHandler(tags=tags, metadata=metadata)
 
     response = wf.run(
         input_data=input_data,
@@ -151,6 +152,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert wf_run.output == format_value(expected_output)
     assert wf_run.status == RunStatus.SUCCEEDED
     assert wf_run.tags == tags
+    assert metadata.items() <= wf_run.metadata.items()
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf.flow.id
     assert flow_run.metadata["host"]
@@ -158,6 +160,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert flow_run.output == format_value(expected_output)
     assert flow_run.status == RunStatus.SUCCEEDED
     assert flow_run.tags == tags
+    assert metadata.items() <= flow_run.metadata.items()
     openai_run = tracing_runs[2]
     openai_node = openai_node.to_dict()
     openai_node["prompt"]["messages"] = expected_openai_messages
@@ -169,6 +172,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert openai_run.output == format_value(expected_output_openai)
     assert openai_run.status == RunStatus.SUCCEEDED
     assert openai_run.tags == tags
+    assert metadata.items() <= openai_run.metadata.items()
     anthropic_run = tracing_runs[3]
     anthropic_node = anthropic_node_with_dependency.to_dict()
     anthropic_node["prompt"]["messages"] = expected_anthropic_messages
@@ -180,6 +184,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert anthropic_run.output == format_value(expected_output_anthropic)
     assert anthropic_run.status == RunStatus.SUCCEEDED
     assert anthropic_run.tags == tags
+    assert metadata.items() <= anthropic_run.metadata.items()
     output_node_run = tracing_runs[4]
     assert output_node_run.metadata["node"] == output_node.to_dict()
     assert output_node_run.metadata["host"]
@@ -190,6 +195,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert output_node_run.status == RunStatus.SUCCEEDED
     assert output_node_run.tags == tags
     assert output_node_run.executions
+    assert metadata.items() <= output_node_run.metadata.items()
 
 
 def test_workflow_with_depend_nodes_and_depend_fail(

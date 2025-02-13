@@ -842,13 +842,13 @@ class PostgreSQL(BaseConnection):
             )
             conn.autocommit = True
             logger.debug(
-                f"Connected to PGVector with host={self.host}, "
+                f"Connected to PostgreSQL with host={self.host}, "
                 f"port={str(self.port)}, user={self.user}, "
                 f"database={self.database}."
             )
             return conn
         except Exception as e:
-            raise ConnectionError(f"Failed to connect to PGVector: {str(e)}")
+            raise ConnectionError(f"Failed to connect to PostgreSQL: {str(e)}")
 
     @property
     def conn_params(self) -> str:
