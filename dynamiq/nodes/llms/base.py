@@ -98,7 +98,6 @@ class BaseLLM(ConnectionNode):
     schema_: dict[str, Any] | type[BaseModel] | None = Field(
         None, description="Schema for structured output or function calling.", alias="schema"
     )
-
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
     input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
