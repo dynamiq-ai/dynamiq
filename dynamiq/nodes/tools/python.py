@@ -170,9 +170,8 @@ class Python(Node):
         def safe_print(*args, **kwargs):
             print(*args, file=stdout, **kwargs)
 
-        def guarded_write(obj, value):
-            obj = value
-            return obj
+        def guarded_write(obj, value=None):
+            return value if value is not None else obj
 
         restricted_globals = get_restricted_globals()
         restricted_globals.update(
