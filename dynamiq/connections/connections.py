@@ -1043,7 +1043,8 @@ class Elasticsearch(BaseConnection):
         use_ssl (bool): Whether to use SSL for connection
     """
 
-    url: str = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_URL", "http://localhost:9200"))
+    url: str = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_URL", None))
+    api_key_id: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_API_KEY_ID", None))
     api_key: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_API_KEY", None))
     username: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_USERNAME", None))
     password: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_PASSWORD", None))
@@ -1071,21 +1072,24 @@ class Elasticsearch(BaseConnection):
             conn_params = {}
 
             # Handle authentication
-            if self.api_key:
-                conn_params["api_key"] = self.api_key
-            elif self.username and self.password:
+            if self.api_key is not None:
+                if self.api_key_id is not None:
+                    conn_params["api_key"] = (self.api_key_id, self.api_key)
+                else:
+                    conn_params["api_key"] = self.api_key
+            elif self.username is not None and self.password is not None:
                 conn_params["basic_auth"] = (self.username, self.password)
-            elif not self.cloud_id:  # Only require auth for non-cloud deployments
+            elif self.cloud_id is None:  # Only require auth for non-cloud deployments
                 raise ValueError("Either API key or username/password must be provided")
 
             # Handle SSL/TLS
-            if self.use_ssl:
-                if self.ca_path:
+            if self.use_ssl is not None:
+                if self.ca_path is not None:
                     conn_params["ca_certs"] = self.ca_path
                 conn_params["verify_certs"] = self.verify_certs
 
             # Handle cloud deployment
-            if self.cloud_id:
+            if self.cloud_id is not None:
                 conn_params["cloud_id"] = self.cloud_id
             else:
                 conn_params["hosts"] = [self.url]
@@ -1095,9 +1099,15 @@ class Elasticsearch(BaseConnection):
 
             # Test connection
             if not es_client.ping():
-                raise ConnectionError("Failed to connect to Elasticsearch")
+                from elasticsearch.exceptions import AuthenticationException
 
-            logger.debug(f"Connected to Elasticsearch at {self.url or self.cloud_id}")
+                try:
+                    info = es_client.info()
+                except AuthenticationException as e:
+                    info = f"Authentication error: {e}"
+                raise ConnectionError(f"Failed to connect to Elasticsearch. {info}")
+
+            logger.debug(f"Connected to Elasticsearch at {self.cloud_id or self.url}")
             return es_client
 
         except ImportError:
