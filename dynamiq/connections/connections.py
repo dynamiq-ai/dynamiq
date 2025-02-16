@@ -1083,8 +1083,8 @@ class Elasticsearch(BaseConnection):
                 raise ValueError("Either API key or username/password must be provided")
 
             # Handle SSL/TLS
-            if self.use_ssl is not None:
-                if self.ca_path is not None:
+            if self.use_ssl:
+                if self.ca_path:
                     conn_params["ca_certs"] = self.ca_path
                 conn_params["verify_certs"] = self.verify_certs
 
