@@ -159,7 +159,7 @@ def _equal(field: str, value: Any) -> dict[str, Any]:
     if not isinstance(value, supported_types):
         msg = (
             f"Unsupported type for 'equal' comparison: {type(value)}. "
-            f"Types supported by Pinecone are: {supported_types}"
+            f"Types supported by Elasticsearch are: {supported_types}"
         )
         raise VectorStoreFilterException(msg)
 
@@ -184,7 +184,7 @@ def _greater_than(field: str, value: Any) -> dict[str, Any]:
     if not isinstance(value, supported_types):
         msg = (
             f"Unsupported type for 'greater than' comparison: {type(value)}. "
-            f"Types supported by Pinecone are: {supported_types}"
+            f"Types supported by Elasticsearch are: {supported_types}"
         )
         raise VectorStoreFilterException(msg)
 
@@ -209,7 +209,7 @@ def _greater_than_equal(field: str, value: Any) -> dict[str, Any]:
     if not isinstance(value, supported_types):
         msg = (
             f"Unsupported type for 'greater than equal' comparison: {type(value)}. "
-            f"Types supported by Pinecone are: {supported_types}"
+            f"Types supported by Elasticsearch are: {supported_types}"
         )
         raise VectorStoreFilterException(msg)
 
@@ -234,7 +234,7 @@ def _less_than(field: str, value: Any) -> dict[str, Any]:
     if not isinstance(value, supported_types):
         msg = (
             f"Unsupported type for 'less than' comparison: {type(value)}. "
-            f"Types supported by Pinecone are: {supported_types}"
+            f"Types supported by Elasticsearch are: {supported_types}"
         )
         raise VectorStoreFilterException(msg)
 
@@ -259,7 +259,7 @@ def _less_than_equal(field: str, value: Any) -> dict[str, Any]:
     if not isinstance(value, supported_types):
         msg = (
             f"Unsupported type for 'less than equal' comparison: {type(value)}. "
-            f"Types supported by Pinecone are: {supported_types}"
+            f"Types supported by Elasticsearch are: {supported_types}"
         )
         raise VectorStoreFilterException(msg)
 

@@ -1,54 +1,152 @@
+connections:
+  openai-conn:
+    api_key:  ${oc.env:OPENAI_API_KEY}
+    type: dynamiq.connections.OpenAI
+
+  elasticsearch-conn:
+    url:  ${oc.env:ELASTICSEARCH_URL}
+    api_key: ${oc.env:ELASTICSEARCH_API_KEY}
+    type: dynamiq.connections.Elasticsearch
+
+  unstructured-conn:
+    type: dynamiq.connections.Unstructured
+    api_key: ${oc.env:UNSTRUCTURED_API_KEY}
+    url: ${oc.env:UNSTRUCTURED_API_URL}
+
+prompt_template: |
+  Please answer the following question based on the information found
+  within the sections enclosed by triplet quotes (\`\`\`).
+  Your response should be concise, well-written, and follow markdown formatting guidelines:
+
+  - Use bullet points for list items.
+  - Use **bold** text for emphasis where necessary.
+
+  **Question:** {{query}}
+
+  Thank you for your detailed attention to the request
+  **Context information**:
+  ```
+  {% for document in documents %}
+      ---
+      Document title: {{ document.metadata["title"] }}
+      Document information: {{ document.content }}
+      ---
+  {% endfor %}
+  ```
+
+  **User Question:** {{query}}
+  Answer:
+
+prompts:
+  openai-ai-prompt:
+    messages:
+      - role: user
+        content: ${prompt_template}
+
+
 nodes:
-  - id: pdf_converter
-    type: dynamiq.nodes.converters.PyPDFConverter
-    params:
-      document_creation_mode: one-doc-per-page
+  unstructured-file-converter:
+    type: dynamiq.nodes.converters.UnstructuredFileConverter
+    name: Unstructured File Converter
+    connection: unstructured-conn
+    strategy: auto
 
-  - id: document_splitter
-    type: dynamiq.nodes.splitters.document.DocumentSplitter
-    params:
-      split_by: sentence
-      split_length: 10
-      split_overlap: 1
-    inputs:
-      documents: ${[pdf_converter]}.output.documents
-    depends_on:
-      - pdf_converter
+  document_splitter:
+    name: DocumentSplitter
+    group: splitters
+    input_transformer:
+      selector:
+        documents: $['unstructured-file-converter'].output.documents
+    depends:
+    - node: unstructured-file-converter
+    type: dynamiq.nodes.splitters.DocumentSplitter
 
-  - id: embedder
+  document-embedder-node:
+    name: OpenAIDocumentEmbedder
+    group: embedders
+    input_transformer:
+      selector:
+        documents: $['document_splitter'].output.documents
+    connection: openai-conn
+    model: text-embedding-3-small
     type: dynamiq.nodes.embedders.OpenAIDocumentEmbedder
-    params:
-      connection:
-        type: dynamiq.connections.OpenAI
-        params:
-          api_key: $OPENAI_API_KEY
-      model: text-embedding-3-small
-    inputs:
-      documents: ${[document_splitter]}.output.documents
-    depends_on:
-      - document_splitter
+    depends:
+    - node: document_splitter
 
-  - id: vector_store
+  document-writer-node:
+    index_name: documents
+    content_key: content
+    create_if_not_exist: true
+    dimension: 1536
+    similarity: cosine
+    embedding_key: embedding
+    write_batch_size: 100
+    scroll_size: 1000
+    name: ElasticsearchDocumentWriter
+    group: writers
+    connection: elasticsearch-conn
     type: dynamiq.nodes.writers.ElasticsearchDocumentWriter
-    params:
-      connection:
-        type: dynamiq.connections.Elasticsearch
-        params:
-          url: $ELASTICSEARCH_URL
-          username: $ELASTICSEARCH_USERNAME
-          password: $ELASTICSEARCH_PASSWORD
-          use_ssl: true
-          verify_certs: true
-      index_name: documents
-      dimension: 1536
-      similarity: cosine
-      create_if_not_exist: true
-      index_settings:
-        number_of_shards: 1
-        number_of_replicas: 1
-      mapping_settings:
-        dynamic: strict
-    inputs:
-      documents: ${[embedder]}.output.documents
-    depends_on:
-      - embedder
+    depends:
+    - node: document-embedder-node
+      option: null
+    input_transformer:
+      path: null
+      selector:
+        documents: $['document-embedder-node'].output.documents
+
+  openai-text-embedder:
+    type: dynamiq.nodes.embedders.OpenAITextEmbedder
+    name: OpenAI Text Embedder
+    connection: openai-conn
+    model: text-embedding-3-small
+
+  document-retriever-node:
+    type: dynamiq.nodes.retrievers.ElasticsearchDocumentRetriever
+    name: Elasticsearch Document Retriever
+    connection: elasticsearch-conn
+    index_name: documents
+    depends:
+      - node: openai-text-embedder
+    input_transformer:
+      selector:
+        query: $['openai-text-embedder'].output.embedding
+
+  openai-1:
+    type: dynamiq.nodes.llms.OpenAI
+    name: OpenAI-1
+    model: gpt-3.5-turbo
+    connection: openai-conn
+    prompt: openai-ai-prompt
+    depends:
+      - node: document-retriever-node
+    input_transformer:
+      selector:
+        documents: $['document-retriever-node'].output.documents
+        query: $['openai-text-embedder'].output.query
+    output_transformer:
+      path: null
+      selector:
+        answer: $.content
+
+flows:
+  indexing-flow:
+    name: RAG Document Indexing Flow
+    nodes:
+    - unstructured-file-converter
+    - document_splitter
+    - document-embedder-node
+    - document-writer-node
+
+  retrieval-flow:
+    name: RAG Document Retrieval Flow
+    nodes:
+      - openai-text-embedder
+      - document-retriever-node
+      - openai-1
+
+workflows:
+  indexing-workflow:
+    flow: indexing-flow
+
+  retrieval-workflow:
+    flow: retrieval-flow
