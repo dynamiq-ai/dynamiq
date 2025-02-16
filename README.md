@@ -495,7 +495,7 @@ from dynamiq.nodes.splitters.document import DocumentSplitter
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.writers import ElasticsearchDocumentWriter
 
-def create_indexing_workflow(files: List[str]) -> None:
+def create_indexing_workflow(files: list[str]) -> None:
     """Create and run the document indexing workflow."""
 
     # Initialize workflow
@@ -582,6 +582,8 @@ create_indexing_workflow(files)
 This example shows how to perform vector similarity search in Elasticsearch and generate answers using retrieved documents.
 
 ```python
+import os
+
 from dynamiq import Workflow
 from dynamiq.connections import OpenAI as OpenAIConnection, Elasticsearch as ElasticsearchConnection
 from dynamiq.nodes.embedders import OpenAITextEmbedder

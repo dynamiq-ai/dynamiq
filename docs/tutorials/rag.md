@@ -164,8 +164,8 @@ For Elastic Cloud deployment:
 ```python
 vector_store = ElasticsearchDocumentWriter(
     connection=ElasticsearchConnection(
-        username="$PINECONE_API_KEY",
-        password="$PINECONE_API_KEY",
+        username="$ELASTICSEARCH_USERNAME",
+        password="$ELASTICSEARCH_PASSWORD",
         cloud_id="$ELASTICSEARCH_CLOUD_ID",
     ),
     index_name="documents",
@@ -303,8 +303,8 @@ For cloud deployment with score normalization:
 ```python
 document_retriever = ElasticsearchDocumentRetriever(
     connection=ElasticsearchConnection(
-        username="$PINECONE_API_KEY",
-        password="$PINECONE_API_KEY",
+        username="$ELASTICSEARCH_USERNAME",
+        password="$ELASTICSEARCH_PASSWORD",
         cloud_id="$ELASTICSEARCH_CLOUD_ID",
     ),
     index_name="documents",
