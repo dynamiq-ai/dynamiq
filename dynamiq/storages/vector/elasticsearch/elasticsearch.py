@@ -453,7 +453,6 @@ class ElasticsearchVectorStore:
         response = self.client.count(
             index=self.index_name,
             query={"match_all": {}},
-            _source_excludes=([self.embedding_key]),
         )
         return response.get("count", 0)
 
