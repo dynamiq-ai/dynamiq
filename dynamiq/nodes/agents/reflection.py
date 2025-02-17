@@ -84,7 +84,7 @@ class ReflectionAgent(Agent):
 
             self._prompt.messages = [system_message, input_message]
 
-            result = self._run_llm(config=config, **kwargs).output["content"]
+            result = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
 
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=result))
 

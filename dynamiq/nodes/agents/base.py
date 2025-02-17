@@ -305,6 +305,8 @@ class Agent(Node):
         custom_metadata = self._prepare_metadata(dict(input_data))
 
         input_message = input_message or self.input_message
+        input_message = input_message.format_message(**dict(input_data))
+
         if self.memory:
             self.memory.add(role=MessageRole.USER, content=input_message.content, metadata=custom_metadata)
             self._retrieve_memory(dict(input_data))
@@ -318,7 +320,6 @@ class Agent(Node):
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
-        input_message = input_message.format_message(**dict(input_data))
         result = self._run_agent(input_message, config=config, **kwargs)
 
         if self.memory:
@@ -376,13 +377,13 @@ class Agent(Node):
                 self._prompt_variables["relevant_memory"] = relevant_memory
                 self._prompt_variables["conversation_history"] = all_messages
 
-    def _run_llm(self, config: RunnableConfig | None = None, **kwargs) -> str:
+    def _run_llm(self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and handles streaming or full responses."""
         try:
             llm_result = self.llm.run(
                 input_data={},
                 config=config,
-                prompt=self._prompt,
+                prompt=Prompt(messages=messages),
                 run_depends=self._run_depends,
                 **kwargs,
             )
@@ -444,7 +445,7 @@ class Agent(Node):
         self._prompt.messages = [system_message, input_message]
 
         try:
-            llm_result = self._run_llm(config=config, **kwargs).output["content"]
+            llm_result = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_result))
 
             if self.streaming.enabled:

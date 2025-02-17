@@ -324,7 +324,11 @@ class ReActAgent(Agent):
 
             try:
                 llm_result = self._run_llm(
-                    config=config, schema=self.format_schema, inference_mode=self.inference_mode, **kwargs
+                    self._prompt.messages,
+                    config=config,
+                    schema=self.format_schema,
+                    inference_mode=self.inference_mode,
+                    **kwargs,
                 )
                 self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_result.output["content"]))
 
@@ -505,7 +509,7 @@ class ReActAgent(Agent):
         Handle the case where max loops are exceeded by crafting a thoughtful response.
         """
         self._prompt.messages.append(Message(role=MessageRole.USER, content=REACT_MAX_LOOPS_PROMPT))
-        llm_final_attempt = self._run_llm(config=config, **kwargs).output["content"]
+        llm_final_attempt = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
         self._run_depends = [NodeDependency(node=self.llm).to_dict()]
         final_answer = self.parse_xml_content(llm_final_attempt, "answer")
 
