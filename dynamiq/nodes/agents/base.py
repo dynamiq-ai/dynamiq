@@ -160,8 +160,6 @@ class Agent(Node):
     memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.BOTH
     verbose: bool = Field(False, description="Whether to print verbose logs.")
 
-    prompt: Prompt | None = None
-
     input_message: Message | VisionMessage = Message(role=MessageRole.USER, content="{{input}}")
     context_template: str | None = None
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
