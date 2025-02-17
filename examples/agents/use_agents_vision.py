@@ -96,7 +96,7 @@ def run_react_agent_workflow() -> tuple[str, dict]:
         llm=llm,
         id="agent",
         verbose=True,
-        contex="You are helpful assistant that answers on question about art."
+        context="You are helpful assistant that answers on question about art."
         "Take into account style of response: {{context}}",
         input_message=VisionMessage(
             content=[
