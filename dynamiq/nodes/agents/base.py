@@ -116,7 +116,7 @@ Current date: {{date}}
 {%- if tool_description -%}
 
 #####################
-Tool description: {{tool_description}}
+Tools information: {{tool_description}}
 {% endif %}
 
 {%- if file_description -%}
