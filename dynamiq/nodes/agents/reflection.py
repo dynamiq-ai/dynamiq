@@ -73,22 +73,23 @@ class ReflectionAgent(Agent):
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
-        context_message: Message | VisionMessage | None = None,
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> str:
         try:
             system_message = Message(
                 role=MessageRole.SYSTEM,
-                content=self.generate_prompt(block_names=["introduction", "role", "date", "instructions"]),
+                content=self.generate_prompt(block_names=["introduction", "role", "date", "instructions", "context"]),
             )
 
-            messages = [system_message, input_message]
-            if context_message:
-                messages.insert(1, context_message)
+            self._prompt.messages = [system_message, input_message]
 
-            result = self._run_llm(messages, config=config, **kwargs)
+            result = self._run_llm(config=config, **kwargs).output["content"]
+
+            self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=result))
+
             output_content = self.extract_output_content(result)
+
             if self.verbose:
                 logger.info(f"Agent {self.name} - {self.id}: LLM output by REFLECTION prompt:\n{result[:200]}...")
             if self.streaming.enabled:

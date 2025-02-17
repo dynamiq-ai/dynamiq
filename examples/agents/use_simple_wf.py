@@ -70,7 +70,7 @@ def run_simple_custom_workflow() -> tuple[str, dict]:
         id="agent_custom",
         llm=llm,
     )
-    agent_custom.add_block(
+    agent_custom.set_block(
         "instructions",
         """
                            Use markdown as a main engine.

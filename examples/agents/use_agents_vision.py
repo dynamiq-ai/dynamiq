@@ -3,9 +3,10 @@ import json
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
+from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.agents.reflection import ReflectionAgent
+from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.prompts import (
-    Message,
     MessageRole,
     VisionMessage,
     VisionMessageImageContent,
@@ -15,15 +16,10 @@ from dynamiq.prompts import (
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
-from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.agents.simple import SimpleAgent
-
 
 # Constants
 AGENT_NAME = "Art Agent"
-AGENT_ROLE = (
-    "Professional writer with the goal of producing well-written and informative responses about art"
-)
+AGENT_ROLE = "Professional writer with the goal of producing well-written and informative responses about art"
 INPUT_QUESTION = "Describe main idea of this piece of art."
 IMAGE_URL = "IMAGE_URL"
 
@@ -45,11 +41,8 @@ def run_reflection_agent_workflow() -> tuple[str, dict]:
         llm=llm,
         id="agent",
         verbose=True,
-        context_message=Message(
-            role=MessageRole.SYSTEM,
-            content="You are helpful assistant that answers on question about art."
-            "Take into account style of response: {{context}}",
-        ),
+        context="You are helpful assistant that answers on question about art."
+        "Take into account style of response: {{context}}",
         input_message=VisionMessage(
             content=[
                 VisionMessageImageContent(image_url=VisionMessageImageURL(url="{{ url }}")),
@@ -103,11 +96,8 @@ def run_react_agent_workflow() -> tuple[str, dict]:
         llm=llm,
         id="agent",
         verbose=True,
-        context_message=Message(
-            role=MessageRole.SYSTEM,
-            content="You are helpful assistant that answers on question about art."
-            "Take into account style of response: {{context}}",
-        ),
+        contex="You are helpful assistant that answers on question about art."
+        "Take into account style of response: {{context}}",
         input_message=VisionMessage(
             content=[
                 VisionMessageImageContent(image_url=VisionMessageImageURL(url="{{ url }}")),
@@ -161,11 +151,8 @@ def run_simple_agent_workflow() -> tuple[str, dict]:
         llm=llm,
         id="agent",
         verbose=True,
-        context_message=Message(
-            role=MessageRole.SYSTEM,
-            content="You are helpful assistant that answers on question about art."
-            "Take into account style of response: {{context}}",
-        ),
+        context="You are helpful assistant that answers on question about art."
+        "Take into account style of response: {{context}}",
         input_message=VisionMessage(
             content=[
                 VisionMessageImageContent(image_url=VisionMessageImageURL(url="{{ url }}")),

@@ -402,7 +402,7 @@ class AdaptiveAgentManager(AgentManager):
     def _reflect(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'reflect' action."""
         prompt = self.generate_prompt(block_names=["reflect"])
-        llm_result = self._run_llm(prompt, config, **kwargs)
+        llm_result = self._run_llm(prompt, config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
         return llm_result
@@ -410,7 +410,7 @@ class AdaptiveAgentManager(AgentManager):
     def _respond(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'respond' action."""
         prompt = self.generate_prompt(block_names=["respond"])
-        llm_result = self._run_llm(prompt, config, **kwargs)
+        llm_result = self._run_llm(prompt, config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
         return llm_result

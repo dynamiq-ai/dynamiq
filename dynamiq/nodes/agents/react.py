@@ -10,8 +10,8 @@ from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentInterme
 from dynamiq.nodes.agents.exceptions import ActionParsingException, MaxLoopsExceededException, RecoverableAgentException
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
-from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
-from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.prompts import Message, MessageRole, VisionMessage
+from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
@@ -169,10 +169,8 @@ REACT_BLOCK_CONTEXT = "Below is the conversation: {context}"
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
 Your goal is to analyze the given context and formulate a clear, concise response.
-First, carefully review the following context, which contains thoughts and information gathered during the process:
-<context>
-{context}
-</context>
+First, carefully review the history, which contains thoughts and information gathered during the process.
+
 Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
 Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
 1. Fully supported by the information found in the context
@@ -223,7 +221,6 @@ class ReActAgent(Agent):
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
     format_schema: list = []
-    prompt: Prompt | None = None
 
     @model_validator(mode="after")
     def validate_inference_mode(self):
@@ -295,7 +292,6 @@ class ReActAgent(Agent):
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
-        context_message: Message | VisionMessage | None = None,
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> str:
@@ -322,27 +318,15 @@ class ReActAgent(Agent):
             ),
         )
 
-        messages = [system_message, input_message]
-        if context_message:
-            messages.insert(1, context_message)
+        self._prompt.messages = [system_message, input_message]
 
         for loop_num in range(self.max_loops):
 
             try:
-                llm_result = self.llm.run(
-                    input_data={},
-                    config=config,
-                    prompt=Prompt(messages=messages),
-                    run_depends=self._run_depends,
-                    schema=self.format_schema,
-                    inference_mode=self.inference_mode,
-                    **kwargs,
+                llm_result = self._run_llm(
+                    config=config, schema=self.format_schema, inference_mode=self.inference_mode, **kwargs
                 )
-                self._run_depends = [NodeDependency(node=self.llm).to_dict()]
-
-                if llm_result.status != RunnableStatus.SUCCESS:
-                    messages.append(Message(role=MessageRole.ASSISTANT, content=llm_result.output["content"]))
-                    continue
+                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_result.output["content"]))
 
                 action, action_input = None, None
                 llm_generated_output = ""
@@ -352,7 +336,7 @@ class ReActAgent(Agent):
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
                         llm_generated_output = llm_result.output["content"]
-                        self.tracing_intermediate(loop_num, messages, llm_generated_output)
+                        self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content=llm_generated_output,
@@ -383,7 +367,7 @@ class ReActAgent(Agent):
                         ]
 
                         llm_generated_output = json.dumps(llm_generated_output_json)
-                        self.tracing_intermediate(loop_num, messages, llm_generated_output)
+                        self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content=llm_generated_output,
@@ -411,7 +395,7 @@ class ReActAgent(Agent):
                             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
                         llm_generated_output_json = json.loads(llm_result.output["content"])
                         action = llm_generated_output_json["action"]
-                        self.tracing_intermediate(loop_num, messages, llm_generated_output)
+                        self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content=llm_generated_output,
@@ -439,7 +423,7 @@ class ReActAgent(Agent):
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
                         llm_generated_output = llm_result.output["content"]
-                        self.tracing_intermediate(loop_num, messages, llm_generated_output)
+                        self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content=llm_generated_output,
@@ -462,7 +446,7 @@ class ReActAgent(Agent):
                             return final_answer
                         action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
 
-                messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
+                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
 
                 if action:
                     if self.tools:
@@ -491,21 +475,21 @@ class ReActAgent(Agent):
                                 updated=llm_generated_output,
                             ).model_dump()
                         )
-                        messages.append(Message(role=MessageRole.USER, content=observation))
+                        self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
 
             except ActionParsingException as e:
-                messages.append(Message(role=MessageRole.ASSISTANT, content=f"{type(e).__name__}: {e}"))
+                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=f"{type(e).__name__}: {e}"))
                 continue
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
                 f"Agent {self.name} (ID: {self.id}) has reached the maximum loop limit of {self.max_loops} without finding a final answer. "  # noqa: E501
-                f"Last response: {messages[-1].content}\n"
+                f"Last response: {self._prompt.messages[-1].content}\n"
                 f"Consider increasing the maximum number of loops or reviewing the task complexity to ensure completion."  # noqa: E501
             )
             raise MaxLoopsExceededException(message=error_message)
         else:
-            max_loop_final_answer = self._handle_max_loops_exceeded(messages, config, **kwargs)
+            max_loop_final_answer = self._handle_max_loops_exceeded(config, **kwargs)
             if self.streaming.enabled:
                 self.stream_content(
                     content=max_loop_final_answer,
@@ -516,14 +500,12 @@ class ReActAgent(Agent):
                 )
             return max_loop_final_answer
 
-    def _handle_max_loops_exceeded(
-        self, previous_responses: list, config: RunnableConfig | None = None, **kwargs
-    ) -> str:
+    def _handle_max_loops_exceeded(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """
         Handle the case where max loops are exceeded by crafting a thoughtful response.
         """
-        final_attempt_prompt = REACT_MAX_LOOPS_PROMPT.format(context="\n".join(previous_responses))
-        llm_final_attempt = self._run_llm(final_attempt_prompt, config=config, **kwargs)
+        self._prompt.messages.append(Message(role=MessageRole.USER, content=REACT_MAX_LOOPS_PROMPT))
+        llm_final_attempt = self._run_llm(config=config, **kwargs).output["content"]
         self._run_depends = [NodeDependency(node=self.llm).to_dict()]
         final_answer = self.parse_xml_content(llm_final_attempt, "answer")
 
