@@ -23,6 +23,7 @@ class SQLExecutor(ConnectionNode):
         name (str): The name of the tool.
         description (str): A brief description of the tool.
         connection (PostgreSQL|MySQL|Snowflake|AWSRedshift): The connection instance for the specified storage.
+        query (str): The SQL statement to execute.
         input_schema (SQLInputSchema): The input schema for the tool.
     """
 
@@ -38,6 +39,25 @@ class SQLExecutor(ConnectionNode):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     input_schema: ClassVar[type[SQLInputSchema]] = SQLInputSchema
+
+    def format_results(self, results: list[dict[str, Any]], query: str) -> str:
+        """Format the retrieved results.
+
+        Args:
+            query (str): The executed SQL statement.
+            results (list[dict[str,Any]]): List of execution results.
+
+        Returns:
+            str: Formatted content of the query result.
+        """
+        formatted_results = []
+        if not results:
+            return f'Query "{query}" executed successfully. No results returned.'
+        for i, result in enumerate(results):
+            formatted_result = f"Row {i + 1}\n"
+            formatted_result += "\n".join(f"{key}: {value}" for key, value in result.items())
+            formatted_results.append(formatted_result)
+        return "\n\n".join(formatted_results)
 
     def execute(self, input_data, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
@@ -55,6 +75,8 @@ class SQLExecutor(ConnectionNode):
             cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []
             cursor.close()
+            if self.is_optimized_for_agents:
+                output = self.format_results(output, query)
             return {"content": output}
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
