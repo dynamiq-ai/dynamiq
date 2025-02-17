@@ -229,7 +229,7 @@ class Agent(Node):
             "instructions": "",
             "output_format": "",
             "relevant_information": "{relevant_memory}",
-            "context": self.context_template if self.context_template else "",
+            "context": "{context}",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
@@ -300,6 +300,9 @@ class Agent(Node):
         if self.memory:
             self.memory.add(role=MessageRole.USER, content=input_message.content, metadata=custom_metadata)
             self._retrieve_memory(dict(input_data))
+
+        if self.context_template:
+            self._prompt_variables["context"] = Template(self.context_template).render(**dict(input_data))
 
         files = input_data.files
         if files:
