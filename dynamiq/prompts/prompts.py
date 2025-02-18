@@ -278,7 +278,7 @@ class Prompt(BasePrompt):
                 processed_value = self.parse_bytes_to_base64(image_bytes)
 
             elif isinstance(value, bytes):
-                processed_value = self.parse_bytes_to_base64(image_bytes)
+                processed_value = self.parse_bytes_to_base64(value)
 
             elif isinstance(value, str):
                 pass  # No action needed; assuming it's a regular URL or already a Data URL
