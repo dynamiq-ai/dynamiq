@@ -227,14 +227,13 @@ class Prompt(BasePrompt):
 
         return parameters
 
-
     def parse_bytes_to_base64(self, file_bytes: bytes) -> str:
         """
         Parses file bytes in base64 format.
 
         Args:
             file_bytes (bytes): File bytes.
-        
+
         Returns:
             str: Base64 encoded file.
         """
