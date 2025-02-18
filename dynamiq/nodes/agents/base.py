@@ -65,7 +65,7 @@ class AgentIntermediateStep(BaseModel):
 
 
 class AgentInputSchema(BaseModel):
-    input: str = Field(..., description="Parameter to provide input to the agent.")
+    input: str = Field(default=None, description="Parameter to provide input to the agent.")
     files: list[io.BytesIO | bytes] = Field(default=None, description="Parameter to provide files to the agent.")
 
     user_id: str = Field(default=None, description="Parameter to provide user ID.")
