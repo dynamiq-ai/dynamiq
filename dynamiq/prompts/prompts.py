@@ -246,7 +246,7 @@ class Prompt(BasePrompt):
         mime_type, _ = mimetypes.guess_type(f"file.{extension}")
 
         if mime_type is None:
-            return "text/plain"
+            mime_type = "text/plain"
 
         return f"data:{mime_type};base64,{encoded_str}"
 
