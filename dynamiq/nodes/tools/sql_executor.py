@@ -23,7 +23,7 @@ class SQLExecutor(ConnectionNode):
         name (str): The name of the tool.
         description (str): A brief description of the tool.
         connection (PostgreSQL|MySQL|Snowflake|AWSRedshift): The connection instance for the specified storage.
-        query (str): The SQL statement to execute.
+        query (Optional[str]): The SQL statement to execute.
         input_schema (SQLInputSchema): The input schema for the tool.
     """
 
