@@ -2,6 +2,7 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
+from lxml import etree as LET  # nosec B410
 from pydantic import BaseModel, Field
 
 from dynamiq.nodes import Node, NodeGroup
@@ -14,13 +15,9 @@ from dynamiq.utils.logger import logger
 class OrchestratorError(Exception):
     """Base exception for Orchestrator errors."""
 
-    pass
-
 
 class ActionParseError(OrchestratorError):
     """Exception raised when an error occurs during action parsing."""
-
-    pass
 
 
 class OrchestratorInputSchema(BaseModel):
@@ -163,3 +160,9 @@ class Orchestrator(Node, ABC):
             if fallback_content:
                 return fallback_content
         raise ActionParseError("No <output> tags found in the response.")
+
+    def _clean_content(self, content: str) -> LET.Element:
+        cleaned_content = content.replace("```", "").strip()
+        wrapped_content = f"<root>{cleaned_content}</root>"
+        parser = LET.XMLParser(recover=True)  # nosec B320
+        return LET.fromstring(wrapped_content, parser=parser)  # nosec B320

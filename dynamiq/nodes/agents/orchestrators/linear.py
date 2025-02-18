@@ -188,7 +188,7 @@ class LinearOrchestrator(Orchestrator):
         output_content = output_match.group(1).strip()
 
         try:
-            output_content = re.sub(r"^```(?:json)?\s*|```$", "", output_content).strip()
+            output_content = self._clean_output(output_content)
         except AttributeError as e:
             logger.warning(
                 f"Orchestrator {self.name} - {self.id}: "
@@ -245,22 +245,7 @@ class LinearOrchestrator(Orchestrator):
                 self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
                 if manager_result.status == RunnableStatus.SUCCESS:
-                    try:
-                        assigned_agent_index = int(manager_result.output.get("content").get("result", -1))
-
-                    except ValueError:
-                        logger.warning(
-                            f"Orchestrator {self.name} - {self.id}: Invalid agent index: {manager_result.output.get('content').get('result', -1)}"  # noqa: E501
-                        )
-                        try:
-                            match = re.match(
-                                r"^\d+",
-                                manager_result.output.get("content").get("result", -1),
-                            )
-                            assigned_agent_index = int(match.group())
-                        except Exception as e:
-                            logger.error(f"Orchestrator {self.name} - {self.id}: Failed to extract agent index: {e}")
-                            assigned_agent_index = -1
+                    assigned_agent_index = self._extract_agent_index(manager_result.output.get("content", {}))
 
                     if 0 <= assigned_agent_index < len(self.agents):
                         assigned_agent = self.agents[assigned_agent_index]
@@ -451,8 +436,8 @@ class LinearOrchestrator(Orchestrator):
         Returns:
             dict | None: The extracted JSON dictionary if successful, otherwise None.
         """
-        output_content = self.extract_output_content(result_text)
-        output_content = re.sub(r"^```(?:json)?\s*|```$", "", output_content).strip()
+        output_content = self._extract_output_content(result_text)
+        output_content = self._clean_output(output_content)
 
         try:
             data = json.loads(output_content)
@@ -461,3 +446,22 @@ class LinearOrchestrator(Orchestrator):
             error_message = f"Orchestrator {self.name} - {self.id}: JSON decoding error: {e}"
             logger.error(error_message)
             return None
+
+    def _clean_output(self, text: str) -> str:
+        """Remove Markdown code fences and extra whitespace from a text."""
+        cleaned = re.sub(r"^```(?:json)?\s*|```$", "", text).strip()
+        return cleaned
+
+    def _extract_agent_index(self, result_content: dict) -> int:
+        """Extracts and validates the agent index from the result content."""
+        raw = result_content.get("result", -1)
+        try:
+            return int(raw)
+        except ValueError:
+            logger.warning(f"Invalid agent index: {raw}")
+            match = re.match(r"^\d+", str(raw))
+            if match:
+                return int(match.group())
+            else:
+                logger.error(f"Failed to extract agent index from: {raw}")
+                return -1
