@@ -227,24 +227,29 @@ class Prompt(BasePrompt):
 
         return parameters
 
-    def get_mime_type(self, file_name):
-        mime_type, _ = mimetypes.guess_type(file_name)
+
+    def parse_bytes_to_base64(self, file_bytes: bytes) -> str:
+        """
+        Parses file bytes in base64 format.
+
+        Args:
+            file_bytes (bytes): File bytes.
+        
+        Returns:
+            str: Base64 encoded file.
+        """
+        extension = filetype.guess_extension(file_bytes)
+        if not extension:
+            extension = "txt"
+
+        encoded_str = base64.b64encode(file_bytes).decode("utf-8")
+
+        mime_type, _ = mimetypes.guess_type(f"file.{extension}")
 
         if mime_type is None:
             return "text/plain"
 
-        return mime_type
-
-    def parse_bytes_to_base64(self, bytes: bytes) -> str:
-        extension = filetype.guess_extension(bytes)
-        if not extension:
-            extension = "txt"
-
-        encoded_str = base64.b64encode(bytes).decode("utf-8")
-
-        mimetype = self.get_mime_type(f"file.{extension}")
-
-        return f"data:{mimetype};base64,{encoded_str}"
+        return f"data:{mime_type};base64,{encoded_str}"
 
     def parse_image_url_parameters(self, url_template: str, kwargs: dict) -> None:
         """
