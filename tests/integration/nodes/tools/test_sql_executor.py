@@ -17,6 +17,16 @@ def mock_fetchall_sql_response():
 
 
 @pytest.fixture
+def mock_fetchall_sql_response_for_agents():
+    """Mock response from select requests"""
+    return (
+        "Row 1\nDescription: Row5Description\nName: Row5Name\n\nRow 2\nDescription: Row6Description"
+        "\nName: Row6Name\n\nRow 3\nDescription: Row5Description\nName: Row5Name\n\nRow 4"
+        "\nDescription: Row6Description\nName: Row6Name"
+    )
+
+
+@pytest.fixture
 def mock_cursor_with_select(mocker, mock_fetchall_sql_response):
     mock_cursor = mocker.Mock()
     mock_cursor.fetchall.return_value = mock_fetchall_sql_response
@@ -41,7 +51,7 @@ def mock_cursor_with_select(mocker, mock_fetchall_sql_response):
         connections.AWSRedshift(user="user", host="test_host", port=5439, database="db", password="password"),
     ],
 )
-def test_mysql_postgres_select_execute(mock_fetchall_sql_response, connection, mock_cursor_with_select):
+def test_select_execute(mock_fetchall_sql_response, connection, mock_cursor_with_select):
     sql_tool = SQLExecutor(connection=connection)
     output = mock_fetchall_sql_response
     input_data = {"query": """select * from test1"""}
@@ -85,10 +95,10 @@ def mock_cursor_with_none_description(mocker):
         connections.AWSRedshift(user="user", host="test_host", port=5439, database="db", password="password"),
     ],
 )
-def test_non_select_queries_execution(mock_fetchall_sql_response, connection, mock_cursor_with_none_description):
+def test_non_select_queries_execution(connection, mock_cursor_with_none_description):
     sql_tool = SQLExecutor(connection=connection)
     output = []
-    input_data = {"query": """select * from test1"""}
+    input_data = {"query": """delete * from test1"""}
 
     result = sql_tool.run(input_data, None)
 
@@ -99,5 +109,64 @@ def test_non_select_queries_execution(mock_fetchall_sql_response, connection, mo
     assert input_dump["query"] == input_data["query"]
 
     mock_cursor_with_none_description.execute.assert_called_once_with(input_data["query"])
+    output_dump = result.output
+    assert output_dump["content"] == output
+
+
+@pytest.mark.parametrize(
+    "connection",
+    [
+        connections.PostgreSQL(host="test_host", port=5432, database="db", user="user", password="password"),
+        connections.MySQL(host="test_host", database="db", user="user", password="password"),
+        connections.Snowflake(
+            user="user", password="password", database="db", account="account", warehouse="warehouse", schema="schema"
+        ),
+        connections.AWSRedshift(user="user", host="test_host", port=5439, database="db", password="password"),
+    ],
+)
+def test_non_select_queries_execution_for_agents(connection, mock_cursor_with_none_description):
+    sql_tool = SQLExecutor(connection=connection, is_optimized_for_agents=True)
+    input_data = {"query": """delete * from test1"""}
+    output = f'Query "{input_data["query"]}" executed successfully. No results returned.'
+
+    result = sql_tool.run(input_data, None)
+
+    assert isinstance(result, RunnableResult)
+    assert result.status == RunnableStatus.SUCCESS
+
+    input_dump = result.input
+    assert input_dump["query"] == input_data["query"]
+
+    mock_cursor_with_none_description.execute.assert_called_once_with(input_data["query"])
+    output_dump = result.output
+    assert output_dump["content"] == output
+
+
+@pytest.mark.parametrize(
+    "connection",
+    [
+        connections.PostgreSQL(host="test_host", port=5432, database="db", user="user", password="password"),
+        connections.MySQL(host="test_host", database="db", user="user", password="password"),
+        connections.Snowflake(
+            user="user", password="password", database="db", account="account", warehouse="warehouse", schema="schema"
+        ),
+        connections.AWSRedshift(user="user", host="test_host", port=5439, database="db", password="password"),
+    ],
+)
+def test_select_execute_for_agents(mock_fetchall_sql_response_for_agents, connection, mock_cursor_with_select):
+    sql_tool = SQLExecutor(connection=connection, is_optimized_for_agents=True)
+    output = mock_fetchall_sql_response_for_agents
+    input_data = {"query": """select * from test1"""}
+
+    result = sql_tool.run(input_data, None)
+
+    assert isinstance(result, RunnableResult)
+    assert result.status == RunnableStatus.SUCCESS
+
+    input_dump = result.input
+    assert input_dump["query"] == input_data["query"]
+
+    mock_cursor_with_select.execute.assert_called_once_with(input_data["query"])
+    mock_cursor_with_select.fetchall.assert_called_once()
     output_dump = result.output
     assert output_dump["content"] == output

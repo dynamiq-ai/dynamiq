@@ -1,6 +1,7 @@
 import base64
 import enum
 import io
+import mimetypes
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -226,6 +227,29 @@ class Prompt(BasePrompt):
 
         return parameters
 
+    def parse_bytes_to_base64(self, file_bytes: bytes) -> str:
+        """
+        Parses file bytes in base64 format.
+
+        Args:
+            file_bytes (bytes): File bytes.
+
+        Returns:
+            str: Base64 encoded file.
+        """
+        extension = filetype.guess_extension(file_bytes)
+        if not extension:
+            extension = "txt"
+
+        encoded_str = base64.b64encode(file_bytes).decode("utf-8")
+
+        mime_type, _ = mimetypes.guess_type(f"file.{extension}")
+
+        if mime_type is None:
+            mime_type = "text/plain"
+
+        return f"data:{mime_type};base64,{encoded_str}"
+
     def parse_image_url_parameters(self, url_template: str, kwargs: dict) -> None:
         """
         Converts image URL parameters in kwargs to Base64-encoded Data URLs if they contain image data.
@@ -251,18 +275,10 @@ class Prompt(BasePrompt):
 
             if isinstance(value, io.BytesIO):
                 image_bytes = value.getvalue()
-                extension = filetype.guess_extension(image_bytes)
-                if not extension:
-                    raise ValueError(f"Cannot determine file type for parameter '{param}'.")
-                encoded_str = base64.b64encode(image_bytes).decode("utf-8")
-                processed_value = f"data:image/{extension};base64,{encoded_str}"
+                processed_value = self.parse_bytes_to_base64(image_bytes)
 
             elif isinstance(value, bytes):
-                extension = filetype.guess_extension(value)
-                if not extension:
-                    raise ValueError(f"Cannot determine file type for parameter '{param}'.")
-                encoded_str = base64.b64encode(value).decode("utf-8")
-                processed_value = f"data:image/{extension};base64,{encoded_str}"
+                processed_value = self.parse_bytes_to_base64(value)
 
             elif isinstance(value, str):
                 pass  # No action needed; assuming it's a regular URL or already a Data URL
