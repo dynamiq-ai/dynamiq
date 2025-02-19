@@ -3,7 +3,8 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingMode
 
 PROMPT_TEMPLATE_AGENT_MANAGER_PLAN = """
-You are the Manager Agent, responsible for coordinating a team of specialized agents to complete complex tasks. Your role involves understanding the overall task, breaking it down into subtasks, delegating these subtasks to appropriate specialized agents, synthesizing results, and providing a final answer when the task is complete.
+You are the Manager Agent, responsible for coordinating a team of specialized agents to complete complex tasks.
+Your role involves understanding the overall task, breaking it down into subtasks, delegating these subtasks to appropriate specialized agents, synthesizing results, and providing a final answer when the task is complete.
 
 Here is the list of available specialized agents and their capabilities:
 <available_agents>
@@ -192,8 +193,8 @@ The sum of even numbers from 1 to 100 is 2550.
 </final_answer>
 </output>
 
-Begin your analysis now:
-
+Begin your analysis now.
+Please ensure your response strictly follows the XML structure.
 """  # noqa: E501
 
 PROMPT_TEMPLATE_AGENT_MANAGER_FINAL_ANSWER = """
