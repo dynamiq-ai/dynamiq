@@ -28,9 +28,17 @@ class Orchestrator(Node, ABC):
     """
     Orchestrates the execution of complex tasks using multiple specialized agents.
 
+    This abstract base class provides the framework for orchestrating complex tasks
+    through multiple agents. It manages the execution flow and communication between
+    different specialized agents.
+
     Attributes:
         manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
         objective (Optional[str]): The main objective of the orchestration.
+
+    Abstract Methods:
+        run_flow: Processes the given task and returns the result.
+        setup_streaming: Configures streaming functionality for the orchestrator.
     """
 
     name: str | None = "Orchestrator"
@@ -122,6 +130,9 @@ class Orchestrator(Node, ABC):
 
         Returns:
             dict[str, Any]: The result of the orchestration process.
+
+        Raises:
+            OrchestratorError: If the orchestration process fails.
         """
         logger.info(f"Orchestrator {self.name} - {self.id}: started with INPUT DATA:\n{input_data}")
         self.reset_run_state()
@@ -162,6 +173,20 @@ class Orchestrator(Node, ABC):
         raise ActionParseError("No <output> tags found in the response.")
 
     def _clean_content(self, content: str) -> LET.Element:
+        """
+        Clean and parse XML content by removing code block markers and wrapping in a root element.
+
+        Args:
+            content (str): The input string containing XML content, possibly with code block markers.
+
+        Returns:
+            LET.Element: A parsed XML element tree with the cleaned content wrapped in a root element.
+
+        Note:
+            - Removes triple backticks (```) from the content
+            - Wraps the content in a <root> element for proper XML parsing
+            - Uses a lenient XML parser that attempts to recover from malformed XML
+        """
         cleaned_content = content.replace("```", "").strip()
         wrapped_content = f"<root>{cleaned_content}</root>"
         parser = LET.XMLParser(recover=True)  # nosec B320

@@ -22,11 +22,12 @@ class Task(BaseModel):
     Represents a single task in the LinearOrchestrator system.
 
     Attributes:
-        id (int): Unique identifier for the task.
-        name (str): Name of the task.
-        description (str): Detailed description of the task.
-        dependencies (list[int]): List of task IDs that this task depends on.
-        output: dict[str, Any] | str: Expected output of the task.
+        id (int): Unique identifier for the task
+        name (str): Name of the task
+        description (str): Detailed description of the task
+        dependencies (list[int]): List of task IDs that this task depends on
+        output (Union[dict[str, Any], str]): Expected output of the task,
+            either as a structured dictionary or string
     """
 
     id: int
@@ -63,15 +64,16 @@ class LinearOrchestrator(Orchestrator):
     Manages the execution of tasks by coordinating multiple agents and leveraging LLM (Large Language Model).
 
     Attributes:
-        manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
-        agents (List[BaseAgent]): List of specialized agents available for task execution.
-        objective (Optional[str]): The main objective of the orchestration.
-        use_summarizer (Optional[bool]): Indicates if a final summarizer is used.
-        summarize_all_answers (Optional[bool]): Indicates whether to summarize answers to all tasks
-             or use only last one. Will only be applied if use_summarizer is set to True.
-        max_plan_retries (Optional[int]): Maximum number of plan generation retries.
+        name (str | None): Name of the orchestrator.
+        group (NodeGroup): The group this node belongs to.
+        manager (LinearAgentManager): The managing agent responsible for overseeing the orchestration process.
+        agents (list[Agent]): List of specialized agents available for task execution.
+        use_summarizer (bool): Indicates if a final summarizer is used.
+        summarize_all_answers (bool): Indicates whether to summarize answers to all tasks
+            or use only last one. Will only be applied if use_summarizer is set to True.
+        max_plan_retries (int): Maximum number of plan generation retries.
         plan_approval (PlanApprovalConfig): Configuration for plan approval.
-        max_user_analyze_retries (Optional[int]): Maximum number of retries for analyzing user input.
+        max_user_analyze_retries (int): Maximum number of retries for analyzing user input.
     """
 
     name: str | None = "LinearOrchestrator"
@@ -130,7 +132,21 @@ class LinearOrchestrator(Orchestrator):
         return "\n".join([f"{i}. {_agent.name}" for i, _agent in enumerate(self.agents)]) if self.agents else ""
 
     def get_tasks(self, input_task: str, config: RunnableConfig = None, **kwargs) -> list[Task]:
-        """Generate tasks using the manager agent."""
+        """
+        Generate tasks using the manager agent.
+
+        Args:
+            input_task (str): The input task to generate subtasks from
+            config (RunnableConfig, optional): Configuration for the runnable
+            **kwargs: Additional keyword arguments passed to the manager's run method
+
+        Returns:
+            list[Task]: List of generated tasks
+
+        Raises:
+            ValueError: If task generation fails
+            OrchestratorError: If maximum number of retries is reached
+        """
         manager_result_content = ""
         feedback = ""
 
@@ -452,8 +468,16 @@ class LinearOrchestrator(Orchestrator):
         cleaned = re.sub(r"^```(?:json)?\s*|```$", "", text).strip()
         return cleaned
 
-    def _extract_agent_index(self, result_content: dict) -> int:
-        """Extracts and validates the agent index from the result content."""
+    def _extract_agent_index(self, result_content: dict[str, Any]) -> int:
+        """
+        Extracts and validates the agent index from the result content.
+
+        Args:
+            result_content (dict[str, Any]): The content containing the agent index
+
+        Returns:
+            int: The extracted agent index, or -1 if extraction fails
+        """
         raw = result_content.get("result", -1)
         try:
             return int(raw)

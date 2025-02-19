@@ -82,7 +82,7 @@ class AdaptiveOrchestrator(Orchestrator):
         Initialize components of the orchestrator.
 
         Args:
-            connection_manager (Optional[ConnectionManager]): The connection manager. Defaults to ConnectionManager.
+            connection_manager (ConnectionManager | None): The connection manager. Defaults to None.
         """
         super().init_components(connection_manager)
         if self.manager.is_postponed_component_init:
@@ -246,11 +246,21 @@ class AdaptiveOrchestrator(Orchestrator):
                 }
             )
 
-    def _handle_respond(self, action: Action, config: RunnableConfig = None, **kwargs):
+    def _handle_respond(self, action: Action, config: RunnableConfig = None, **kwargs) -> str:
         """
-        A direct response from the Manager, delegated to the manager agent.
-        """
+        Handle a direct response from the Manager.
 
+        Args:
+            action (Action): The action to handle.
+            config (RunnableConfig | None): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            str: The manager's response content.
+
+        Raises:
+            OrchestratorError: If the manager fails to execute the respond action.
+        """
         manager_result = self.manager.run(
             input_data={
                 "action": "respond",
@@ -309,7 +319,6 @@ class AdaptiveOrchestrator(Orchestrator):
             raise ActionParseError(error_message)
 
         try:
-            # Use recursive search (".//") for tags in case they are nested.
             action_elem = root.find(".//action")
             if action_elem is None or not action_elem.text:
                 error_message = (
@@ -370,6 +379,23 @@ class AdaptiveOrchestrator(Orchestrator):
             raise ActionParseError(error_message)
 
     def parse_xml_final_answer(self, content: str) -> str:
+        """
+        Parses XML content to extract the final answer from either 'output' or 'final_answer' tags.
+
+        This method attempts to extract content using XML parsing first, and if that fails,
+        falls back to regex pattern matching. If both methods fail, it returns the original content.
+
+        Args:
+            content (str): The XML-formatted string containing the answer.
+
+        Returns:
+            str: The extracted answer from either the 'output' or 'final_answer' tags.
+                If parsing fails, returns the original content.
+
+        Raises:
+            ActionParseError: When XML parsing fails and neither 'output' nor 'final_answer' tags
+                contain valid content.
+        """
         try:
             root = self._clean_content(content=content)
             for tag in ["output", "final_answer"]:
