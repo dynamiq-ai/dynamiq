@@ -146,32 +146,19 @@ class ExaTool(ConnectionNode):
 
         payload = {
             "query": input_data.query,
-            "useAutoprompt": self.use_autoprompt,
-            "type": self.query_type,
-            "numResults": self.limit,
-            "includeDomains": self.include_domains,
-            "excludeDomains": self.exclude_domains,
-            "includeText": self.include_text,
-            "excludeText": self.exclude_text,
+            "useAutoprompt": input_data.use_autoprompt or self.use_autoprompt,
+            "type": input_data.query_type or self.query_type,
+            "numResults": input_data.limit or self.limit,
+            "includeDomains": input_data.include_domains or self.include_domains,
+            "excludeDomains": input_data.exclude_domains or self.exclude_domains,
+            "includeText": input_data.include_text or self.include_text,
+            "excludeText": input_data.exclude_text or self.exclude_text,
+            "category": input_data.category or self.category,
         }
 
         input_dict = input_data.model_dump(exclude_unset=True)
-        if "use_autoprompt" in input_dict:
-            payload["useAutoprompt"] = input_data.use_autoprompt
-        if input_data.query_type is not None:
-            payload["type"] = input_data.query_type
-        if input_data.limit is not None:
-            payload["numResults"] = input_data.limit
-        if input_data.include_domains is not None:
-            payload["includeDomains"] = input_data.include_domains
-        if input_data.exclude_domains is not None:
-            payload["excludeDomains"] = input_data.exclude_domains
-        if input_data.include_text is not None:
-            payload["includeText"] = input_data.include_text
-        if input_data.exclude_text is not None:
-            payload["excludeText"] = input_data.exclude_text
-
         include_full_content = self.include_full_content
+
         if "include_full_content" in input_dict:
             include_full_content = input_data.include_full_content
 
