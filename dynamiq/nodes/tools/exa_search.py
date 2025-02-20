@@ -144,29 +144,41 @@ class ExaTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        node_params = {
-            "include_full_content": self.include_full_content,
-            "use_autoprompt": self.use_autoprompt,
-            "query_type": self.query_type,
-            "category": self.category,
-            "limit": self.limit,
-            "include_domains": self.include_domains,
-            "exclude_domains": self.exclude_domains,
-            "include_text": self.include_text,
-            "exclude_text": self.exclude_text,
-        }
-
-        payload = {k: v for k, v in {**node_params, **input_data.model_dump()}.items() if v is not None}
-
-        include_full_content = payload.pop("include_full_content", False)
-
         payload = {
-            "query": payload.pop("query"),
-            "useAutoprompt": payload.pop("use_autoprompt", False),
-            "type": payload.pop("query_type", "neural"),
-            "numResults": payload.pop("limit", 10),
-            **{self.to_camel_case(k): v for k, v in payload.items()},
+            "query": input_data.query,
+            "useAutoprompt": self.use_autoprompt,
+            "type": self.query_type,
+            "numResults": self.limit,
+            "includeDomains": self.include_domains,
+            "excludeDomains": self.exclude_domains,
+            "includeText": self.include_text,
+            "excludeText": self.exclude_text,
         }
+
+        input_dict = input_data.model_dump(exclude_unset=True)
+        if "use_autoprompt" in input_dict:
+            payload["useAutoprompt"] = input_data.use_autoprompt
+        if input_data.query_type is not None:
+            payload["type"] = input_data.query_type
+        if input_data.limit is not None:
+            payload["numResults"] = input_data.limit
+        if input_data.include_domains is not None:
+            payload["includeDomains"] = input_data.include_domains
+        if input_data.exclude_domains is not None:
+            payload["excludeDomains"] = input_data.exclude_domains
+        if input_data.include_text is not None:
+            payload["includeText"] = input_data.include_text
+        if input_data.exclude_text is not None:
+            payload["excludeText"] = input_data.exclude_text
+
+        include_full_content = self.include_full_content
+        if "include_full_content" in input_dict:
+            include_full_content = input_data.include_full_content
+
+        if isinstance(payload["type"], QueryType):
+            payload["type"] = payload["type"].value
+
+        payload = {k: v for k, v in payload.items() if v is not None}
 
         if include_full_content:
             payload["contents"] = {
@@ -201,9 +213,7 @@ class ExaTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result_parts = ["<Sources with URLs>", "\n".join(sources_with_url), "</Sources with URLs>"]
-
             result_parts.extend(["<Search results>", formatted_results, "</Search results>"])
-
             result = "\n\n".join(result_parts)
         else:
             urls = [result.get("url") for result in results]

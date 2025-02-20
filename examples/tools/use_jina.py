@@ -9,7 +9,7 @@ def basic_search_example():
 
     result = jina_search_tool.run(
         input_data={
-            "query": "What is LLM?",
+            "query": "What is AI Agent?",
             "max_results": 3,
         }
     )
