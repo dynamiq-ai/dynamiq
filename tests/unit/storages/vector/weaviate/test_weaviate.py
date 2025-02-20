@@ -30,15 +30,14 @@ def test_invalid_collection_names(name: str) -> None:
     assert WeaviateVectorStore.is_valid_collection_name(name) is False
 
 
-def test_fix_and_validate_index_name_already_valid() -> None:
-    # Name already valid; will be returned unchanged.
-    input_name = "ValidIndex"
+@pytest.mark.parametrize(
+    "input_name, expected",
+    [
+        ("a", "A"),
+        ("default", "Default"),
+        ("ValidIndex", "ValidIndex"),
+    ],
+)
+def test_fix_and_validate_index_name(input_name: str, expected: str) -> None:
     fixed = WeaviateVectorStore._fix_and_validate_index_name(input_name)
-    assert fixed == input_name
-
-
-def test_fix_and_validate_index_name_lowercase() -> None:
-    # Name starts with lowercase; should automatically be fixed.
-    input_name = "default"
-    fixed = WeaviateVectorStore._fix_and_validate_index_name(input_name)
-    assert fixed == "Default"
+    assert fixed == expected
