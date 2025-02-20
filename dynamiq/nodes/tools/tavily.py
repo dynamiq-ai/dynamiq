@@ -110,7 +110,6 @@ class TavilyTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        # Create search_data dictionary with node's default values
         search_data = {
             "query": input_data.query,
             "search_depth": self.search_depth,
@@ -124,7 +123,6 @@ class TavilyTool(ConnectionNode):
             "use_cache": self.use_cache,
         }
 
-        # Override with any non-None values from input_data
         input_dict = input_data.model_dump(exclude_unset=True)
         for key, value in input_dict.items():
             if value is not None:
