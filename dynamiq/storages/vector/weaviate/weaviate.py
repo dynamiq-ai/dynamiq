@@ -1,4 +1,5 @@
 import datetime
+import re
 from typing import TYPE_CHECKING, Any, Optional
 
 from weaviate.classes.query import HybridFusion
@@ -19,13 +20,6 @@ if TYPE_CHECKING:
     from weaviate import WeaviateClient
     from weaviate.collections.classes.data import DataObject
 
-DOCUMENT_COLLECTION_PROPERTIES = [
-    {"name": "_original_id", "dataType": ["text"]},
-    {"name": "content", "dataType": ["text"]},
-    {"name": "blob_data", "dataType": ["blob"]},
-    {"name": "blob_mime_type", "dataType": ["text"]},
-    {"name": "score", "dataType": ["number"]},
-]
 
 DEFAULT_QUERY_LIMIT = 9999
 
@@ -41,6 +35,13 @@ class WeaviateVectorStore:
     This class can be used with Weaviate Cloud Services or self-hosted instances.
     """
 
+    @staticmethod
+    def is_valid_collection_name(name: str) -> bool:
+        # Matches names starting with an uppercase letter followed by
+        # alphanumeric characters or underscores.
+        pattern = r"^[A-Z][_0-9A-Za-z]*$"
+        return bool(re.fullmatch(pattern, name))
+
     def __init__(
         self,
         connection: Weaviate | None = None,
@@ -50,14 +51,22 @@ class WeaviateVectorStore:
         content_key: str = "content",
     ):
         """
-        Initialize a new instance of WeaviateDocumentStore and connect to the Weaviate instance.
+        Initialize a new instance of WeaviateDocumentStore and connect to the
+        Weaviate instance.
 
         Args:
-            connection (Weaviate | None): A Weaviate connection object. If None, a new one is created.
-            client (Optional[WeaviateClient]): A Weaviate client. If None, one is created from the connection.
+            connection (Weaviate | None): A Weaviate connection object. If None, a
+                new one is created.
+            client (Optional[WeaviateClient]): A Weaviate client. If None, one is
+                created from the connection.
             index_name (str): The name of the index to use. Defaults to "default".
-            content_key (Optional[str]): The field used to store content in the storage.
+            content_key (Optional[str]): The field used to store content in the
+                storage.
         """
+        if not self.is_valid_collection_name(index_name):
+            msg = f"Collection name '{index_name}' is invalid. It must match the pattern " "^[A-Z][_0-9A-Za-z]*$"
+            raise ValueError(msg)
+
         self.client = client
         if self.client is None:
             if connection is None:
@@ -74,8 +83,8 @@ class WeaviateVectorStore:
                 self.client.collections.create_from_dict(collection_settings)
             else:
                 raise ValueError(
-                    f"Collection '{collection_settings['class']}' does not exist."
-                    " Set 'create_if_not_exist' to True to create it."
+                    f"Collection '{collection_settings['class']}' does not exist. "
+                    "Set 'create_if_not_exist' to True to create it."
                 )
 
         self._collection_settings = collection_settings
@@ -256,10 +265,7 @@ class WeaviateVectorStore:
             list[Document]: A list of all documents in the store.
         """
         documents = []
-        for item in self._collection.iterator(
-            include_vector=include_embeddings
-            # If using named vectors, you can specify ones to include e.g. ['title', 'body'], or True to include all
-        ):
+        for item in self._collection.iterator(include_vector=include_embeddings):
             document = self._to_document(item, content_key=content_key or self.content_key)
             documents.append(document)
         return documents
@@ -317,7 +323,6 @@ class WeaviateVectorStore:
             policy (DuplicatePolicy): The policy to use for handling duplicates.
             content_key (Optional[str]): The field used to store content in the storage.
 
-
         Returns:
             int: The number of documents written.
 
@@ -341,7 +346,6 @@ class WeaviateVectorStore:
                     properties=self._to_data_object(doc, content_key=content_key),
                     vector=doc.embedding,
                 )
-
                 written += 1
             except UnexpectedStatusCodeError:
                 if policy == DuplicatePolicy.FAIL:
@@ -368,7 +372,7 @@ class WeaviateVectorStore:
         if policy in [DuplicatePolicy.NONE, DuplicatePolicy.OVERWRITE]:
             return self._batch_write(documents, content_key=content_key)
 
-        return self._write(documents, policy)
+        return self._write(documents, policy, content_key=content_key)
 
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """
