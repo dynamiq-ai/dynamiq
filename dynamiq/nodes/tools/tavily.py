@@ -13,26 +13,25 @@ from dynamiq.utils.logger import logger
 
 class TavilyInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a search query.")
+    search_depth: str | None = Field(default=None, description="The search depth to use.")
+    topic: str | None = Field(default=None, description="The topic to search for.")
+    max_results: int | None = Field(
+        default=None,
+        description="The maximum number of search results to return.",
+    )
+    include_images: bool | None = Field(default=None, description="Include images in search results.")
+    include_answer: bool | None = Field(default=None, description="Include answer in search results.")
+    include_raw_content: bool | None = Field(default=None, description="Include raw content in search results.")
+    include_domains: list[str] | None = Field(default=None, description="The domains to include in search results.")
+    exclude_domains: list[str] | None = Field(default=None, description="The domains to exclude from search results.")
+    use_cache: bool | None = Field(default=None, description="Use cache for search results.")
 
 
 class TavilyTool(ConnectionNode):
     """
     TavilyTool is a ConnectionNode that interfaces with the Tavily search service.
 
-    Attributes:
-        group (Literal[NodeGroup.TOOLS]): The node group to which this tool belongs.
-        name (str): The name of the tool.
-        description (str): A brief description of the tool's functionality.
-        connection (Tavily): The connection object for interacting with Tavily.
-        search_depth (str): The depth of the search, default is 'basic'.
-        topic (str): The topic to search for, default is 'general'.
-        max_results (int): Maximum number of search results to return, default is 5.
-        include_images (bool): Flag to include images in search results, default is False.
-        include_answer (bool): Flag to include an answer in search results, default is False.
-        include_raw_content (bool): Flag to include raw content in search results, default is False.
-        include_domains (list[str]): Domains to include in search results.
-        exclude_domains (list[str]): Domains to exclude from search results.
-        use_cache (bool): Flag to use cache for search results, default is True.
+    All parameters can be set during initialization and optionally overridden during execution.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -96,9 +95,10 @@ class TavilyTool(ConnectionNode):
     def execute(self, input_data: TavilyInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
         Executes the search operation using the provided input data.
+        Parameters from input_data override the node's default parameters if provided.
 
         Args:
-            input_data (dict[str, Any]): The input data containing the search query.
+            input_data (TavilyInputSchema): The input data containing the search query and optional parameters.
             config (RunnableConfig | None): Optional configuration for the execution.
             **kwargs: Additional keyword arguments.
 
@@ -110,9 +110,9 @@ class TavilyTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        query = input_data.query
+        # Create search_data dictionary with node's default values
         search_data = {
-            "query": query,
+            "query": input_data.query,
             "search_depth": self.search_depth,
             "topic": self.topic,
             "max_results": self.max_results,
@@ -123,6 +123,12 @@ class TavilyTool(ConnectionNode):
             "exclude_domains": self.exclude_domains,
             "use_cache": self.use_cache,
         }
+
+        # Override with any non-None values from input_data
+        input_dict = input_data.model_dump(exclude_unset=True)
+        for key, value in input_dict.items():
+            if value is not None:
+                search_data[key] = value
 
         connection_url = urljoin(self.connection.url, "/search")
 
@@ -147,17 +153,17 @@ class TavilyTool(ConnectionNode):
             f"[{result.get('title')}]({result.get('url')})"
             for result in search_result.get("results", [])
         ]
+
         if self.is_optimized_for_agents:
             result = (
                 "<Sources with URLs>\n"
                 + "\n".join(sources_with_url)
-                + f"\n<\\Sources with URLs>\n\n<Search results for query {query}>\n"
+                + f"\n<\\Sources with URLs>\n\n<Search results for query {input_data.query}>\n"
                 + formatted_results
-                + f"\n<\\Search results for query {query}>"
+                + f"\n<\\Search results for query {input_data.query}>"
             )
             if search_result.get("answer", "") != "":
                 result += f"\n\n<Answer>\n{search_result.get('answer')}\n<\\Answer>"
-
         else:
             result = {
                 "result": formatted_results,

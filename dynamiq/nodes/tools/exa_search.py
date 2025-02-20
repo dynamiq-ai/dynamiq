@@ -22,20 +22,18 @@ class ExaInputSchema(BaseModel):
     """Schema for Exa search input parameters."""
 
     query: str = Field(description="The search query string.")
-    include_full_content: bool = Field(
-        default=False, description="If true, retrieve full content, highlights, and summaries for search results."
+    include_full_content: bool | None = Field(
+        default=None, description="If true, retrieve full content, highlights, and summaries for search results."
     )
-    use_autoprompt: bool = Field(
-        default=False, description="If true, query will be converted to a Exa query. Default false."
-    )
-    query_type: QueryType = Field(
-        default=QueryType.auto,
-        description="Type of query to be used. Options are 'keyword', 'neural', or 'auto'. Default is 'auto'.",
+    use_autoprompt: bool | None = Field(default=None, description="If true, query will be converted to a Exa query.")
+    query_type: QueryType | None = Field(
+        default=None,
+        description="Type of query to be used. Options are 'keyword', 'neural', or 'auto'.",
     )
     category: str | None = Field(
         default=None, description="A data category to focus on (e.g., company, research paper, news article)."
     )
-    limit: int = Field(default=10, ge=1, le=100, description="Number of search results to return. Default 10.")
+    limit: int | None = Field(default=None, ge=1, le=100, description="Number of search results to return.")
     include_domains: list[str] | None = Field(default=None, description="List of domains to include in the search.")
     exclude_domains: list[str] | None = Field(default=None, description="List of domains to exclude from the search.")
     include_text: list[str] | None = Field(default=None, description="Strings that must be present in webpage text.")
@@ -56,6 +54,15 @@ class ExaTool(ConnectionNode):
         name (str): The name of the tool.
         description (str): A brief description of the tool.
         connection (Exa): The connection instance for the Exa API.
+        include_full_content (bool): If true, retrieve full content, highlights, and summaries.
+        use_autoprompt (bool): If true, query will be converted to a Exa query.
+        query_type (QueryType): Type of query to be used.
+        category (str, optional): A data category to focus on.
+        limit (int): Number of search results to return.
+        include_domains (list[str], optional): List of domains to include.
+        exclude_domains (list[str], optional): List of domains to exclude.
+        include_text (list[str], optional): Strings that must be present.
+        exclude_text (list[str], optional): Strings that must not be present.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -65,6 +72,20 @@ class ExaTool(ConnectionNode):
         "Provides advanced search capabilities with options for filtering results."
     )
     connection: Exa
+
+    include_full_content: bool = Field(
+        default=False, description="If true, retrieve full content, highlights, and summaries for search results."
+    )
+    use_autoprompt: bool = Field(default=False, description="If true, query will be converted to a Exa query.")
+    query_type: QueryType = Field(default=QueryType.auto, description="Type of query to be used.")
+    category: str | None = Field(default=None, description="A data category to focus on.")
+    limit: int = Field(default=10, ge=1, le=100, description="Number of search results to return.")
+    include_domains: list[str] | None = Field(default=None, description="List of domains to include in the search.")
+    exclude_domains: list[str] | None = Field(default=None, description="List of domains to exclude from the search.")
+    include_text: list[str] | None = Field(default=None, description="Strings that must be present in webpage text.")
+    exclude_text: list[str] | None = Field(
+        default=None, description="Strings that must not be present in webpage text."
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ExaInputSchema]] = ExaInputSchema
@@ -115,13 +136,30 @@ class ExaTool(ConnectionNode):
     def execute(self, input_data: ExaInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
         Executes the search using the Exa API and returns the formatted results.
+
+        Input parameters override node parameters when provided.
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        payload = {k: v for k, v in input_data.model_dump().items() if v is not None}
+        node_params = {
+            "include_full_content": self.include_full_content,
+            "use_autoprompt": self.use_autoprompt,
+            "query_type": self.query_type,
+            "category": self.category,
+            "limit": self.limit,
+            "include_domains": self.include_domains,
+            "exclude_domains": self.exclude_domains,
+            "include_text": self.include_text,
+            "exclude_text": self.exclude_text,
+        }
+
+        payload = node_params.copy()
+        payload.update({k: v for k, v in input_data.model_dump().items() if v is not None})
+
+        payload = {k: v for k, v in payload.items() if v is not None}
         include_full_content = payload.pop("include_full_content", False)
 
         payload = {
