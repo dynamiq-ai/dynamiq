@@ -48,11 +48,11 @@ def test_initialization_with_defaults(mock_vector_store):
 
 def test_run_basic_search(retriever, mock_vector_store, mock_es_filters):
     """Test basic vector similarity search."""
-    query = [0.1] * 768
-    result = retriever.run(query=query, filters=mock_es_filters, top_k=5)
+    query_embedding = [0.1] * 768
+    result = retriever.run(query_embedding=query_embedding, filters=mock_es_filters, top_k=5)
 
     mock_vector_store._embedding_retrieval.assert_called_once_with(
-        query_embedding=query,
+        query_embedding=query_embedding,
         filters=mock_es_filters,
         top_k=5,
         exclude_document_embeddings=True,
@@ -66,11 +66,13 @@ def test_run_basic_search(retriever, mock_vector_store, mock_es_filters):
 
 def test_run_with_score_scaling(retriever, mock_vector_store):
     """Test vector search with score scaling enabled."""
-    query = [0.1] * 768
-    result = retriever.run(query=query, scale_scores=True, content_key="content", embedding_key="embedding")
+    query_embedding = [0.1] * 768
+    result = retriever.run(
+        query_embedding=query_embedding, scale_scores=True, content_key="content", embedding_key="embedding"
+    )
 
     mock_vector_store._embedding_retrieval.assert_called_once_with(
-        query_embedding=query,
+        query_embedding=query_embedding,
         filters=retriever.filters,
         top_k=retriever.top_k,
         exclude_document_embeddings=True,
@@ -83,11 +85,11 @@ def test_run_with_score_scaling(retriever, mock_vector_store):
 
 def test_run_with_document_embeddings(retriever, mock_vector_store):
     """Test vector search with document embeddings included."""
-    query = [0.1] * 768
-    result = retriever.run(query=query, exclude_document_embeddings=False)
+    query_embedding = [0.1] * 768
+    result = retriever.run(query_embedding=query_embedding, exclude_document_embeddings=False)
 
     mock_vector_store._embedding_retrieval.assert_called_once_with(
-        query_embedding=query,
+        query_embedding=query_embedding,
         filters=retriever.filters,
         top_k=retriever.top_k,
         exclude_document_embeddings=False,
@@ -100,11 +102,11 @@ def test_run_with_document_embeddings(retriever, mock_vector_store):
 
 def test_run_with_default_parameters(retriever, mock_vector_store):
     """Test search with default parameters."""
-    query = [0.1] * 768
-    result = retriever.run(query=query)
+    query_embedding = [0.1] * 768
+    result = retriever.run(query_embedding=query_embedding)
 
     mock_vector_store._embedding_retrieval.assert_called_once_with(
-        query_embedding=query,
+        query_embedding=query_embedding,
         filters=retriever.filters,
         top_k=retriever.top_k,
         exclude_document_embeddings=True,

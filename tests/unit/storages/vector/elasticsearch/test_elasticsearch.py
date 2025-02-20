@@ -185,6 +185,52 @@ def test_search_by_vector_with_score_scaling(es_vector_store):
     assert results[0].score == 0.75
 
 
+def test_get_field_statistics(es_vector_store, mock_es_client):
+    """Test getting field statistics."""
+    field = "field_name"
+    es_vector_store.get_field_statistics(field)
+
+    mock_es_client.search.assert_called_once_with(
+        index=es_vector_store.index_name,
+        body={"size": 0, "aggs": {"stats": {"stats": {"field": field}}}},
+    )
+
+
+def test_update_document_by_file_id(es_vector_store, mock_es_client):
+    """Test updating document by their id."""
+    file_id = "id"
+    content = "updated content"
+    metadata = {"key": "value"}
+    embedding = [0.1] * 768
+    es_vector_store.update_document_by_file_id(
+        file_id=file_id,
+        content=content,
+        metadata=metadata,
+        embedding=embedding,
+    )
+
+    mock_es_client.update.assert_called_once_with(
+        index=es_vector_store.index_name,
+        id=file_id,
+        body={
+            "doc": {
+                es_vector_store.content_key: content,
+                es_vector_store.embedding_key: embedding,
+                "metadata": metadata,
+            }
+        },
+        refresh=True,
+    )
+
+
+def test_create_alias(es_vector_store, mock_es_client):
+    """Test creating an alias."""
+    alias_name = "test_alias"
+    index_names = ["test_index_1", "test_index_2"]
+    es_vector_store.create_alias(alias_name, index_names)
+    mock_es_client.indices.update_aliases.assert_called_once()
+
+
 def test_search_by_vector_invalid_dimension(es_vector_store):
     """Test vector search with invalid embedding dimension."""
     with pytest.raises(ValueError, match="query_embedding must have dimension 768"):

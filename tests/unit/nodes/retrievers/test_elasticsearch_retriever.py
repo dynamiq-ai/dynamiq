@@ -72,7 +72,7 @@ def test_init_components(elasticsearch_document_retriever, mock_elasticsearch_st
 
 def test_execute_basic_search(elasticsearch_document_retriever):
     """Test basic vector similarity search."""
-    input_data = ElasticsearchRetrieverInputSchema(query=[0.1, 0.2, 0.3], filters={"field": "value"}, top_k=5)
+    input_data = ElasticsearchRetrieverInputSchema(query_embedding=[0.1, 0.2, 0.3], filters={"field": "value"}, top_k=5)
     config = RunnableConfig(callbacks=[])
 
     mock_output = {"documents": [{"id": "1", "content": "Document 1"}]}
@@ -82,7 +82,7 @@ def test_execute_basic_search(elasticsearch_document_retriever):
     result = elasticsearch_document_retriever.execute(input_data, config)
 
     elasticsearch_document_retriever.document_retriever.run.assert_called_once_with(
-        query=input_data.query,
+        query_embedding=input_data.query_embedding,
         filters=input_data.filters,
         top_k=input_data.top_k,
         exclude_document_embeddings=input_data.exclude_document_embeddings,
@@ -104,7 +104,7 @@ def test_execute_with_missing_query(elasticsearch_document_retriever):
 
 def test_execute_with_default_filters_and_top_k(elasticsearch_document_retriever):
     """Test search with default filters and top_k values."""
-    input_data = ElasticsearchRetrieverInputSchema(query=[0.1, 0.2, 0.3])
+    input_data = ElasticsearchRetrieverInputSchema(query_embedding=[0.1, 0.2, 0.3])
     config = RunnableConfig(callbacks=[])
 
     mock_output = {"documents": [{"id": "1", "content": "Document 1"}]}
@@ -114,7 +114,7 @@ def test_execute_with_default_filters_and_top_k(elasticsearch_document_retriever
     result = elasticsearch_document_retriever.execute(input_data, config)
 
     elasticsearch_document_retriever.document_retriever.run.assert_called_once_with(
-        query=input_data.query,
+        query_embedding=input_data.query_embedding,
         filters=elasticsearch_document_retriever.filters,
         top_k=elasticsearch_document_retriever.top_k,
         exclude_document_embeddings=input_data.exclude_document_embeddings,

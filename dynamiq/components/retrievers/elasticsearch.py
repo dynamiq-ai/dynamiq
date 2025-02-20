@@ -15,15 +15,16 @@ class ElasticsearchDocumentRetriever:
         filters: dict[str, Any] | None = None,
         top_k: int = 10,
     ):
-        """Initialize ElasticsearchDocumentRetriever.
+        """
+        Initialize ElasticsearchDocumentRetriever.
 
         Args:
-            vector_store: An instance of ElasticsearchVectorStore
-            filters: Filters to apply for retrieving specific documents
-            top_k: Maximum number of documents to return
+            vector_store (ElasticsearchVectorStore): An instance of ElasticsearchVectorStore.
+            filters (Optional[dict[str, Any]]): Filters to apply for retrieving specific documents. Defaults to None.
+            top_k (int): Maximum number of documents to return. Defaults to 10.
 
         Raises:
-            ValueError: If vector_store is not an instance of ElasticsearchVectorStore
+            ValueError: If `vector_store` is not an instance of ElasticsearchVectorStore.
         """
         if not isinstance(vector_store, ElasticsearchVectorStore):
             raise ValueError("vector_store must be an instance of ElasticsearchVectorStore")
@@ -34,7 +35,7 @@ class ElasticsearchDocumentRetriever:
 
     def run(
         self,
-        query: list[float],
+        query_embedding: list[float],
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
@@ -42,28 +43,29 @@ class ElasticsearchDocumentRetriever:
         embedding_key: str | None = None,
         scale_scores: bool = False,
     ) -> dict[str, list[Document]]:
-        """Retrieve documents from ElasticsearchVectorStore.
+        """
+        Retrieve documents from ElasticsearchVectorStore.
 
         Args:
-            query: Vector query for similarity search
-            exclude_document_embeddings: Whether to exclude embeddings in results
-            top_k: Maximum number of documents to return
-            filters: Filters to apply for retrieving specific documents
-            content_key: Field used to store content
-            embedding_key: Field used to store vector
-            scale_scores: Whether to scale scores to 0-1 range
+            query_embedding (list[float]): Vector query for similarity search.
+            exclude_document_embeddings (bool): Whether to exclude embeddings in results. Defaults to True.
+            top_k (Optional[int]): Maximum number of documents to return. Defaults to None.
+            filters (Optional[dict[str, Any]]): Filters to apply for retrieving specific documents. Defaults to None.
+            content_key (Optional[str]): Field used to store content. Defaults to None.
+            embedding_key (Optional[str]): Field used to store vector. Defaults to None.
+            scale_scores (bool): Whether to scale scores to the 0-1 range. Defaults to False.
 
         Returns:
-            Dictionary containing list of retrieved documents
+            dict[str, list[Document]]: A dictionary containing a list of retrieved documents.
 
         Raises:
-            ValueError: If query format is invalid
+            ValueError: If the query format is invalid.
         """
         top_k = top_k or self.top_k
         filters = filters or self.filters
 
         docs = self.vector_store._embedding_retrieval(
-            query_embedding=query,
+            query_embedding=query_embedding,
             filters=filters,
             top_k=top_k,
             exclude_document_embeddings=exclude_document_embeddings,

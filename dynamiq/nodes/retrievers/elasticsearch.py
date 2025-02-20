@@ -15,9 +15,20 @@ from dynamiq.storages.vector.elasticsearch.elasticsearch import ElasticsearchVec
 
 
 class ElasticsearchRetrieverInputSchema(BaseModel):
-    """Input schema for Elasticsearch retriever."""
+    """
+    Input schema for Elasticsearch retriever.
 
-    query: list[float] = Field(..., description="Vector query for similarity search")
+    Attributes:
+        query_embedding (list[float]): Vector query for similarity search.
+        filters (dict[str, Any]): Filters to apply for retrieving specific documents. Defaults to an empty dictionary.
+        top_k (int): Number of documents to retrieve. Defaults to 0.
+        exclude_document_embeddings (bool): Whether to exclude embeddings in the response. Defaults to True.
+        scale_scores (bool): Whether to scale scores to the 0-1 range. Defaults to False.
+        content_key (str): Key to use for content in the response. Defaults to "content".
+        embedding_key (str): Key to use for embedding in the response. Defaults to "embedding".
+    """
+
+    query_embedding: list[float] = Field(..., description="Vector query for similarity search")
     filters: dict[str, Any] = Field(default={}, description="Filters to apply for retrieving specific documents")
     top_k: int = Field(default=0, description="Number of documents to retrieve")
     exclude_document_embeddings: bool = Field(default=True, description="Whether to exclude embeddings in response")
@@ -27,7 +38,8 @@ class ElasticsearchRetrieverInputSchema(BaseModel):
 
 
 class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
-    """Document Retriever using Elasticsearch for vector similarity search.
+    """
+    Document Retriever using Elasticsearch for vector similarity search.
 
     This class implements a document retriever that uses Elasticsearch as the underlying store
     for vector similarity search with optional metadata filtering.
@@ -35,8 +47,8 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
     Attributes:
         group (Literal[NodeGroup.RETRIEVERS]): The group the node belongs to.
         name (str): The name of the node.
-        vector_store (ElasticsearchVectorStore | None): The ElasticsearchVectorStore instance.
-        filters (dict[str, Any] | None): Filters to apply when retrieving documents.
+        vector_store (Optional[ElasticsearchVectorStore]): The ElasticsearchVectorStore instance.
+        filters (Optional[dict[str, Any]]): Filters to apply when retrieving documents.
         top_k (int): The maximum number of documents to retrieve.
         document_retriever (ElasticsearchDocumentRetrieverComponent): The document retriever component.
 
@@ -104,12 +116,14 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
 
         Args:
             input_data (ElasticsearchRetrieverInputSchema): The input data containing:
-                - query: Vector query for similarity search
+                - query_embedding: Vector query for similarity search
                 - filters: Optional metadata filters
                 - top_k: Number of documents to retrieve
                 - exclude_document_embeddings: Whether to exclude embeddings
                 - scale_scores: Whether to scale scores to 0-1 range
-            config (RunnableConfig, optional): The configuration for the execution.
+                - content_key: Key to use for content in the response.
+                - embedding_key: Key to use for embedding in the response.
+            config (Optional[RunnableConfig]): The configuration for the execution.
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -119,7 +133,7 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         output = self.document_retriever.run(
-            query=input_data.query,
+            query_embedding=input_data.query_embedding,
             filters=input_data.filters or self.filters,
             top_k=input_data.top_k or self.top_k,
             exclude_document_embeddings=input_data.exclude_document_embeddings,

@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
 from elasticsearch import NotFoundError
+from elasticsearch.helpers import bulk
 
 from dynamiq.connections import Elasticsearch
 from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
@@ -68,21 +69,23 @@ class ElasticsearchVectorStore:
         index_settings: dict | None = None,
         mapping_settings: dict | None = None,
     ):
-        """Initialize ElasticsearchVectorStore.
+        """
+        Initialize ElasticsearchVectorStore.
 
         Args:
-            connection: Elasticsearch connection
-            client: Elasticsearch client
-            index_name: Name of the index
-            dimension: Dimension of vectors
-            similarity: Similarity metric
-            create_if_not_exist: Create index if not exists
-            content_key: Key for content field
-            embedding_key: Key for embedding field
-            write_batch_size: Batch size for write operations
-            scroll_size: Batch size for scroll operations
-            index_settings: Custom index settings
-            mapping_settings: Custom mapping settings
+            connection (Optional[Elasticsearch]): Elasticsearch connection. Defaults to None.
+            client (Optional[ElasticsearchClient]): Elasticsearch client. Defaults to None.
+            index_name (str): Name of the index. Defaults to "default".
+            dimension (int): Dimension of vectors. Defaults to 1536.
+            similarity (ElasticsearchSimilarityMetric): Similarity metric.
+                        Defaults to ElasticsearchSimilarityMetric.COSINE.
+            create_if_not_exist (bool): Whether to create the index if it does not exist. Defaults to False.
+            content_key (str): Key for content field. Defaults to "content".
+            embedding_key (str): Key for embedding field. Defaults to "embedding".
+            write_batch_size (int): Batch size for write operations. Defaults to 100.
+            scroll_size (int): Batch size for scroll operations. Defaults to 1000.
+            index_settings (Optional[dict]): Custom index settings. Defaults to None.
+            mapping_settings (Optional[dict]): Custom mapping settings. Defaults to None.
         """
         if client is None:
             if connection is None:
@@ -138,17 +141,18 @@ class ElasticsearchVectorStore:
     def _handle_duplicate_documents(
         self, documents: list[Document], policy: DuplicatePolicy = DuplicatePolicy.FAIL
     ) -> list[Document]:
-        """Handle duplicate documents based on policy.
+        """
+        Handle duplicate documents based on policy.
 
         Args:
-            documents: List of documents to check
-            policy: Policy for handling duplicates
+            documents (list[Document]): List of documents to check for duplicates.
+            policy (DuplicatePolicy): Policy for handling duplicates. Defaults to DuplicatePolicy.FAIL.
 
         Returns:
-            List of documents after applying policy
+            list[Document]: List of documents after applying the specified policy.
 
         Raises:
-            VectorStoreException: If duplicates found with FAIL policy
+            VectorStoreException: If duplicates are found and the policy is set to FAIL.
         """
         if policy == DuplicatePolicy.OVERWRITE:
             return documents
@@ -196,20 +200,22 @@ class ElasticsearchVectorStore:
         content_key: str | None = None,
         embedding_key: str | None = None,
     ) -> int:
-        """Write documents to Elasticsearch.
+        """
+        Write documents to Elasticsearch.
 
         Args:
-            documents: Documents to write
-            policy: Policy for handling duplicates
-            batch_size: Size of batches for bulk operations
-            content_key (Optional[str]): The field used to store content in the storage.
+            documents (list[Document]): List of documents to write.
+            policy (DuplicatePolicy): Policy for handling duplicate documents. Defaults to DuplicatePolicy.FAIL.
+            batch_size (Optional[int]): Size of batches for bulk operations. Defaults to None.
+            content_key (Optional[str]): The field used to store content in the storage. Defaults to None.
+            embedding_key (Optional[str]): The field used to store embeddings in the storage. Defaults to None.
 
         Returns:
-            Number of documents written
+            int: Number of documents successfully written.
 
         Raises:
-            ValueError: If documents are invalid
-            VectorStoreException: If duplicates found with FAIL policy
+            ValueError: If the provided documents are invalid.
+            VectorStoreException: If duplicates are found when using the FAIL policy.
         """
         if not documents:
             return 0
@@ -250,14 +256,15 @@ class ElasticsearchVectorStore:
         return total_written
 
     def _scale_score(self, score: float, similarity: ElasticsearchSimilarityMetric) -> float:
-        """Scale the score based on similarity metric.
+        """
+        Scale the score based on the similarity metric.
 
         Args:
-            score: Raw score from Elasticsearch
-            similarity: Similarity metric used
+            score (float): Raw score from Elasticsearch.
+            similarity (ElasticsearchSimilarityMetric): Similarity metric used.
 
         Returns:
-            Scaled score between 0 and 1
+            float: Scaled score between 0 and 1, depending on the similarity metric used.
         """
         if similarity == ElasticsearchSimilarityMetric.COSINE:
             # Elasticsearch cosine scores are between -1 and 1
@@ -274,6 +281,7 @@ class ElasticsearchVectorStore:
         self,
         query_embedding: list[float],
         top_k: int = 10,
+        num_candidates: int = 500,
         exclude_document_embeddings: bool = True,
         filters: dict[str, Any] | None = None,
         scale_scores: bool = False,
@@ -286,10 +294,12 @@ class ElasticsearchVectorStore:
         Args:
             query_embedding (List[float]): Query vector.
             top_k (int): Number of results. Defaults to 10.
+            num_candidates (int): Number of candidates to consider in the retriever. Defaults to 500.
             exclude_document_embeddings (bool): Exclude embeddings in response. Defaults to True.
             filters (dict[str, Any] | None): Metadata filters. Defaults to None.
             scale_scores (bool): Whether to scale scores to 0-1 range. Defaults to False.
             content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store embeddings in the storage.
 
         Returns:
             List[Document]: Retrieved documents.
@@ -310,7 +320,7 @@ class ElasticsearchVectorStore:
                 "field": embedding_key,
                 "query_vector": query_embedding,
                 "k": top_k,
-                "num_candidates": top_k * 2,
+                "num_candidates": num_candidates,
             }
         }
 
@@ -351,10 +361,11 @@ class ElasticsearchVectorStore:
         return documents
 
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
-        """Delete documents from the store.
+        """
+        Delete documents from the store.
 
         Args:
-            document_ids (List[str] | None): IDs to delete. Defaults to None.
+            document_ids (Optional[List[str]]): IDs to delete. Defaults to None.
             delete_all (bool): Delete all documents. Defaults to False.
         """
         if delete_all:
@@ -386,7 +397,6 @@ class ElasticsearchVectorStore:
     def delete_documents_by_file_id(self, file_id: str):
         """
         Delete documents from the Pinecone vector store by file ID.
-            file_id should be located in the metadata of the document.
 
         Args:
             file_id (str): The file ID to filter by.
@@ -396,6 +406,7 @@ class ElasticsearchVectorStore:
 
     def list_documents(
         self,
+        top_k: int | None = 100,
         include_embeddings: bool = False,
         content_key: str | None = None,
         embedding_key: str | None = None,
@@ -405,8 +416,10 @@ class ElasticsearchVectorStore:
         List documents in the Pinecone vector store.
 
         Args:
+            top_k (Optional[int]): Maximal number of documents to retrieve. Defaults to 100.
             include_embeddings (bool): Whether to include embeddings in the results. Defaults to False.
             content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store embeddings in the storage.
             scale_scores (bool): Whether to scale scores to 0-1 range. Defaults to False.
 
         Returns:
@@ -418,6 +431,7 @@ class ElasticsearchVectorStore:
         response = self.client.search(
             index=self.index_name,
             query={"match_all": {}},
+            size=top_k,
             _source_excludes=([embedding_key] if not include_embeddings else None),
         )
 
@@ -455,6 +469,110 @@ class ElasticsearchVectorStore:
             query={"match_all": {}},
         )
         return response.get("count", 0)
+
+    def get_field_statistics(self, field: str) -> dict[str, Any]:
+        """
+        Get statistics for a numeric field.
+
+        Args:
+            field (str): Full field name (must be numeric)
+
+        Returns:
+            Dictionary with min, max, avg, sum
+        """
+        response = self.client.search(
+            index=self.index_name,
+            body={"size": 0, "aggs": {"stats": {"stats": {"field": field}}}},
+        )
+        return response["aggregations"]["stats"]
+
+    def update_document_by_file_id(
+        self,
+        file_id: str,
+        content: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        embedding: list[float] | None = None,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+    ) -> None:
+        """Update an existing document.
+
+        Args:
+            file_id (str): Document ID
+            content (Optional[str]): Update content
+            metadata (Optional[dict[str, Any]]): Update field metadata or add new fields
+            embedding (Optional[list[float]]): New embedding vector
+            content_key (Optional[str]): Key for content field.
+            embedding_key (Optional[str]): The field used to store embeddings in the storage.
+        """
+        update_fields = {}
+        if content is not None:
+            update_fields[content_key or self.content_key] = content
+        if metadata is not None:
+            update_fields["metadata"] = metadata
+        if embedding is not None:
+            update_fields[embedding_key or self.embedding_key] = embedding
+
+        if update_fields:
+            self.client.update(index=self.index_name, id=file_id, body={"doc": update_fields}, refresh=True)
+
+    def update_documents_batch(
+        self,
+        documents: list[Document],
+        batch_size: int | None = None,
+    ) -> int:
+        """
+        Update multiple documents in batches.
+
+        Args:
+            documents (list[Document]): List of documents to update.
+            batch_size (Optional[int]): Size of batches for bulk operations. Defaults to None.
+
+        Returns:
+            int: Number of documents successfully updated.
+
+        """
+        batch_size = batch_size or self.write_batch_size
+        total_updated = 0
+
+        def generate_actions(docs):
+            for i, doc in enumerate(docs):
+                docs[i] = {
+                    "_op_type": "update",
+                    "_index": "documents",
+                    "_id": doc.id,
+                    "doc": {
+                        "content": doc.content,
+                        "metadata": doc.metadata,
+                        "embedding_key": doc.embedding,
+                    },
+                }
+            return docs
+
+        for i in range(0, len(documents), batch_size):
+            sub_set_docs = documents[i : i + batch_size]
+            batch = generate_actions(sub_set_docs)
+            success, failed = bulk(self.client, batch, refresh=True, raise_on_error=True)
+            total_updated += success
+        return total_updated
+
+    def create_alias(
+        self,
+        alias_name: str,
+        index_names: list[str] | None = None,
+    ) -> None:
+        """
+        Create an alias for one or more indices.
+
+        Args:
+            alias_name (str): Name of the alias.
+            index_names (Optional[list[str]]): List of indices to include in the alias. Defaults to None.
+        """
+        index_names = index_names or [self.index_name]
+        actions = []
+        for index in index_names:
+            actions.append({"add": {"index": index, "alias": alias_name}})
+        self.client.indices.update_aliases({"actions": actions})
 
     def close(self) -> None:
         """Close the client connection."""

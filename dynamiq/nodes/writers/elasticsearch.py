@@ -18,8 +18,8 @@ class ElasticsearchDocumentWriter(Writer, ElasticsearchVectorStoreWriterParams):
     Attributes:
         group (Literal[NodeGroup.WRITERS]): The group the node belongs to.
         name (str): The name of the node.
-        connection (Elasticsearch | None): The Elasticsearch connection.
-        vector_store (ElasticsearchVectorStore | None): The Elasticsearch Vector Store instance.
+        connection (Optional[Elasticsearch]): The Elasticsearch connection.
+        vector_store (Optional[ElasticsearchVectorStore]): The Elasticsearch Vector Store instance.
     """
 
     name: str = "ElasticsearchDocumentWriter"
@@ -71,11 +71,11 @@ class ElasticsearchDocumentWriter(Writer, ElasticsearchVectorStoreWriterParams):
 
         Args:
             input_data (WriterInputSchema): Input data containing the documents to be written.
-            config (RunnableConfig, optional): Configuration for the execution.
+            config (Optional[RunnableConfig]): Configuration for the execution.
             **kwargs: Additional keyword arguments.
 
         Returns:
-            dict: A dictionary containing the count of written documents.
+            dict[str, int]: A dictionary containing the count of written documents.
         """
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
