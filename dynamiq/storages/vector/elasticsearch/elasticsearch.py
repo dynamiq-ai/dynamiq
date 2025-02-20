@@ -520,13 +520,17 @@ class ElasticsearchVectorStore:
         self,
         documents: list[Document],
         batch_size: int | None = None,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
     ) -> int:
         """
         Update multiple documents in batches.
 
         Args:
             documents (list[Document]): List of documents to update.
-            batch_size (Optional[int]): Size of batches for bulk operations. Defaults to None.
+            batch_size (Optional[int]): Size of batches for bulk operations.
+            content_key (Optional[str]): Key for content field.
+            embedding_key (Optional[str]): The field used to store embeddings in the storage.
 
         Returns:
             int: Number of documents successfully updated.
@@ -534,24 +538,26 @@ class ElasticsearchVectorStore:
         """
         batch_size = batch_size or self.write_batch_size
         total_updated = 0
+        content_key = content_key or self.content_key
+        embedding_key = embedding_key or self.embedding_key
 
-        def generate_actions(docs):
+        def generate_actions(docs, content_key, embedding_key):
             for i, doc in enumerate(docs):
                 docs[i] = {
                     "_op_type": "update",
                     "_index": "documents",
                     "_id": doc.id,
                     "doc": {
-                        "content": doc.content,
+                        content_key: doc.content,
                         "metadata": doc.metadata,
-                        "embedding_key": doc.embedding,
+                        embedding_key: doc.embedding,
                     },
                 }
             return docs
 
         for i in range(0, len(documents), batch_size):
             sub_set_docs = documents[i : i + batch_size]
-            batch = generate_actions(sub_set_docs)
+            batch = generate_actions(sub_set_docs, content_key, embedding_key)
             success, failed = bulk(self.client, batch, refresh=True, raise_on_error=True)
             total_updated += success
         return total_updated
