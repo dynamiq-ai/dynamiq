@@ -22,10 +22,10 @@ class ExaInputSchema(BaseModel):
     """Schema for Exa search input parameters."""
 
     query: str = Field(description="The search query string.")
-    include_full_content: bool | None = Field(
-        default=None, description="If true, retrieve full content, highlights, and summaries for search results."
+    include_full_content: bool = Field(
+        default=False, description="If true, retrieve full content, highlights, and summaries for search results."
     )
-    use_autoprompt: bool | None = Field(default=None, description="If true, query will be converted to a Exa query.")
+    use_autoprompt: bool = Field(default=False, description="If true, query will be converted to a Exa query.")
     query_type: QueryType | None = Field(
         default=None,
         description="Type of query to be used. Options are 'keyword', 'neural', or 'auto'.",
@@ -156,10 +156,8 @@ class ExaTool(ConnectionNode):
             "exclude_text": self.exclude_text,
         }
 
-        payload = node_params.copy()
-        payload.update({k: v for k, v in input_data.model_dump().items() if v is not None})
+        payload = {k: v for k, v in {**node_params, **input_data.model_dump()}.items() if v is not None}
 
-        payload = {k: v for k, v in payload.items() if v is not None}
         include_full_content = payload.pop("include_full_content", False)
 
         payload = {

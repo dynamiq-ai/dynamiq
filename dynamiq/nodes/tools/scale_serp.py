@@ -75,7 +75,7 @@ class ScaleSerpTool(ConnectionNode):
 
     query: str = Field(default="", description="The default search query to use")
     url: str = Field(default="", description="The default URL to search")
-    limit: int = Field(default=10, ge=1, le=100, description="The default number of search results to return")
+    limit: int = Field(default=10, ge=1, le=1000, description="The default number of search results to return")
     search_type: SearchType = Field(default=SearchType.WEB, description="The type of search to perform")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -121,7 +121,7 @@ class ScaleSerpTool(ConnectionNode):
         return {k: v for k, v in params.items() if v is not None}
 
     def execute(
-        self, input_data: ScaleSerpInputSchema | None = None, config: RunnableConfig | None = None, **kwargs
+        self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """
         Executes the search using the Scale SERP API and returns the formatted results.
