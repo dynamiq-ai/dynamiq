@@ -82,7 +82,7 @@ class AdaptiveOrchestrator(Orchestrator):
         Initialize components of the orchestrator.
 
         Args:
-            connection_manager (Optional[ConnectionManager]): The connection manager. Defaults to ConnectionManager.
+            connection_manager (ConnectionManager | None): The connection manager. Defaults to None.
         """
         super().init_components(connection_manager)
         if self.manager.is_postponed_component_init:
@@ -246,11 +246,21 @@ class AdaptiveOrchestrator(Orchestrator):
                 }
             )
 
-    def _handle_respond(self, action: Action, config: RunnableConfig = None, **kwargs):
+    def _handle_respond(self, action: Action, config: RunnableConfig = None, **kwargs) -> str:
         """
-        A direct response from the Manager, delegated to the manager agent.
-        """
+        Handle a direct response from the Manager.
 
+        Args:
+            action (Action): The action to handle.
+            config (RunnableConfig | None): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            str: The manager's response content.
+
+        Raises:
+            OrchestratorError: If the manager fails to execute the respond action.
+        """
         manager_result = self.manager.run(
             input_data={
                 "action": "respond",
@@ -297,19 +307,18 @@ class AdaptiveOrchestrator(Orchestrator):
         Raises:
             ActionParseError: If XML parsing fails or required tags are missing
         """
+
+        if "<action>" not in content.lower():
+            logger.info("No <action> tag found in content, applying fallback wrapping for XML parsing.")
+            content = f"<root><action>respond</action><task>{content.strip()}</task></root>"
         try:
-            cleaned_content = content.replace("```", "").strip()
-            output_content = self._extract_output_content(cleaned_content)
-            wrapped_content = f"<root>{output_content}</root>"
-            parser = LET.XMLParser(recover=True)  # nosec B320
-            root = LET.fromstring(wrapped_content, parser=parser)  # nosec B320
+            root = self._clean_content(content=content)
         except Exception as e:
             error_message = f"XML parsing error: {str(e)} in content: {content}"
             logger.error(error_message)
             raise ActionParseError(error_message)
 
         try:
-            # Use recursive search (".//") for tags in case they are nested.
             action_elem = root.find(".//action")
             if action_elem is None or not action_elem.text:
                 error_message = (
@@ -370,30 +379,42 @@ class AdaptiveOrchestrator(Orchestrator):
             raise ActionParseError(error_message)
 
     def parse_xml_final_answer(self, content: str) -> str:
+        """
+        Parses XML content to extract the final answer from either 'output' or 'final_answer' tags.
+
+        This method attempts to extract content using XML parsing first, and if that fails,
+        falls back to regex pattern matching. If both methods fail, it returns the original content.
+
+        Args:
+            content (str): The XML-formatted string containing the answer.
+
+        Returns:
+            str: The extracted answer from either the 'output' or 'final_answer' tags.
+                If parsing fails, returns the original content.
+
+        Raises:
+            ActionParseError: When XML parsing fails and neither 'output' nor 'final_answer' tags
+                contain valid content.
+        """
         try:
-            parser = LET.XMLParser(recover=True)  # nosec B320
-            cleaned_content = content.replace("```", "").strip()
-            output_content = self._extract_output_content(cleaned_content)
-            wrapped_content = f"<root>{output_content}</root>"
-            root = LET.fromstring(wrapped_content, parser=parser)  # nosec B320
-            final_answer_elem = root.find(".//final_answer")
-            if final_answer_elem is None or not final_answer_elem.text:
-                raise ActionParseError("Final answer tag <final_answer> missing.")
-            return final_answer_elem.text.strip()
+            root = self._clean_content(content=content)
+            for tag in ["output", "final_answer"]:
+                elem = root.find(f".//{tag}")
+                if elem is not None and elem.text and elem.text.strip():
+                    return elem.text.strip()
+            error_message = (
+                f"Error parsing final answer: {str(content)[:100]}..."
+                f" Neither <output> nor <final_answer> tag found with valid content."
+            )
+            raise ActionParseError(error_message)
         except Exception as e:
-            error_message = f"Error parsing final answer: {str(e)}. Falling back to regex extraction."
-            logger.error(error_message)
-            try:
-                output_match = re.search(r"<output>(.*?)</output>", content, re.DOTALL)
-                if not output_match:
-                    error_message = (
-                        f"Orchestrator {self.name} - {self.id}: Error parsing final answer: "
-                        f"No <output> tags found in the response {content}"
-                    )
-                    raise ActionParseError(error_message)
-                output_content = output_match.group(1).strip()
-                return output_content
-            except Exception as e:
-                error_message = f"Error parsing final answer: {str(e)}. Falling back to plain text extraction."
-                logger.error(error_message)
-                return content
+            logger.info("Error parsing final answer using XML: %s. Falling back to regex extraction.", e)
+            for tag in ["output", "final_answer"]:
+                pattern = rf"<{tag}>(.*?)</{tag}>"
+                match = re.search(pattern, content, re.DOTALL)
+                if match:
+                    extracted = match.group(1).strip()
+                    if extracted:
+                        return extracted
+            logger.info("Regex extraction failed. Returning original content as fallback.")
+            return content
