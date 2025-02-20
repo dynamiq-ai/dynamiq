@@ -35,12 +35,32 @@ class WeaviateVectorStore:
     This class can be used with Weaviate Cloud Services or self-hosted instances.
     """
 
+    PATTERN_COLLECTION_NAME = re.compile(r"^[A-Z][_0-9A-Za-z]*$")
+
     @staticmethod
     def is_valid_collection_name(name: str) -> bool:
-        # Matches names starting with an uppercase letter followed by
-        # alphanumeric characters or underscores.
-        pattern = r"^[A-Z][_0-9A-Za-z]*$"
-        return bool(re.fullmatch(pattern, name))
+        return bool(WeaviateVectorStore.PATTERN_COLLECTION_NAME.fullmatch(name))
+
+    @classmethod
+    def _fix_and_validate_index_name(cls, index_name: str) -> str:
+        """
+        Fix the index name if it starts with a lowercase letter and then validate it.
+        Logs a warning if the index name is corrected.
+        """
+        if index_name and index_name[0].islower():
+            fixed_name = index_name[0].upper() + index_name[1:]
+            logger.warning(
+                f"Index name '{index_name}' starts with a lowercase letter. "
+                f"Automatically updating it to '{fixed_name}'."
+            )
+            index_name = fixed_name
+        if not cls.is_valid_collection_name(index_name):
+            msg = (
+                f"Collection name '{index_name}' is invalid. It must match the pattern "
+                f"{cls.PATTERN_COLLECTION_NAME.pattern}"
+            )
+            raise ValueError(msg)
+        return index_name
 
     def __init__(
         self,
@@ -63,9 +83,7 @@ class WeaviateVectorStore:
             content_key (Optional[str]): The field used to store content in the
                 storage.
         """
-        if not self.is_valid_collection_name(index_name):
-            msg = f"Collection name '{index_name}' is invalid. It must match the pattern " "^[A-Z][_0-9A-Za-z]*$"
-            raise ValueError(msg)
+        index_name = self._fix_and_validate_index_name(index_name)
 
         self.client = client
         if self.client is None:
