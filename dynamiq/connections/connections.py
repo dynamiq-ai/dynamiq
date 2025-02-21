@@ -1050,8 +1050,8 @@ class Elasticsearch(BaseConnection):
     password: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_PASSWORD", None))
     cloud_id: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_CLOUD_ID", None))
     ca_path: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_CA_PATH", None))
-    verify_certs: str = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_VERIFY_CERTS", "true"))
-    use_ssl: str = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_USE_SSL", "true"))
+    verify_certs: str = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_VERIFY_CERTS", "false"))
+    use_ssl: str = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_USE_SSL", "false"))
 
     def connect(self):
         """
