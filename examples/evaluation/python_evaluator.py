@@ -47,7 +47,7 @@ def run_phone_presence_metric():
 import re
 def evaluate(answer):
     # US-style phone number pattern with separators '-' or '.'
-    phone_pattern = r"\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b"
+    phone_pattern = r"\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\b"
     return 1.0 if re.search(phone_pattern, answer) else 0.0
 """
     input_data_phone = [
@@ -93,31 +93,6 @@ def evaluate(a, b, answer):
     run_metric("Arithmetic Sum", user_code_sum, input_data_sum)
 
 
-def run_pydantic_response_validation_metric():
-    user_code_pydantic = """
-from pydantic import BaseModel, ValidationError
-import json
-class ResponseModel(BaseModel):
-    name: str
-    email: str
-    phone: str
-
-def evaluate(answer):
-    try:
-        data = json.loads(answer)
-        ResponseModel(**data)
-        return 1.0
-    except (ValidationError, Exception):
-        return 0.0
-"""
-    input_data_pydantic = [
-        {"answer": '{"name": "Alice", "email": "alice@example.com", "phone": "123-456-7890"}'},
-        {"answer": '{"name": "Bob", "email": "bob_at_example.com", "phone": "1234567890"}'},
-        {"answer": '{"name": "Charlie", "email": "charlie@example.com"}'},
-    ]
-    run_metric("Pydantic Response Validation", user_code_pydantic, input_data_pydantic)
-
-
 def run_json_validity_metric():
     user_code_json_validity = """
 import json
@@ -143,7 +118,6 @@ def main():
     run_phone_presence_metric()
     run_yes_presence_metric()
     run_arithmetic_sum_metric()
-    run_pydantic_response_validation_metric()
     run_json_validity_metric()
 
 
