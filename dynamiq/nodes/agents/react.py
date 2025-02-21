@@ -97,7 +97,6 @@ Remember:
 - Always start with a Thought.
 - Never use markdown code markers in your response.
 
-Explain thought why you putted some value in Action and Action Input
 """  # noqa: E501
 
 
