@@ -1,3 +1,4 @@
+import concurrent.futures
 from enum import Enum
 from typing import Any, ClassVar, Literal
 from uuid import uuid4
@@ -210,6 +211,7 @@ class Map(Node):
     node: Node
     behavior: Behavior | None = Behavior.RETURN
     input_schema: ClassVar[type[MapInputSchema]] = MapInputSchema
+    max_workflows: int = 1
 
     @property
     def to_dict_exclude_params(self):
@@ -231,6 +233,14 @@ class Map(Node):
         data["node"] = self.node.to_dict(**kwargs)
         return data
 
+    def execute_workflow(self, data, config, merged_kwargs):
+        """Execute a single workflow and handle errors."""
+        result = self.node.run(data, config, **merged_kwargs)
+        if result.status != RunnableStatus.SUCCESS:
+            if self.behavior == Behavior.RAISE:
+                raise
+        return result.output
+
     def execute(self, input_data: MapInputSchema, config: RunnableConfig = None, **kwargs):
         """
         Executes the map node.
@@ -248,20 +258,30 @@ class Map(Node):
         """
         input_data = input_data.input
 
-        output = []
+        output = [None] * len(input_data)
         run_id = kwargs.get("run_id", uuid4())
         config = ensure_config(config)
         merged_kwargs = {**kwargs, "parent_run_id": run_id}
-
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        for index, data in enumerate(input_data, start=1):
-            result = self.node.run(data, config, **merged_kwargs)
-            if result.status != RunnableStatus.SUCCESS:
-                if self.behavior == Behavior.RAISE:
-                    raise ValueError(f"Map node failed to execute: node under iteration index {index} has failed.")
-                logger.error(f"Node under iteration index {index} has failed.")
-            output.append(result.output)
+        total_workflows = len(input_data)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workflows) as executor:
+            for i in range(0, total_workflows, self.max_workflows):
+                batch = input_data[i : i + self.max_workflows]
+                future_to_index = {
+                    executor.submit(self.execute_workflow, workflow_dict, config, merged_kwargs): index
+                    for index, workflow_dict in enumerate(batch, start=i)
+                }
+                for future in concurrent.futures.as_completed(future_to_index):
+                    index = future_to_index[future]
+                    try:
+                        result = future.result()
+                        output[index] = result
+                    except Exception:
+                        logger.error(f"Node under iteration index {index+1} has failed.")
+                        raise ValueError(
+                            f"Map node failed to execute: node under iteration index {index+1} has failed."
+                        )
 
         return {"output": output}
 
