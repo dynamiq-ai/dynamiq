@@ -118,6 +118,25 @@ def evaluate(answer):
     run_metric("Pydantic Response Validation", user_code_pydantic, input_data_pydantic)
 
 
+def run_json_validity_metric():
+    user_code_json_validity = """
+import json
+def evaluate(answer):
+    try:
+        json.loads(answer)
+        return 1.0
+    except Exception:
+        return 0.0
+"""
+    input_data_json = [
+        {"answer": '{"key": "value", "number": 123}'},  # Valid JSON
+        {"answer": '{"key": "value", "number":}'},  # Invalid JSON
+        {"answer": "Not a JSON string"},  # Invalid JSON
+        {"answer": '["An", "array", "of", "strings"]'},  # Valid JSON
+    ]
+    run_metric("JSON Validity Check", user_code_json_validity, input_data_json)
+
+
 def main():
     run_exact_match_metric()
     run_email_presence_metric()
@@ -125,6 +144,7 @@ def main():
     run_yes_presence_metric()
     run_arithmetic_sum_metric()
     run_pydantic_response_validation_metric()
+    run_json_validity_metric()
 
 
 if __name__ == "__main__":
