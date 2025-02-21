@@ -1088,7 +1088,7 @@ class Elasticsearch(BaseConnection):
 
         # Handle SSL/TLS
         if self.use_ssl.lower() == "true":
-            if self.ca_path is None:
+            if self.ca_path is not None:
                 conn_params["ca_certs"] = self.ca_path
             conn_params["verify_certs"] = True if self.verify_certs.lower() == "true" else False
 
