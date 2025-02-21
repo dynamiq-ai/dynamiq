@@ -86,11 +86,7 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
             "client": self.client,
         }
 
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"document_retriever": True}
-
-    def init_components(self, connection_manager: ConnectionManager = ConnectionManager()):
+    def init_components(self, connection_manager: ConnectionManager | None = None):
         """Initialize the components of the ElasticsearchDocumentRetriever.
 
         This method sets up the document retriever component if it hasn't been initialized yet.
@@ -99,6 +95,7 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
             connection_manager (ConnectionManager): The connection manager to use.
                 Defaults to a new ConnectionManager instance.
         """
+        connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.document_retriever is None:
             self.document_retriever = ElasticsearchDocumentRetrieverComponent(
@@ -116,13 +113,6 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
 
         Args:
             input_data (ElasticsearchRetrieverInputSchema): The input data containing:
-                - query_embedding: Vector query for similarity search
-                - filters: Optional metadata filters
-                - top_k: Number of documents to retrieve
-                - exclude_document_embeddings: Whether to exclude embeddings
-                - scale_scores: Whether to scale scores to 0-1 range
-                - content_key: Key to use for content in the response.
-                - embedding_key: Key to use for embedding in the response.
             config (Optional[RunnableConfig]): The configuration for the execution.
             **kwargs: Additional keyword arguments.
 

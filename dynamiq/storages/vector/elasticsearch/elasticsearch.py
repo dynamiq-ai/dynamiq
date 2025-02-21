@@ -164,31 +164,21 @@ class ElasticsearchVectorStore:
                 logger.warning(f"Duplicate document ID found: {doc.id}")
             unique_docs[doc.id] = doc
 
-        if policy == DuplicatePolicy.SKIP:
+        if policy in {DuplicatePolicy.SKIP, DuplicatePolicy.FAIL}:
             # Check which documents already exist
             existing_ids = set()
             for doc_id in unique_docs.keys():
                 try:
-                    self.client.get(index=self.index_name, id=doc_id)
+                    self.retrieve_document_by_file_id(file_id=doc_id)
                     existing_ids.add(doc_id)
                 except NotFoundError:
                     pass
+
+            if policy == DuplicatePolicy.FAIL and existing_ids:
+                raise VectorStoreException(f"Documents with IDs {existing_ids} already exist")
 
             # Remove existing documents
             return [doc for doc in documents if doc.id not in existing_ids]
-
-        elif policy == DuplicatePolicy.FAIL:
-            # Check for existing documents
-            existing_ids = set()
-            for doc_id in unique_docs.keys():
-                try:
-                    self.client.get(index=self.index_name, id=doc_id)
-                    existing_ids.add(doc_id)
-                except NotFoundError:
-                    pass
-
-            if existing_ids:
-                raise VectorStoreException(f"Documents with IDs {existing_ids} already exist")
 
         return list(unique_docs.values())
 
@@ -360,6 +350,33 @@ class ElasticsearchVectorStore:
 
         return documents
 
+    def retrieve_document_by_file_id(
+        self,
+        file_id: str,
+        include_embeddings: bool = False,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+    ):
+        embedding_key = embedding_key or self.embedding_key
+        content_key = content_key or self.content_key
+
+        response = self.client.get(
+            index=self.index_name,
+            id=file_id,
+            _source_excludes=([embedding_key] if not include_embeddings else None),
+        )
+
+        # Convert result to Document
+        doc = Document(
+            id=response["_id"],
+            content=response["_source"][content_key],
+            metadata=response["_source"]["metadata"],
+        )
+        if include_embeddings:
+            doc.embedding = response["_source"][embedding_key]
+
+        return doc
+
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """
         Delete documents from the store.
@@ -394,7 +411,7 @@ class ElasticsearchVectorStore:
 
         self.client.delete_by_query(index=self.index_name, query=bool_query, refresh=True)
 
-    def delete_documents_by_file_id(self, file_id: str):
+    def delete_document_by_file_id(self, file_id: str):
         """
         Delete documents from the Pinecone vector store by file ID.
 
