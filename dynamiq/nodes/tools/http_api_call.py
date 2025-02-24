@@ -43,6 +43,58 @@ class HttpApiCallInputSchema(BaseModel):
             raise ActionParsingException(f"Expected a dictionary or a JSON string for '{field}'.")
 
 
+def recursive_merge(dict1: dict, dict2: dict) -> dict:
+    """
+    Recursively merge two dictionaries.
+
+    If a key exists in both dictionaries:
+    - If value are not lists or dictionaries, the value in dict1 will be used.
+    - If both values are lists or dictionaries, they are merged recursively.
+
+    Args:
+        dict1 (dict): The first dictionary to merge.
+        dict2 (dict): The second dictionary to merge.
+
+    Returns:
+        dict: The merged dictionary
+    """
+    for key, value in dict2.items():
+        if key in dict1:
+            if isinstance(dict1[key], dict) and isinstance(value, dict):
+                dict1[key] = recursive_merge(dict1[key], value)
+            elif isinstance(dict1[key], list) and isinstance(value, list):
+                dict1[key].extend(x for x in value if x not in dict1[key])
+        else:
+            dict1[key] = value
+    return dict1
+
+
+def concatenate_parameters(
+    input_params: HttpApiCallInputSchema, additional_params: HttpApiCallInputSchema
+) -> HttpApiCallInputSchema:
+    """
+    Concatenate parameters for an API call.
+
+    Args:
+        input_params (HttpApiCallInputSchema): The first set of parameters for the API call.
+        additional_params (HttpApiCallInputSchema): The second set of parameters to be merged into the first.
+
+    Returns:
+        HttpApiCallInputSchema: A new object with the combined parameters.
+    """
+    combined_params = recursive_merge(input_params.params.copy(), additional_params.params)
+    combined_headers = recursive_merge(input_params.headers.copy(), additional_params.headers)
+    combined_data = recursive_merge(input_params.data.copy(), additional_params.data)
+
+    return HttpApiCallInputSchema(
+        params=combined_params,
+        data=combined_data,
+        url=input_params.url or additional_params.url,
+        payload_type=input_params.payload_type or additional_params.payload_type,
+        headers=combined_headers,
+    )
+
+
 class HttpApiCall(ConnectionNode):
     """
     A component for sending API requests using requests library.
@@ -58,6 +110,7 @@ class HttpApiCall(ConnectionNode):
         payload_type (dict[str, Any]): Parameter to specify the type of payload data.
         params(dict[str,Any]): The additional query params of request.
         response_type(ResponseType|str): The type of response content.
+        additional_input_data(Optional[HttpApiCallInputSchema]): Additional predefined input data parameters.
     """
 
     name: str = "Api Call Tool"
@@ -73,6 +126,7 @@ class HttpApiCall(ConnectionNode):
     url: str = ""
     response_type: ResponseType | str | None = ResponseType.RAW
     input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
+    additional_input_data: HttpApiCallInputSchema | None = None
 
     def execute(self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs):
         """Execute the API call.
@@ -92,6 +146,9 @@ class HttpApiCall(ConnectionNode):
         """
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        if self.additional_input_data is not None:
+            input_data = concatenate_parameters(input_data, self.additional_input_data)
 
         data = self.connection.data | self.data | input_data.data
         payload_type = input_data.payload_type or self.payload_type

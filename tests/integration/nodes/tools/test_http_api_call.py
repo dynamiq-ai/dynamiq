@@ -1,10 +1,14 @@
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
 from dynamiq import Workflow, connections
+from dynamiq.connections import Http as HttpConnection
+from dynamiq.connections import HTTPMethod
 from dynamiq.flows import Flow
 from dynamiq.nodes.tools import HttpApiCall, ResponseType
+from dynamiq.nodes.tools.http_api_call import HttpApiCallInputSchema, RequestPayloadType
 from dynamiq.runnables import RunnableResult, RunnableStatus
 
 
@@ -64,3 +68,121 @@ def test_workflow_with_httpapicall(
     assert call_mock.last_request.url == url
     for header, value in expected_headers.items():
         assert call_mock.last_request.headers.get(header) == value
+
+
+@pytest.fixture
+def mock_client():
+    client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    client.request.return_value = mock_response
+    return client
+
+
+def test_http_api_call_with_merged_params(mock_client):
+    get_api_connection = HttpConnection(
+        method=HTTPMethod.GET,
+        url="url",
+    )
+
+    additional_params = HttpApiCallInputSchema(
+        data={
+            "user_id": "2",
+            "nested_data": {"outer": {"middle": {"extra": "extra_value"}}},
+            "numbers_list": [3, 4],
+            "status": "active",
+            "description": "contains value",
+        },
+        params={
+            "user_id": "2",
+            "nested_data": {"outer": {"middle": {"extra": "extra_value"}}},
+            "numbers_list": [3, 4],
+            "status": "active",
+            "description": "contains value",
+        },
+        headers={
+            "user_id": "2",
+            "nested_data": {"outer": {"middle": {"extra": "extra_value"}}},
+            "numbers_list": [3, 4],
+            "status": "active",
+            "description": "contains value",
+        },
+        url="https://example.com/api",
+        payload_type=RequestPayloadType.JSON,
+    )
+
+    api_tool = HttpApiCall(
+        connection=get_api_connection,
+        additional_input_data=additional_params,
+        client=mock_client,
+    )
+    api_tool.client = mock_client
+
+    input_params = HttpApiCallInputSchema(
+        data={
+            "nested_data": {"outer": {"middle": {"inner": "value"}}},
+            "numbers_list": [1, 2],
+            "api_key": "custom_key",
+            "status": "inactive",
+            "description": "",
+        },
+        params={
+            "nested_data": {"outer": {"middle": {"inner": "value"}}},
+            "numbers_list": [1, 2],
+            "api_key": "custom_key",
+            "status": "inactive",
+            "description": "",
+        },
+        headers={
+            "nested_data": {"outer": {"middle": {"inner": "value"}}},
+            "numbers_list": [1, 2],
+            "api_key": "custom_key",
+            "status": "inactive",
+            "description": "",
+        },
+        payload_type=RequestPayloadType.RAW,
+    )
+
+    api_tool.execute(input_data=input_params)
+
+    result_params = HttpApiCallInputSchema(
+        data={
+            "user_id": "2",
+            "nested_data": {"outer": {"middle": {"inner": "value", "extra": "extra_value"}}},
+            "numbers_list": [1, 2, 3, 4],
+            "api_key": "custom_key",
+            "status": "inactive",
+            "description": "",
+        },
+        params={
+            "user_id": "2",
+            "nested_data": {"outer": {"middle": {"inner": "value", "extra": "extra_value"}}},
+            "numbers_list": [1, 2, 3, 4],
+            "api_key": "custom_key",
+            "status": "inactive",
+            "description": "",
+        },
+        headers={
+            "user_id": "2",
+            "nested_data": {"outer": {"middle": {"inner": "value", "extra": "extra_value"}}},
+            "numbers_list": [1, 2, 3, 4],
+            "api_key": "custom_key",
+            "status": "inactive",
+            "description": "",
+        },
+        url="https://example.com/api",
+        payload_type=RequestPayloadType.RAW,
+    )
+
+    mock_client.request.assert_called_once_with(
+        method=get_api_connection.method,
+        url=result_params.url,
+        headers=result_params.headers,
+        params=result_params.params,
+        timeout=api_tool.timeout,
+        **(
+            {"data": result_params.data}
+            if result_params.payload_type == RequestPayloadType.RAW
+            else {"json": result_params.data}
+        )
+    )
