@@ -211,6 +211,14 @@ final_answer_function_schema = {
 }
 
 
+TYPE_MAPPING = {
+    int: "integer",
+    float: "float",
+    bool: "boolean",
+    str: "string",
+}
+
+
 class ReActAgent(Agent):
     """Agent that uses the ReAct strategy for processing tasks by interacting with tools in a loop."""
 
@@ -597,47 +605,32 @@ class ReActAgent(Agent):
     @staticmethod
     def filter_format_type(param_type: str | type) -> str:
         """Filters proper type for a function calling schema."""
-        type_mapping = {
-            int: "integer",
-            float: "float",
-            bool: "boolean",
-            str: "string",
-            Enum: "enum"
-        }
 
-        if isinstance(param_type, str):
-            match param_type:
-                case "bool":
-                    return "boolean"
-                case "int":
-                    return "integer"
-                case "float":
-                    return "float"
-                case _:
-                    return "string"
-
-        elif get_origin(param_type) in (Union, types.UnionType):
+        if get_origin(param_type) in (Union, types.UnionType):
             param_type = next((arg for arg in get_args(param_type) if arg is not type(None)), None)
-            if param_type is None:
-                return "string"
 
-
-        if issubclass(param_type, Enum):
-            param_type = Enum
-        return type_mapping.get(param_type, getattr(param_type, "__name__", "string"))
+        return param_type
 
     def generate_property_schema(self, properties, name, field, tool):
         if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
-            param_type = self.filter_format_type(field.annotation)
             description = field.description or "No description"
+            param = self.filter_format_type(field.annotation)
 
-            if param_type == "enum":
-                element_type = self.filter_format_type(type(list(field.annotation.__members__.values())[0].value))
-                properties[name] = {"type": element_type, "description": description, "enum": [field.value for field in field.annotation.__members__.values()]}
-            elif param_type in ["integer", "float", "boolean", "string"]:
+            if param_type := TYPE_MAPPING.get(param):
                 properties[name] = {"type": param_type, "description": description}
 
+            elif issubclass(param, Enum):
+                element_type = TYPE_MAPPING.get(
+                    self.filter_format_type(type(list(field.annotation.__members__.values())[0].value))
+                )
+                properties[name] = {
+                    "type": element_type,
+                    "description": description,
+                    "enum": [field.value for field in field.annotation.__members__.values()],
+                }
 
+            elif param.__origin__ is list:
+                properties[name] = {"type": "array", "items": {"type": TYPE_MAPPING.get(param.__args__[0])}}
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
@@ -646,7 +639,7 @@ class ReActAgent(Agent):
             properties = {}
             for name, field in tool.input_schema.model_fields.items():
                 self.generate_property_schema(properties, name, field, tool)
-
+            print(properties)
             schema = {
                 "type": "function",
                 "strict": True,
