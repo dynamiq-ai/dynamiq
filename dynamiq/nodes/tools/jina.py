@@ -12,7 +12,7 @@ from dynamiq.utils.logger import logger
 
 
 class JinaScrapeInputSchema(BaseModel):
-    url: str = Field(..., description="Parameter to provide a url of the page to scrape.")
+    url: str | None = Field(None, description="Parameter to provide a url of the page to scrape.")
 
 
 class JinaResponseFormat(str, enum.Enum):
@@ -37,7 +37,8 @@ class JinaScrapeTool(ConnectionNode):
         SCRAPE_PATH(str): The constant path to perform scrape request using Jina API.
         connection (Jina): The connection instance for the Jina API.
         timeout(int): The timeout of the scraping process.
-        input_schema (JinaSearchInputSchema): The input schema for the tool.
+        url (Optional[str]): The URL to scrape, can be set during initialization.
+        input_schema (JinaScrapeInputSchema): The input schema for the tool.
     """
 
     SCRAPE_PATH: ClassVar[str] = "https://r.jina.ai/"
@@ -50,6 +51,7 @@ class JinaScrapeTool(ConnectionNode):
     response_format: JinaResponseFormat = JinaResponseFormat.DEFAULT
     connection: Jina
     timeout: int = 60
+    url: str | None = Field(None, description="URL to scrape")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -69,11 +71,15 @@ class JinaScrapeTool(ConnectionNode):
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
-        # Ensure the config is set up correctly
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        url = input_data.url
+        url = input_data.url or self.url
+        if not url:
+            raise ToolExecutionException(
+                "No URL provided. Please provide a URL either during node initialization or execution.",
+                recoverable=True,
+            )
 
         headers = {
             **self.connection.headers,
@@ -102,22 +108,17 @@ class JinaScrapeTool(ConnectionNode):
             )
 
         if self.is_optimized_for_agents:
-            result = (
-                f"<Source URL>\n{input_data.url}\n<\\Source URL>"
-                f"\n<Scraped result>\n{scrape_result}\n<\\Scraped result>"
-            )
+            result = f"<Source URL>\n{url}\n<\\Source URL>" f"\n<Scraped result>\n{scrape_result}\n<\\Scraped result>"
         else:
-            result = {"url": input_data.url, "content": scrape_result}
+            result = {"url": url, "content": scrape_result}
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
         return {"content": result}
 
 
 class JinaSearchInputSchema(BaseModel):
-    query: str = Field(..., description="Parameter to provide a search query.")
-    max_results: int = Field(
-        default=5,
-        ge=1,
-        le=100,
+    query: str | None = Field(None, description="Parameter to provide a search query.")
+    max_results: int | None = Field(
+        None,
         description="The maximum number of search results to return.",
     )
 
@@ -134,6 +135,8 @@ class JinaSearchTool(ConnectionNode):
         description (str): A brief description of the tool.
         connection (Jina): The connection instance for the Jina API.
         include_images(bool): Whether include images in the search results.
+        query (Optional[str]): The search query, can be set during initialization.
+        max_results (int): Maximum number of results to return.
         input_schema (JinaSearchInputSchema): The input schema for the tool.
         include_full_content(bool): Whether include full content of the search results.
     """
@@ -146,6 +149,8 @@ class JinaSearchTool(ConnectionNode):
     connection: Jina
     include_images: bool = Field(default=False, description="Include images in search results.")
     include_full_content: bool = False
+    query: str | None = Field(None, description="Search query")
+    max_results: int = Field(default=5, ge=1, le=100, description="Maximum number of search results to return")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -181,7 +186,7 @@ class JinaSearchTool(ConnectionNode):
 
     def execute(self, input_data: JinaSearchInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
-        Executes the web scraping process.
+        Executes the web search process.
 
         Args:
             input_data (JinaSearchInputSchema): input data for the tool, which includes the query to search.
@@ -189,16 +194,21 @@ class JinaSearchTool(ConnectionNode):
             **kwargs: Additional arguments passed to the execution context.
 
         Returns:
-            dict[str, Any]: A dictionary containing the URL and the scraped content.
+            dict[str, Any]: A dictionary containing the search results.
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
-        # Ensure the config is set up correctly
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        query = input_data.query
-        max_results = input_data.max_results
+        query = input_data.query or self.query
+        if not query:
+            raise ToolExecutionException(
+                "No query provided. Please provide a query either during node initialization or execution.",
+                recoverable=True,
+            )
+
+        max_results = input_data.max_results or self.max_results
 
         headers = {
             **self.connection.headers,
@@ -229,6 +239,7 @@ class JinaSearchTool(ConnectionNode):
 
         formatted_results = self._format_search_results(search_result)
         sources_with_url = [f"[{result.get('title')}]({result.get('url')})" for result in search_result.get("data", [])]
+
         if self.is_optimized_for_agents:
             result = (
                 "<Sources with URLs>\n"
@@ -237,7 +248,6 @@ class JinaSearchTool(ConnectionNode):
                 + formatted_results
                 + f"\n<\\Search results for query {query}>"
             )
-
         else:
             result = {
                 "result": formatted_results,
