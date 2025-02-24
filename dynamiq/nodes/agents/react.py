@@ -311,7 +311,7 @@ class ReActAgent(Agent):
         return ""
 
     def _parse_action(self, output: str) -> tuple[str | None, str | None]:
-        """Parses the action and its input from the output string."""
+        """Parses the action, its input, and thought from the output string."""
         try:
             action_match = re.search(
                 r"Action:\s*(.*?)\nAction Input:\s*(({\n)?.*?)(?:[^}]*$)",
@@ -330,7 +330,6 @@ class ReActAgent(Agent):
                 logger.error("ActionParsingException")
                 raise ActionParsingException()
         except Exception as e:
-            logger.error("Excetion in parsing")
             raise ActionParsingException(
                 (
                     f"Error {e}: Unable to parse action and action input."
@@ -415,7 +414,7 @@ class ReActAgent(Agent):
                                 )
 
                             return final_answer
-                        
+
                         thought, action, action_input = self._parse_action(llm_generated_output)
                         self.log_reasoning(thought, action, action_input, loop_num + 1)
 
@@ -482,15 +481,16 @@ class ReActAgent(Agent):
 
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
-                        llm_generated_output_json = json.loads(llm_generated_output)                  
+                        llm_generated_output_json = json.loads(llm_generated_output)
 
                         thought = llm_generated_output_json["thought"]
                         action = llm_generated_output_json["action"]
                         action_input = llm_generated_output_json["action_input"]
 
                         if action == "finish":
-                            logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}\n"
-                                    f"Final answer: {action_input}")
+                            logger.info(
+                                f"Agent {self.name} - {self.id}: Loop {loop_num + 1}\n" f"Final answer: {action_input}"
+                            )
                             self.tracing_final(loop_num, action_input, config, kwargs)
                             if self.streaming.enabled:
                                 self.stream_content(
@@ -523,8 +523,9 @@ class ReActAgent(Agent):
 
                         if "<answer>" in llm_generated_output:
                             final_answer = self._extract_final_answer_xml(llm_generated_output)
-                            logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}\n"
-                                    f"Final answer: {final_answer}")
+                            logger.info(
+                                f"Agent {self.name} - {self.id}: Loop {loop_num + 1}\n" f"Final answer: {final_answer}"
+                            )
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             if self.streaming.enabled:
                                 self.stream_content(
@@ -535,7 +536,7 @@ class ReActAgent(Agent):
                                     **kwargs,
                                 )
                             return final_answer
-                        
+
                         thought, action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
                         self.log_reasoning(thought, action, action_input, loop_num + 1)
 
@@ -547,7 +548,6 @@ class ReActAgent(Agent):
                                 config=config,
                                 **kwargs,
                             )
-
 
                 self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
 

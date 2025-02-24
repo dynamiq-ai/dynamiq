@@ -34,7 +34,6 @@ def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler)
     Returns:
         str: Agent final output.
     """
-    send_handler.queue.put_nowait({"Something is here"})
     connection_tavily = TavilyConnection()
     tool_search = TavilyTool(connection=connection_tavily)
 
