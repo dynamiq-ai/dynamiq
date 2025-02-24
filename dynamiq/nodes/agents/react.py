@@ -16,11 +16,20 @@ from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 from enum import Enum
 
-REACT_BLOCK_TOOLS = (
-    "You have access to a variety of tools,"
-    "and you are responsible for using them in any order you choose to complete the task:\n"
-    "{tool_description}"
-)
+REACT_BLOCK_TOOLS = """
+You have access to a variety of tools,
+and you are responsible for using them in any order you choose to complete the task:\n
+{tool_description}
+
+Input formats for tools:
+{input_formats}
+"""
+
+REACT_BLOCK_TOOLS_NO_FORMATS = """
+You have access to a variety of tools,
+and you are responsible for using them in any order you choose to complete the task:\n
+{tool_description}
+"""
 
 REACT_BLOCK_NO_TOOLS = "You do not have access to any tools."
 
@@ -41,8 +50,6 @@ Here is how you will think about the user's request
 REMEMBER:
 * Inside 'action' provide just name of one tool from this list: [{tools_name}]. Don't wrap it with <>.
 * Each 'action' has its own input format strictly adhere to it.
-Input formats for tools:
-{input_formats}
 
 After each action, the user will provide an "Observation" with the result.
 Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
@@ -82,9 +89,6 @@ Remember:
 - After each action, the user will provide an 'Observation' with the result.
 - Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
 
-Input formats for tools:
-{input_formats}
-
 When you have sufficient information, provide your final answer in one of these two formats:
 If you can answer the request:
 Thought: I can answer without using any tools
@@ -121,9 +125,6 @@ Remember:
 - Each tool has is specific input format you have strickly adhere to it.
 - In action_input you have to provide input in JSON format.
 - Avoid using extra backslashes
-
-Input formats for tools:
-{input_formats}
 """  # noqa: E501
 
 
@@ -132,7 +133,8 @@ You have to call appropriate functions.
 
 Function descriptions:
 plan_next_action - function that should be called to use tools [{tools_name}]].
-provide_final_answer - function that should be called when answer on initial request can be provided
+provide_final_answer - function that should be called when answer on initial request can be provided.
+Call this function if initial user input does not have any actionable request.
 """  # noqa: E501
 
 
@@ -195,7 +197,7 @@ final_answer_function_schema = {
     "strict": True,
     "function": {
         "name": "provide_final_answer",
-        "description": "Function should be called when if you can answer the initial request",
+        "description": "Function should be called when if you can answer the initial request or if there is not request at all.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -326,6 +328,10 @@ class ReActAgent(Agent):
             ),
         )
 
+        print(self.generate_prompt(
+                tools_name=self.tool_names,
+                input_formats=self.generate_input_formats(self.tools),
+            ))
         self._prompt.messages = [system_message, input_message]
 
         for loop_num in range(self.max_loops):
@@ -376,9 +382,9 @@ class ReActAgent(Agent):
                     case InferenceMode.FUNCTION_CALLING:
 
                         if "tool_calls" not in dict(llm_result.output):
-                            logger.error("Error: No function called")
+                            logger.error(f"Error: No function called. Output: {llm_result.output["content"]}")
                             raise ActionParsingException(
-                                "Error: No function called, you need to call the correct function."
+                                "Error: No function called. Call the function to proceed."
                             )
 
                         action = list(llm_result.output["tool_calls"].values())[0]["function"]["name"].strip()
@@ -514,7 +520,7 @@ class ReActAgent(Agent):
                         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
 
             except ActionParsingException as e:
-                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=f"{type(e).__name__}: {e}"))
+                self._prompt.messages.append(Message(role=MessageRole.USER, content=f"{type(e).__name__}: {e}"))
                 continue
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
@@ -680,6 +686,8 @@ class ReActAgent(Agent):
             case InferenceMode.FUNCTION_CALLING:
                 self.generate_function_calling_schemas()
                 prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING
+                prompt_blocks["tools"] = REACT_BLOCK_TOOLS_NO_FORMATS
+
             case InferenceMode.STRUCTURED_OUTPUT:
                 self.generate_structured_output_schemas()
                 prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT
