@@ -4,7 +4,7 @@ from dynamiq.evaluations import PythonEvaluator
 def run_metric(example_name, user_code, input_data_list):
     """
     Helper function to run a metric via PythonEvaluator.
-    It prints the input data and resulting score.
+    It prints the input data and the resulting score.
     """
     print(f"\n=== Running {example_name} Metric ===")
     evaluator = PythonEvaluator(code=user_code)
@@ -47,7 +47,7 @@ def run_phone_presence_metric():
 import re
 def evaluate(answer):
     # US-style phone number pattern with separators '-' or '.'
-    phone_pattern = r"\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\b"
+    phone_pattern = r"\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b"
     return 1.0 if re.search(phone_pattern, answer) else 0.0
 """
     input_data_phone = [
@@ -104,12 +104,72 @@ def evaluate(answer):
         return 0.0
 """
     input_data_json = [
-        {"answer": '{"key": "value", "number": 123}'},  # Valid JSON
-        {"answer": '{"key": "value", "number":}'},  # Invalid JSON
-        {"answer": "Not a JSON string"},  # Invalid JSON
-        {"answer": '["An", "array", "of", "strings"]'},  # Valid JSON
+        {"answer": '{"key": "value", "number": 123}'},
+        {"answer": '{"key": "value", "number":}'},
+        {"answer": "Not a JSON string"},
+        {"answer": '["An", "array", "of", "strings"]'},
     ]
     run_metric("JSON Validity Check", user_code_json_validity, input_data_json)
+
+
+def run_bleu_metric():
+    user_code_bleu = r"""
+from dynamiq.evaluations.metrics import BleuScoreEvaluator
+
+def evaluate(ground_truth_answer, answer):
+    bleu_evaluator = BleuScoreEvaluator()
+    score = bleu_evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
+    return score
+"""
+    input_data_bleu = {
+        "ground_truth_answer": "The cat sits on the mat. It is quiet.",
+        "answer": "The cat sits on the mat. It is silent.",
+    }
+    print("\n=== PythonEvaluator BLEU Metric (Single) ===")
+    evaluator = PythonEvaluator(code=user_code_bleu)
+    score = evaluator.run_single(
+        ground_truth_answer=input_data_bleu["ground_truth_answer"], answer=input_data_bleu["answer"]
+    )
+    print(f"Data: {input_data_bleu} -> Score: {score}")
+
+
+def run_rouge_metric():
+    user_code_rouge = r"""
+from dynamiq.evaluations.metrics import RougeScoreEvaluator
+
+def evaluate(ground_truth_answer, answer):
+    rouge_evaluator = RougeScoreEvaluator()
+    score = rouge_evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
+    return score
+"""
+    input_data_rouge = {
+        "ground_truth_answer": "The quick brown fox jumps over the lazy dog.",
+        "answer": "A quick brown fox jumps over the lazy dog.",
+    }
+    print("\n=== PythonEvaluator ROUGE Metric (Single) ===")
+    evaluator = PythonEvaluator(code=user_code_rouge)
+    score = evaluator.run_single(
+        ground_truth_answer=input_data_rouge["ground_truth_answer"], answer=input_data_rouge["answer"]
+    )
+    print(f"Data: {input_data_rouge} -> Score: {score}")
+
+
+def run_levenstein_metric():
+    user_code_leven = r"""
+from dynamiq.evaluations.metrics import StringSimilarityEvaluator, DistanceMeasure
+
+def evaluate(ground_truth_answer, answer):
+    evaluator = StringSimilarityEvaluator(distance_measure=DistanceMeasure.LEVENSHTEIN)
+    score = evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
+    return score
+"""
+    input_data_leven = {"ground_truth_answer": "Hello world", "answer": "H3llo wor1d"}
+    print("\n=== PythonEvaluator Levenshtein Similarity Metric (Single) ===")
+    evaluator = PythonEvaluator(code=user_code_leven)
+    score = evaluator.run_single(
+        ground_truth_answer=input_data_leven["ground_truth_answer"], answer=input_data_leven["answer"]
+    )
+    print(f"Data: {input_data_leven} -> Score: {score}")
 
 
 def main():
@@ -119,6 +179,10 @@ def main():
     run_yes_presence_metric()
     run_arithmetic_sum_metric()
     run_json_validity_metric()
+
+    run_bleu_metric()
+    run_rouge_metric()
+    run_levenstein_metric()
 
 
 if __name__ == "__main__":
