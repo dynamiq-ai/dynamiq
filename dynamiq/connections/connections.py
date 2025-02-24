@@ -1087,7 +1087,7 @@ class Elasticsearch(BaseConnection):
         if self.use_ssl:
             if self.ca_path is not None:
                 conn_params["ca_certs"] = self.ca_path
-            conn_params["verify_certs"] = True if self.verify_certs else False
+            conn_params["verify_certs"] = self.verify_certs
 
         # Handle cloud deployment
         if self.cloud_id is not None:
