@@ -248,6 +248,7 @@ class ReActAgent(Agent):
     def parse_xml_and_extract_info(self, text: str) -> dict[str, Any]:
         """Parse XML-like structure and extract action and action_input."""
         output_content = self.parse_xml_content(text, "output")
+        thought = self.parse_xml_content(output_content, "thought")
         action = self.parse_xml_content(output_content, "action")
         action_input_text = self.parse_xml_content(output_content, "action_input")
 
@@ -273,13 +274,58 @@ class ReActAgent(Agent):
             )
             raise ActionParsingException(error_message, recoverable=True)
 
-        return action, action_input
+        return thought, action, action_input
 
     def extract_output_and_answer_xml(self, text: str) -> dict[str, str]:
         """Extract output and answer from XML-like structure."""
         output = self.parse_xml_content(text, "output")
         answer = self.parse_xml_content(text, "answer")
         return {"output": output, "answer": answer}
+
+    def _parse_thought(self, output: str) -> tuple[str | None, str | None]:
+        """Extracts thought from the output string."""
+        thought_match = re.search(
+            r"Thought:\s*(.*?)Action",
+            output,
+            re.DOTALL,
+        )
+
+        if thought_match:
+            return thought_match.group(1).strip()
+        
+        return ""
+
+    def _parse_action(self, output: str) -> tuple[str | None, str | None]:
+        """Parses the action and its input from the output string."""
+        try:
+            action_match = re.search(
+                r"Action:\s*(.*?)\nAction Input:\s*(({\n)?.*?)(?:[^}]*$)",
+                output,
+                re.DOTALL,
+            )
+            if action_match:
+                action = action_match.group(1).strip()
+                action_input = action_match.group(2).strip()
+                if "```json" in action_input:
+                    action_input = action_input.replace("```json", "").replace("```", "").strip()
+
+                action_input = json.loads(action_input)
+                return self._parse_thought(output), action, action_input
+            else:
+                logger.error("ActionParsingException")
+                raise ActionParsingException()
+        except Exception as e:
+            logger.error("Excetion in parsing")
+            raise ActionParsingException(
+                (
+                    f"Error {e}: Unable to parse action and action input."
+                    "Please rewrite using the correct Action/Action Input format"
+                    "with action input as a valid dictionary."
+                    "Ensure all quotes are included."
+                ),
+                recoverable=True,
+            )
+
 
     def tracing_final(self, loop_num, final_answer, config, kwargs):
         self._intermediate_steps[loop_num]["final_answer"] = final_answer
@@ -340,14 +386,7 @@ class ReActAgent(Agent):
                     case InferenceMode.DEFAULT:
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
-                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_content(
-                                content=llm_generated_output,
-                                source=self.name,
-                                step=f"reasoning_{loop_num + 1}",
-                                config=config,
-                                **kwargs,
-                            )
+
                         if "Answer:" in llm_generated_output:
                             final_answer = self._extract_final_answer(llm_generated_output)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
@@ -360,19 +399,30 @@ class ReActAgent(Agent):
                                     **kwargs,
                                 )
                             return final_answer
-                        action, action_input = self._parse_action(llm_generated_output)
+
+                        thought, action, action_input = self._parse_action(llm_generated_output)
+                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                            self.stream_content(
+                                content={"thought": thought, "action": action, "action_input": action_input},
+                                source=self.name,
+                                step=f"reasoning_{loop_num + 1}",
+                                config=config,
+                                **kwargs,
+                            )
 
                     case InferenceMode.FUNCTION_CALLING:
                         action = list(llm_result.output["tool_calls"].values())[0]["function"]["name"].strip()
+                        action_input = llm_generated_output_json["action_input"]
                         llm_generated_output_json = list(llm_result.output["tool_calls"].values())[0]["function"][
                             "arguments"
                         ]
-
+                        print(")Asdasd")
                         llm_generated_output = json.dumps(llm_generated_output_json)
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                            thought = llm_generated_output_json["thought"]
                             self.stream_content(
-                                content=llm_generated_output,
+                                content={"thought": thought, "action": action, "action_input": action_input},
                                 source=self.name,
                                 step=f"reasoning_{loop_num + 1}",
                                 config=config,
@@ -390,35 +440,41 @@ class ReActAgent(Agent):
                                     **kwargs,
                                 )
                             return final_answer
-                        action_input = llm_generated_output_json["action_input"]
 
                     case InferenceMode.STRUCTURED_OUTPUT:
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
                         llm_generated_output_json = json.loads(llm_result.output["content"])
+
                         action = llm_generated_output_json["action"]
+
+                        action_input = llm_generated_output_json["action_input"]
+                        if action != "finish":
+                            action_input = json.loads(action_input)
+
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
+
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                            thought = llm_generated_output_json["thought"]
+
                             self.stream_content(
-                                content=llm_generated_output,
+                                content={"thought": thought, "action": action, "action_input": action_input},
                                 source=self.name,
                                 step=f"reasoning_{loop_num + 1}",
                                 config=config,
                                 **kwargs,
                             )
                         if action == "finish":
-                            final_answer = llm_generated_output_json["action_input"]
-                            self.tracing_final(loop_num, final_answer, config, kwargs)
+                            self.tracing_final(loop_num, action_input, config, kwargs)
                             if self.streaming.enabled:
                                 self.stream_content(
-                                    content=final_answer,
+                                    content=action_input,
                                     source=self.name,
                                     step="answer",
                                     config=config,
                                     **kwargs,
                                 )
-                            return final_answer
-                        action_input = json.loads(llm_generated_output_json["action_input"])
+                            return action_input
                         llm_generated_output = json.dumps(llm_generated_output_json)
 
                     case InferenceMode.XML:
@@ -426,9 +482,12 @@ class ReActAgent(Agent):
                             logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, formatted_prompt, llm_generated_output)
+
+                        thought, action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
+
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
-                                content=llm_generated_output,
+                                content={"thought": thought, "action": action, "action_input": action_input},
                                 source=self.name,
                                 step=f"reasoning_{loop_num + 1}",
                                 config=config,
@@ -446,9 +505,10 @@ class ReActAgent(Agent):
                                     **kwargs,
                                 )
                             return final_answer
-                        action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
+
                 if action:
                     if self.tools:
+
                         try:
                             tool = self._get_tool(action)
                             tool_result = self._run_tool(tool, action_input, config, **kwargs)
@@ -458,10 +518,11 @@ class ReActAgent(Agent):
 
                         observation = f"\nObservation: {tool_result}\n"
                         llm_generated_output += observation
+
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content=observation,
-                                source=tool.name,
+                                source=tool.name if tool else action,
                                 step=f"tool_{loop_num}",
                                 config=config,
                                 **kwargs,

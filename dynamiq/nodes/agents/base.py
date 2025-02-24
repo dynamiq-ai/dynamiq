@@ -321,8 +321,15 @@ class Agent(Node):
         except Exception as e:
             raise e
 
-    def stream_content(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
-        if self.streaming.by_tokens:
+    def stream_content(
+        self,
+        content: str | dict,
+        source: str,
+        step: str,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ):
+        if type(content) != dict and self.streaming.by_tokens:
             return self.stream_by_tokens(content=content, source=source, step=step, config=config, **kwargs)
         return self.stream_response(content=content, source=source, step=step, config=config, **kwargs)
 
@@ -345,7 +352,7 @@ class Agent(Node):
             )
         return " ".join(final_response)
 
-    def stream_response(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
+    def stream_response(self, content: str | dict, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
         response_for_stream = StreamChunk(
             choices=[StreamChunkChoice(delta=StreamChunkChoiceDelta(content=content, source=source, step=step))]
         )
@@ -375,35 +382,6 @@ class Agent(Node):
         except Exception as e:
             raise e
 
-    def _parse_action(self, output: str) -> tuple[str | None, str | None]:
-        """Parses the action and its input from the output string."""
-        try:
-            action_match = re.search(
-                r"Action:\s*(.*?)\nAction Input:\s*(({\n)?.*?)(?:[^}]*$)",
-                output,
-                re.DOTALL,
-            )
-            if action_match:
-                action = action_match.group(1).strip()
-                action_input = action_match.group(2).strip()
-                if "```json" in action_input:
-                    action_input = action_input.replace("```json", "").replace("```", "").strip()
-
-                action_input = json.loads(action_input)
-                return action, action_input
-            else:
-                raise ActionParsingException()
-        except Exception as e:
-            raise ActionParsingException(
-                (
-                    f"Error {e}: Unable to parse action and action input."
-                    "Please rewrite using the correct Action/Action Input format"
-                    "with action input as a valid dictionary."
-                    "Ensure all quotes are included."
-                ),
-                recoverable=True,
-            )
-
     def _extract_final_answer(self, output: str) -> str:
         """Extracts the final answer from the output string."""
         match = re.search(r"Answer:\s*(.*)", output, re.DOTALL)
@@ -411,7 +389,7 @@ class Agent(Node):
 
     def _get_tool(self, action: str) -> Node:
         """Retrieves the tool corresponding to the given action."""
-        tool = self.tool_by_names.get(action)
+        tool = self.tool_by_names.get(self.sanitize_tool_name(action))
         if not tool:
             raise AgentUnknownToolException(
                 f"Unknown tool: {action}."
