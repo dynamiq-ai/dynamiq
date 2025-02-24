@@ -16,16 +16,16 @@ REFLECTION_REFLECT_PROMPT: str = (
     "Don't be verbose while thinking. Finally, you will generate an output based on the previous thinking. "
     "This is the format to follow:"
     "<thinking>"
-    "Here you will think about the user's request"
-    "<reflection>"
-    "Here you will reflect on the thinking"
-    "</reflection>"
-    "<reflection>"
-    "This is another reflection"
-    "</reflection>"
+        "Here you will think about the user's request"
+        "<reflection>"
+            "Here you will reflect on the thinking"
+        "</reflection>"
+        "<reflection>"
+            "This is another reflection"
+        "</reflection>"
     "</thinking>"
     "<output>"
-    "Here you will generate the output based on the thinking"
+        "Here you will generate the output based on the thinking"
     "</output>"
     "Always use these tags in your responses. Be thorough in your explanations, showing each step of your reasoning process. "  # noqa: E501
     "Aim to be precise and logical in your approach, and don't hesitate to break down complex problems into simpler components. "  # noqa: E501
@@ -93,20 +93,21 @@ class ReflectionAgent(Agent):
             if self.verbose:
                 logger.info(f"Agent {self.name} - {self.id}: LLM output by REFLECTION prompt:\n{result[:200]}...")
             if self.streaming.enabled:
-                if self.streaming.mode == StreamingMode.FINAL:
-                    if not output_content:
-                        return ""
+                if self.streaming.mode == StreamingMode.ALL:
                     return self.stream_content(
-                        content=output_content[-1],
-                        step="answer",
-                        source=self.name,
-                        config=config,
-                        **kwargs,
+                        content={"outputs": output_content}, step="reasoning", source=self.name, config=config, **kwargs
                     )
-                elif self.streaming.mode == StreamingMode.ALL:
-                    return self.stream_content(
-                        content=result, step="reasoning", source=self.name, config=config, **kwargs
-                    )
+                
+                if not output_content:
+                    return ""
+                return self.stream_content(
+                    content=output_content[-1],
+                    step="answer",
+                    source=self.name,
+                    config=config,
+                    **kwargs,
+                )
+
 
             if not output_content:
                 return ""
