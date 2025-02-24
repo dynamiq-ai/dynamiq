@@ -1050,8 +1050,8 @@ class Elasticsearch(BaseConnection):
     password: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_PASSWORD", None))
     cloud_id: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_CLOUD_ID", None))
     ca_path: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_CA_PATH", None))
-    verify_certs: str = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_VERIFY_CERTS", "false"))
-    use_ssl: str = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_USE_SSL", "false"))
+    verify_certs: bool = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_VERIFY_CERTS", False))
+    use_ssl: bool = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_USE_SSL", True))
 
     def connect(self):
         """
@@ -1083,14 +1083,11 @@ class Elasticsearch(BaseConnection):
         elif self.cloud_id is None:  # Only require auth for non-cloud deployments
             raise ValueError("Either API key or username/password must be provided")
 
-        if self.use_ssl.lower() not in ["true", "false"] or self.verify_certs.lower() not in ["true", "false"]:
-            raise ValueError("use_ssl and verify_certs must be set to 'true' or 'false'")
-
         # Handle SSL/TLS
-        if self.use_ssl.lower() == "true":
+        if self.use_ssl:
             if self.ca_path is not None:
                 conn_params["ca_certs"] = self.ca_path
-            conn_params["verify_certs"] = True if self.verify_certs.lower() == "true" else False
+            conn_params["verify_certs"] = True if self.verify_certs else False
 
         # Handle cloud deployment
         if self.cloud_id is not None:
