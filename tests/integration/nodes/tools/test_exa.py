@@ -8,7 +8,7 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.callbacks.tracing import RunStatus
 from dynamiq.connections import Exa
 from dynamiq.flows import Flow
-from dynamiq.nodes.tools.exa_search import ExaTool
+from dynamiq.nodes.tools.exa_search import ExaTool, QueryType
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils import JsonWorkflowEncoder
 
@@ -50,6 +50,74 @@ def mock_requests(mocker, mock_exa_response):
 
     mock_requests = mocker.patch("requests.request", return_value=mock_response)
     return mock_requests
+
+
+def test_exa_node_parameters(mock_requests):
+    """Test ExaTool initialization with node parameters."""
+    exa_connection = Exa(api_key="test_key")
+    exa_tool = ExaTool(
+        connection=exa_connection,
+        model_config=ConfigDict(),
+        include_full_content=True,
+        limit=5,
+        query_type=QueryType.neural,
+        include_domains=["example.com"],
+    )
+
+    # Verify node parameters were set correctly
+    assert exa_tool.include_full_content is True
+    assert exa_tool.limit == 5
+    assert exa_tool.query_type == QueryType.neural
+    assert exa_tool.include_domains == ["example.com"]
+
+    # Test with minimal input (just query)
+    input_data = {"query": "artificial intelligence"}
+    result = exa_tool.run(input_data, None)
+
+    assert isinstance(result, RunnableResult)
+    assert result.status == RunnableStatus.SUCCESS
+
+    # Verify node parameters were used in the API call
+    mock_requests.assert_called_once()
+    call_args = mock_requests.call_args
+    assert call_args[1]["json"]["query"] == "artificial intelligence"
+    assert call_args[1]["json"]["numResults"] == 5
+    assert call_args[1]["json"]["type"] == "neural"
+    assert call_args[1]["json"]["includeDomains"] == ["example.com"]
+    assert "contents" in call_args[1]["json"]
+
+
+def test_exa_parameter_override(mock_requests):
+    """Test overriding node parameters during execution."""
+    exa_connection = Exa(api_key="test_key")
+    exa_tool = ExaTool(
+        connection=exa_connection,
+        model_config=ConfigDict(),
+        include_full_content=True,
+        limit=5,
+        query_type=QueryType.neural,
+    )
+
+    # Override parameters in input
+    input_data = {
+        "query": "artificial intelligence",
+        "limit": 2,
+        "include_full_content": False,
+        "query_type": "keyword",
+    }
+
+    result = exa_tool.run(input_data, None)
+
+    assert isinstance(result, RunnableResult)
+    assert result.status == RunnableStatus.SUCCESS
+
+    # Verify input parameters override node parameters
+    mock_requests.assert_called_once()
+    call_args = mock_requests.call_args
+    assert call_args[1]["json"]["query"] == "artificial intelligence"
+    assert call_args[1]["json"]["numResults"] == 2  # Overridden from 5
+    assert call_args[1]["json"]["type"] == "keyword"  # Overridden from neural
+    assert "contents" not in call_args[1]["json"]  # Overridden from True to False
 
 
 def test_exa_basic_search(mock_requests, mock_exa_response):
@@ -102,6 +170,7 @@ def test_exa_search_agent_optimized(mock_requests, mock_exa_response):
 
 
 def test_exa_with_invalid_input_schema(mock_requests, mock_exa_response):
+    """Test behavior with invalid input schema."""
     exa_connection = Exa(api_key="test_key")
     exa_tool = ExaTool(connection=exa_connection, model_config=ConfigDict())
 
