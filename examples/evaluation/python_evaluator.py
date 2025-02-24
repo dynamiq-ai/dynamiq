@@ -118,19 +118,15 @@ from dynamiq.evaluations.metrics import BleuScoreEvaluator
 
 def evaluate(ground_truth_answer, answer):
     bleu_evaluator = BleuScoreEvaluator()
-    score = bleu_evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
-    return score
+    return bleu_evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
 """
-    input_data_bleu = {
-        "ground_truth_answer": "The cat sits on the mat. It is quiet.",
-        "answer": "The cat sits on the mat. It is silent.",
-    }
-    print("\n=== PythonEvaluator BLEU Metric (Single) ===")
-    evaluator = PythonEvaluator(code=user_code_bleu)
-    score = evaluator.run_single(
-        ground_truth_answer=input_data_bleu["ground_truth_answer"], answer=input_data_bleu["answer"]
-    )
-    print(f"Data: {input_data_bleu} -> Score: {score}")
+    input_data_bleu = [
+        {
+            "ground_truth_answer": "The cat sits on the mat. It is quiet.",
+            "answer": "The cat sits on the mat. It is silent.",
+        }
+    ]
+    run_metric("BLEU", user_code_bleu, input_data_bleu)
 
 
 def run_rouge_metric():
@@ -139,19 +135,15 @@ from dynamiq.evaluations.metrics import RougeScoreEvaluator
 
 def evaluate(ground_truth_answer, answer):
     rouge_evaluator = RougeScoreEvaluator()
-    score = rouge_evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
-    return score
+    return rouge_evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
 """
-    input_data_rouge = {
-        "ground_truth_answer": "The quick brown fox jumps over the lazy dog.",
-        "answer": "A quick brown fox jumps over the lazy dog.",
-    }
-    print("\n=== PythonEvaluator ROUGE Metric (Single) ===")
-    evaluator = PythonEvaluator(code=user_code_rouge)
-    score = evaluator.run_single(
-        ground_truth_answer=input_data_rouge["ground_truth_answer"], answer=input_data_rouge["answer"]
-    )
-    print(f"Data: {input_data_rouge} -> Score: {score}")
+    input_data_rouge = [
+        {
+            "ground_truth_answer": "The quick brown fox jumps over the lazy dog.",
+            "answer": "A quick brown fox jumps over the lazy dog.",
+        }
+    ]
+    run_metric("ROUGE", user_code_rouge, input_data_rouge)
 
 
 def run_levenstein_metric():
@@ -160,16 +152,10 @@ from dynamiq.evaluations.metrics import StringSimilarityEvaluator, DistanceMeasu
 
 def evaluate(ground_truth_answer, answer):
     evaluator = StringSimilarityEvaluator(distance_measure=DistanceMeasure.LEVENSHTEIN)
-    score = evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
-    return score
+    return evaluator.run_single(ground_truth_answer=ground_truth_answer, answer=answer)
 """
-    input_data_leven = {"ground_truth_answer": "Hello world", "answer": "H3llo wor1d"}
-    print("\n=== PythonEvaluator Levenshtein Similarity Metric (Single) ===")
-    evaluator = PythonEvaluator(code=user_code_leven)
-    score = evaluator.run_single(
-        ground_truth_answer=input_data_leven["ground_truth_answer"], answer=input_data_leven["answer"]
-    )
-    print(f"Data: {input_data_leven} -> Score: {score}")
+    input_data_leven = [{"ground_truth_answer": "Hello world", "answer": "H3llo wor1d"}]
+    run_metric("Levenshtein Similarity", user_code_leven, input_data_leven)
 
 
 def main():
