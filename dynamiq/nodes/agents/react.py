@@ -162,7 +162,7 @@ Remember:
 
 
 REACT_BLOCK_OUTPUT_FORMAT = (
-    "In your final answer, avoid phrases like 'based on the information gathered or provided.'"
+    "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
     "Simply give a clear and concise answer."
 )
 
@@ -197,7 +197,8 @@ final_answer_function_schema = {
     "strict": True,
     "function": {
         "name": "provide_final_answer",
-        "description": "Function should be called when if you can answer the initial request or if there is not request at all.",
+        "description": "Function should be called when if you can answer the initial request"
+        " or if there is not request at all.",
         "parameters": {
             "type": "object",
             "properties": {
