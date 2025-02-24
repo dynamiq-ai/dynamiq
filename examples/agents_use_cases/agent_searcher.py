@@ -14,7 +14,7 @@ if __name__ == "__main__":
         id="Agent",
         llm=llm,
         tools=[tool_search],
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
     result = agent.run(input_data={"input": "Who won USA elections 2024?"})
     output_content = result.output.get("content")

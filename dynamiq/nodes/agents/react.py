@@ -14,6 +14,7 @@ from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
+from enum import Enum
 
 REACT_BLOCK_TOOLS = (
     "You have access to a variety of tools,"
@@ -445,6 +446,11 @@ class ReActAgent(Agent):
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
                         llm_generated_output = llm_result.output["content"]
+
+                        logger.info(
+                            f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, reasoning:\n{llm_generated_output}"
+                        )
+
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
@@ -596,6 +602,7 @@ class ReActAgent(Agent):
             float: "float",
             bool: "boolean",
             str: "string",
+            Enum: "enum"
         }
 
         if isinstance(param_type, str):
@@ -608,13 +615,29 @@ class ReActAgent(Agent):
                     return "float"
                 case _:
                     return "string"
-        elif get_origin(param_type) is Union:
-            first_type = next((arg for arg in get_args(param_type) if arg is not type(None)), None)
-            if first_type is None:
+
+        elif get_origin(param_type) in (Union, types.UnionType):
+            param_type = next((arg for arg in get_args(param_type) if arg is not type(None)), None)
+            if param_type is None:
                 return "string"
-            return type_mapping.get(first_type, getattr(first_type, "__name__", "string"))
-        else:
-            return type_mapping.get(param_type, getattr(param_type, "__name__", "string"))
+
+
+        if issubclass(param_type, Enum):
+            param_type = Enum
+        return type_mapping.get(param_type, getattr(param_type, "__name__", "string"))
+
+    def generate_property_schema(self, properties, name, field, tool):
+        if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
+            param_type = self.filter_format_type(field.annotation)
+            description = field.description or "No description"
+
+            if param_type == "enum":
+                element_type = self.filter_format_type(type(list(field.annotation.__members__.values())[0].value))
+                properties[name] = {"type": element_type, "description": description, "enum": [field.value for field in field.annotation.__members__.values()]}
+            elif param_type in ["integer", "float", "boolean", "string"]:
+                properties[name] = {"type": param_type, "description": description}
+
+
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
@@ -622,10 +645,7 @@ class ReActAgent(Agent):
         for tool in self.tools:
             properties = {}
             for name, field in tool.input_schema.model_fields.items():
-                if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
-                    param_type = self.filter_format_type(field.annotation)
-                    description = field.description or "No description"
-                    properties[name] = {"type": param_type, "description": description}
+                self.generate_property_schema(properties, name, field, tool)
 
             schema = {
                 "type": "function",
