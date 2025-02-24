@@ -18,7 +18,7 @@ from dynamiq.utils.logger import logger
 REACT_BLOCK_TOOLS = (
     "You have access to a variety of tools,"
     "and you are responsible for using them in any order you choose to complete the task:\n"
-    "{tools_desc}"
+    "{tool_description}"
 )
 
 REACT_BLOCK_NO_TOOLS = "You do not have access to any tools."
@@ -75,7 +75,6 @@ Action Input: [The input you provide to the tool]
 Remember:
 - Each tool has its specific input format you have strickly adhere to it.
 - Avoid using triple quotes (multi-line strings, docstrings) when providing multi-line code.
-- Provide all necessary information in 'Action Input' for the next step to succeed.
 - Action Input must be in JSON format.
 - Always begin each response with a 'Thought' explaining your reasoning.
 - If you use a tool, follow the 'Thought' with an 'Action' (chosen from the available tools) and an 'Action Input'.
@@ -97,6 +96,7 @@ Answer: [Explanation of why you cannot answer]
 Remember:
 - Always start with a Thought.
 - Never use markdown code markers in your response.
+
 """  # noqa: E501
 
 
@@ -215,7 +215,7 @@ class ReActAgent(Agent):
 
     name: str = "React Agent"
     max_loops: int = Field(default=15, ge=2)
-    inference_mode: InferenceMode = InferenceMode.DEFAULT
+    inference_mode: InferenceMode = InferenceMode.XML
     behaviour_on_max_loops: Behavior = Field(
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
@@ -357,7 +357,6 @@ class ReActAgent(Agent):
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(
-                tools_desc=self.tool_description,
                 tools_name=self.tool_names,
                 input_formats=self.generate_input_formats(self.tools),
             ),
@@ -375,14 +374,17 @@ class ReActAgent(Agent):
                     inference_mode=self.inference_mode,
                     **kwargs,
                 )
+
                 action, action_input = None, None
                 llm_generated_output = ""
-                logger.info(
-                    f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, reasoning:\n{llm_result.output['content']}"
-                )
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
                         llm_generated_output = llm_result.output["content"]
+
+                        logger.info(
+                            f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, reasoning:\n{llm_generated_output}"
+                        )
+
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
@@ -417,12 +419,25 @@ class ReActAgent(Agent):
                             )
 
                     case InferenceMode.FUNCTION_CALLING:
+
+                        if "tool_calls" not in dict(llm_result.output):
+                            logger.error("Error: No function called")
+                            raise ActionParsingException(
+                                "Error: No function called, you need to call the correct function."
+                            )
+
                         action = list(llm_result.output["tool_calls"].values())[0]["function"]["name"].strip()
-                        action_input = llm_generated_output_json["action_input"]
                         llm_generated_output_json = list(llm_result.output["tool_calls"].values())[0]["function"][
                             "arguments"
                         ]
+                        action_input = llm_generated_output_json["action_input"]
+
                         llm_generated_output = json.dumps(llm_generated_output_json)
+
+                        logger.info(
+                            f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, reasoning:\n{llm_generated_output}"
+                        )
+
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             thought = llm_generated_output_json["thought"]
@@ -450,6 +465,11 @@ class ReActAgent(Agent):
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
                         llm_generated_output_json = json.loads(llm_result.output["content"])
+
+                        logger.info(
+                            f"Agent {self.name} - {self.id}:"
+                            f"Loop {loop_num + 1}, reasoning:\n{llm_generated_output_json}"
+                        )
 
                         action = llm_generated_output_json["action"]
 

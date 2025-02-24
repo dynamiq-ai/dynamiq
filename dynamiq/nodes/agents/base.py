@@ -38,14 +38,14 @@ Output instructions:
 Current date: {{date}}
 {% endif %}
 
-{%- if tool_description -%}
+{%- if tools -%}
 
-Tools information: {{tool_description}}
+Tools information: {{tools}}
 {% endif %}
 
-{%- if file_description -%}
+{%- if files -%}
 
-Uploaded files: {{file_description}}
+Uploaded files: {{files}}
 {% endif %}
 
 {%- if relevant_information -%}
@@ -629,7 +629,7 @@ class AgentManager(Agent):
 
     def _plan(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'plan' action."""
-        prompt = self.generate_prompt(block_names=["plan"])
+        prompt = self._prompt_blocks.get("plan").format(**self._prompt_variables, **kwargs)
 
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
@@ -638,7 +638,7 @@ class AgentManager(Agent):
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'assign' action."""
-        prompt = self.generate_prompt(block_names=["assign"])
+        prompt = self._prompt_blocks.get("assign").format(**self._prompt_variables, **kwargs)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
@@ -646,7 +646,7 @@ class AgentManager(Agent):
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'final' action."""
-        prompt = self.generate_prompt(block_names=["final"])
+        prompt = self._prompt_blocks.get("final").format(**self._prompt_variables, **kwargs)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled:
             return self.stream_content(content=llm_result, step="answer", source=self.name, config=config, **kwargs)

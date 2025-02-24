@@ -60,14 +60,11 @@ def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler)
 async def _send_stream_events_by_ws(send_handler):
     messages = []
     async for message in send_handler:
-        try:
-            step = message.data["choices"][-1]["delta"]["step"]
-            if "reasoning_" in step:
-                content = message.data["choices"][-1]["delta"]["content"]["thought"]
-                messages.append(content)
-                streamlit_callback(messages)
-        except Exception:
-            continue
+        step = message.data["choices"][-1]["delta"]["step"]
+        if "reasoning_" in step:
+            content = message.data["choices"][-1]["delta"]["content"]["thought"]
+            messages.append(content)
+            streamlit_callback(messages)
 
 
 async def run_agent_async(request: str) -> str:
