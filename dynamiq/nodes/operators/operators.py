@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from typing import Any, ClassVar, Literal
 from uuid import uuid4
@@ -210,6 +211,7 @@ class Map(Node):
     node: Node
     behavior: Behavior | None = Behavior.RETURN
     input_schema: ClassVar[type[MapInputSchema]] = MapInputSchema
+    max_workers: int = 1
 
     @property
     def to_dict_exclude_params(self):
@@ -231,6 +233,14 @@ class Map(Node):
         data["node"] = self.node.to_dict(**kwargs)
         return data
 
+    def execute_workflow(self, index, data, config, merged_kwargs):
+        """Execute a single workflow and handle errors."""
+        result = self.node.run(data, config, **merged_kwargs)
+        if result.status != RunnableStatus.SUCCESS:
+            if self.behavior == Behavior.RAISE:
+                raise ValueError(f"Node under iteration index {index + 1} has failed.")
+        return result.output
+
     def execute(self, input_data: MapInputSchema, config: RunnableConfig = None, **kwargs):
         """
         Executes the map node.
@@ -248,22 +258,21 @@ class Map(Node):
         """
         input_data = input_data.input
 
-        output = []
         run_id = kwargs.get("run_id", uuid4())
         config = ensure_config(config)
         merged_kwargs = {**kwargs, "parent_run_id": run_id}
-
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        for index, data in enumerate(input_data, start=1):
-            result = self.node.run(data, config, **merged_kwargs)
-            if result.status != RunnableStatus.SUCCESS:
-                if self.behavior == Behavior.RAISE:
-                    raise ValueError(f"Map node failed to execute: node under iteration index {index} has failed.")
-                logger.error(f"Node under iteration index {index} has failed.")
-            output.append(result.output)
+        try:
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                results = executor.map(
+                    lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs), enumerate(input_data)
+                )
+        except Exception as e:
+            logger.error(str(e))
+            raise ValueError(f"Map node failed to execute:{str(e)}")
 
-        return {"output": output}
+        return {"output": list(results)}
 
 
 class Pass(Node):

@@ -1,4 +1,5 @@
 from .chroma import ChromaDocumentRetriever
+from .elasticsearch import ElasticsearchDocumentRetriever
 from .milvus import MilvusDocumentRetriever
 from .pgvector import PGVectorDocumentRetriever
 from .pinecone import PineconeDocumentRetriever
