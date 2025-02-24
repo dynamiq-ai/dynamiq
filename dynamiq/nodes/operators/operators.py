@@ -1,4 +1,4 @@
-import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from typing import Any, ClassVar, Literal
 from uuid import uuid4
@@ -211,7 +211,7 @@ class Map(Node):
     node: Node
     behavior: Behavior | None = Behavior.RETURN
     input_schema: ClassVar[type[MapInputSchema]] = MapInputSchema
-    max_workflows: int = 1
+    max_workers: int = 1
 
     @property
     def to_dict_exclude_params(self):
@@ -233,12 +233,12 @@ class Map(Node):
         data["node"] = self.node.to_dict(**kwargs)
         return data
 
-    def execute_workflow(self, data, config, merged_kwargs):
+    def execute_workflow(self, index, data, config, merged_kwargs):
         """Execute a single workflow and handle errors."""
         result = self.node.run(data, config, **merged_kwargs)
         if result.status != RunnableStatus.SUCCESS:
             if self.behavior == Behavior.RAISE:
-                raise
+                raise ValueError(f"Node under iteration index {index + 1} has failed.")
         return result.output
 
     def execute(self, input_data: MapInputSchema, config: RunnableConfig = None, **kwargs):
@@ -258,32 +258,21 @@ class Map(Node):
         """
         input_data = input_data.input
 
-        output = [None] * len(input_data)
         run_id = kwargs.get("run_id", uuid4())
         config = ensure_config(config)
         merged_kwargs = {**kwargs, "parent_run_id": run_id}
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        total_workflows = len(input_data)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workflows) as executor:
-            for i in range(0, total_workflows, self.max_workflows):
-                batch = input_data[i : i + self.max_workflows]
-                future_to_index = {
-                    executor.submit(self.execute_workflow, workflow_dict, config, merged_kwargs): index
-                    for index, workflow_dict in enumerate(batch, start=i)
-                }
-                for future in concurrent.futures.as_completed(future_to_index):
-                    index = future_to_index[future]
-                    try:
-                        result = future.result()
-                        output[index] = result
-                    except Exception:
-                        logger.error(f"Node under iteration index {index+1} has failed.")
-                        raise ValueError(
-                            f"Map node failed to execute: node under iteration index {index+1} has failed."
-                        )
+        try:
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                results = executor.map(
+                    lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs), enumerate(input_data)
+                )
+        except Exception as e:
+            logger.error(str(e))
+            raise ValueError(f"Map node failed to execute:{str(e)}")
 
-        return {"output": output}
+        return {"output": list(results)}
 
 
 class Pass(Node):
