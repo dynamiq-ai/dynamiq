@@ -27,10 +27,8 @@ def streamlit_callback(messages):
 def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler) -> str:
     """
     Creates and runs agent
-
     Args:
     send_handler (AsyncStreamingIteratorCallbackHandler): Handler of output messages.
-
     Returns:
         str: Agent final output.
     """
@@ -44,7 +42,7 @@ def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler)
         llm=llm,
         tools=[tool_search],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.XML,
         streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
     )
 
@@ -76,6 +74,7 @@ async def run_agent_async(request: str) -> str:
     await task
 
     return response
+
 
 if __name__ == "__main__":
     print(asyncio.run(run_agent_async("Write report about Google")))

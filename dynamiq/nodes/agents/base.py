@@ -634,8 +634,9 @@ class AgentManager(Agent):
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(
-                content={"plan": llm_result}, step="manager", source=self.name, config=config, **kwargs
+                content=llm_result, step="manager_planning", source=self.name, config=config, **kwargs
             )
+
         return llm_result
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
@@ -644,7 +645,7 @@ class AgentManager(Agent):
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(
-                content={"assignment": llm_result}, step="manager", source=self.name, config=config, **kwargs
+                content=llm_result, step="manager_assigning", source=self.name, config=config, **kwargs
             )
         return llm_result
 
@@ -653,5 +654,7 @@ class AgentManager(Agent):
         prompt = self._prompt_blocks.get("final").format(**self._prompt_variables, **kwargs)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled:
-            return self.stream_content(content=llm_result, step="answer", source=self.name, config=config, **kwargs)
+            return self.stream_content(
+                content=llm_result, step="manager_final_output", source=self.name, config=config, **kwargs
+            )
         return llm_result

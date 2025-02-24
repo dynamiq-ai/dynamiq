@@ -95,7 +95,9 @@ Answer: [Explanation of why you cannot answer]
 
 Remember:
 - Always start with a Thought.
+- In Thought provide your reasoning about your action.
 - Never use markdown code markers in your response.
+
 
 """  # noqa: E501
 
@@ -224,20 +226,37 @@ class ReActAgent(Agent):
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
-        Logs reasoning step of agent
+        Logs reasoning step of agent.
 
         Args:
-            thought (str): Reasoning about next step
-            action (str): Chosen action
-            action_input (str): Input to the tool chosen by action
-            loop_num (int): Number of reasoning loop
+            thought (str): Reasoning about next step.
+            action (str): Chosen action.
+            action_input (str): Input to the tool chosen by action.
+            loop_num (int): Number of reasoning loop.
         """
         logger.info(
-            f"Agent {self.name} - {self.id}: Loop {loop_num}:\n"
+            "\n------------------------------------------\n"
+            f"Agent {self.name}: Loop {loop_num}:\n"
             f"Thought: {thought}\n"
             f"Action: {action}\n"
             f"Action Input: {action_input}"
+            "\n------------------------------------------"
+        )
 
+    def log_final_output(self, final_output: str, loop_num: int) -> None:
+        """
+        Logs final output of the agent.
+
+        Args:
+            thought (str): Reasoning about finishing.
+            final_output (str): Final output of agent.
+            loop_num (int): Number of reasoning loop
+        """
+        logger.info(
+            "\n------------------------------------------\n"
+            f"Agent {self.name}: Loop {loop_num + 1}\n"
+            f"Final answer: {final_output}"
+            "\n------------------------------------------\n"
         )
 
     @model_validator(mode="after")
@@ -401,8 +420,7 @@ class ReActAgent(Agent):
 
                         if "Answer:" in llm_generated_output:
                             final_answer = self._extract_final_answer(llm_generated_output)
-                            logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}\n"
-                                        f"Final answer: {final_answer}")
+                            self.log_final_output(final_answer, loop_num + 1)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             if self.streaming.enabled:
                                 self.stream_content(
@@ -448,8 +466,7 @@ class ReActAgent(Agent):
 
                         if action == "provide_final_answer":
                             final_answer = llm_generated_output_json["answer"]
-                            logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}\n"
-                                        f"Final answer: {final_answer}")
+                            self.log_final_output(final_answer, loop_num + 1)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             if self.streaming.enabled:
                                 self.stream_content(
@@ -488,9 +505,7 @@ class ReActAgent(Agent):
                         action_input = llm_generated_output_json["action_input"]
 
                         if action == "finish":
-                            logger.info(
-                                f"Agent {self.name} - {self.id}: Loop {loop_num + 1}\n" f"Final answer: {action_input}"
-                            )
+                            self.log_final_output(action_input, loop_num + 1)
                             self.tracing_final(loop_num, action_input, config, kwargs)
                             if self.streaming.enabled:
                                 self.stream_content(
@@ -523,9 +538,7 @@ class ReActAgent(Agent):
 
                         if "<answer>" in llm_generated_output:
                             final_answer = self._extract_final_answer_xml(llm_generated_output)
-                            logger.info(
-                                f"Agent {self.name} - {self.id}: Loop {loop_num + 1}\n" f"Final answer: {final_answer}"
-                            )
+                            self.log_final_output(final_answer, loop_num + 1)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             if self.streaming.enabled:
                                 self.stream_content(
@@ -564,7 +577,7 @@ class ReActAgent(Agent):
                         observation = f"\nObservation: {tool_result}\n"
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
-                                content={"tool_name": tool.name, "tool_result": tool_result},
+                                content={"name": tool.name, "input": action_input, "result": tool_result},
                                 source=tool.name if tool else action,
                                 step=f"tool_{loop_num}",
                                 config=config,
@@ -582,7 +595,7 @@ class ReActAgent(Agent):
                         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
 
             except ActionParsingException as e:
-                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=f"{type(e).__name__}: {e}"))
+                self._prompt.messages.append(Message(role=MessageRole.USER, content=f"{type(e).__name__}: {e}"))
                 continue
 
         if self.behaviour_on_max_loops == Behavior.RAISE:

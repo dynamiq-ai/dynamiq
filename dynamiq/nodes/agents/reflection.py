@@ -94,17 +94,17 @@ class ReflectionAgent(Agent):
             if self.verbose:
                 logger.info(f"Agent {self.name} - {self.id}: LLM output by REFLECTION prompt:\n{result[:200]}...")
             if self.streaming.enabled:
+                if not output_content:
+                    return ""
+
                 if self.streaming.mode == StreamingMode.ALL:
-                    return self.stream_content(
-                        content={"reflection": reflection_content},
+                    self.stream_content(
+                        content={"output_content": output_content[:-1], "reflection": reflection_content},
                         step="reasoning",
                         source=self.name,
                         config=config,
                         **kwargs,
                     )
-
-                if not output_content:
-                    return ""
 
                 return self.stream_content(
                     content=output_content[-1],
