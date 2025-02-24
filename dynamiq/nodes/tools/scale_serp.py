@@ -30,20 +30,18 @@ class SearchType(str, enum.Enum):
 
 
 class ScaleSerpInputSchema(BaseModel):
-    query: str = Field(default="", description="Parameter to provide a search query.")
-    url: str = Field(default="", description="Parameter to provide a search url.")
-    limit: int = Field(
-        default=10, description="Parameter to specify the number of results to return, by default is set to 10."
-    )
-    search_type: SearchType = Field(
-        default=SearchType.WEB, description="Type of search to perform (web, news, images, videos)"
+    query: str | None = Field(default=None, description="Parameter to provide a search query.")
+    url: str | None = Field(default=None, description="Parameter to provide a search url.")
+    limit: int | None = Field(default=None, description="Parameter to specify the number of results to return.")
+    search_type: SearchType | None = Field(
+        default=None, description="Type of search to perform (web, news, images, videos)"
     )
 
     @model_validator(mode="after")
     def validate_query_url(self):
-        """Validate that either query or url is specified"""
-        if not self.url and not self.query:
-            raise ValueError("Either 'query' or 'url' has to be specified.")
+        """Validate that either query or url is specified if both are provided"""
+        if self.url is not None and self.query is not None:
+            raise ValueError("Cannot specify both 'query' and 'url' at the same time.")
         return self
 
 

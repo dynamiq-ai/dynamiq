@@ -22,10 +22,10 @@ class ExaInputSchema(BaseModel):
     """Schema for Exa search input parameters."""
 
     query: str = Field(description="The search query string.")
-    include_full_content: bool = Field(
-        default=False, description="If true, retrieve full content, highlights, and summaries for search results."
+    include_full_content: bool | None = Field(
+        default=None, description="If true, retrieve full content, highlights, and summaries for search results."
     )
-    use_autoprompt: bool = Field(default=False, description="If true, query will be converted to a Exa query.")
+    use_autoprompt: bool | None = Field(default=None, description="If true, query will be converted to a Exa query.")
     query_type: QueryType | None = Field(
         default=None,
         description="Type of query to be used. Options are 'keyword', 'neural', or 'auto'.",
@@ -146,26 +146,32 @@ class ExaTool(ConnectionNode):
 
         payload = {
             "query": input_data.query,
-            "useAutoprompt": input_data.use_autoprompt or self.use_autoprompt,
-            "type": input_data.query_type or self.query_type,
-            "numResults": input_data.limit or self.limit,
-            "includeDomains": input_data.include_domains or self.include_domains,
-            "excludeDomains": input_data.exclude_domains or self.exclude_domains,
-            "includeText": input_data.include_text or self.include_text,
-            "excludeText": input_data.exclude_text or self.exclude_text,
-            "category": input_data.category or self.category,
+            "useAutoprompt": (
+                input_data.use_autoprompt if input_data.use_autoprompt is not None else self.use_autoprompt
+            ),
+            "type": input_data.query_type if input_data.query_type is not None else self.query_type,
+            "numResults": input_data.limit if input_data.limit is not None else self.limit,
+            "includeDomains": (
+                input_data.include_domains if input_data.include_domains is not None else self.include_domains
+            ),
+            "excludeDomains": (
+                input_data.exclude_domains if input_data.exclude_domains is not None else self.exclude_domains
+            ),
+            "includeText": input_data.include_text if input_data.include_text is not None else self.include_text,
+            "excludeText": input_data.exclude_text if input_data.exclude_text is not None else self.exclude_text,
+            "category": input_data.category if input_data.category is not None else self.category,
         }
-
-        input_dict = input_data.model_dump(exclude_unset=True)
-        include_full_content = self.include_full_content
-
-        if "include_full_content" in input_dict:
-            include_full_content = input_data.include_full_content
 
         if isinstance(payload["type"], QueryType):
             payload["type"] = payload["type"].value
 
         payload = {k: v for k, v in payload.items() if v is not None}
+
+        include_full_content = (
+            input_data.include_full_content
+            if input_data.include_full_content is not None
+            else self.include_full_content
+        )
 
         if include_full_content:
             payload["contents"] = {
