@@ -148,6 +148,7 @@ class VectorStoreRetriever(Node):
         query = input_data.query
         try:
             kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
+            kwargs.pop("run_depends", None)
             text_embedder_output = self.text_embedder.run(
                 input_data={"query": query}, run_depends=self._run_depends, config=config, **kwargs
             )

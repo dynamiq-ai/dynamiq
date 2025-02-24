@@ -29,6 +29,26 @@ class VisionDetail(str, enum.Enum):
     LOW = "low"
 
 
+def get_parameters_for_template(template: str, env: Environment | None = None) -> set[str]:
+    """
+    Extracts set of parameters for template.
+
+    Args:
+        template (str): Template to find parameters for.
+        env: (Environment, optional): jinja Environment object.
+
+    Returns:
+        set: Set of required parameters.
+    """
+    if not env:
+        env = Environment(autoescape=True)
+    # Parse the template to get its Abstract Syntax Tree
+    ast = env.parse(template)
+
+    # Find and return set of undeclared variables in the template
+    return meta.find_undeclared_variables(ast)
+
+
 class Message(BaseModel):
     """
     Represents a message in a conversation.
@@ -41,6 +61,20 @@ class Message(BaseModel):
     content: str
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Import and initialize Jinja2 Template here
+        from jinja2 import Template
+
+        self._Template = Template
+
+    def format_message(self, **kwargs) -> "Message":
+        "Returns formated copy of message"
+        return Message(
+            role=self.role,
+            content=self._Template(self.content).render(**kwargs),
+        )
 
 
 class VisionMessageTextContent(BaseModel):
@@ -92,6 +126,88 @@ class VisionMessage(BaseModel):
 
     content: list[VisionMessageTextContent | VisionMessageImageContent]
     role: MessageRole = MessageRole.USER
+
+    def parse_image_url_parameters(self, url_template: str, kwargs: dict) -> None:
+        """
+        Converts image URL parameters in kwargs to Base64-encoded Data URLs if they contain image data.
+
+        Args:
+            url_template (str): Jinja template for the image URL.
+            kwargs (dict): Dictionary of parameters to be used with the template.
+
+        Raises:
+            KeyError: If a required parameter is missing in kwargs.
+            ValueError: If the file type cannot be determined or unsupported data type is provided.
+        """
+        template_params = get_parameters_for_template(url_template)
+
+        for param in template_params:
+            if param not in kwargs:
+                raise KeyError(f"Missing required parameter: '{param}'")
+
+            value = kwargs[param]
+
+            # Initialize as unchanged; will be modified if image data is detected
+            processed_value = value
+
+            if isinstance(value, io.BytesIO):
+                image_bytes = value.getvalue()
+                extension = filetype.guess_extension(image_bytes)
+                if not extension:
+                    raise ValueError(f"Cannot determine file type for parameter '{param}'.")
+                encoded_str = base64.b64encode(image_bytes).decode("utf-8")
+                processed_value = f"data:image/{extension};base64,{encoded_str}"
+
+            elif isinstance(value, bytes):
+                extension = filetype.guess_extension(value)
+                if not extension:
+                    raise ValueError(f"Cannot determine file type for parameter '{param}'.")
+                encoded_str = base64.b64encode(value).decode("utf-8")
+                processed_value = f"data:image/{extension};base64,{encoded_str}"
+
+            elif isinstance(value, str):
+                pass  # No action needed; assuming it's a regular URL or already a Data URL
+
+            else:
+                # Unsupported data type for image parameter
+                raise ValueError(f"Unsupported data type for parameter '{param}': {type(value)}")
+
+            # Update the parameter with the processed value
+            kwargs[param] = processed_value
+
+    def format_message(self, **kwargs):
+        out_msg_content = []
+        for content in self.content:
+            if isinstance(content, VisionMessageTextContent):
+                out_msg_content.append(
+                    VisionMessageTextContent(
+                        text=self._Template(content.text).render(**kwargs),
+                    )
+                )
+            elif isinstance(content, VisionMessageImageContent):
+                self.parse_image_url_parameters(content.image_url.url, kwargs)
+                out_msg_content.append(
+                    VisionMessageImageContent(
+                        image_url=VisionMessageImageURL(
+                            url=self._Template(content.image_url.url).render(**kwargs),
+                            detail=content.image_url.detail,
+                        )
+                    )
+                )
+            else:
+                raise ValueError(f"Invalid content type: {content.type}")
+
+        if len(out_msg_content) == 1 and out_msg_content[0].type == VisionMessageType.TEXT:
+            return Message(self.role, content=out_msg_content[0].text)
+
+        return VisionMessage(role=self.role, content=out_msg_content)
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Import and initialize Jinja2 Template here
+        from jinja2 import Template
+
+        self._Template = Template
 
     def to_dict(self, **kwargs) -> dict:
         """
@@ -177,29 +293,6 @@ class Prompt(BasePrompt):
 
     def __init__(self, **data):
         super().__init__(**data)
-        # Import and initialize Jinja2 Template here
-        from jinja2 import Template
-
-        self._Template = Template
-
-    def get_parameters_for_template(self, template: str, env: Environment | None = None) -> set[str]:
-        """
-        Extracts set of parameters for template.
-
-        Args:
-            template (str): Template to find parameters for.
-            env: (Environment, optional): jinja Environment object.
-
-        Returns:
-            set: Set of required parameters.
-        """
-        if not env:
-            env = Environment(autoescape=True)
-        # Parse the template to get its Abstract Syntax Tree
-        ast = env.parse(template)
-
-        # Find and return set of undeclared variables in the template
-        return meta.find_undeclared_variables(ast)
 
     def get_required_parameters(self) -> set[str]:
         """Extracts set of parameters required for messages.
@@ -213,13 +306,13 @@ class Prompt(BasePrompt):
 
         for msg in self.messages:
             if isinstance(msg, Message):
-                parameters |= self.get_parameters_for_template(msg.content, env=env)
+                parameters |= get_parameters_for_template(msg.content, env=env)
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
-                        parameters |= self.get_parameters_for_template(content.text, env=env)
+                        parameters |= get_parameters_for_template(content.text, env=env)
                     elif isinstance(content, VisionMessageImageContent):
-                        parameters |= self.get_parameters_for_template(content.image_url.url, env=env)
+                        parameters |= get_parameters_for_template(content.image_url.url, env=env)
                     else:
                         raise ValueError(f"Invalid content type: {content.type}")
             else:
@@ -303,42 +396,9 @@ class Prompt(BasePrompt):
         out: list[dict] = []
         for msg in self.messages:
             if isinstance(msg, Message):
-                out.append(
-                    Message(
-                        role=msg.role,
-                        content=self._Template(msg.content).render(**kwargs),
-                    ).model_dump(exclude={"metadata"})
-                )
+                out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
             elif isinstance(msg, VisionMessage):
-                out_msg_content = []
-                for content in msg.content:
-                    if isinstance(content, VisionMessageTextContent):
-                        out_msg_content.append(
-                            VisionMessageTextContent(
-                                text=self._Template(content.text).render(**kwargs),
-                            ).model_dump()
-                        )
-                    elif isinstance(content, VisionMessageImageContent):
-                        self.parse_image_url_parameters(content.image_url.url, kwargs)
-                        out_msg_content.append(
-                            VisionMessageImageContent(
-                                image_url=VisionMessageImageURL(
-                                    url=self._Template(content.image_url.url).render(**kwargs),
-                                    detail=content.image_url.detail,
-                                )
-                            ).model_dump()
-                        )
-                    else:
-                        raise ValueError(f"Invalid content type: {content.type}")
-
-                if len(out_msg_content) == 1 and out_msg_content[0]["type"] == VisionMessageType.TEXT:
-                    out_msg_content = out_msg_content[0]["text"]
-
-                out_msg = {
-                    "content": out_msg_content,
-                    "role": msg.role,
-                }
-                out.append(out_msg)
+                out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
             else:
                 raise ValueError(f"Invalid message type: {type(msg)}")
 
