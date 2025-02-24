@@ -116,7 +116,6 @@ def test_http_api_call_with_merged_params(mock_client):
         additional_input_data=additional_params,
         client=mock_client,
     )
-    api_tool.client = mock_client
 
     input_params = HttpApiCallInputSchema(
         data={

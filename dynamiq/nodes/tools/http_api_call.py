@@ -48,8 +48,8 @@ def recursive_merge(dict1: dict, dict2: dict) -> dict:
     Recursively merge two dictionaries.
 
     If a key exists in both dictionaries:
-    - If value are not lists or dictionaries, the value in dict1 will be used.
-    - If both values are lists or dictionaries, they are merged recursively.
+    - If value are not list or dict, the value in dict1 will be used.
+    - If both values are list or dict, they are concatenated.
 
     Args:
         dict1 (dict): The first dictionary to merge.
@@ -63,7 +63,7 @@ def recursive_merge(dict1: dict, dict2: dict) -> dict:
             if isinstance(dict1[key], dict) and isinstance(value, dict):
                 dict1[key] = recursive_merge(dict1[key], value)
             elif isinstance(dict1[key], list) and isinstance(value, list):
-                dict1[key].extend(x for x in value if x not in dict1[key])
+                dict1[key].extend(x for x in value if x not in set(dict1[key]))
         else:
             dict1[key] = value
     return dict1
