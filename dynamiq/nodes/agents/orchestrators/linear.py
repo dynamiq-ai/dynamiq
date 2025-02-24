@@ -22,11 +22,12 @@ class Task(BaseModel):
     Represents a single task in the LinearOrchestrator system.
 
     Attributes:
-        id (int): Unique identifier for the task.
-        name (str): Name of the task.
-        description (str): Detailed description of the task.
-        dependencies (list[int]): List of task IDs that this task depends on.
-        output: dict[str, Any] | str: Expected output of the task.
+        id (int): Unique identifier for the task
+        name (str): Name of the task
+        description (str): Detailed description of the task
+        dependencies (list[int]): List of task IDs that this task depends on
+        output (Union[dict[str, Any], str]): Expected output of the task,
+            either as a structured dictionary or string
     """
 
     id: int
@@ -63,15 +64,16 @@ class LinearOrchestrator(Orchestrator):
     Manages the execution of tasks by coordinating multiple agents and leveraging LLM (Large Language Model).
 
     Attributes:
-        manager (ManagerAgent): The managing agent responsible for overseeing the orchestration process.
-        agents (List[BaseAgent]): List of specialized agents available for task execution.
-        objective (Optional[str]): The main objective of the orchestration.
-        use_summarizer (Optional[bool]): Indicates if a final summarizer is used.
-        summarize_all_answers (Optional[bool]): Indicates whether to summarize answers to all tasks
-             or use only last one. Will only be applied if use_summarizer is set to True.
-        max_plan_retries (Optional[int]): Maximum number of plan generation retries.
+        name (str | None): Name of the orchestrator.
+        group (NodeGroup): The group this node belongs to.
+        manager (LinearAgentManager): The managing agent responsible for overseeing the orchestration process.
+        agents (list[Agent]): List of specialized agents available for task execution.
+        use_summarizer (bool): Indicates if a final summarizer is used.
+        summarize_all_answers (bool): Indicates whether to summarize answers to all tasks
+            or use only last one. Will only be applied if use_summarizer is set to True.
+        max_plan_retries (int): Maximum number of plan generation retries.
         plan_approval (PlanApprovalConfig): Configuration for plan approval.
-        max_user_analyze_retries (Optional[int]): Maximum number of retries for analyzing user input.
+        max_user_analyze_retries (int): Maximum number of retries for analyzing user input.
     """
 
     name: str | None = "LinearOrchestrator"
@@ -130,7 +132,21 @@ class LinearOrchestrator(Orchestrator):
         return "\n".join([f"{i}. {_agent.name}" for i, _agent in enumerate(self.agents)]) if self.agents else ""
 
     def get_tasks(self, input_task: str, config: RunnableConfig = None, **kwargs) -> list[Task]:
-        """Generate tasks using the manager agent."""
+        """
+        Generate tasks using the manager agent.
+
+        Args:
+            input_task (str): The input task to generate subtasks from
+            config (RunnableConfig, optional): Configuration for the runnable
+            **kwargs: Additional keyword arguments passed to the manager's run method
+
+        Returns:
+            list[Task]: List of generated tasks
+
+        Raises:
+            ValueError: If task generation fails
+            OrchestratorError: If maximum number of retries is reached
+        """
         manager_result_content = ""
         feedback = ""
 
@@ -188,7 +204,7 @@ class LinearOrchestrator(Orchestrator):
         output_content = output_match.group(1).strip()
 
         try:
-            output_content = re.sub(r"^```(?:json)?\s*|```$", "", output_content).strip()
+            output_content = self._clean_output(output_content)
         except AttributeError as e:
             logger.warning(
                 f"Orchestrator {self.name} - {self.id}: "
@@ -245,22 +261,7 @@ class LinearOrchestrator(Orchestrator):
                 self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
                 if manager_result.status == RunnableStatus.SUCCESS:
-                    try:
-                        assigned_agent_index = int(manager_result.output.get("content").get("result", -1))
-
-                    except ValueError:
-                        logger.warning(
-                            f"Orchestrator {self.name} - {self.id}: Invalid agent index: {manager_result.output.get('content').get('result', -1)}"  # noqa: E501
-                        )
-                        try:
-                            match = re.match(
-                                r"^\d+",
-                                manager_result.output.get("content").get("result", -1),
-                            )
-                            assigned_agent_index = int(match.group())
-                        except Exception as e:
-                            logger.error(f"Orchestrator {self.name} - {self.id}: Failed to extract agent index: {e}")
-                            assigned_agent_index = -1
+                    assigned_agent_index = self._extract_agent_index(manager_result.output.get("content", {}))
 
                     if 0 <= assigned_agent_index < len(self.agents):
                         assigned_agent = self.agents[assigned_agent_index]
@@ -451,8 +452,8 @@ class LinearOrchestrator(Orchestrator):
         Returns:
             dict | None: The extracted JSON dictionary if successful, otherwise None.
         """
-        output_content = self.extract_output_content(result_text)
-        output_content = re.sub(r"^```(?:json)?\s*|```$", "", output_content).strip()
+        output_content = self._extract_output_content(result_text)
+        output_content = self._clean_output(output_content)
 
         try:
             data = json.loads(output_content)
@@ -461,3 +462,30 @@ class LinearOrchestrator(Orchestrator):
             error_message = f"Orchestrator {self.name} - {self.id}: JSON decoding error: {e}"
             logger.error(error_message)
             return None
+
+    def _clean_output(self, text: str) -> str:
+        """Remove Markdown code fences and extra whitespace from a text."""
+        cleaned = re.sub(r"^```(?:json)?\s*|```$", "", text).strip()
+        return cleaned
+
+    def _extract_agent_index(self, result_content: dict[str, Any]) -> int:
+        """
+        Extracts and validates the agent index from the result content.
+
+        Args:
+            result_content (dict[str, Any]): The content containing the agent index
+
+        Returns:
+            int: The extracted agent index, or -1 if extraction fails
+        """
+        raw = result_content.get("result", -1)
+        try:
+            return int(raw)
+        except ValueError:
+            logger.warning(f"Invalid agent index: {raw}")
+            match = re.match(r"^\d+", str(raw))
+            if match:
+                return int(match.group())
+            else:
+                logger.error(f"Failed to extract agent index from: {raw}")
+                return -1

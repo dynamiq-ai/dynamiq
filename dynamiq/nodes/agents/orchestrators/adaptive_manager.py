@@ -1,9 +1,11 @@
 from dynamiq.nodes.agents.base import AgentManager
+from dynamiq.prompts import Message, MessageRole
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingMode
 
 PROMPT_TEMPLATE_AGENT_MANAGER_PLAN = """
-You are the Manager Agent, responsible for coordinating a team of specialized agents to complete complex tasks. Your role involves understanding the overall task, breaking it down into subtasks, delegating these subtasks to appropriate specialized agents, synthesizing results, and providing a final answer when the task is complete.
+You are the Manager Agent, responsible for coordinating a team of specialized agents to complete complex tasks.
+Your role involves understanding the overall task, breaking it down into subtasks, delegating these subtasks to appropriate specialized agents, synthesizing results, and providing a final answer when the task is complete.
 
 Here is the list of available specialized agents and their capabilities:
 <available_agents>
@@ -192,8 +194,8 @@ The sum of even numbers from 1 to 100 is 2550.
 </final_answer>
 </output>
 
-Begin your analysis now:
-
+Begin your analysis now.
+Please ensure your response strictly follows the XML structure.
 """  # noqa: E501
 
 PROMPT_TEMPLATE_AGENT_MANAGER_FINAL_ANSWER = """
@@ -402,7 +404,7 @@ class AdaptiveAgentManager(AgentManager):
     def _reflect(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'reflect' action."""
         prompt = self.generate_prompt(block_names=["reflect"])
-        llm_result = self._run_llm(prompt, config, **kwargs)
+        llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
         return llm_result
@@ -410,7 +412,7 @@ class AdaptiveAgentManager(AgentManager):
     def _respond(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'respond' action."""
         prompt = self.generate_prompt(block_names=["respond"])
-        llm_result = self._run_llm(prompt, config, **kwargs)
+        llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
         return llm_result

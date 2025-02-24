@@ -1,6 +1,7 @@
 import re
 
 from dynamiq.nodes.agents.base import Agent
+from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
@@ -69,13 +70,26 @@ class ReflectionAgent(Agent):
 
         return [content.strip() for content in output_content]
 
-    def _run_agent(self, config: RunnableConfig | None = None, **kwargs) -> str:
+    def _run_agent(
+        self,
+        input_message: Message | VisionMessage,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> str:
         try:
-            formatted_prompt = self.generate_prompt(
-                block_names=["introduction", "role", "date", "instructions", "request"]
+            system_message = Message(
+                role=MessageRole.SYSTEM,
+                content=self.generate_prompt(block_names=["introduction", "role", "date", "instructions", "context"]),
             )
-            result = self._run_llm(formatted_prompt, config=config, **kwargs)
+
+            self._prompt.messages = [system_message, input_message]
+
+            result = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
+
+            self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=result))
+
             output_content = self.extract_output_content(result)
+
             if self.verbose:
                 logger.info(f"Agent {self.name} - {self.id}: LLM output by REFLECTION prompt:\n{result[:200]}...")
             if self.streaming.enabled:

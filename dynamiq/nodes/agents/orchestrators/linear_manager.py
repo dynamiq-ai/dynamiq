@@ -1,4 +1,5 @@
 from dynamiq.nodes.agents.base import AgentManager
+from dynamiq.prompts import Message, MessageRole
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingMode
 
@@ -377,7 +378,9 @@ class LinearAgentManager(AgentManager):
         _prompt = self._get_linear_handle_input_prompt()
         _prompt = _prompt.replace("task_placeholder", temp_variables.get("task"))
         _prompt = _prompt.replace("agents_placeholder", temp_variables.get("agents"))
-        llm_result = self._run_llm(_prompt, config, **kwargs)
+        llm_result = self._run_llm([Message(role=MessageRole.USER, content=_prompt)], config, **kwargs).output[
+            "content"
+        ]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
         return llm_result
