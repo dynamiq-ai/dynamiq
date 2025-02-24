@@ -1026,3 +1026,87 @@ class AWSRedshift(BaseConnection):
             return conn
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Amazon Redshift : {str(e)}")
+
+
+class Elasticsearch(BaseConnection):
+    """
+    Represents a connection to the Elasticsearch service.
+
+    Attributes:
+        url (str): The URL of the Elasticsearch service
+        api_key (str): API key for authentication
+        username (str): Username for basic authentication
+        password (str): Password for basic authentication
+        cloud_id (str): Cloud ID for Elastic Cloud deployment
+        ca_path (str): Path to CA certificate for SSL verification
+        verify_certs (bool): Whether to verify SSL certificates
+        use_ssl (bool): Whether to use SSL for connection
+    """
+
+    url: str = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_URL", None))
+    api_key_id: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_API_KEY_ID", None))
+    api_key: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_API_KEY", None))
+    username: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_USERNAME", None))
+    password: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_PASSWORD", None))
+    cloud_id: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_CLOUD_ID", None))
+    ca_path: str | None = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_CA_PATH", None))
+    verify_certs: bool = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_VERIFY_CERTS", False))
+    use_ssl: bool = Field(default_factory=partial(get_env_var, "ELASTICSEARCH_USE_SSL", True))
+
+    def connect(self):
+        """
+        Connects to the Elasticsearch service.
+
+        Returns:
+            elasticsearch.Elasticsearch: An instance of the Elasticsearch client.
+
+        Raises:
+            ImportError: If elasticsearch package is not installed
+            ConnectionError: If connection fails
+            ValueError: If neither API key nor basic auth credentials are provided
+        """
+
+        from elasticsearch import Elasticsearch
+        from elasticsearch.exceptions import AuthenticationException
+
+        # Build connection params
+        conn_params = {}
+
+        # Handle authentication
+        if self.api_key is not None:
+            if self.api_key_id is not None:
+                conn_params["api_key"] = (self.api_key_id, self.api_key)
+            else:
+                conn_params["api_key"] = self.api_key
+        elif self.username is not None and self.password is not None:
+            conn_params["basic_auth"] = (self.username, self.password)
+        elif self.cloud_id is None:  # Only require auth for non-cloud deployments
+            raise ValueError("Either API key or username/password must be provided")
+
+        # Handle SSL/TLS
+        if self.use_ssl:
+            if self.ca_path is not None:
+                conn_params["ca_certs"] = self.ca_path
+            conn_params["verify_certs"] = self.verify_certs
+
+        # Handle cloud deployment
+        if self.cloud_id is not None:
+            conn_params["cloud_id"] = self.cloud_id
+        else:
+            conn_params["hosts"] = [self.url]
+
+        # Create client
+        try:
+            es_client = Elasticsearch(**conn_params)
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Elasticsearch: {str(e)}")
+
+        if not es_client.ping():
+            try:
+                info = es_client.info()
+            except AuthenticationException as e:
+                info = f"Authentication error: {e}"
+            raise ConnectionError(f"Failed to connect to Elasticsearch. {info}")
+
+        logger.debug(f"Connected to Elasticsearch at {self.cloud_id or self.url}")
+        return es_client

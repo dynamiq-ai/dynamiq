@@ -1,0 +1,152 @@
+connections:
+  openai-conn:
+    api_key:  ${oc.env:OPENAI_API_KEY}
+    type: dynamiq.connections.OpenAI
+
+  elasticsearch-conn:
+    url:  ${oc.env:ELASTICSEARCH_URL}
+    api_key: ${oc.env:ELASTICSEARCH_API_KEY}
+    type: dynamiq.connections.Elasticsearch
+
+  unstructured-conn:
+    type: dynamiq.connections.Unstructured
+    api_key: ${oc.env:UNSTRUCTURED_API_KEY}
+    url: ${oc.env:UNSTRUCTURED_API_URL}
+
+prompt_template: |
+  Please answer the following question based on the information found
+  within the sections enclosed by triplet quotes (\`\`\`).
+  Your response should be concise, well-written, and follow markdown formatting guidelines:
+
+  - Use bullet points for list items.
+  - Use **bold** text for emphasis where necessary.
+
+  **Question:** {{query}}
+
+  Thank you for your detailed attention to the request
+  **Context information**:
+  ```
+  {% for document in documents %}
+      ---
+      Document title: {{ document.metadata["title"] }}
+      Document information: {{ document.content }}
+      ---
+  {% endfor %}
+  ```
+
+  **User Question:** {{query}}
+  Answer:
+
+prompts:
+  openai-ai-prompt:
+    messages:
+      - role: user
+        content: ${prompt_template}
+
+
+nodes:
+  unstructured-file-converter:
+    type: dynamiq.nodes.converters.UnstructuredFileConverter
+    name: Unstructured File Converter
+    connection: unstructured-conn
+    strategy: auto
+
+  document_splitter:
+    name: DocumentSplitter
+    group: splitters
+    input_transformer:
+      selector:
+        documents: $['unstructured-file-converter'].output.documents
+    depends:
+    - node: unstructured-file-converter
+    type: dynamiq.nodes.splitters.DocumentSplitter
+
+  document-embedder-node:
+    name: OpenAIDocumentEmbedder
+    group: embedders
+    input_transformer:
+      selector:
+        documents: $['document_splitter'].output.documents
+    connection: openai-conn
+    model: text-embedding-3-small
+    type: dynamiq.nodes.embedders.OpenAIDocumentEmbedder
+    depends:
+    - node: document_splitter
+
+  document-writer-node:
+    index_name: documents
+    content_key: content
+    create_if_not_exist: true
+    dimension: 1536
+    similarity: cosine
+    embedding_key: embedding
+    write_batch_size: 100
+    scroll_size: 1000
+    name: ElasticsearchDocumentWriter
+    group: writers
+    connection: elasticsearch-conn
+    type: dynamiq.nodes.writers.ElasticsearchDocumentWriter
+    depends:
+    - node: document-embedder-node
+      option: null
+    input_transformer:
+      path: null
+      selector:
+        documents: $['document-embedder-node'].output.documents
+
+  openai-text-embedder:
+    type: dynamiq.nodes.embedders.OpenAITextEmbedder
+    name: OpenAI Text Embedder
+    connection: openai-conn
+    model: text-embedding-3-small
+
+  document-retriever-node:
+    type: dynamiq.nodes.retrievers.ElasticsearchDocumentRetriever
+    name: Elasticsearch Document Retriever
+    connection: elasticsearch-conn
+    index_name: documents
+    depends:
+      - node: openai-text-embedder
+    input_transformer:
+      selector:
+        query: $['openai-text-embedder'].output.embedding
+
+  openai-1:
+    type: dynamiq.nodes.llms.OpenAI
+    name: OpenAI-1
+    model: gpt-3.5-turbo
+    connection: openai-conn
+    prompt: openai-ai-prompt
+    depends:
+      - node: document-retriever-node
+    input_transformer:
+      selector:
+        documents: $['document-retriever-node'].output.documents
+        query: $['openai-text-embedder'].output.query
+    output_transformer:
+      path: null
+      selector:
+        answer: $.content
+
+flows:
+  indexing-flow:
+    name: RAG Document Indexing Flow
+    nodes:
+    - unstructured-file-converter
+    - document_splitter
+    - document-embedder-node
+    - document-writer-node
+
+  retrieval-flow:
+    name: RAG Document Retrieval Flow
+    nodes:
+      - openai-text-embedder
+      - document-retriever-node
+      - openai-1
+
+workflows:
+  indexing-workflow:
+    flow: indexing-flow
+
+  retrieval-workflow:
+    flow: retrieval-flow
