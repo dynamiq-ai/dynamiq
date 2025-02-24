@@ -639,7 +639,7 @@ class ReActAgent(Agent):
             properties = {}
             for name, field in tool.input_schema.model_fields.items():
                 self.generate_property_schema(properties, name, field, tool)
-            print(properties)
+
             schema = {
                 "type": "function",
                 "strict": True,
