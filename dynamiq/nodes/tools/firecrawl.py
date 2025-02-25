@@ -84,9 +84,11 @@ class FirecrawlTool(ConnectionNode):
             "skipTlsVerification": self.skip_tls_verification if self.skip_tls_verification else None,
             "timeout": self.timeout if self.timeout != 30000 else None,
             "removeBase64Images": self.remove_base64_images if self.remove_base64_images else None,
-            "blockAds": None if self.block_ads else False,
             "proxy": self.proxy,
         }
+
+        if not self.block_ads:
+            conditional_fields["blockAds"] = False
 
         if self.json_options:
             conditional_fields["jsonOptions"] = self.json_options.model_dump(exclude_none=True, by_alias=True)
