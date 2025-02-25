@@ -10,25 +10,27 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
 
-class PageOptions(BaseModel):
-    """Options for configuring page scraping behavior."""
-    headers: dict | None = None
-    include_html: bool = False
-    only_main_content: bool = False
-    remove_tags: list[str] | None = None
-    wait_for: int = 0
+class JsonOptions(BaseModel):
+    """Options for configuring JSON extraction."""
+
+    schema: dict | None = None
+    system_prompt: str | None = Field(None, alias="systemPrompt")
+    prompt: str | None = None
 
 
-class ExtractorOptions(BaseModel):
-    """Options for configuring content extraction behavior."""
-    mode: Literal[
-        "markdown",
-        "llm-extraction",
-        "llm-extraction-from-raw-html",
-        "llm-extraction-from-markdown",
-    ] = "markdown"
-    extraction_prompt: str | None = None
-    extraction_schema: dict | None = None
+class LocationSettings(BaseModel):
+    """Settings for location emulation."""
+
+    country: str = "US"
+    languages: list[str] | None = None
+
+
+class Action(BaseModel):
+    """Action to perform before content extraction."""
+
+    type: str
+    milliseconds: int | None = None
+    selector: str | None = None
 
 
 class FirecrawlInputSchema(BaseModel):
@@ -47,38 +49,67 @@ class FirecrawlTool(ConnectionNode):
     url: str | None = None
     input_schema: ClassVar[type[FirecrawlInputSchema]] = FirecrawlInputSchema
 
-    # Default parameters
-    page_options: PageOptions = Field(
-        default_factory=PageOptions, description="The options for scraping the page"
-    )
-    extractor_options: ExtractorOptions = Field(
-        default_factory=ExtractorOptions,
-        description="The options for extracting content via service LLM",
-    )
-    timeout: int = 60000
+    formats: list[str] = Field(default_factory=lambda: ["markdown"])
+    only_main_content: bool = Field(default=True, alias="onlyMainContent")
+    include_tags: list[str] | None = Field(default=None, alias="includeTags")
+    exclude_tags: list[str] | None = Field(default=None, alias="excludeTags")
+    headers: dict | None = None
+    wait_for: int = Field(default=0, alias="waitFor")
+    mobile: bool = False
+    skip_tls_verification: bool = Field(default=False, alias="skipTlsVerification")
+    timeout: int = 30000
+    json_options: JsonOptions | None = Field(default=None, alias="jsonOptions")
+    actions: list[Action] | None = None
+    location: LocationSettings | None = None
+    remove_base64_images: bool = Field(default=False, alias="removeBase64Images")
+    block_ads: bool = Field(default=True, alias="blockAds")
+    proxy: str | None = None
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
-    @staticmethod
-    def to_camel_case(snake_str: str) -> str:
-        components = snake_str.split("_")
-        return components[0] + "".join(x.title() for x in components[1:])
+    def _build_scrape_data(self, url: str) -> dict:
+        """Build the request payload for the Firecrawl API."""
+        base_data = {
+            "url": url,
+            "formats": self.formats,
+            "onlyMainContent": self.only_main_content,
+        }
 
-    @staticmethod
-    def dict_to_camel_case(data: dict | list) -> dict | list:
-        if isinstance(data, dict):
-            return {
-                FirecrawlTool.to_camel_case(key): (
-                    FirecrawlTool.dict_to_camel_case(value)
-                    if isinstance(value, (dict, list))
-                    else value
-                )
-                for key, value in data.items()
-            }
-        elif isinstance(data, list):
-            return [FirecrawlTool.dict_to_camel_case(item) for item in data]
-        else:
-            return data
+        conditional_fields = {
+            "includeTags": self.include_tags,
+            "excludeTags": self.exclude_tags,
+            "headers": self.headers,
+            "waitFor": self.wait_for if self.wait_for > 0 else None,
+            "mobile": self.mobile if self.mobile else None,
+            "skipTlsVerification": self.skip_tls_verification if self.skip_tls_verification else None,
+            "timeout": self.timeout if self.timeout != 30000 else None,
+            "removeBase64Images": self.remove_base64_images if self.remove_base64_images else None,
+            "blockAds": None if self.block_ads else False,
+            "proxy": self.proxy,
+        }
+
+        if self.json_options:
+            conditional_fields["jsonOptions"] = self.json_options.model_dump(exclude_none=True, by_alias=True)
+        if self.actions:
+            conditional_fields["actions"] = [action.model_dump(exclude_none=True) for action in self.actions]
+        if self.location:
+            conditional_fields["location"] = self.location.model_dump(exclude_none=True)
+
+        # Filter out None values and merge with base data
+        filtered_fields = {k: v for k, v in conditional_fields.items() if v is not None}
+        return {**base_data, **filtered_fields}
+
+    def _format_agent_response(self, url: str, data: dict) -> str:
+        """Format the response for agent consumption."""
+        sections = [f"<Source URL>\n{url}\n<\\Source URL>"]
+
+        format_mappings = {"content": "Scraped result", "markdown": "Markdown", "html": "HTML", "json": "JSON"}
+
+        for data_key, section_name in format_mappings.items():
+            if data_key in data:
+                sections.append(f"<{section_name}>\n{data[data_key]}\n<\\{section_name}>")
+
+        return "\n\n".join(sections)
 
     def execute(
         self, input_data: FirecrawlInputSchema, config: RunnableConfig | None = None, **kwargs
@@ -94,18 +125,8 @@ class FirecrawlTool(ConnectionNode):
             logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
             raise ValueError("URL is required for scraping")
 
-        scrape_data = {
-            "url": url,
-            "pageOptions": self.dict_to_camel_case(
-                self.page_options.model_dump(exclude_none=True)
-            ),
-            "extractorOptions": self.dict_to_camel_case(
-                self.extractor_options.model_dump(exclude_none=True)
-            ),
-            "timeout": self.timeout,
-        }
-
-        connection_url = self.connection.url + "scrape/"
+        scrape_data = self._build_scrape_data(url)
+        connection_url = self.connection.url + "scrape"
 
         try:
             response = self.client.request(
@@ -126,28 +147,12 @@ class FirecrawlTool(ConnectionNode):
                 recoverable=True,
             )
 
+        data = scrape_result.get("data", {})
+
         if self.is_optimized_for_agents:
-            result = f"<Source URL>\n{url}\n<\\Source URL>"
-            if scrape_result.get("data", {}).get("content", "") != "":
-                result += f"\n\n<Scraped result>\n{scrape_result.get('data', {}).get('content')}\n<\\Scraped result>"
-            if scrape_result.get("data", {}).get("markdown", "") != "":
-                result += f"\n\n<Markdown>\n{scrape_result.get('data', {}).get('markdown')}\n<\\Markdown>"
-            if scrape_result.get("data", {}).get("llm_extraction", "") != "":
-                result += (
-                    f"\n\n<LLM Extraction>\n{scrape_result.get('data', {}).get('llm_extraction')}\n<\\LLM Extraction>"
-                )
+            result = self._format_agent_response(url, data)
         else:
-            result = {
-                "success": scrape_result.get("success", False),
-                "url": url,
-                "markdown": scrape_result.get("data", {}).get("markdown", ""),
-                "content": scrape_result.get("data", {}).get("content", ""),
-                "html": scrape_result.get("data", {}).get("html"),
-                "raw_html": scrape_result.get("data", {}).get("rawHtml"),
-                "metadata": scrape_result.get("data", {}).get("metadata", {}),
-                "llm_extraction": scrape_result.get("data", {}).get("llm_extraction"),
-                "warning": scrape_result.get("data", {}).get("warning"),
-            }
+            result = {"success": scrape_result.get("success", False), "url": url, **data}
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
