@@ -399,7 +399,7 @@ class Agent(Node):
             content (str | dict): Data that will be streamed.
             source (str): Source of the content.
             step (str): Description of the step.
-            by_tokens (bool | None): Determines whether to stream content by tokens or not.
+            by_tokens (Optional[bool]): Determines whether to stream content by tokens or not.
                 If None it is determined based on StreamingConfig. Defaults to None.
             config (Optional[RunnableConfig]): Configuration for the runnable.
             **kwargs: Additional keyword arguments.
