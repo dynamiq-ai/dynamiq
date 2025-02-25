@@ -328,12 +328,14 @@ class ReActAgent(Agent):
                 input_formats=self.generate_input_formats(self.tools),
             ),
         )
-
-        print(self.generate_prompt(
-                tools_name=self.tool_names,
-                input_formats=self.generate_input_formats(self.tools),
-            ))
         self._prompt.messages = [system_message, input_message]
+
+        stop_sequences = ["Observation:"]
+
+        if self.inference_mode == InferenceMode.XML:
+            stop_sequences = (["<observation>", "</observation>"])
+
+        self.llm.stop = stop_sequences
 
         for loop_num in range(self.max_loops):
 
@@ -348,6 +350,9 @@ class ReActAgent(Agent):
 
                 action, action_input = None, None
                 llm_generated_output = ""
+
+                stop_sequences = ["Observation:"]
+
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
                         llm_generated_output = llm_result.output["content"]
@@ -458,6 +463,8 @@ class ReActAgent(Agent):
                         llm_generated_output = json.dumps(llm_generated_output_json)
 
                     case InferenceMode.XML:
+
+                        
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
                         llm_generated_output = llm_result.output["content"]
