@@ -391,7 +391,22 @@ class Agent(Node):
         config: RunnableConfig | None = None,
         by_tokens: bool | None = None,
         **kwargs,
-    ):
+    ) -> str | dict:
+        """
+        Streams data.
+
+        Args:
+            content (str | dict): Data that will be streamed.
+            source (str): Source of the content.
+            step (str): Description of the step.
+            by_tokens (bool | None): Determines whether to stream content by tokens or not.
+                If None it is determined based on StreamingConfig. Defaults to None.
+            config (Optional[RunnableConfig]): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            str | dict: Streamed data.
+        """
         if (by_tokens is None and self.streaming.by_tokens) or by_tokens:
             return self.stream_by_tokens(content=content, source=source, step=step, config=config, **kwargs)
         return self.stream_response(content=content, source=source, step=step, config=config, **kwargs)
