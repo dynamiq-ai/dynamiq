@@ -257,7 +257,6 @@ class ReActAgent(Agent):
         Logs final output of the agent.
 
         Args:
-            thought (str): Reasoning about finishing.
             final_output (str): Final output of agent.
             loop_num (int): Number of reasoning loop
         """
