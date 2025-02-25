@@ -463,8 +463,6 @@ class ReActAgent(Agent):
                         llm_generated_output = json.dumps(llm_generated_output_json)
 
                     case InferenceMode.XML:
-
-                        
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
                         llm_generated_output = llm_result.output["content"]
