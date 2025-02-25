@@ -176,6 +176,7 @@ class LinearOrchestrator(Orchestrator):
             )
             try:
                 tasks = self.parse_tasks_from_output(manager_result_content)
+
             except ActionParseError as e:
                 feedback = str(e)
                 continue
