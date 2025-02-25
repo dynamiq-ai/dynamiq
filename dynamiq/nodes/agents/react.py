@@ -14,12 +14,22 @@ from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
+from enum import Enum
 
-REACT_BLOCK_TOOLS = (
-    "You have access to a variety of tools,"
-    "and you are responsible for using them in any order you choose to complete the task:\n"
-    "{tools_desc}"
-)
+REACT_BLOCK_TOOLS = """
+You have access to a variety of tools,
+and you are responsible for using them in any order you choose to complete the task:\n
+{tool_description}
+
+Input formats for tools:
+{input_formats}
+"""
+
+REACT_BLOCK_TOOLS_NO_FORMATS = """
+You have access to a variety of tools,
+and you are responsible for using them in any order you choose to complete the task:\n
+{tool_description}
+"""
 
 REACT_BLOCK_NO_TOOLS = "You do not have access to any tools."
 
@@ -40,8 +50,6 @@ Here is how you will think about the user's request
 REMEMBER:
 * Inside 'action' provide just name of one tool from this list: [{tools_name}]. Don't wrap it with <>.
 * Each 'action' has its own input format strictly adhere to it.
-Input formats for tools:
-{input_formats}
 
 After each action, the user will provide an "Observation" with the result.
 Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
@@ -75,15 +83,11 @@ Action Input: [The input you provide to the tool]
 Remember:
 - Each tool has its specific input format you have strickly adhere to it.
 - Avoid using triple quotes (multi-line strings, docstrings) when providing multi-line code.
-- Provide all necessary information in 'Action Input' for the next step to succeed.
 - Action Input must be in JSON format.
 - Always begin each response with a 'Thought' explaining your reasoning.
 - If you use a tool, follow the 'Thought' with an 'Action' (chosen from the available tools) and an 'Action Input'.
 - After each action, the user will provide an 'Observation' with the result.
 - Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
-
-Input formats for tools:
-{input_formats}
 
 When you have sufficient information, provide your final answer in one of these two formats:
 If you can answer the request:
@@ -97,6 +101,7 @@ Answer: [Explanation of why you cannot answer]
 Remember:
 - Always start with a Thought.
 - Never use markdown code markers in your response.
+
 """  # noqa: E501
 
 
@@ -120,9 +125,6 @@ Remember:
 - Each tool has is specific input format you have strickly adhere to it.
 - In action_input you have to provide input in JSON format.
 - Avoid using extra backslashes
-
-Input formats for tools:
-{input_formats}
 """  # noqa: E501
 
 
@@ -131,7 +133,8 @@ You have to call appropriate functions.
 
 Function descriptions:
 plan_next_action - function that should be called to use tools [{tools_name}]].
-provide_final_answer - function that should be called when answer on initial request can be provided
+provide_final_answer - function that should be called when answer on initial request can be provided.
+Call this function if initial user input does not have any actionable request.
 """  # noqa: E501
 
 
@@ -159,11 +162,9 @@ Remember:
 
 
 REACT_BLOCK_OUTPUT_FORMAT = (
-    "In your final answer, avoid phrases like 'based on the information gathered or provided.'"
+    "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
     "Simply give a clear and concise answer."
 )
-
-REACT_BLOCK_CONTEXT = "Below is the conversation: {context}"
 
 
 REACT_MAX_LOOPS_PROMPT = """
@@ -194,7 +195,8 @@ final_answer_function_schema = {
     "strict": True,
     "function": {
         "name": "provide_final_answer",
-        "description": "Function should be called when if you can answer the initial request",
+        "description": "Function should be called when if you can answer the initial request"
+        " or if there is not request at all.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -210,12 +212,20 @@ final_answer_function_schema = {
 }
 
 
+TYPE_MAPPING = {
+    int: "integer",
+    float: "float",
+    bool: "boolean",
+    str: "string",
+}
+
+
 class ReActAgent(Agent):
     """Agent that uses the ReAct strategy for processing tasks by interacting with tools in a loop."""
 
     name: str = "React Agent"
     max_loops: int = Field(default=15, ge=2)
-    inference_mode: InferenceMode = InferenceMode.DEFAULT
+    inference_mode: InferenceMode = InferenceMode.XML
     behaviour_on_max_loops: Behavior = Field(
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
@@ -272,7 +282,7 @@ class ReActAgent(Agent):
 
         return action, action_input
 
-    def extract_output_and_answer_xml(self, text: str) -> dict[str, str]:
+    def extract_output_and_answer_xml(self, text: str) -> tuple[str, Any]:
         """Extract output and answer from XML-like structure."""
         output = self.parse_xml_content(text, "output")
         answer = self.parse_xml_content(text, "answer")
@@ -312,13 +322,19 @@ class ReActAgent(Agent):
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(
-                tools_desc=self.tool_description,
                 tools_name=self.tool_names,
                 input_formats=self.generate_input_formats(self.tools),
             ),
         )
-
         self._prompt.messages = [system_message, input_message]
+
+        stop_sequences = []
+
+        if self.inference_mode == InferenceMode.XML:
+            stop_sequences.extend(["<observation>"])
+        elif self.inference_mode == InferenceMode.DEFAULT:
+            stop_sequences.extend(["Observation: "])
+        self.llm.stop = stop_sequences
 
         for loop_num in range(self.max_loops):
 
@@ -330,16 +346,18 @@ class ReActAgent(Agent):
                     inference_mode=self.inference_mode,
                     **kwargs,
                 )
-                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_result.output["content"]))
 
                 action, action_input = None, None
                 llm_generated_output = ""
-                logger.info(
-                    f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, reasoning:\n{llm_result.output['content']}"
-                )
+
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
                         llm_generated_output = llm_result.output["content"]
+
+                        logger.info(
+                            f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, reasoning:\n{llm_generated_output}"
+                        )
+
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
@@ -365,12 +383,24 @@ class ReActAgent(Agent):
                         action, action_input = self._parse_action(llm_generated_output)
 
                     case InferenceMode.FUNCTION_CALLING:
+
+                        if "tool_calls" not in dict(llm_result.output):
+                            logger.error(f"Error: No function called. Output: {llm_result.output['content']}")
+                            raise ActionParsingException(
+                                "Error: No function called. Call the function to proceed."
+                            )
+
                         action = list(llm_result.output["tool_calls"].values())[0]["function"]["name"].strip()
                         llm_generated_output_json = list(llm_result.output["tool_calls"].values())[0]["function"][
                             "arguments"
                         ]
 
                         llm_generated_output = json.dumps(llm_generated_output_json)
+
+                        logger.info(
+                            f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, reasoning:\n{llm_generated_output}"
+                        )
+
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
@@ -398,6 +428,12 @@ class ReActAgent(Agent):
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
                         llm_generated_output_json = json.loads(llm_result.output["content"])
+
+                        logger.info(
+                            f"Agent {self.name} - {self.id}:"
+                            f"Loop {loop_num + 1}, reasoning:\n{llm_generated_output_json}"
+                        )
+
                         action = llm_generated_output_json["action"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
@@ -427,6 +463,11 @@ class ReActAgent(Agent):
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
                         llm_generated_output = llm_result.output["content"]
+
+                        logger.info(
+                            f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, reasoning:\n{llm_generated_output}"
+                        )
+
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
@@ -465,7 +506,7 @@ class ReActAgent(Agent):
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content=observation,
-                                source=tool.name,
+                                source=tool.name if tool else action,
                                 step=f"tool_{loop_num}",
                                 config=config,
                                 **kwargs,
@@ -482,7 +523,7 @@ class ReActAgent(Agent):
                         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
 
             except ActionParsingException as e:
-                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=f"{type(e).__name__}: {e}"))
+                self._prompt.messages.append(Message(role=MessageRole.USER, content=f"{type(e).__name__}: {e}"))
                 continue
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
@@ -573,30 +614,32 @@ class ReActAgent(Agent):
     @staticmethod
     def filter_format_type(param_type: str | type) -> str:
         """Filters proper type for a function calling schema."""
-        type_mapping = {
-            int: "integer",
-            float: "float",
-            bool: "boolean",
-            str: "string",
-        }
 
-        if isinstance(param_type, str):
-            match param_type:
-                case "bool":
-                    return "boolean"
-                case "int":
-                    return "integer"
-                case "float":
-                    return "float"
-                case _:
-                    return "string"
-        elif get_origin(param_type) is Union:
-            first_type = next((arg for arg in get_args(param_type) if arg is not type(None)), None)
-            if first_type is None:
-                return "string"
-            return type_mapping.get(first_type, getattr(first_type, "__name__", "string"))
-        else:
-            return type_mapping.get(param_type, getattr(param_type, "__name__", "string"))
+        if get_origin(param_type) in (Union, types.UnionType):
+            param_type = next((arg for arg in get_args(param_type) if arg is not type(None)), None)
+
+        return param_type
+
+    def generate_property_schema(self, properties, name, field, tool):
+        if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
+            description = field.description or "No description"
+            param = self.filter_format_type(field.annotation)
+
+            if param_type := TYPE_MAPPING.get(param):
+                properties[name] = {"type": param_type, "description": description}
+
+            elif issubclass(param, Enum):
+                element_type = TYPE_MAPPING.get(
+                    self.filter_format_type(type(list(field.annotation.__members__.values())[0].value))
+                )
+                properties[name] = {
+                    "type": element_type,
+                    "description": description,
+                    "enum": [field.value for field in field.annotation.__members__.values()],
+                }
+
+            elif param.__origin__ is list:
+                properties[name] = {"type": "array", "items": {"type": TYPE_MAPPING.get(param.__args__[0])}}
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
@@ -604,10 +647,7 @@ class ReActAgent(Agent):
         for tool in self.tools:
             properties = {}
             for name, field in tool.input_schema.model_fields.items():
-                if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
-                    param_type = self.filter_format_type(field.annotation)
-                    description = field.description or "No description"
-                    properties[name] = {"type": param_type, "description": description}
+                self.generate_property_schema(properties, name, field, tool)
 
             schema = {
                 "type": "function",
@@ -649,6 +689,8 @@ class ReActAgent(Agent):
             case InferenceMode.FUNCTION_CALLING:
                 self.generate_function_calling_schemas()
                 prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING
+                prompt_blocks["tools"] = REACT_BLOCK_TOOLS_NO_FORMATS
+
             case InferenceMode.STRUCTURED_OUTPUT:
                 self.generate_structured_output_schemas()
                 prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT
