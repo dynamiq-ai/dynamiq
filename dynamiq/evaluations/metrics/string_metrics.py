@@ -106,8 +106,8 @@ class StringPresenceEvaluator(BaseEvaluator):
     def run_single(self, ground_truth_answer: str, answer: str) -> float:
         input_data = RunSingleInput(ground_truth_answer=ground_truth_answer, answer=answer)
         presence = float(input_data.ground_truth_answer in input_data.answer)
-        logger.debug(f"Single pair: String Presence = {presence}")
-        return presence
+        output = RunSingleOutput(score=presence)
+        return output.score
 
     def run(self, ground_truth_answers: list[str], answers: list[str]) -> list[float]:
         input_data = RunInput(ground_truth_answers=ground_truth_answers, answers=answers)
@@ -158,7 +158,8 @@ class StringSimilarityEvaluator(BaseEvaluator):
             f"Normalized Distance = {normalized_dist}, "
             f"Similarity = {similarity_rounded}"
         )
-        return similarity_rounded
+        output = RunSingleOutput(score=similarity_rounded)
+        return output.score
 
     def run(self, ground_truth_answers: list[str], answers: list[str]) -> list[float]:
         input_data = RunInput(ground_truth_answers=ground_truth_answers, answers=answers)

@@ -125,7 +125,9 @@ class RougeScoreEvaluator(BaseEvaluator):
         rouge_result = self._scorer.score(single_input.ground_truth_answer, single_input.answer)
         metric_value = getattr(rouge_result[self.rouge_type.value], self.measure_type.value)
         score = round(float(metric_value), 2)
-        return score
+
+        output = RunSingleOutput(score=score)
+        return output.score
 
     def run(self, ground_truth_answers: list[str], answers: list[str]) -> list[float]:
         """

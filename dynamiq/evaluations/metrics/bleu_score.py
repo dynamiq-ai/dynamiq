@@ -127,7 +127,9 @@ class BleuScoreEvaluator(BaseEvaluator):
         # Compute the BLEU score; sacrebleu returns a percentage, so we scale it by 1/100.
         bleu_result = self._corpus_bleu(hypothesis, structured_refs).score / 100.0
         score = round(float(bleu_result), 2)
-        return score
+
+        output = RunSingleOutput(score=score)
+        return output.score
 
     def _process_text_for_bleu(self, text: str) -> list[str]:
         """
