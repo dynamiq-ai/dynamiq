@@ -36,9 +36,7 @@ class TavilyTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Tavily Search Tool"
-    description: str = (
-        "A tool for searching the web, powered by Tavily. "
-    )
+    description: str = "A tool for searching the web."
     connection: Tavily
 
     search_depth: str = Field(default="basic", description="The search depth to use.")
