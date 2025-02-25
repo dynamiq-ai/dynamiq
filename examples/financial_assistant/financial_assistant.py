@@ -1,9 +1,13 @@
+from datetime import date
+
 from dynamiq import Workflow
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms.openai import OpenAI
+from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, RequestPayloadType
+from dynamiq.prompts import Message, Prompt
 
 # API Descriptions
 STOCK_HISTORICAL_API_DESCRIPTION = """
@@ -41,16 +45,12 @@ Endpoint:
 Multiple symbols in a single request are NOT allowed.
 
 **Function options:**
-
-**OHLCV Time Series Data:**
 * 'TIME_SERIES_DAILY' - Daily stock data.
 * 'TIME_SERIES_DAILY_ADJUSTED' - Daily stock data with adjustments.
 * 'TIME_SERIES_WEEKLY' - Weekly stock data.
 * 'TIME_SERIES_WEEKLY_ADJUSTED' - Weekly stock data with adjustments.
 * 'TIME_SERIES_MONTHLY' - Monthly stock data.
 * 'TIME_SERIES_MONTHLY_ADJUSTED' - Monthly stock data.
-
-**Real-Time Data:**
 * 'REALTIME_BULK_QUOTES' - Bulk real-time quotes for up to 100 US-traded symbols.
 * 'REALTIME_OPTIONS' - Real-time US options data.
 
@@ -81,6 +81,20 @@ Endpoint:
 {"params": {"function": "FUNCTION", "symbol":"COMPANY"}, "data": {}, "url": "",
 "payload_type": "raw", "headers": {}}
 ```
+"""
+
+WRITE_REPORT_PROMPT = f"""
+Information: "{{{{context}}}}"
+---
+Based on the above, answer: "{{{{question}}}}" in a detailed, well-structured,
+and comprehensive report of at least {{{{word_lower_limit}}}} words.
+Provide factual information, numbers if available, and a concrete, well-reasoned analysis.
+
+- Formulate a clear and valid opinion; avoid vague conclusions.
+- Use markdown syntax.
+- Today's date is {date.today()}.
+
+This report is critical, ensure the highest quality.
 """
 
 
@@ -157,8 +171,27 @@ def initialize_workflow(endpoint_url, api_key):
         max_loops=30,
     )
 
+    generate_report_node = OpenAI(
+        id="generate_report_node",
+        name="generate-report",
+        model="gpt-4o-mini",
+        connection=OpenAIConnection(),
+        prompt=Prompt(messages=[Message(role="user", content=WRITE_REPORT_PROMPT)]),
+        temperature=0.35,
+        max_tokens=3000,
+        input_transformer=InputTransformer(
+            selector={
+                "context": f"${[financial_research_agent.id]}.output.content",
+                "question": "$.input",
+                "word_lower_limit": "$.word_lower_limit",
+            }
+        ),
+        depends=[NodeDependency(financial_research_agent)],
+    )
+
     workflow = Workflow()
     workflow.flow.add_nodes(financial_research_agent)
+    workflow.flow.add_nodes(generate_report_node)
     return workflow
 
 
@@ -175,7 +208,7 @@ if __name__ == "__main__":
         "Which stocks of MAANG companies were the most successful during the last month?",
     ]
 
-    result = wf.run(input_data={"input": possible_questions_to_ask[0]})
+    result = wf.run(input_data={"input": possible_questions_to_ask[1], "word_lower_limit": 300})
 
     print("Result:")
-    print(result.output.get("financial_research_agent", {}).get("output", {}).get("content"))
+    print(result.output.get("generate_report_node", {}).get("output", {}).get("content"))
