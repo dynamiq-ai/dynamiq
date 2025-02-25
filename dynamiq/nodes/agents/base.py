@@ -7,7 +7,7 @@ from typing import Any, Callable, ClassVar
 
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
-
+import textwrap
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
@@ -151,7 +151,7 @@ class Agent(Node):
     verbose: bool = Field(False, description="Whether to print verbose logs.")
 
     input_message: Message | VisionMessage = Message(role=MessageRole.USER, content="{{input}}")
-    context_template: str | None = None
+    role: str | None = None
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
 
@@ -299,8 +299,8 @@ class Agent(Node):
             self.memory.add(role=MessageRole.USER, content=input_message.content, metadata=custom_metadata)
             self._retrieve_memory(dict(input_data))
 
-        if self.context_template:
-            self._prompt_variables["context"] = Template(self.context_template).render(**dict(input_data))
+        if self.role:
+            self._prompt_variables["context"] = Template(self.role).render(**dict(input_data))
 
         files = input_data.files
         if files:
@@ -574,7 +574,7 @@ class Agent(Node):
                     formated_prompt_blocks[block] = formatted_content
 
         prompt = Template(self.AGENT_PROMPT_TEMPLATE).render(formated_prompt_blocks).strip()
-        return prompt
+        return textwrap.dedent(prompt)
 
 
 class AgentManagerInputSchema(BaseModel):

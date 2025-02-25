@@ -100,7 +100,7 @@ class GraphState(Node):
         Return:
             str: Description of the agent.
         """
-        return f"Name: {agent.name}. Description: {agent.context_template}"
+        return f"Name: {agent.name}. Role: {agent.role}"
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
