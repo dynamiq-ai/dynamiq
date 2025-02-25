@@ -61,7 +61,7 @@ class StreamingQueueCallbackHandler(BaseCallbackHandler):
             data=format_value(chunk),
             event=serialized.get("streaming", {}).get("event"),
         )
-        self.queue.put_nowait(event)
+        self.send_to_queue(event)
 
     def on_workflow_end(
         self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any
@@ -80,7 +80,7 @@ class StreamingQueueCallbackHandler(BaseCallbackHandler):
             data=format_value(output_data),
             event=serialized.get("streaming", {}).get("event"),
         )
-        self.queue.put_nowait(event)
+        self.send_to_queue(event)
         self.done_event.set()
 
     def on_workflow_error(
@@ -94,6 +94,10 @@ class StreamingQueueCallbackHandler(BaseCallbackHandler):
             **kwargs (Any): Additional arguments.
         """
         self.done_event.set()
+
+    def send_to_queue(self, event: StreamingEventMessage):
+        """Send the event to the queue."""
+        self.queue.put_nowait(event)
 
 
 class StreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
@@ -154,12 +158,14 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
         self,
         queue: asyncio.Queue | None = None,
         done_event: asyncio.Event | None = None,
+        loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         """Initialize AsyncStreamingIteratorCallbackHandler.
 
         Args:
             queue (asyncio.Queue | None): Queue for streaming events.
             done_event (asyncio.Event | None): Event to signal completion.
+            loop (asyncio.AbstractEventLoop | None): Event loop.
         """
         if queue is None:
             queue = asyncio.Queue()
@@ -167,6 +173,11 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
             done_event = asyncio.Event()
         super().__init__(queue, done_event)
         self._iterator = self._iter_queue_events()
+        self.loop = loop or asyncio.get_event_loop()
+
+    def send_to_queue(self, event: StreamingEventMessage):
+        """Send the event to the queue."""
+        asyncio.run_coroutine_threadsafe(self.queue.put(event), self.loop)
 
     async def _iter_queue_events(self) -> AsyncIterator[StreamingEventMessage]:
         """Async iterate over queue events.
