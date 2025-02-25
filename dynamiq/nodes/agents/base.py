@@ -145,7 +145,6 @@ class Agent(Node):
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
     name: str = "Agent"
-    role: str | None = None
     max_loops: int = 1
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.BOTH
