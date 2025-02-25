@@ -166,8 +166,6 @@ REACT_BLOCK_OUTPUT_FORMAT = (
     "Simply give a clear and concise answer."
 )
 
-REACT_BLOCK_CONTEXT = "Below is the conversation: {context}"
-
 
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
@@ -284,7 +282,7 @@ class ReActAgent(Agent):
 
         return action, action_input
 
-    def extract_output_and_answer_xml(self, text: str) -> dict[str, str]:
+    def extract_output_and_answer_xml(self, text: str) -> tuple[str, Any]:
         """Extract output and answer from XML-like structure."""
         output = self.parse_xml_content(text, "output")
         answer = self.parse_xml_content(text, "answer")
@@ -330,11 +328,12 @@ class ReActAgent(Agent):
         )
         self._prompt.messages = [system_message, input_message]
 
-        stop_sequences = ["Observation:"]
+        stop_sequences = []
 
         if self.inference_mode == InferenceMode.XML:
-            stop_sequences = (["<observation>", "</observation>"])
-
+            stop_sequences.extend(["</action_input>", "</output>", "<observation>"])
+        elif self.inference_mode == InferenceMode.DEFAULT:
+            stop_sequences.extend(["Observation: "])
         self.llm.stop = stop_sequences
 
         for loop_num in range(self.max_loops):
@@ -350,8 +349,6 @@ class ReActAgent(Agent):
 
                 action, action_input = None, None
                 llm_generated_output = ""
-
-                stop_sequences = ["Observation:"]
 
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
@@ -388,7 +385,7 @@ class ReActAgent(Agent):
                     case InferenceMode.FUNCTION_CALLING:
 
                         if "tool_calls" not in dict(llm_result.output):
-                            logger.error(f"Error: No function called. Output: {llm_result.output["content"]}")
+                            logger.error(f"Error: No function called. Output: {llm_result.output['content']}")
                             raise ActionParsingException(
                                 "Error: No function called. Call the function to proceed."
                             )
