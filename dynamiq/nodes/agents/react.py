@@ -442,6 +442,7 @@ class ReActAgent(Agent):
                                 source=self.name,
                                 step=f"reasoning_{loop_num + 1}",
                                 config=config,
+                                by_tokens=False,
                                 **kwargs,
                             )
 
@@ -489,6 +490,7 @@ class ReActAgent(Agent):
                                 source=self.name,
                                 step=f"reasoning_{loop_num + 1}",
                                 config=config,
+                                by_tokens=False,
                                 **kwargs,
                             )
 
@@ -526,6 +528,7 @@ class ReActAgent(Agent):
                                 source=self.name,
                                 step=f"reasoning_{loop_num + 1}",
                                 config=config,
+                                by_tokens=False,
                                 **kwargs,
                             )
 
@@ -559,6 +562,7 @@ class ReActAgent(Agent):
                                 source=self.name,
                                 step=f"reasoning_{loop_num + 1}",
                                 config=config,
+                                by_tokens=False,
                                 **kwargs,
                             )
 
@@ -581,6 +585,7 @@ class ReActAgent(Agent):
                                 source=tool.name if tool else action,
                                 step=f"tool_{loop_num}",
                                 config=config,
+                                by_tokens=False,
                                 **kwargs,
                             )
 

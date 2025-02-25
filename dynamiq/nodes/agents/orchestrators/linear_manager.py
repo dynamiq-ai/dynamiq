@@ -383,6 +383,11 @@ class LinearAgentManager(AgentManager):
         ]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(
-                content=llm_result, step="manager_input_handling", source=self.name, config=config, **kwargs
+                content=llm_result,
+                step="manager_input_handling",
+                source=self.name,
+                config=config,
+                by_tokens=False,
+                **kwargs
             )
         return llm_result
