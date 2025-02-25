@@ -1,5 +1,8 @@
+import re
 from typing import Callable
+
 from pydantic import BaseModel, PrivateAttr, model_validator
+
 from dynamiq.evaluations import BaseEvaluator
 
 
@@ -99,7 +102,7 @@ class BleuScoreEvaluator(BaseEvaluator):
         """
         Compute the BLEU score for a single pair of ground truth (reference) and answer.
 
-        The input strings are split by ". " into sentences. The reference is provided
+        The input strings are into sentences. The reference is provided
         in a format expected by sacrebleu (a list of lists) and the candidate is provided
         as a list of sentences.
 
@@ -113,8 +116,9 @@ class BleuScoreEvaluator(BaseEvaluator):
         # Validate inputs using the Pydantic model.
         single_input = RunSingleInput(ground_truth_answer=ground_truth_answer, answer=answer)
 
-        ref_sentences = single_input.ground_truth_answer.split(". ")
-        resp_sentences = single_input.answer.split(". ")
+        # Process text into clean sentences
+        ref_sentences = self._process_text_for_bleu(single_input.ground_truth_answer)
+        resp_sentences = self._process_text_for_bleu(single_input.answer)
 
         # Format the reference as a list of lists (one per sentence)
         structured_refs = [[sent] for sent in ref_sentences]
@@ -124,6 +128,57 @@ class BleuScoreEvaluator(BaseEvaluator):
         bleu_result = self._corpus_bleu(hypothesis, structured_refs).score / 100.0
         score = round(float(bleu_result), 2)
         return score
+
+    def _process_text_for_bleu(self, text: str) -> list[str]:
+        """
+        Process text into clean sentences for BLEU score computation.
+
+        Args:
+            text (str): The text to process.
+
+        Returns:
+            list[str]: List of cleaned sentences.
+        """
+        # First split the text into sentences
+        raw_sentences = self._split_text_into_sentences(text)
+
+        # Then clean each sentence by removing punctuation
+        cleaned_sentences = [self._clean_sentence(sentence) for sentence in raw_sentences]
+
+        # Filter out empty or very short sentences (likely fragments)
+        return [s for s in cleaned_sentences if s and len(s.split()) > 1]
+
+    def _split_text_into_sentences(self, text: str) -> list[str]:
+        """
+        Split text into sentences based on punctuation boundaries.
+
+        Args:
+            text (str): The text to split.
+
+        Returns:
+            list[str]: List of sentences.
+        """
+        # Split on ., !, or ? followed by whitespace or end of string
+        sentences = re.split(r"(?<=[.!?])\s+|(?<=[.!?])$", text)
+        return [s.strip() for s in sentences if s.strip()]
+
+    def _clean_sentence(self, sentence: str) -> str:
+        """
+        Clean a sentence by removing all punctuation.
+
+        Args:
+            sentence (str): The sentence to clean.
+
+        Returns:
+            str: Cleaned sentence with punctuation removed.
+        """
+        # Remove leading/trailing whitespace
+        cleaned = sentence.strip()
+
+        # Remove all punctuation
+        cleaned = re.sub(r"[^\w\s]", "", cleaned)
+
+        return cleaned.strip()
 
     def run(self, ground_truth_answers: list[str], answers: list[str]) -> list[float]:
         """
