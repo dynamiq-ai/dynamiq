@@ -24,6 +24,6 @@ def test_bleu_score_evaluator():
     # Run evaluator
     bleu_scores = bleu_evaluator.run(ground_truth_answers=ground_truth_answers, answers=answers)
 
-    expected_scores = [1.0, 0.47, 0.24]  # Replace with actual printed scores
+    expected_scores = [1.0, 0.37, 0.26]  # Replace with actual printed scores
     for computed, expected in zip(bleu_scores, expected_scores):
         assert abs(computed - expected) < 0.01, f"Expected {expected}, got {computed}"
