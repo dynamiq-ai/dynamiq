@@ -108,7 +108,7 @@ class HttpApiCall(ConnectionNode):
 
         data = self.connection.data | self.data | input_dict.get("data", {})
         payload_type = input_dict.get("payload_type", self.payload_type)
-        url = input_dict.get("url", self.url or self.connection.url)
+        url = input_dict.get("url") or self.url or self.connection.url
 
         headers = {}
         if isinstance(self.connection.headers, dict):
