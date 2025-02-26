@@ -106,10 +106,15 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
         for param in signature.parameters.values():
             if param.name == "kwargs" or param.name == "config":
                 continue
+
+            annotation = param.annotation
+            if annotation is inspect.Parameter.empty:
+                annotation = Any
+
             if param.default is inspect.Parameter.empty:
-                params_dict[param.name] = (param.annotation, ...)
+                params_dict[param.name] = (annotation, ...)
             else:
-                params_dict[param.name] = (param.annotation, param.default)
+                params_dict[param.name] = (annotation, param.default)
 
         return create_model(
             "FunctionToolInputSchema",
