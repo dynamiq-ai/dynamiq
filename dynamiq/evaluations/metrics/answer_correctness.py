@@ -1,5 +1,4 @@
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
-
 from dynamiq.evaluations import BaseEvaluator
 from dynamiq.evaluations.llm_evaluator import LLMEvaluator
 from dynamiq.nodes.llms import BaseLLM
@@ -10,7 +9,6 @@ class ExtractStatementsInput(BaseModel):
     """
     Input model for extracting candidate statements.
     """
-
     question: str = Field(description="The question to answer")
     answer: str = Field(description="The answer to the question")
 
@@ -19,7 +17,6 @@ class ExtractStatementsOutput(BaseModel):
     """
     Output model for extracted candidate statements.
     """
-
     statements: list[str] = Field(description="The generated statements")
 
 
@@ -27,7 +24,6 @@ class ClassifyStatementInput(BaseModel):
     """
     Input model for classifying a candidate pair.
     """
-
     question: str = Field(description="The question for context")
     answer_statement: str = Field(description="A candidate statement from the answer")
     ground_truth_statement: str = Field(
@@ -39,7 +35,6 @@ class ClassifyStatementOutput(BaseModel):
     """
     Output model for classifying a candidate pair.
     """
-
     match: bool = Field(
         description=("Verdict: true if the core fact of the statement is supported by the ground truth")
     )
@@ -62,11 +57,21 @@ class RunInput(BaseModel):
         return self
 
 
+class AnswerCorrectnessRunSingleInput(BaseModel):
+    """
+    Single-run input model for answer correctness evaluation.
+    """
+
+    question: str = Field(description="The question to answer")
+    answer: str = Field(description="The answer to the question")
+    ground_truth_answer: str = Field(description="The ground truth answer")
+    verbose: bool = False
+
+
 class F1Result(BaseModel):
     """
     Model for F1 score calculation.
     """
-
     precision: float
     recall: float
     f1: float
@@ -79,7 +84,6 @@ class RunResult(BaseModel):
     """
     Result containing final score and detailed, user-friendly reasoning.
     """
-
     score: float
     reasoning: str
 
@@ -88,7 +92,6 @@ class RunOutput(BaseModel):
     """
     Output model for final scores and detailed reasoning.
     """
-
     results: list[RunResult]
 
 
@@ -317,7 +320,7 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
                 "Overview:",
                 "  The evaluator splits the answer and the ground truth answer into core fact statements.",
                 "  Each statement from the answer is compared to the ground truth answer to determine if",
-                "  the core fact is supported. Similarly, the ground truth statements are checked for their",
+                "  the core fact is supported. Similarly, ground truth statements are checked for their",
                 "  presence in the answer. '✅' indicates support/presence, while '❌' indicates lack thereof.",
                 "",
                 "1. Answer Statements Analysis:",
@@ -404,6 +407,36 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
         reasoning = self._build_reasoning(ans_class, gt_class, tp, fp, fn, precision, recall, f1)
         return RunResult(score=round(f1, 2), reasoning=reasoning)
 
+    def run_single(self, question: str, answer: str, ground_truth_answer: str, verbose: bool = False) -> RunResult:
+        """
+        Evaluate answer correctness for a single sample.
+
+        Steps:
+          1) Extract candidate statements from both the answer and the ground truth answer.
+          2) Compare the candidate statements.
+          3) Compute Precision, Recall, and F1 Score.
+          4) Generate detailed reasoning.
+
+        Args:
+          question (str): The question.
+          answer (str): The answer.
+          ground_truth_answer (str): The ground truth answer.
+          verbose (bool): Flag to output verbose logs.
+
+        Returns:
+          RunResult: The evaluation result with score and reasoning.
+        """
+        # Extract candidate statements for answer and ground truth
+        ans_candidates = self.extract_statements([question], [answer])[0]
+        gt_candidates = self.extract_statements([question], [ground_truth_answer])[0]
+        result = self._evaluate_question(question, ans_candidates, gt_candidates)
+        if verbose:
+            logger.debug(f"Question: {question}")
+            logger.debug(f"Answer: {self._join_candidates(ans_candidates)}")
+            logger.debug(f"Ground Truth Answer: {self._join_candidates(gt_candidates)}")
+            logger.debug(result.reasoning)
+        return result
+
     def run(
         self, questions: list[str], answers: list[str], ground_truth_answers: list[str], verbose: bool = False
     ) -> RunOutput:
@@ -414,19 +447,26 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
              and vice versa.
           3) Compute Precision, Recall, and F1 Score.
           4) Generate detailed and easy-to-understand reasoning that explains the metrics.
+
+        Args:
+          questions (list[str]): List of questions.
+          answers (list[str]): List of answers.
+          ground_truth_answers (list[str]): List of ground truth answers.
+          verbose (bool): Flag for verbose logging.
+
+        Returns:
+          RunOutput: The overall evaluation results.
         """
-        run_in = RunInput(
+        run_input = RunInput(
             questions=questions, answers=answers, ground_truth_answers=ground_truth_answers, verbose=verbose
         )
-        ans_candidates = self.extract_statements(run_in.questions, run_in.answers)
-        gt_candidates = self.extract_statements(run_in.questions, run_in.ground_truth_answers)
         out_results = []
-        for i, question in enumerate(run_in.questions):
-            res = self._evaluate_question(question, ans_candidates[i], gt_candidates[i])
-            if verbose:
-                logger.debug(f"Question: {question}")
-                logger.debug(f"Ground Truth Answer: {self._join_candidates(gt_candidates[i])}")
-                logger.debug(f"Answer: {self._join_candidates(ans_candidates[i])}")
-                logger.debug(res.reasoning)
-            out_results.append(res)
+        for i in range(len(run_input.questions)):
+            result = self.run_single(
+                question=run_input.questions[i],
+                answer=run_input.answers[i],
+                ground_truth_answer=run_input.ground_truth_answers[i],
+                verbose=run_input.verbose,
+            )
+            out_results.append(result)
         return RunOutput(results=out_results)
