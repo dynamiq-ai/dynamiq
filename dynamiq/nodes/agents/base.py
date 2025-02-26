@@ -1,22 +1,17 @@
 import io
-import json
 import re
+import textwrap
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, ClassVar
 
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
-import textwrap
+
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.agents.exceptions import (
-    ActionParsingException,
-    AgentUnknownToolException,
-    InvalidActionException,
-    ToolExecutionException,
-)
+from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -388,8 +383,31 @@ class Agent(Node):
         except Exception as e:
             raise e
 
-    def stream_content(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
-        if self.streaming.by_tokens:
+    def stream_content(
+        self,
+        content: str | dict,
+        source: str,
+        step: str,
+        config: RunnableConfig | None = None,
+        by_tokens: bool | None = None,
+        **kwargs,
+    ) -> str | dict:
+        """
+        Streams data.
+
+        Args:
+            content (str | dict): Data that will be streamed.
+            source (str): Source of the content.
+            step (str): Description of the step.
+            by_tokens (Optional[bool]): Determines whether to stream content by tokens or not.
+                If None it is determined based on StreamingConfig. Defaults to None.
+            config (Optional[RunnableConfig]): Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            str | dict: Streamed data.
+        """
+        if (by_tokens is None and self.streaming.by_tokens) or by_tokens:
             return self.stream_by_tokens(content=content, source=source, step=step, config=config, **kwargs)
         return self.stream_response(content=content, source=source, step=step, config=config, **kwargs)
 
@@ -412,7 +430,9 @@ class Agent(Node):
             )
         return " ".join(final_response)
 
-    def stream_response(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
+    def stream_response(
+        self, content: str | dict, source: str, step: str, config: RunnableConfig | None = None, **kwargs
+    ):
         response_for_stream = StreamChunk(
             choices=[StreamChunkChoice(delta=StreamChunkChoiceDelta(content=content, source=source, step=step))]
         )
@@ -451,35 +471,6 @@ class Agent(Node):
 
         except Exception as e:
             raise e
-
-    def _parse_action(self, output: str) -> tuple[str | None, str | None]:
-        """Parses the action and its input from the output string."""
-        try:
-            action_match = re.search(
-                r"Action:\s*(.*?)\nAction Input:\s*(({\n)?.*?)(?:[^}]*$)",
-                output,
-                re.DOTALL,
-            )
-            if action_match:
-                action = action_match.group(1).strip()
-                action_input = action_match.group(2).strip()
-                if "```json" in action_input:
-                    action_input = action_input.replace("```json", "").replace("```", "").strip()
-
-                action_input = json.loads(action_input)
-                return action, action_input
-            else:
-                raise ActionParsingException()
-        except Exception as e:
-            raise ActionParsingException(
-                (
-                    f"Error {e}: Unable to parse action and action input."
-                    "Please rewrite using the correct Action/Action Input format"
-                    "with action input as a valid dictionary."
-                    "Ensure all quotes are included."
-                ),
-                recoverable=True,
-            )
 
     def _extract_final_answer(self, output: str) -> str:
         """Extracts the final answer from the output string."""
@@ -658,7 +649,10 @@ class AgentManager(Agent):
 
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
+            return self.stream_content(
+                content=llm_result, step="manager_planning", source=self.name, config=config, by_tokens=False, **kwargs
+            )
+
         return llm_result
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
@@ -666,13 +660,24 @@ class AgentManager(Agent):
         prompt = self._prompt_blocks.get("assign").format(**self._prompt_variables, **kwargs)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            return self.stream_content(content=llm_result, step="reasoning", source=self.name, config=config, **kwargs)
+            return self.stream_content(
+                content=llm_result, step="manager_assigning", source=self.name, config=config, by_tokens=False, **kwargs
+            )
         return llm_result
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'final' action."""
         prompt = self._prompt_blocks.get("final").format(**self._prompt_variables, **kwargs)
-        llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
+        llm_result = self._run_llm(
+            [Message(role=MessageRole.USER, content=prompt)], config, by_tokens=False, **kwargs
+        ).output["content"]
         if self.streaming.enabled:
-            return self.stream_content(content=llm_result, step="answer", source=self.name, config=config, **kwargs)
+            return self.stream_content(
+                content=llm_result,
+                step="manager_final_output",
+                source=self.name,
+                config=config,
+                by_tokens=False,
+                **kwargs,
+            )
         return llm_result

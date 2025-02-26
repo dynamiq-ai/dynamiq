@@ -51,21 +51,21 @@ class ReflectionAgent(Agent):
         self._prompt_blocks.update(prompt_blocks)
 
     @staticmethod
-    def extract_output_content(text: str) -> list[str]:
+    def extract_tag_content(tag_name: str, text: str) -> list[str]:
         """
-        Extracts content from <output> tags in the given text.
+        Extracts content from <tag_name> tags in the given text.
 
         Args:
-            text (str): The input text containing <output> tags.
+            text (str): The input text containing <tag_name> tags.
 
         Returns:
-            List[str]: A list of content found within <output> tags.
+            List[str]: A list of content found within <tag_name> tags.
         """
-        pattern = r"<output>(.*?)</output>"
+        pattern = rf"<{tag_name}>(.*?)</{tag_name}>"
         output_content = re.findall(pattern, text, re.DOTALL)
 
         if not output_content:
-            pattern = r"<output>(.*)"
+            pattern = rf"<{tag_name}>(.*)"
             output_content = re.findall(pattern, text, re.DOTALL)
 
         return [content.strip() for content in output_content]
@@ -88,25 +88,32 @@ class ReflectionAgent(Agent):
 
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=result))
 
-            output_content = self.extract_output_content(result)
+            output_content = self.extract_tag_content("output", result)
+            reflection_content = self.extract_tag_content("reflection", result)
 
             if self.verbose:
                 logger.info(f"Agent {self.name} - {self.id}: LLM output by REFLECTION prompt:\n{result[:200]}...")
             if self.streaming.enabled:
-                if self.streaming.mode == StreamingMode.FINAL:
-                    if not output_content:
-                        return ""
-                    return self.stream_content(
-                        content=output_content[-1],
-                        step="answer",
+                if not output_content:
+                    return ""
+
+                if self.streaming.mode == StreamingMode.ALL:
+                    self.stream_content(
+                        content={"output_content": output_content[:-1], "reflection": reflection_content},
+                        step="reasoning",
                         source=self.name,
                         config=config,
+                        by_tokens=False,
                         **kwargs,
                     )
-                elif self.streaming.mode == StreamingMode.ALL:
-                    return self.stream_content(
-                        content=result, step="reasoning", source=self.name, config=config, **kwargs
-                    )
+
+                return self.stream_content(
+                    content=output_content[-1],
+                    step="answer",
+                    source=self.name,
+                    config=config,
+                    **kwargs,
+                )
 
             if not output_content:
                 return ""

@@ -796,7 +796,6 @@ class Node(BaseModel, Runnable, ABC):
             event_msg_type (Type[StreamingEventMessage], optional): The event message type to use.
             event (str, optional): The event to use for the message.
             config (RunnableConfig, optional): Configuration for the runnable.
-
         """
         # Use runnable streaming configuration. If not found use node streaming configuration
         streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
