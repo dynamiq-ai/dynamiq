@@ -114,6 +114,12 @@ class AgentInputSchema(BaseModel):
 
     model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
 
+    tool_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parameters to be passed directly to all tools without LLM exposure",
+        is_accessible_to_agent=False,
+    )
+
     @model_validator(mode="after")
     def validate_input_fields(self, context):
         messages = [context.context.get("input_message")]
@@ -152,6 +158,7 @@ class Agent(Node):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
+    _tool_params: dict[str, Any] | None = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -301,6 +308,9 @@ class Agent(Node):
         if files:
             self.files = files
             self._prompt_variables["file_description"] = self.file_description
+
+        if hasattr(input_data, "tool_params") and input_data.tool_params:
+            kwargs["tool_params"] = input_data.tool_params
 
         self._prompt_variables.update(dict(input_data))
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
@@ -489,11 +499,32 @@ class Agent(Node):
             )
         return tool
 
-    def _run_tool(self, tool: Node, tool_input: str, config, **kwargs) -> Any:
+    def _run_tool(self, tool: Node, tool_input: dict, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
         if self.files:
             if tool.is_files_allowed is True:
                 tool_input["files"] = self.files
+
+        merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
+
+        if self.files and tool.is_files_allowed is True:
+            merged_input["files"] = self.files
+
+        logger.info(f"Running tool '{tool.name}' with input from LLM: {merged_input}")
+
+        if hasattr(self, "_tool_params") and self._tool_params:
+
+            for key, value in self._tool_params.items():
+                if key in merged_input and isinstance(value, dict) and isinstance(merged_input[key], dict):
+                    merged_nested = merged_input[key].copy()
+                    merged_nested.update(value)
+                    merged_input[key] = merged_nested
+                elif key not in merged_input:
+                    merged_input[key] = value
+
+        logger.info(f"Running tool '{tool.name}' with merged input: {merged_input}")
+
+        kwargs["tool_params"] = self._tool_params
 
         tool_result = tool.run(
             input_data=tool_input,

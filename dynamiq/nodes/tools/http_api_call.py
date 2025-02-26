@@ -9,6 +9,7 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.utils.logger import logger
 
 
 class ResponseType(str, enum.Enum):
@@ -92,15 +93,47 @@ class HttpApiCall(ConnectionNode):
         """
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
+        tool_params = kwargs.get("tool_params", {})
 
-        data = self.connection.data | self.data | input_data.data
-        payload_type = input_data.payload_type or self.payload_type
+        if isinstance(input_data, HttpApiCallInputSchema):
+            try:
+                input_dict = input_data.model_dump() if hasattr(input_data, "model_dump") else input_data.dict()
+            except Exception as e:
+                logger.warning(f"Failed to get input data from Pydantic model. Error: {e}")
+                input_dict = {}
+        else:
+            input_dict = input_data if isinstance(input_data, dict) else {}
+
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        data = self.connection.data | self.data | input_dict.get("data", {})
+        payload_type = input_dict.get("payload_type", self.payload_type)
+        url = input_dict.get("url", self.url or self.connection.url)
+
+        headers = {}
+        if isinstance(self.connection.headers, dict):
+            headers.update(self.connection.headers)
+        if isinstance(self.headers, dict):
+            headers.update(self.headers)
+        if isinstance(input_dict.get("headers"), dict):
+            headers.update(input_dict.get("headers", {}))
+        if isinstance(tool_params.get("headers"), dict):
+            headers.update(tool_params.get("headers", {}))
+
+        params = {}
+        if isinstance(self.connection.params, dict):
+            params.update(self.connection.params)
+        if isinstance(self.params, dict):
+            params.update(self.params)
+        if isinstance(input_dict.get("params"), dict):
+            params.update(input_dict.get("params", {}))
+        if isinstance(tool_params.get("params"), dict):
+            params.update(tool_params.get("params", {}))
+
         extras = {"data": data} if payload_type == RequestPayloadType.RAW else {"json": data}
-        url = input_data.url or self.url or self.connection.url
+
         if not url:
             raise ValueError("No url provided.")
-        headers = input_data.headers
-        params = input_data.params
 
         response = self.client.request(
             method=self.connection.method,
@@ -132,4 +165,7 @@ class HttpApiCall(ConnectionNode):
             raise ValueError(
                 f"Response type must be one of the following: {', '.join(allowed_types)}"
             )
+
+        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
+
         return {"content": content, "status_code": response.status_code}
