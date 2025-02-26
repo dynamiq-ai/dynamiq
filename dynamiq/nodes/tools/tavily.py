@@ -13,18 +13,29 @@ from dynamiq.utils.logger import logger
 
 class TavilyInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a search query.")
-    search_depth: str | None = Field(default=None, description="The search depth to use.")
-    topic: str | None = Field(default=None, description="The topic to search for.")
+    search_depth: str | None = Field(default=None, description="The search depth to use.", is_accessible_to_agent=False)
+    topic: str | None = Field(default=None, description="The topic to search for.", is_accessible_to_agent=False)
     max_results: int | None = Field(
-        default=None,
-        description="The maximum number of search results to return.",
+        default=None, description="The maximum number of search results to return.", is_accessible_to_agent=False
     )
-    include_images: bool | None = Field(default=None, description="Include images in search results.")
-    include_answer: bool | None = Field(default=None, description="Include answer in search results.")
-    include_raw_content: bool | None = Field(default=None, description="Include raw content in search results.")
-    include_domains: list[str] | None = Field(default=None, description="The domains to include in search results.")
-    exclude_domains: list[str] | None = Field(default=None, description="The domains to exclude from search results.")
-    use_cache: bool | None = Field(default=None, description="Use cache for search results.")
+    include_images: bool | None = Field(
+        default=None, description="Include images in search results.", is_accessible_to_agent=False
+    )
+    include_answer: bool | None = Field(
+        default=None, description="Include answer in search results.", is_accessible_to_agent=False
+    )
+    include_raw_content: bool | None = Field(
+        default=None, description="Include raw content in search results.", is_accessible_to_agent=False
+    )
+    include_domains: list[str] | None = Field(
+        default=None, description="The domains to include in search results.", is_accessible_to_agent=False
+    )
+    exclude_domains: list[str] | None = Field(
+        default=None, description="The domains to exclude from search results.", is_accessible_to_agent=False
+    )
+    use_cache: bool | None = Field(
+        default=None, description="Use cache for search results.", is_accessible_to_agent=False
+    )
 
 
 class TavilyTool(ConnectionNode):
