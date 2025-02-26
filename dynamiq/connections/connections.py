@@ -187,8 +187,10 @@ class OpenAI(BaseApiKeyConnection):
 
     Attributes:
         api_key (str): The API key for the OpenAI service, fetched from the environment variable 'OPENAI_API_KEY'.
+        url (str): The endpoint url for the OpenAI service, fetched from the environment variable 'OPENAI_URL'.
     """
     api_key: str = Field(default_factory=partial(get_env_var, "OPENAI_API_KEY"))
+    url: str = Field(default_factory=partial(get_env_var, "OPENAI_URL", "https://api.openai.com/v1"))
 
     def connect(self) -> "OpenAIClient":
         """
@@ -201,9 +203,27 @@ class OpenAI(BaseApiKeyConnection):
         """
         # Import in runtime to save memory
         from openai import OpenAI as OpenAIClient
-        openai_client = OpenAIClient(api_key=self.api_key)
+
+        openai_client = OpenAIClient(api_key=self.api_key, base_url=self.url)
         logger.debug("Connected to OpenAI")
         return openai_client
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing
+
+                -the API key with the key 'api_key'.
+
+                -the base url with the key 'api_base'.
+        """
+        return {
+            "api_base": self.url,
+            "api_key": self.api_key,
+        }
 
 
 class Anthropic(BaseApiKeyConnection):
