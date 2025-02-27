@@ -225,7 +225,7 @@ class ReActAgent(Agent):
 
     name: str = "React Agent"
     max_loops: int = Field(default=15, ge=2)
-    inference_mode: InferenceMode = InferenceMode.XML
+    inference_mode: InferenceMode = InferenceMode.DEFAULT
     behaviour_on_max_loops: Behavior = Field(
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
