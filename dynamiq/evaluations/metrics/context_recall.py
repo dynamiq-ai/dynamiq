@@ -2,7 +2,6 @@ import json
 from typing import Any
 
 from pydantic import BaseModel, PrivateAttr, field_validator, model_validator
-
 from dynamiq.evaluations import BaseEvaluator
 from dynamiq.evaluations.llm_evaluator import LLMEvaluator
 from dynamiq.nodes.llms import BaseLLM
@@ -25,17 +24,17 @@ class ContextRecallInput(BaseModel):
     verbose: bool = False
 
     @field_validator("contexts", mode="before")
-    def unify_contexts(cls, v):
+    def unify_contexts(cls, value):
         """
         If we receive a list of lists of strings, join each sublist into a single string.
         Otherwise, if it's already list[str], do nothing.
         """
-        if not isinstance(v, list):
+        if not isinstance(value, list):
             raise ValueError("contexts must be either a list[str] or a list[list[str]].")
-        if all(isinstance(item, list) and all(isinstance(x, str) for x in item) for item in v):
-            return [" ".join(sublist) for sublist in v]
-        if all(isinstance(item, str) for item in v):
-            return v
+        if all(isinstance(item, list) and all(isinstance(x, str) for x in item) for item in value):
+            return [" ".join(sublist) for sublist in value]
+        if all(isinstance(item, str) for item in value):
+            return value
         raise ValueError("contexts must be either a list[str] or a list[list[str]].")
 
     @model_validator(mode="after")
@@ -60,10 +59,10 @@ class ClassificationItem(BaseModel):
 
     @field_validator("attributed")
     @classmethod
-    def validate_attributed(cls, v):
-        if v not in (0, 1):
+    def validate_attributed(cls, value):
+        if value not in (0, 1):
             raise ValueError("Attributed must be either 0 or 1.")
-        return v
+        return value
 
 
 class ContextRecallRunResult(BaseModel):
@@ -74,7 +73,6 @@ class ContextRecallRunResult(BaseModel):
         score (float): The computed context recall score.
         reasoning (str): Detailed reasoning explaining how the score was derived.
     """
-
     score: float
     reasoning: str
 
@@ -86,7 +84,6 @@ class ContextRecallOutput(BaseModel):
     Attributes:
         results (list[ContextRecallRunResult]): Detailed run results.
     """
-
     results: list[ContextRecallRunResult]
 
 
@@ -205,7 +202,6 @@ class ContextRecallEvaluator(BaseEvaluator):
         """
         lines = []
         lines.extend(["Reasoning:", "", "Classifications:"])
-
         for item in classifications:
             mark = "✅" if item.attributed == 1 else "❌"
             lines.extend(
@@ -216,14 +212,65 @@ class ContextRecallEvaluator(BaseEvaluator):
                     "",
                 ]
             )
+        lines.append(f"Context Recall Score = {score:.2f}")
+        return "\n".join(lines)
 
-        lines.extend(
-            [
-                f"Context Recall Score = {score:.2f}",
-            ]
+    def run_single(self, question: str, context: str, answer: str, verbose: bool = False) -> ContextRecallRunResult:
+        """
+        Evaluate the context recall for a single sample.
+
+        Args:
+            question (str): The question.
+            context (str): The context (already normalized as a single string).
+            answer (str): The answer.
+            verbose (bool): Flag to enable verbose logging.
+
+        Returns:
+            ContextRecallRunResult: The computed context recall score and detailed reasoning.
+        """
+        result = self._classification_evaluator.run(
+            question=[question],
+            context=[context],
+            answer=[answer],
         )
 
-        return "\n".join(lines)
+        classifications = []
+        if "results" not in result or not result["results"]:
+            if verbose:
+                logger.debug(f"No results returned for question: {question}, context: {context}.")
+        else:
+            first_result = result["results"][0]
+            if "classifications" not in first_result or not first_result["classifications"]:
+                if verbose:
+                    logger.debug(f"No classifications returned for question: {question}, context: {context}.")
+            else:
+                classifications_raw = first_result["classifications"]
+                for item in classifications_raw:
+                    classification_item = ClassificationItem(
+                        statement=item["statement"],
+                        reason=item["reason"],
+                        attributed=int(item["attributed"]),
+                    )
+                    classifications.append(classification_item)
+
+        attributed_list = [item.attributed for item in classifications]
+        num_sentences = len(attributed_list)
+        num_attributed = sum(attributed_list)
+        score = num_attributed / num_sentences if num_sentences > 0 else 0.0
+        score = round(float(score), 2)
+
+        reasoning_str = self._build_reasoning(classifications, score)
+
+        if verbose:
+            logger.debug(f"Question: {question}")
+            logger.debug(f"Answer: {answer}")
+            logger.debug(f"Context: {context}")
+            logger.debug("Classifications:")
+            logger.debug(json.dumps([item.dict() for item in classifications], indent=2))
+            logger.debug(f"Context Recall Score: {score}")
+            logger.debug("-" * 50)
+
+        return ContextRecallRunResult(score=score, reasoning=reasoning_str)
 
     def run(
         self,
@@ -245,66 +292,19 @@ class ContextRecallEvaluator(BaseEvaluator):
         Returns:
             ContextRecallOutput: Contains a list of context recall run results.
         """
-        # Pass everything to the Pydantic model, which normalizes "contexts".
-        input_data = ContextRecallInput(
+        run_input = ContextRecallInput(
             questions=questions,
             contexts=contexts,
             answers=answers,
             verbose=verbose,
         )
-
-        results_out = []
-        for idx in range(len(input_data.questions)):
-            question = input_data.questions[idx]
-            context = input_data.contexts[idx]  # Guaranteed to be a single string
-            answer = input_data.answers[idx]
-
-            result = self._classification_evaluator.run(
-                question=[question],
-                context=[context],
-                answer=[answer],
+        results_output = []
+        for i in range(len(run_input.questions)):
+            question = run_input.questions[i]
+            context = run_input.contexts[i]
+            answer = run_input.answers[i]
+            result_single = self.run_single(
+                question=question, context=context, answer=answer, verbose=run_input.verbose
             )
-
-            classifications = []
-            # Check that we have valid results coming from the evaluator.
-            if "results" not in result or not result["results"]:
-                if input_data.verbose:
-                    logger.debug(f"No results returned for question: {question}, context: {context}.")
-                # Use default behavior: empty classifications list, which will result in a score of 0.0
-            else:
-                # Ensure that classifications are present in the first result.
-                first_result = result["results"][0]
-                if "classifications" not in first_result or not first_result["classifications"]:
-                    if input_data.verbose:
-                        logger.debug(f"No classifications returned for question: {question}, context: {context}.")
-                else:
-                    classifications_raw = first_result["classifications"]
-                    for item in classifications_raw:
-                        classification_item = ClassificationItem(
-                            statement=item["statement"],
-                            reason=item["reason"],
-                            attributed=int(item["attributed"]),
-                        )
-                        classifications.append(classification_item)
-
-            # Calculate recall score.
-            attributed_list = [item.attributed for item in classifications]
-            num_sentences = len(attributed_list)
-            num_attributed = sum(attributed_list)
-            score = num_attributed / num_sentences if num_sentences > 0 else 0.0
-            score = round(float(score), 2)
-
-            reasoning_str = self._build_reasoning(classifications, score)
-
-            if input_data.verbose:
-                logger.debug(f"Question: {question}")
-                logger.debug(f"Answer: {answer}")
-                logger.debug(f"Context: {context}")
-                logger.debug("Classifications:")
-                logger.debug(json.dumps([item.dict() for item in classifications], indent=2))
-                logger.debug(f"Context Recall Score: {score}")
-                logger.debug("-" * 50)
-
-            results_out.append(ContextRecallRunResult(score=score, reasoning=reasoning_str))
-
-        return ContextRecallOutput(results=results_out)
+            results_output.append(result_single)
+        return ContextRecallOutput(results=results_output)
