@@ -118,8 +118,10 @@ class AgentInputSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_input_fields(self, context):
-        messages = [context.context.get("input_message"), 
-                    Message(role = MessageRole.USER, content = context.context.get("role"))]
+        messages = [
+            context.context.get("input_message"),
+            Message(role=MessageRole.USER, content=context.context.get("role")),
+        ]
         required_parameters = Prompt(messages=messages).get_required_parameters()
 
         provided_parameters = set(self.model_dump().keys())
