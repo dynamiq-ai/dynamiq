@@ -213,7 +213,7 @@ class VisionMessage(BaseModel):
                 raise ValueError(f"Invalid content type: {content.type}")
 
         if len(out_msg_content) == 1 and out_msg_content[0].type == VisionMessageType.TEXT:
-            return Message(role = self.role, content=out_msg_content[0].text)
+            return Message(role=self.role, content=out_msg_content[0].text)
 
         return VisionMessage(role=self.role, content=out_msg_content)
 
