@@ -297,6 +297,7 @@ class ReActAgent(Agent):
         try:
             action_input = json.loads(action_input_text)
         except json.JSONDecodeError as e:
+            logger.error(f"Error: Unable to parse action and action input due to invalid JSON formatting. {e}")
             error_message = (
                 "Error: Unable to parse action and action input due to invalid JSON formatting. "
                 "Multiline strings are not allowed in JSON unless properly escaped. "
