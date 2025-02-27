@@ -212,13 +212,6 @@ class OpenAI(BaseApiKeyConnection):
     def conn_params(self) -> dict:
         """
         Returns the parameters required for connection.
-
-        Returns:
-            dict: A dictionary containing
-
-                -the API key with the key 'api_key'.
-
-                -the base url with the key 'api_base'.
         """
         return {
             "api_base": self.url,
