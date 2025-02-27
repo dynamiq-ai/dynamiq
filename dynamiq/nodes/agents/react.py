@@ -164,7 +164,6 @@ Remember:
 
 REACT_BLOCK_OUTPUT_FORMAT = (
     "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
-    "Simply give a clear and concise answer."
 )
 
 
