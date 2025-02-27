@@ -123,6 +123,7 @@ def test_workflow_with_depend_nodes_with_tracing(
             client=ANY,
             response_format=None,
             drop_params=True,
+            api_base="https://api.openai.com/v1",
         ),
         mock.call(
             tools=None,
@@ -277,6 +278,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
             top_p=None,
             response_format=None,
             drop_params=True,
+            api_base="https://api.openai.com/v1",
         )
     ]
 
