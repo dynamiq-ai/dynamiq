@@ -62,7 +62,6 @@ class NLIResultItem(BaseModel):
         verdict (int): 1 if faithful, 0 otherwise.
         reason (str): Reason for the verdict.
     """
-
     statement: str
     verdict: int
     reason: str
@@ -130,7 +129,6 @@ class FaithfulnessRunResult(BaseModel):
         score (float): The computed faithfulness score.
         reasoning (str): Detailed reasoning explaining the evaluation.
     """
-
     score: float
     reasoning: str
 
@@ -144,6 +142,23 @@ class RunOutput(BaseModel):
     """
 
     results: list[FaithfulnessRunResult]
+
+
+class FaithfulnessRunSingleInput(BaseModel):
+    """
+    Single-run input model for faithfulness evaluation.
+
+    Attributes:
+        question (str): The question.
+        answer (str): The corresponding answer.
+        context (str): The context for the evaluation.
+        verbose (bool): Flag to enable verbose logging.
+    """
+
+    question: str
+    answer: str
+    context: str
+    verbose: bool = False
 
 
 class FaithfulnessEvaluator(BaseEvaluator):
@@ -386,6 +401,65 @@ class FaithfulnessEvaluator(BaseEvaluator):
 
         return "\n".join(lines)
 
+    def run_single(self, question: str, answer: str, context: str, verbose: bool = False) -> FaithfulnessRunResult:
+        """
+        Evaluate the faithfulness for a single sample.
+
+        Args:
+            question (str): The question.
+            answer (str): The corresponding answer.
+            context (str): The evaluation context.
+            verbose (bool): Flag to enable verbose logging.
+
+        Returns:
+            FaithfulnessRunResult: The result with faithfulness score and detailed reasoning.
+        """
+        # Validate the single input using a pydantic model
+        single_input = FaithfulnessRunSingleInput(question=question, answer=answer, context=context, verbose=verbose)
+
+        # Simplify the answer (using question and answer)
+        statements_list = self.simplify_statements([single_input.question], [single_input.answer])
+        if not statements_list or statements_list[0] is None:
+            if single_input.verbose:
+                logger.debug(f"No simplified statements for answer: {single_input.answer}. Using empty list.")
+            statements = []
+        else:
+            statements = statements_list[0]
+
+        # Evaluate faithfulness via NLI
+        nli_results_list = self.check_faithfulness([single_input.context], [statements])
+        if not nli_results_list or nli_results_list[0] is None:
+            if single_input.verbose:
+                logger.debug("No NLI results for context or statements. Using empty list for NLI evaluation.")
+            nli_results = []
+        else:
+            nli_results = nli_results_list[0]
+
+        num_statements = len(nli_results)
+        num_faithful = sum(item.verdict for item in nli_results)
+        score = num_faithful / num_statements if num_statements else 0.0
+        score = round(float(score), 2)
+
+        reasoning = self._build_reasoning(
+            statements=statements,
+            nli_results=nli_results,
+            num_statements=num_statements,
+            num_faithful=num_faithful,
+            score=score,
+        )
+        if single_input.verbose:
+            logger.debug(f"Question: {single_input.question}")
+            logger.debug(f"Answer: {single_input.answer}")
+            logger.debug(f"Context: {single_input.context}")
+            logger.debug("Simplified Statements:")
+            logger.debug(statements)
+            logger.debug("NLI Results:")
+            logger.debug([item.model_dump() for item in nli_results])
+            logger.debug(reasoning)
+            logger.debug("-" * 50)
+        result_item = FaithfulnessRunResult(score=score, reasoning=reasoning)
+        return result_item
+
     def run(
         self,
         questions: list[str],
@@ -417,48 +491,7 @@ class FaithfulnessEvaluator(BaseEvaluator):
             question = input_data.questions[idx]
             answer = input_data.answers[idx]
             context = input_data.contexts[idx]
-
-            # Simplify the answer (using question and answer)
-            statements_list = self.simplify_statements([question], [answer])
-            if not statements_list or statements_list[0] is None:
-                if verbose:
-                    logger.debug(f"No simplified statements for answer: {answer}. Using empty list.")
-                statements = []
-            else:
-                statements = statements_list[0]
-
-            # Evaluate faithfulness via NLI
-            nli_results_list = self.check_faithfulness([context], [statements])
-            if not nli_results_list or nli_results_list[0] is None:
-                if verbose:
-                    logger.debug("No NLI results for context or statements. " "Using empty list for NLI evaluation.")
-                nli_results = []
-            else:
-                nli_results = nli_results_list[0]
-
-            num_statements = len(nli_results)
-            num_faithful = sum(item.verdict for item in nli_results)
-            score = num_faithful / num_statements if num_statements else 0.0
-            score = round(float(score), 2)
-
-            reasoning = self._build_reasoning(
-                statements=statements,
-                nli_results=nli_results,
-                num_statements=num_statements,
-                num_faithful=num_faithful,
-                score=score,
-            )
-            if input_data.verbose:
-                logger.debug(f"Question: {question}")
-                logger.debug(f"Answer: {answer}")
-                logger.debug(f"Context: {context}")
-                logger.debug("Simplified Statements:")
-                logger.debug(statements)
-                logger.debug("NLI Results:")
-                logger.debug([item.model_dump() for item in nli_results])
-                logger.debug(reasoning)
-                logger.debug("-" * 50)
-            result_item = FaithfulnessRunResult(score=round(score, 2), reasoning=reasoning)
+            result_item = self.run_single(question=question, answer=answer, context=context, verbose=input_data.verbose)
             results_out.append(result_item)
         output_data = RunOutput(results=results_out)
         return output_data
