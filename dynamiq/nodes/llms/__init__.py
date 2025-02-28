@@ -12,6 +12,7 @@ from .deepseek import DeepSeek
 from .gemini import Gemini
 from .groq import Groq
 from .huggingface import HuggingFace
+from .llm import LLMDynamiqClient
 from .mistral import Mistral
 from .ollama import Ollama
 from .openai import OpenAI
