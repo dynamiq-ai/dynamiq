@@ -166,7 +166,6 @@ class Agent(Node):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
-    _tool_params: dict[str, Any] | None = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
