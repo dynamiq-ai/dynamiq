@@ -164,7 +164,6 @@ Remember:
 
 REACT_BLOCK_OUTPUT_FORMAT = (
     "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
-    "Simply give a clear and concise answer."
 )
 
 
@@ -226,7 +225,7 @@ class ReActAgent(Agent):
 
     name: str = "React Agent"
     max_loops: int = Field(default=15, ge=2)
-    inference_mode: InferenceMode = InferenceMode.XML
+    inference_mode: InferenceMode = InferenceMode.DEFAULT
     behaviour_on_max_loops: Behavior = Field(
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
@@ -297,6 +296,7 @@ class ReActAgent(Agent):
         try:
             action_input = json.loads(action_input_text)
         except json.JSONDecodeError as e:
+            logger.error(f"Error: Unable to parse action and action input due to invalid JSON formatting. {e}")
             error_message = (
                 "Error: Unable to parse action and action input due to invalid JSON formatting. "
                 "Multiline strings are not allowed in JSON unless properly escaped. "
