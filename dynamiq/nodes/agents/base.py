@@ -312,7 +312,7 @@ class Agent(Node):
             self.files = files
             self._prompt_variables["file_description"] = self.file_description
 
-        if hasattr(input_data, "tool_params") and input_data.tool_params:
+        if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
 
         self._prompt_variables.update(dict(input_data))

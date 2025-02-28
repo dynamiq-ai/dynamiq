@@ -397,7 +397,6 @@ class ReActAgent(Agent):
         """
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
-        self._tool_params = kwargs.get("tool_params", {})
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(

@@ -1129,22 +1129,23 @@ class Node(BaseModel, Runnable, ABC):
 
     def deep_merge(self, source: dict, destination: dict) -> dict:
         """
-        Recursively merge dictionaries with nested structures.
+        Recursively merge dictionaries with proper override behavior.
 
         Args:
-            source: Source dictionary with values to merge
-            destination: Destination dictionary where values will be merged into
+            source: Source dictionary with higher priority values
+            destination: Destination dictionary with lower priority values
 
         Returns:
-            dict: Merged dictionary with source values integrated into destination
+            dict: Merged dictionary where source values override destination values
         """
+        result = destination.copy()
         for key, value in source.items():
-            if key in destination:
-                if isinstance(value, dict) and isinstance(destination[key], dict):
-                    destination[key] = self.deep_merge(value, destination[key])
+            if key in result and isinstance(value, dict) and isinstance(result[key], dict):
+                result[key] = self.deep_merge(value, result[key])
             else:
-                destination[key] = value
-        return destination
+                result[key] = value
+
+        return result
 
 
 class ConnectionNode(Node, ABC):
