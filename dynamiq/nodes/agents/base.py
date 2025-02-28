@@ -116,7 +116,10 @@ class AgentInputSchema(BaseModel):
 
     tool_params: dict[str, Any] = Field(
         default_factory=dict,
-        description="Parameters to be passed directly to all tools without LLM exposure",
+        description=(
+            "Parameters to be passed directly to tools without LLM exposure. "
+            "Can contain 'global' key for all tools, or tool name/id keys for specific tools."
+        ),
         is_accessible_to_agent=False,
     )
 
@@ -499,6 +502,19 @@ class Agent(Node):
             )
         return tool
 
+    def _apply_parameters(self, merged_input: dict, params: dict, source: str, debug_info: list = None):
+        """Apply parameters from the specified source to the merged input."""
+        for key, value in params.items():
+            if key in merged_input and isinstance(value, dict) and isinstance(merged_input[key], dict):
+                merged_nested = merged_input[key].copy()
+                merged_input[key] = self.deep_merge(value, merged_nested)
+                if debug_info is not None:
+                    debug_info.append(f"  - From {source}: Merged nested {key}")
+            else:
+                merged_input[key] = value
+                if debug_info is not None:
+                    debug_info.append(f"  - From {source}: Set {key}={value}")
+
     def _run_tool(self, tool: Node, tool_input: dict, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
         if self.files:
@@ -506,28 +522,35 @@ class Agent(Node):
                 tool_input["files"] = self.files
 
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
+        tool_params = kwargs.get("tool_params", {})
 
-        if self.files and tool.is_files_allowed is True:
-            merged_input["files"] = self.files
+        if tool_params:
+            debug_info = []
+            if self.verbose:
+                debug_info.append(f"Tool parameter merging for {tool.name} (ID: {tool.id}):")
+                debug_info.append(f"Starting with input: {merged_input}")
 
-        logger.info(f"Running tool '{tool.name}' with input from LLM: {merged_input}")
+            # 1. Apply global parameters (lowest priority)
+            global_params = tool_params.get("global", {})
+            if global_params:
+                self._apply_parameters(merged_input, global_params, "global", debug_info)
 
-        if hasattr(self, "_tool_params") and self._tool_params:
+            # 2. Apply parameters by tool name (medium priority)
+            tool_name = self.sanitize_tool_name(tool.name)
+            name_params = tool_params.get(tool.name, {}) or tool_params.get(tool_name, {})
+            if name_params:
+                self._apply_parameters(merged_input, name_params, f"name:{tool.name}", debug_info)
 
-            for key, value in self._tool_params.items():
-                if key in merged_input and isinstance(value, dict) and isinstance(merged_input[key], dict):
-                    merged_nested = merged_input[key].copy()
-                    merged_nested.update(value)
-                    merged_input[key] = merged_nested
-                elif key not in merged_input:
-                    merged_input[key] = value
+            # 3. Apply parameters by tool ID (highest priority)
+            id_params = tool_params.get(tool.id, {})
+            if id_params:
+                self._apply_parameters(merged_input, id_params, f"id:{tool.id}", debug_info)
 
-        logger.info(f"Running tool '{tool.name}' with merged input: {merged_input}")
-
-        kwargs["tool_params"] = self._tool_params
+            if self.verbose and debug_info:
+                logger.debug("\n".join(debug_info))
 
         tool_result = tool.run(
-            input_data=tool_input,
+            input_data=merged_input,
             config=config,
             run_depends=self._run_depends,
             **(kwargs | {"recoverable_error": True}),

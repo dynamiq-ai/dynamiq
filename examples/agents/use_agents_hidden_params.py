@@ -1,41 +1,27 @@
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
-from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from examples.llm_setup import setup_llm
 
-PYTHON_TOOL_CODE = """
-import requests
 
-def run(inputs):
-    response = requests.get("https://example.com")
-    return response.text[:500]  # Return first 500 chars of the response
-"""
-
-
-def setup_react_agent_http_python() -> ReActAgent:
+def setup_react_agent_with_apis() -> ReActAgent:
     """
-    Set up and return a ReAct agent with specified LLM and tools.
+    Set up and return a ReAct agent with two API tools.
 
     Returns:
         ReActAgent: Configured ReAct agent.
     """
     llm = setup_llm()
 
-    web_request_tool = Python(
-        name="WebRequestTool",
-        description="Makes a GET request to example.com and returns the response text",
-        code=PYTHON_TOOL_CODE,
-    )
-
-    connection = HttpConnection(
+    cat_connection = HttpConnection(
         method="GET",
         url="https://catfact.ninja/fact",
     )
 
-    api_call = HttpApiCall(
-        connection=connection,
+    cat_api = HttpApiCall(
+        id="cat-facts-api-456",
+        connection=cat_connection,
         success_codes=[200, 201],
         timeout=60,
         response_type=ResponseType.JSON,
@@ -44,39 +30,54 @@ def setup_react_agent_http_python() -> ReActAgent:
         description="Gets a random cat fact from the CatFact API",
     )
 
-    original_request = api_call.client.request
+    dog_connection = HttpConnection(
+        method="GET",
+        url="https://catfact.ninja/fact",
+    )
 
-    def request_with_logging(*args, **kwargs):
-        print(f"Headers being sent: {kwargs.get('headers', {})}")
-        return original_request(*args, **kwargs)
-
-    api_call.client.request = request_with_logging
+    dog_api = HttpApiCall(
+        id="dog-facts-api-789",
+        connection=dog_connection,
+        success_codes=[200, 201],
+        timeout=60,
+        response_type=ResponseType.JSON,
+        params={"limit": 10},
+        name="DogFactApi",
+        description="Gets a random dog fact (using cat API for demo purposes)",
+    )
 
     agent = ReActAgent(
         name="AI Agent",
         llm=llm,
-        tools=[web_request_tool, api_call],
-        role="is to help user with various tasks",
+        tools=[cat_api, dog_api],
+        role="is to help users retrieve interesting animal facts",
         inference_mode=InferenceMode.DEFAULT,
     )
+
     return agent
 
 
-def run_agent_with_token():
-    agent = setup_react_agent_http_python()
+def run_agent_with_tokens():
+    agent = setup_react_agent_with_apis()
 
-    token = "your_auth_token_12345"  # nosec B105
+    cat_fact_token = "cat_api_token_12345"  # nosec B105
+    dog_fact_token = "dog_api_key_67890"  # nosec B105
 
     result = agent.run(
         input_data={
-            "input": "Get me a cat fact using the CatFactApi tool",
-            "tool_params": {"headers": {"Authorization": f"Bearer {token}", "X-Custom-Header": "CustomValue"}},
+            "input": "Get me a cat fact using the CatFactApi tool, "
+            "then find and return a dog fact using the DogFactApi tool.",
+            "tool_params": {
+                "global": {"timeout": 30},
+                "CatFactApi": {"headers": {"Authorization": f"Bearer {cat_fact_token}"}},
+                "dog-facts-api-789": {"headers": {"Authorization": f"Bearer {dog_fact_token}"}},
+            },
         }
     )
 
-    print("Agent Result:")
+    print("\nAgent Final Result:")
     print(result.output.get("content"))
 
 
 if __name__ == "__main__":
-    run_agent_with_token()
+    run_agent_with_tokens()

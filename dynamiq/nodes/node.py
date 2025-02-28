@@ -1127,6 +1127,25 @@ class Node(BaseModel, Runnable, ABC):
             self.input_mapping[key] = value
         return self
 
+    def deep_merge(self, source: dict, destination: dict) -> dict:
+        """
+        Recursively merge dictionaries with nested structures.
+
+        Args:
+            source: Source dictionary with values to merge
+            destination: Destination dictionary where values will be merged into
+
+        Returns:
+            dict: Merged dictionary with source values integrated into destination
+        """
+        for key, value in source.items():
+            if key in destination:
+                if isinstance(value, dict) and isinstance(destination[key], dict):
+                    destination[key] = self.deep_merge(value, destination[key])
+            else:
+                destination[key] = value
+        return destination
+
 
 class ConnectionNode(Node, ABC):
     """
