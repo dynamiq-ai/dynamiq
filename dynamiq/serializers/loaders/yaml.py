@@ -827,8 +827,9 @@ class WorkflowYAMLLoader:
                 init_components=init_components,
                 queue=queue,
             )
-
-            dependant_nodes = {key: cls.inject_input_queue(value, queue) for key, value in dependant_nodes.items()}
+            
+            if queue:
+                dependant_nodes = {key: cls.inject_input_queue(value, queue) for key, value in dependant_nodes.items()}
 
             nodes.update(dependant_nodes)
 
@@ -851,10 +852,10 @@ class WorkflowYAMLLoader:
                 connection_manager=connection_manager,
                 init_components=init_components,
             )
-
-            non_dependant_nodes = {
-                key: cls.inject_input_queue(value, queue) for key, value in non_dependant_nodes.items()
-            }
+            if queue:
+                non_dependant_nodes = {
+                    key: cls.inject_input_queue(value, queue) for key, value in non_dependant_nodes.items()
+                }
 
             nodes.update(non_dependant_nodes)
 
