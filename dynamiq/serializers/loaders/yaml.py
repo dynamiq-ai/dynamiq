@@ -1,4 +1,5 @@
 from os import PathLike
+from queue import Queue
 from typing import Any
 
 from dynamiq import Workflow
@@ -15,7 +16,6 @@ from dynamiq.utils.logger import logger
 
 class WorkflowYAMLLoaderException(Exception):
     """Exception raised for errors in the WorkflowYAMLDumper."""
-
     pass
 
 
@@ -777,10 +777,17 @@ class WorkflowYAMLLoader:
         return data
 
     @classmethod
+    def inject_input_queue(cls, node: Node, queue: Queue):
+        if node.streaming and node.streaming.enabled:
+            node.streaming.input_queue = queue
+        return node
+
+    @classmethod
     def parse(
         cls,
         data: dict,
         connection_manager: ConnectionManager | None = None,
+        queue: Queue | None = None,
         init_components: bool = False,
     ) -> WorkflowYamlData:
         """
@@ -818,7 +825,11 @@ class WorkflowYAMLLoader:
                 registry=node_registry,
                 connection_manager=connection_manager,
                 init_components=init_components,
+                queue=queue,
             )
+
+            dependant_nodes = {key: cls.inject_input_queue(value, queue) for key, value in dependant_nodes.items()}
+
             nodes.update(dependant_nodes)
 
             dependant_flows = cls.get_dependant_flows(
@@ -827,6 +838,7 @@ class WorkflowYAMLLoader:
                 dependant_nodes=dependant_nodes,
                 connection_manager=connection_manager,
             )
+
             flows.update(dependant_flows)
 
             non_dependant_nodes = cls.get_nodes(
@@ -839,6 +851,11 @@ class WorkflowYAMLLoader:
                 connection_manager=connection_manager,
                 init_components=init_components,
             )
+
+            non_dependant_nodes = {
+                key: cls.inject_input_queue(value, queue) for key, value in non_dependant_nodes.items()
+            }
+
             nodes.update(non_dependant_nodes)
 
             non_dependant_flows = cls.get_flows(
