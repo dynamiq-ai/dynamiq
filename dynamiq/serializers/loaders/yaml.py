@@ -825,9 +825,8 @@ class WorkflowYAMLLoader:
                 registry=node_registry,
                 connection_manager=connection_manager,
                 init_components=init_components,
-                queue=queue,
             )
-            
+
             if queue:
                 dependant_nodes = {key: cls.inject_input_queue(value, queue) for key, value in dependant_nodes.items()}
 
