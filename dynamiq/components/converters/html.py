@@ -52,7 +52,7 @@ class HTMLConverter(BaseConverter):
         """
         # Get the file path or name for BytesIO
         if isinstance(file, BytesIO):
-            filepath = get_filename_for_bytesio(file, metadata)
+            filepath = get_filename_for_bytesio(file)
         else:
             filepath = str(file)
 
