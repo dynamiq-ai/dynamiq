@@ -27,7 +27,7 @@ prompt = Prompt(messages=[Message(content=PROMPT_TEMPLATE, role="user")])
 # Configure the Gemini LLM Node
 llm = Gemini(
     id="gemini",  # Unique identifier for the node
-    connection=GeminiConnection(api_key="AIzaSyAQpCewLlVgRY-q4Bwf_5CAX9Fos1TQ6sM"),  # Securely provide your API key
+    connection=GeminiConnection(api_key=os.getenv('GEMINI_API_KEY')),  # Securely provide your API key
     model="gemini-1.5-flash",  # LLM model version
     temperature=0.3,  # Controls randomness (0.0 = deterministic, 1.0 = very random)
     max_tokens=1000,  # Maximum tokens in the generated response
