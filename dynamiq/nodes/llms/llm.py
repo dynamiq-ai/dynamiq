@@ -2,7 +2,7 @@ import logging
 import time
 from typing import Any, Literal
 
-from dynamiq.callbacks import TracingCallbackHandler
+from dynamiq.callbacks import BaseCallbackHandler, TracingCallbackHandler
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
@@ -44,8 +44,6 @@ class TracingWrapper(Node):
 
     def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs):
 
-        if self._trace:
-            config = RunnableConfig(callbacks=[TracingCallbackHandler()]) if not config else config
         config = ensure_config(config)
         self.run_on_node_execute_run(callbacks=config.callbacks, **kwargs)
 
@@ -66,6 +64,20 @@ class TracingWrapper(Node):
             duration = time.time() - start_time
             logger.error(f"Failed {method_path} in {duration:.2f}s with error: {str(e)}")
             raise
+
+    def run_on_node_end(
+        self,
+        callbacks: list[BaseCallbackHandler],
+        output_data: dict[str, Any],
+        **kwargs,
+    ) -> None:
+        for callback in callbacks + self.callbacks:
+            try:
+                callback.on_node_end(self.model_dump(), output_data, **kwargs)
+                if isinstance(callback, TracingCallbackHandler):
+                    callback.flush()
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
 
 class LLMDynamiqClient:
