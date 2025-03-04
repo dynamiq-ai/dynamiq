@@ -7,7 +7,6 @@ from dynamiq.components.converters.html import HTMLConverter as HTMLConverterCom
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
-from dynamiq.types import DocumentCreationMode
 from dynamiq.utils.logger import logger
 
 
@@ -29,18 +28,10 @@ class HTMLConverterInputSchema(BaseModel):
 class HTMLConverter(Node):
     """
     A component for converting HTML files to Documents using the HTML converter.
-
-    Args:
-        document_creation_mode (Literal["one-doc-per-file"], optional):
-            Determines how to create Documents from the HTML content. Currently only supports:
-            - "one-doc-per-file": Creates one Document per file.
-                All content is converted to markdown format.
-            Defaults to "one-doc-per-file".
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
     name: str = "HTML File Converter"
-    document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     file_converter: HTMLConverterComponent | None = None
     input_schema: ClassVar[type[HTMLConverterInputSchema]] = HTMLConverterInputSchema
 
@@ -59,9 +50,7 @@ class HTMLConverter(Node):
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
         if self.file_converter is None:
-            self.file_converter = HTMLConverterComponent(
-                document_creation_mode=self.document_creation_mode,
-            )
+            self.file_converter = HTMLConverterComponent()
 
     def execute(
         self, input_data: HTMLConverterInputSchema, config: RunnableConfig | None = None, **kwargs
