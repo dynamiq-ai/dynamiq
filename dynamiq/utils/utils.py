@@ -92,17 +92,20 @@ class JsonWorkflowEncoder(JSONEncoder):
         if isinstance(obj, (datetime, date)):
             return obj.isoformat()
         if isinstance(obj, (BytesIO, bytes, Exception)) or callable(obj):
-            return format_value(obj)
+            return format_value(obj)[0]
         return JSONEncoder.default(self, obj)
 
 
-def format_value(value: Any, skip_format_types: set = None, force_format_types: set = None, **kwargs) -> Any:
+def format_value(
+    value: Any, skip_format_types: set = None, force_format_types: set = None, truncate_enabled: bool = False, **kwargs
+) -> tuple[Any, dict]:
     """Format a value for serialization.
 
     Args:
         value (Any): The value to format.
         skip_format_types (set, optional): Types to skip formatting.
         force_format_types (set, optional): Types to force formatting.
+        truncate_enabled: Whether to apply truncation.
         **kwargs: Additional keyword arguments.
 
     Returns:
@@ -116,35 +119,62 @@ def format_value(value: Any, skip_format_types: set = None, force_format_types: 
     if force_format_types is None:
         force_format_types = set()
 
+    metadata = {}
     if not isinstance(value, tuple(force_format_types)) and isinstance(
         value, tuple(skip_format_types)
     ):
-        return value
+        return value, metadata
 
     if isinstance(value, BytesIO):
-        return getattr(value, "name", None) or encode_bytes(value.getvalue())
+        return getattr(value, "name", None) or encode_bytes(value.getvalue()), metadata
     if isinstance(value, bytes):
-        return encode_bytes(value)
+        return encode_bytes(value), metadata
+
+    path = kwargs.get("path", "")
     if isinstance(value, dict):
-        return {
-            k: format_value(v, skip_format_types, force_format_types)
-            for k, v in value.items()
-        }
+        formatted_dict = {}
+        for k, v in value.items():
+            new_path = f"{path}.{k}" if path else k
+            formatted_v, sub_metadata = format_value(
+                v, skip_format_types, force_format_types, truncate_enabled, path=new_path
+            )
+            formatted_dict[k] = formatted_v
+            metadata.update(sub_metadata)
+        return formatted_dict, metadata
+
+    if truncate_enabled and isinstance(value, list) and all(isinstance(v, float) for v in value):
+        original_length = len(value)
+        if original_length > 20:
+            truncated_value = value[:20]
+            metadata[path] = {  # JSONPath notation in metadata
+                "original_length": original_length,
+                "truncated_length": len(truncated_value),
+            }
+            return truncated_value, metadata
+
     if isinstance(value, (list, tuple, set)):
-        return type(value)(
-            format_value(v, skip_format_types, force_format_types) for v in value
-        )
+        formatted_list = []
+        for i, v in enumerate(value):
+            new_path = f"{path}[{i}]"
+            formatted_v, sub_metadata = format_value(
+                v, skip_format_types, force_format_types, truncate_enabled, path=new_path
+            )
+            formatted_list.append(formatted_v)
+            metadata.update(sub_metadata)
+
+        return type(value)(formatted_list), metadata
+
     if isinstance(value, (RunnableResult, PythonInputSchema)):
-        return value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types)
+        return value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types), metadata
     if isinstance(value, BaseModel):
-        return value.to_dict() if hasattr(value, "to_dict") else value.model_dump()
+        return value.to_dict() if hasattr(value, "to_dict") else value.model_dump(), metadata
     if isinstance(value, Exception):
         recoverable = bool(kwargs.get("recoverable"))
-        return {"content": f"{str(value)}", "error_type": type(value).__name__, "recoverable": recoverable}
+        return {"content": f"{str(value)}", "error_type": type(value).__name__, "recoverable": recoverable}, metadata
     if callable(value):
-        return f"func: {getattr(value, '__name__', str(value))}"
+        return f"func: {getattr(value, '__name__', str(value))}", metadata
 
     try:
-        return RootModel[type(value)](value).model_dump()
+        return RootModel[type(value)](value).model_dump(), metadata
     except PydanticUserError:
-        return str(value)
+        return str(value), metadata
