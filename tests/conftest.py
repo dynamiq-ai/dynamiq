@@ -77,6 +77,94 @@ def mock_embedding_executor(mocker):
 
 
 @pytest.fixture
+def mock_embedding_tracing_output():
+    return {
+        "embedding": [
+            0.12,
+            -0.87,
+            0.45,
+            0.98,
+            -0.34,
+            0.67,
+            -0.23,
+            0.11,
+            -0.56,
+            0.89,
+            -0.32,
+            0.76,
+            -0.12,
+            0.44,
+            0.92,
+            -0.68,
+            0.15,
+            0.37,
+            -0.45,
+            0.88,
+            -0.14,
+            0.59,
+            -0.72,
+            0.25,
+            0.77,
+            -0.91,
+            0.63,
+            -0.35,
+            0.41,
+            0.99,
+        ]
+    }
+
+
+@pytest.fixture
+def mock_embedding_executor_truncate_tracing(mocker):
+    def response(*args, **kwargs):
+        embed_r = EmbeddingResponse()
+        embedding_data = {
+            "embedding": [
+                0.12,
+                -0.87,
+                0.45,
+                0.98,
+                -0.34,
+                0.67,
+                -0.23,
+                0.11,
+                -0.56,
+                0.89,
+                -0.32,
+                0.76,
+                -0.12,
+                0.44,
+                0.92,
+                -0.68,
+                0.15,
+                0.37,
+                -0.45,
+                0.88,
+                -0.14,
+                0.59,
+                -0.72,
+                0.25,
+                0.77,
+                -0.91,
+                0.63,
+                -0.35,
+                0.41,
+                0.99,
+            ]
+        }
+        embed_r["data"] = [embedding_data]
+        embed_r["model"] = kwargs.get("model")
+        embed_r["usage"] = {"usage": {"prompt_tokens": 6, "completion_tokens": 0, "total_tokens": 6}}
+        return embed_r
+
+    mock_llm = mocker.patch(
+        "dynamiq.components.embedders.base.BaseEmbedder._embedding",
+        side_effect=response,
+    )
+    yield mock_llm
+
+
+@pytest.fixture
 def mock_tracing_client(mocker):
     class MockTracingClient(BaseTracingClient):
         def trace(self, runs) -> None:

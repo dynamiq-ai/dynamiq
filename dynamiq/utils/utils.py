@@ -146,7 +146,7 @@ def format_value(
         original_length = len(value)
         if original_length > 20:
             truncated_value = value[:20]
-            metadata[path] = {  # JSONPath notation in metadata
+            metadata[path] = {
                 "original_length": original_length,
                 "truncated_length": len(truncated_value),
             }
@@ -167,7 +167,25 @@ def format_value(
     if isinstance(value, (RunnableResult, PythonInputSchema)):
         return value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types), metadata
     if isinstance(value, BaseModel):
-        return value.to_dict() if hasattr(value, "to_dict") else value.model_dump(), metadata
+        base_dict = value.to_dict() if hasattr(value, "to_dict") else value.model_dump()
+
+        if truncate_enabled:
+            for attr_name, attr_value in base_dict.items():
+                if isinstance(attr_value, list) and all(isinstance(x, float) for x in attr_value):
+                    metadata_key = f"{path}.{attr_name}" if path else attr_name
+
+                    original_length = len(attr_value)
+                    if original_length > 20:
+                        truncated_value = attr_value[:20]
+
+                        metadata[metadata_key] = {
+                            "original_length": original_length,
+                            "truncated_length": len(truncated_value),
+                        }
+
+                        base_dict[attr_name] = truncated_value
+
+        return base_dict, metadata
     if isinstance(value, Exception):
         recoverable = bool(kwargs.get("recoverable"))
         return {"content": f"{str(value)}", "error_type": type(value).__name__, "recoverable": recoverable}, metadata
