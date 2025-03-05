@@ -124,13 +124,24 @@ class AgentInputSchema(BaseModel):
         ]
         required_parameters = Prompt(messages=messages).get_required_parameters()
 
-        provided_parameters = set(self.model_dump().keys())
+        parameters = self.model_dump()
+
+        provided_parameters = set(parameters.keys())
 
         if not required_parameters.issubset(provided_parameters):
             raise ValueError(
                 f"Error: Invalid parameters were provided. Expected: {required_parameters}. "
                 f"Got: {provided_parameters}"
             )
+
+        none_elements = []
+        for key, value in parameters.items():
+            if key in required_parameters and value is None:
+                none_elements.append(key)
+
+        if none_elements:
+            raise ValueError(f"Error: None was provided for parameters {none_elements}.")
+
         return self
 
 
