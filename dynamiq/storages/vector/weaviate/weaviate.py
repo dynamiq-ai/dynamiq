@@ -27,7 +27,7 @@ DEFAULT_QUERY_LIMIT = 9999
 
 class WeaviteRetrieverVectorStoreParams(BaseVectorStoreParams):
     alpha: float = 0.5
-    multi_tenancy_enabled: bool = False
+    multi_tenancy_enabled: bool | None = None
     auto_tenant_creation: bool | None = None
 
 
@@ -72,7 +72,7 @@ class WeaviateVectorStore:
         index_name: str = "default",
         create_if_not_exist: bool = False,
         content_key: str = "content",
-        multi_tenancy_enabled: bool = False,
+        multi_tenancy_enabled: bool | None = None,
         auto_tenant_creation: bool | None = None,
     ):
         """
@@ -87,8 +87,8 @@ class WeaviateVectorStore:
             index_name (str): The name of the index to use. Defaults to "default".
             content_key (Optional[str]): The field used to store content in the
                 storage.
-            multi_tenancy_enabled (bool): Whether to enable multi-tenancy for the collection.
-                Defaults to False.
+            multi_tenancy_enabled (bool | None): Whether to enable multi-tenancy for the collection.
+                Defaults to None (use Weaviate default).
             auto_tenant_creation (bool | None): Whether to automatically create tenants if they don't exist.
                 Only used if multi_tenancy_enabled is True. Defaults to None (use Weaviate default).
         """
@@ -109,8 +109,8 @@ class WeaviateVectorStore:
                 # Create collection with appropriate configuration
                 collection_config = {"inverted_index_config": Configure.inverted_index(index_null_state=True)}
 
-                # Add multi-tenancy configuration if enabled
-                if multi_tenancy_enabled:
+                # Add multi-tenancy configuration if explicitly set
+                if multi_tenancy_enabled is not None:
                     mt_config = {"enabled": multi_tenancy_enabled}
                     if auto_tenant_creation is not None:
                         mt_config["auto_tenant_creation"] = auto_tenant_creation
