@@ -26,10 +26,19 @@ if TYPE_CHECKING:
 DEFAULT_QUERY_LIMIT = 9999
 
 
-class WeaviteRetrieverVectorStoreParams(BaseVectorStoreParams):
-    alpha: float = 0.5
+class WeaviateWriterVectorStoreParams(BaseVectorStoreParams):
+    """Parameters for creating and managing Weaviate collections with multi-tenancy."""
     multi_tenancy_enabled: bool | None = None
     auto_tenant_creation: bool | None = None
+    tenant_name: str | None = None
+
+
+class WeaviteRetrieverVectorStoreParams(BaseVectorStoreParams):
+    """Parameters for using existing Weaviate collections with tenant context."""
+
+    alpha: float = 0.5
+    tenant_name: str | None = None
+    multi_tenancy_enabled: bool | None = None
 
 
 class WeaviateVectorStore:
