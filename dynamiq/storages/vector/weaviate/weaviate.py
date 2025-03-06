@@ -2,8 +2,9 @@ import datetime
 import re
 from typing import TYPE_CHECKING, Any, Optional
 
-from weaviate.classes.config import Configure
+from weaviate.classes.config import Configure, Reconfigure
 from weaviate.classes.query import HybridFusion
+from weaviate.classes.tenants import Tenant, TenantActivityStatus
 from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateQueryError
 from weaviate.util import generate_uuid5
 
@@ -74,6 +75,7 @@ class WeaviateVectorStore:
         content_key: str = "content",
         multi_tenancy_enabled: bool | None = None,
         auto_tenant_creation: bool | None = None,
+        tenant_name: str | None = None,
     ):
         """
         Initialize a new instance of WeaviateDocumentStore and connect to the
@@ -91,6 +93,7 @@ class WeaviateVectorStore:
                 Defaults to None (use Weaviate default).
             auto_tenant_creation (bool | None): Whether to automatically create tenants if they don't exist.
                 Only used if multi_tenancy_enabled is True. Defaults to None (use Weaviate default).
+            tenant_name (str | None): The name of the tenant to use for all operations.
         """
         index_name = self._fix_and_validate_index_name(index_name)
 
@@ -124,7 +127,15 @@ class WeaviateVectorStore:
                 )
 
         self.content_key = content_key
-        self._collection = self.client.collections.get(collection_name)
+        base_collection = self.client.collections.get(collection_name)
+
+        # If tenant_name is provided, create a tenant-specific collection
+        if tenant_name:
+            if not self._multi_tenancy_enabled:
+                raise ValueError("Multi-tenancy must be enabled when specifying a tenant_name")
+            self._collection = base_collection.with_tenant(tenant_name)
+        else:
+            self._collection = base_collection
 
     def close(self):
         """Close the connection to Weaviate."""
@@ -216,6 +227,83 @@ class WeaviateVectorStore:
         logger.debug(f"Document loaded from Weaviate: {data}")
 
         return Document(**data)
+
+    def add_tenants(self, tenant_names: list[str]) -> None:
+        """
+        Add new tenants to the collection.
+
+        Args:
+            tenant_names (list[str]): List of tenant names to add.
+        """
+        if not self._multi_tenancy_enabled:
+            raise ValueError("Multi-tenancy is not enabled for this collection")
+
+        tenants = [Tenant(name=name) for name in tenant_names]
+        self._collection.tenants.create(tenants=tenants)
+
+    def remove_tenants(self, tenant_names: list[str]) -> None:
+        """
+        Remove tenants from the collection.
+
+        Args:
+            tenant_names (list[str]): List of tenant names to remove.
+        """
+        if not self._multi_tenancy_enabled:
+            raise ValueError("Multi-tenancy is not enabled for this collection")
+
+        self._collection.tenants.remove(tenant_names)
+
+    def list_tenants(self) -> list[dict[str, Any]]:
+        """
+        List all tenants in the collection.
+
+        Returns:
+            list[dict[str, Any]]: List of tenant information.
+        """
+        if not self._multi_tenancy_enabled:
+            raise ValueError("Multi-tenancy is not enabled for this collection")
+
+        return self._collection.tenants.get()
+
+    def get_tenant(self, tenant_name: str) -> dict[str, Any] | None:
+        """
+        Get information about a specific tenant.
+
+        Args:
+            tenant_name (str): Name of the tenant to get.
+
+        Returns:
+            dict[str, Any] | None: Tenant information if found, None otherwise.
+        """
+        if not self._multi_tenancy_enabled:
+            raise ValueError("Multi-tenancy is not enabled for this collection")
+
+        return self._collection.tenants.get_by_name(tenant_name)
+
+    def update_tenant_status(self, tenant_name: str, status: TenantActivityStatus) -> None:
+        """
+        Update the activity status of a tenant.
+
+        Args:
+            tenant_name (str): Name of the tenant to update.
+            status (TenantActivityStatus): New activity status for the tenant.
+        """
+        if not self._multi_tenancy_enabled:
+            raise ValueError("Multi-tenancy is not enabled for this collection")
+
+        self._collection.tenants.update(tenants=[Tenant(name=tenant_name, activity_status=status)])
+
+    def update_auto_tenant_creation(self, enabled: bool) -> None:
+        """
+        Update the auto-tenant creation setting for the collection.
+
+        Args:
+            enabled (bool): Whether to enable auto-tenant creation.
+        """
+        if not self._multi_tenancy_enabled:
+            raise ValueError("Multi-tenancy is not enabled for this collection")
+
+        self._collection.config.update(multi_tenancy_config=Reconfigure.multi_tenancy(auto_tenant_creation=enabled))
 
     def _query(self) -> list[dict[str, Any]]:
         """
