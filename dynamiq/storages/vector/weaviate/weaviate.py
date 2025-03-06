@@ -2,6 +2,7 @@ import datetime
 import re
 from typing import TYPE_CHECKING, Any, Optional
 
+from weaviate.classes.config import Configure
 from weaviate.classes.query import HybridFusion
 from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateQueryError
 from weaviate.util import generate_uuid5
@@ -69,6 +70,8 @@ class WeaviateVectorStore:
         index_name: str = "default",
         create_if_not_exist: bool = False,
         content_key: str = "content",
+        multi_tenancy_enabled: bool = False,
+        auto_tenant_creation: bool | None = None,
     ):
         """
         Initialize a new instance of WeaviateDocumentStore and connect to the
@@ -82,6 +85,10 @@ class WeaviateVectorStore:
             index_name (str): The name of the index to use. Defaults to "default".
             content_key (Optional[str]): The field used to store content in the
                 storage.
+            multi_tenancy_enabled (bool): Whether to enable multi-tenancy for the collection.
+                Defaults to False.
+            auto_tenant_creation (bool | None): Whether to automatically create tenants if they don't exist.
+                Only used if multi_tenancy_enabled is True. Defaults to None (use Weaviate default).
         """
         index_name = self._fix_and_validate_index_name(index_name)
 
@@ -91,23 +98,31 @@ class WeaviateVectorStore:
                 connection = Weaviate()
             self.client = connection.connect()
 
-        collection_settings = {
-            "class": index_name,
-            "invertedIndexConfig": {"indexNullState": True},
-        }
+        collection_name = index_name
+        self._multi_tenancy_enabled = multi_tenancy_enabled
+        self._auto_tenant_creation = auto_tenant_creation
 
-        if not self.client.collections.exists(collection_settings["class"]):
+        if not self.client.collections.exists(collection_name):
             if create_if_not_exist:
-                self.client.collections.create_from_dict(collection_settings)
+                # Create collection with appropriate configuration
+                collection_config = {"inverted_index_config": Configure.inverted_index(index_null_state=True)}
+
+                # Add multi-tenancy configuration if enabled
+                if multi_tenancy_enabled:
+                    mt_config = {"enabled": multi_tenancy_enabled}
+                    if auto_tenant_creation is not None:
+                        mt_config["auto_tenant_creation"] = auto_tenant_creation
+
+                    collection_config["multi_tenancy_config"] = Configure.multi_tenancy(**mt_config)
+
+                self.client.collections.create(name=collection_name, **collection_config)
             else:
                 raise ValueError(
-                    f"Collection '{collection_settings['class']}' does not exist. "
-                    "Set 'create_if_not_exist' to True to create it."
+                    f"Collection '{collection_name}' does not exist. " "Set 'create_if_not_exist' to True to create it."
                 )
 
-        self._collection_settings = collection_settings
         self.content_key = content_key
-        self._collection = self.client.collections.get(collection_settings["class"])
+        self._collection = self.client.collections.get(collection_name)
 
     def close(self):
         """Close the connection to Weaviate."""
