@@ -132,7 +132,7 @@ class WeaviateVectorStore:
                 self.client.collections.create(name=collection_name, **collection_config)
             else:
                 raise ValueError(
-                    f"Collection '{collection_name}' does not exist. " "Set 'create_if_not_exist' to True to create it."
+                    f"Collection '{collection_name}' does not exist. Set 'create_if_not_exist' to True to create it."
                 )
 
         self.content_key = content_key
