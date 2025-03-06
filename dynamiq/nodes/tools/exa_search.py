@@ -11,6 +11,75 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
+DESCRIPTION_EXA = """# Exa Search Tool
+## Overview
+Exa Search Tool provides web search capabilities powered by Exa AI's semantic search technology. Search the internet for current information with powerful filtering options and retrieve full webpage content when needed.
+
+## Capabilities
+- Perform keyword and semantic searches across the web
+- Filter results by domains, text content, and categories
+- Retrieve highlights, summaries, and full content from webpages
+- Access metadata including titles, URLs, dates, and authors
+
+## Input Parameters
+- **query** (string, required): Search query text
+- **include_full_content** (boolean, optional, default: false): Retrieves complete content when true
+- **use_autoprompt** (boolean, optional, default: false): Enhances query automatically when true
+- **query_type** (string, optional, default: "auto"): "keyword" (exact match), "neural" (semantic), or "auto"
+- **category** (string, optional): Focus on specific data types (e.g., "company", "research paper")
+- **limit** (integer, optional, default: 10): Number of results to return (1-100)
+- **include_domains** (array, optional): Domains to include (e.g., ["wikipedia.org", "github.com"])
+- **exclude_domains** (array, optional): Domains to exclude
+- **include_text** (array, optional): Text strings that must appear in results
+- **exclude_text** (array, optional): Text strings that must not appear in results
+
+## Output Format
+Results include:
+- Title and URL
+- Published date and author (when available)
+- Relevance score
+- Highlights (key passages)
+- Summary (if requested)
+
+## Usage Examples
+
+### Basic Search
+{
+  "query": "renewable energy advancements 2024"
+}
+
+### Filtered Domain Search
+{
+  "query": "machine learning applications",
+  "include_domains": ["arxiv.org", "ieee.org"],
+  "limit": 15
+}
+
+
+### Comprehensive Research
+{
+  "query": "climate change policy",
+  "query_type": "neural",
+  "include_full_content": true,
+  "category": "research paper",
+  "exclude_domains": ["blog.com", "socialmedia.net"]
+}
+
+### Finding Specific Content
+{
+  "query": "python web framework comparison",
+  "include_text": ["performance metrics", "scalability"],
+  "exclude_text": ["paid", "subscription"]
+}
+
+## Best Practices
+1. Use specific queries with key terms and context
+2. Combine domain and text filters for improved relevance
+3. Use "neural" for concept searches, "keyword" for exact matches
+4. Request fewer results (5-15) for higher quality information
+5. Use include_full_content sparingly to maintain response speed
+"""  # noqa E501
+
 
 class QueryType(str, Enum):
     keyword = "keyword"
@@ -82,10 +151,7 @@ class ExaTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Exa Search Tool"
-    description: str = (
-        "A tool for searching the web using Exa AI. "
-        "Provides advanced search capabilities with options for filtering results."
-    )
+    description: str = DESCRIPTION_EXA
     connection: Exa
 
     include_full_content: bool = Field(

@@ -9,6 +9,43 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
+DESCRIPTION = """# Firecrawl Web Scraping Tool
+## Overview
+The Firecrawl Tool is a powerful web scraping utility that extracts content from websites with high fidelity.
+It supports various content formats, custom extraction rules,
+and browser automation capabilities to handle dynamic websites.
+This tool allows you to scrape full web pages or specific content elements based on your configuration.
+## Capabilities
+- Extract content from any accessible webpage in multiple formats (Markdown, HTML, JSON)
+- Focus on main content while filtering out navigation, ads, and other non-essential elements
+- Perform browser actions (clicks, scrolls) before extraction to handle dynamic content
+- Emulate different devices, locations, and browser configurations
+- Handle pages requiring JavaScript execution and dynamic content loading
+- Extract structured data using JSON schema templates
+## When to Use
+- When you need to extract information from a specific webpage
+- When you need content in a structured, readable format
+- When dealing with dynamic websites that require interaction before showing content
+- When you need to parse complex web applications or content behind user interactions
+## Input Parameters
+- **url** (string, required): URL of the webpage to scrape. Must be a valid,
+ accessible URL including protocol (http/https).
+## Usage Examples
+### Basic Scraping
+{
+  "url": "https://example.com/article/123"
+}
+## Best Practices
+1. **Start Simple**: Begin with just the URL parameter for basic scraping
+## Limitations
+- Cannot bypass authentication or access private content without proper credentials
+- May not work on websites with strong anti-scraping measures
+- JavaScript-heavy websites might not render completely
+- Content behind CAPTCHAs or other human verification cannot be accessed
+- Very large pages may time out or return partial content
+- Some websites may block or rate-limit scraping attempts
+"""
+
 
 class JsonOptions(BaseModel):
     """Options for configuring JSON extraction."""

@@ -10,6 +10,62 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
+DESCRIPTION = """# Tavily Search Tool
+## Description
+A web search tool that delivers relevant results from trusted internet sources,
+ specializing in factual information, current events, and topic-specific knowledge.
+
+## Capabilities
+- Perform natural language web searches with adjustable depth and focus
+- Filter by topic categories and specific domains
+- Control result quantity and quality
+- Include optional image content, summarized answers, and raw page data
+- Access current information beyond your knowledge base
+
+## Parameters
+- `query` (required): Your search query (e.g., "latest quantum computing advances")
+- `search_depth`: Search comprehensiveness
+  - `basic`: Quick results (default)
+  - `advanced`: More thorough results
+- `topic`: Focus category
+  - Options: `general` (default), `academic`, `finance`, `health`, `news`, `shopping`, `technology`
+- `max_results`: Number of results (default: 5, range: 1-100)
+- `include_images`: Retrieve image results (default: false)
+- `include_answer`: Provide summarized answer (default: false)
+- `include_raw_content`: Include full page content (default: false)
+- `include_domains`: Specific domains to include
+- `exclude_domains`: Domains to exclude
+- `use_cache`: Use cached results when available (default: true)
+
+## Usage Examples
+1. Basic search:
+   {
+     "query": "effects of climate change on coral reefs"
+    }
+2. Advanced topic-specific search:
+    {
+     "query": "breakthrough Alzheimer's treatments",
+     "search_depth": "advanced",
+     "topic": "health",
+     "max_results": 10
+   }
+
+3. Filtered search with answer:
+   {
+     "query": "electric vehicles carbon emissions impact",
+     "include_answer": true,
+     "include_domains": ["nature.com", "science.org", "epa.gov"],
+     "exclude_domains": ["blog.com"]
+   }
+
+## Tips
+- More specific queries yield more relevant results
+- `search_depth: advanced` improves quality but increases response time
+- `include_raw_content` significantly increases response size
+- Topic-specific searches filter out irrelevant content
+- Relevance scores help identify authoritative sources
+"""  # noqa E501
+
 
 class TavilyInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a search query.")

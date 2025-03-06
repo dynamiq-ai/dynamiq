@@ -9,6 +9,29 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
+DESCRIPTION = """# ZenRows Web Scraper Tool
+## Description
+A powerful web scraping tool that extracts content from any web page while bypassing anti-bot protection,
+CAPTCHAs, and browser fingerprinting. Handles both static and JavaScript-rendered content.
+## Capabilities
+- Extracts complete text from web pages and converts HTML to clean, readable Markdown
+- Handles dynamic JavaScript content requiring browser interaction
+- Bypasses common anti-scraping measures
+- Retrieves structured data from websites
+## When to Use
+- To access specific web content not in knowledge base or requiring up-to-date information
+- To extract information from articles, documentation, or product pages
+- When you need detailed content from a known URL rather than general search results
+## Input Parameters
+- `url` (required): The complete URL of the web page to scrape (e.g., "https://www.example.com/article/12345")
+## Usage Examples
+1. News article: `{"url": "https://www.bbc.com/news/science-environment-12345678"}`
+2. Documentation: `{"url": "https://docs.python.org/3/tutorial/introduction.html"}`
+3. Product information: `{"url": "https://www.amazon.com/dp/B08N5KWB9H"}`
+## Notes
+- Always provide the complete URL including the protocol (http:// or https://)
+"""
+
 
 class ZenRowsInputSchema(BaseModel):
     url: str = Field(default="", description="Parameter to provide a url of the page to scrape.")

@@ -11,6 +11,52 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
+DESCRIPTION_SERP = """# Scale SERP Search Tool
+## Overview
+A web search tool that retrieves current information from the internet using Scale SERP API.
+Access search results including web pages, news, images, and videos with organized titles, links, and descriptive snippets.
+
+## When to Use
+- Find current information beyond your knowledge base
+- Verify facts or recent developments
+- Research specific topics, people, companies, or events
+- Locate authoritative sources
+- Discover relevant visual content
+
+## Parameters
+- `query`: Search term (e.g., "latest climate change report")
+- `url`: Specific website to search (e.g., "https://www.example.com")
+- `limit`: Number of results (default: 10, max: 1000)
+- `search_type`: Search category
+  - `web`: Standard results (default)
+  - `news`: Recent articles
+  - `images`: Image results
+  - `videos`: Video results
+
+## Examples
+1. Basic web search:
+   {
+     "query": "renewable energy breakthroughs 2024",
+     "limit": 5
+   }
+2. News search:
+   {
+     "query": "latest economic policy updates",
+     "search_type": "news",
+     "limit": 3
+   }
+3. Website-specific search:
+   {
+     "url": "https://www.who.int",
+     "limit": 5
+   }
+
+## Notes
+- Provide either `query` OR `url` (not both)
+- Use specific, concise search terms for best results
+- News results reflect most recent publications
+"""  # noqa E501
+
 
 class SearchType(str, enum.Enum):
     WEB = "web"
@@ -65,10 +111,7 @@ class ScaleSerpTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Scale Serp Search Tool"
-    description: str = (
-        "A tool for searching the web, powered by Scale SERP. "
-        "You can use this tool to search the web for information."
-    )
+    description: str = DESCRIPTION_SERP
     connection: ScaleSerp
 
     query: str = Field(default="", description="The default search query to use")

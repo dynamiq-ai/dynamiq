@@ -425,7 +425,6 @@ class ReActAgent(Agent):
                     inference_mode=self.inference_mode,
                     **kwargs,
                 )
-
                 action, action_input = None, None
                 llm_generated_output = ""
 
