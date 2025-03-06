@@ -8,6 +8,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, PydanticUserError, RootModel
 
+TRUNCATE_LIMIT = 20
+
 
 def generate_uuid() -> str:
     """
@@ -97,7 +99,12 @@ class JsonWorkflowEncoder(JSONEncoder):
 
 
 def format_value(
-    value: Any, skip_format_types: set = None, force_format_types: set = None, truncate_enabled: bool = False, **kwargs
+    value: Any,
+    skip_format_types: set = None,
+    force_format_types: set = None,
+    truncate_enabled: bool = False,
+    truncate_limit: int = TRUNCATE_LIMIT,
+    **kwargs,
 ) -> tuple[Any, dict]:
     """Format a value for serialization.
 
@@ -105,7 +112,8 @@ def format_value(
         value (Any): The value to format.
         skip_format_types (set, optional): Types to skip formatting.
         force_format_types (set, optional): Types to force formatting.
-        truncate_enabled: Whether to apply truncation.
+        truncate_enabled(bool,optional): Whether to apply truncation.
+        truncate_limit (int): The maximum allowed length for the value; if exceeded, the value will be truncated.
         **kwargs: Additional keyword arguments.
 
     Returns:
@@ -119,16 +127,16 @@ def format_value(
     if force_format_types is None:
         force_format_types = set()
 
-    metadata = {}
+    truncate_metadata = {}
     if not isinstance(value, tuple(force_format_types)) and isinstance(
         value, tuple(skip_format_types)
     ):
-        return value, metadata
+        return value, truncate_metadata
 
     if isinstance(value, BytesIO):
-        return getattr(value, "name", None) or encode_bytes(value.getvalue()), metadata
+        return getattr(value, "name", None) or encode_bytes(value.getvalue()), truncate_metadata
     if isinstance(value, bytes):
-        return encode_bytes(value), metadata
+        return encode_bytes(value), truncate_metadata
 
     path = kwargs.get("path", "")
     if isinstance(value, dict):
@@ -139,18 +147,18 @@ def format_value(
                 v, skip_format_types, force_format_types, truncate_enabled, path=new_path
             )
             formatted_dict[k] = formatted_v
-            metadata.update(sub_metadata)
-        return formatted_dict, metadata
+            truncate_metadata.update(sub_metadata)
+        return formatted_dict, truncate_metadata
 
     if truncate_enabled and isinstance(value, list) and all(isinstance(v, float) for v in value):
         original_length = len(value)
-        if original_length > 20:
-            truncated_value = value[:20]
-            metadata[path] = {
+        if original_length > truncate_limit:
+            truncated_value = value[:truncate_limit]
+            truncate_metadata[path] = {
                 "original_length": original_length,
                 "truncated_length": len(truncated_value),
             }
-            return truncated_value, metadata
+            return truncated_value, truncate_metadata
 
     if isinstance(value, (list, tuple, set)):
         formatted_list = []
@@ -160,12 +168,15 @@ def format_value(
                 v, skip_format_types, force_format_types, truncate_enabled, path=new_path
             )
             formatted_list.append(formatted_v)
-            metadata.update(sub_metadata)
+            truncate_metadata.update(sub_metadata)
 
-        return type(value)(formatted_list), metadata
+        return type(value)(formatted_list), truncate_metadata
 
     if isinstance(value, (RunnableResult, PythonInputSchema)):
-        return value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types), metadata
+        return (
+            value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types),
+            truncate_metadata,
+        )
     if isinstance(value, BaseModel):
         base_dict = value.to_dict() if hasattr(value, "to_dict") else value.model_dump()
 
@@ -175,24 +186,28 @@ def format_value(
                     metadata_key = f"{path}.{attr_name}" if path else attr_name
 
                     original_length = len(attr_value)
-                    if original_length > 20:
-                        truncated_value = attr_value[:20]
+                    if original_length > truncate_limit:
+                        truncated_value = attr_value[:truncate_limit]
 
-                        metadata[metadata_key] = {
+                        truncate_metadata[metadata_key] = {
                             "original_length": original_length,
                             "truncated_length": len(truncated_value),
                         }
 
                         base_dict[attr_name] = truncated_value
 
-        return base_dict, metadata
+        return base_dict, truncate_metadata
     if isinstance(value, Exception):
         recoverable = bool(kwargs.get("recoverable"))
-        return {"content": f"{str(value)}", "error_type": type(value).__name__, "recoverable": recoverable}, metadata
+        return {
+            "content": f"{str(value)}",
+            "error_type": type(value).__name__,
+            "recoverable": recoverable,
+        }, truncate_metadata
     if callable(value):
-        return f"func: {getattr(value, '__name__', str(value))}", metadata
+        return f"func: {getattr(value, '__name__', str(value))}", truncate_metadata
 
     try:
-        return RootModel[type(value)](value).model_dump(), metadata
+        return RootModel[type(value)](value).model_dump(), truncate_metadata
     except PydanticUserError:
-        return str(value), metadata
+        return str(value), truncate_metadata

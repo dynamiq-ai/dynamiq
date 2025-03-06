@@ -184,8 +184,8 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
                 prompt = prompt.model_dump()
             serialized["prompt"] = prompt
 
-        metadata = {}
-        formatted_v, metadata.setdefault("truncated", {})["input"] = format_value(
+        truncate_metadata = {}
+        formatted_input, truncate_metadata.setdefault("truncated", {})["input"] = format_value(
             kwargs.get("input_data"), truncate_enabled=True
         )
         run = Run(
@@ -202,10 +202,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
                 "run_depends": kwargs.get("run_depends", []),
                 "host": self.host,
                 **self.metadata,
-                **metadata,
+                **truncate_metadata,
             },
             tags=self.tags,
-            input=formatted_v,
+            input=formatted_input,
         )
         return run
 
@@ -221,8 +221,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run_id = get_run_id(kwargs)
 
-        metadata = {}
-        formatted_v, metadata.setdefault("truncated", {})["input"] = format_value(input_data, truncate_enabled=True)
+        truncate_metadata = {}
+        formatted_input, truncate_metadata.setdefault("truncated", {})["input"] = format_value(
+            input_data, truncate_enabled=True
+        )
         self.runs[run_id] = Run(
             id=run_id,
             name="Workflow",
@@ -231,12 +233,12 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             source_id=self.source_id,
             session_id=self.session_id,
             start_time=datetime.now(UTC),
-            input=formatted_v,
+            input=formatted_input,
             metadata={
                 "workflow": {"id": serialized.get("id"), "version": serialized.get("version")},
                 "host": self.host,
                 **self.metadata,
-                **metadata,
+                **truncate_metadata,
             },
             tags=self.tags,
         )
@@ -290,8 +292,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run_id = get_run_id(kwargs)
         parent_run_id = get_parent_run_id(kwargs)
-        metadata = {}
-        formatted_v, metadata.setdefault("truncated", {})["input"] = format_value(input_data, truncate_enabled=True)
+        truncate_metadata = {}
+        formatted_input, truncate_metadata.setdefault("truncated", {})["input"] = format_value(
+            input_data, truncate_enabled=True
+        )
 
         self.runs[run_id] = Run(
             id=run_id,
@@ -302,8 +306,8 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             session_id=self.session_id,
             start_time=datetime.now(UTC),
             parent_run_id=parent_run_id,
-            input=formatted_v,
-            metadata={"flow": {"id": serialized.get("id")}, "host": self.host, **self.metadata, **metadata},
+            input=formatted_input,
+            metadata={"flow": {"id": serialized.get("id")}, "host": self.host, **self.metadata, **truncate_metadata},
             tags=self.tags,
         )
 
@@ -434,13 +438,15 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         execution_run_id = get_execution_run_id(kwargs)
-        metadata = {}
-        formatted_v, metadata.setdefault("truncated", {})["input"] = format_value(input_data, truncate_enabled=True)
+        truncate_metadata = {}
+        formatted_input, truncate_metadata.setdefault("truncated", {})["input"] = format_value(
+            input_data, truncate_enabled=True
+        )
         execution = ExecutionRun(
             id=execution_run_id,
             start_time=datetime.now(UTC),
-            input=formatted_v,
-            metadata=metadata,
+            input=formatted_input,
+            metadata=truncate_metadata,
         )
         run.executions.append(execution)
 
