@@ -12,9 +12,13 @@ Dependencies:
 Ensure you have the necessary API key and dependencies installed before running the script.
 """
 
+import os
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.prompts import Prompt, Message
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables from .env
 
 # Define the prompt template for generating a short response
 PROMPT_TEMPLATE = """
@@ -27,7 +31,7 @@ prompt = Prompt(messages=[Message(content=PROMPT_TEMPLATE, role="user")])
 # Configure the Gemini LLM Node
 llm = Gemini(
     id="gemini",  # Unique identifier for the node
-    connection=GeminiConnection(api_key="GEMINI_API_KEY"),  # Securely provide your API key
+    connection=GeminiConnection(api_key=os.getenv("GEMINI_API_KEY")),  # Securely provide your API key
     model="gemini-2.0-flash-exp",  # LLM model version
     temperature=0.3,  # Controls randomness (0.0 = deterministic, 1.0 = very random)
     max_tokens=1000,  # Maximum tokens in the generated response
