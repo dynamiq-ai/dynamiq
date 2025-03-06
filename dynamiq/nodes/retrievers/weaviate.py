@@ -7,7 +7,7 @@ from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.retrievers.base import Retriever, RetrieverInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import WeaviateVectorStore
-from dynamiq.storages.vector.weaviate.weaviate import WeaviteRetrieverVectorStoreParams
+from dynamiq.storages.vector.weaviate import WeaviteRetrieverVectorStoreParams
 
 
 class WeaviateDocumentRetriever(Retriever, WeaviteRetrieverVectorStoreParams):

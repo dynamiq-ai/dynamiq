@@ -1,1 +1,1 @@
-from .weaviate import WeaviateVectorStore
+from .weaviate import WeaviateVectorStore, WeaviateWriterVectorStoreParams, WeaviteRetrieverVectorStoreParams
