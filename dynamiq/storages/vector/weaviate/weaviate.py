@@ -27,6 +27,8 @@ DEFAULT_QUERY_LIMIT = 9999
 
 class WeaviteRetrieverVectorStoreParams(BaseVectorStoreParams):
     alpha: float = 0.5
+    multi_tenancy_enabled: bool = False
+    auto_tenant_creation: bool | None = None
 
 
 class WeaviateVectorStore:
