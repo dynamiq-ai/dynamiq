@@ -1123,3 +1123,10 @@ class Elasticsearch(BaseConnection):
 
         logger.debug(f"Connected to Elasticsearch at {self.cloud_id or self.url}")
         return es_client
+
+
+class xAI(BaseApiKeyConnection):
+    api_key: str = Field(default_factory=partial(get_env_var, "XAI_API_KEY"))
+
+    def connect(self):
+        pass
