@@ -361,7 +361,7 @@ class Node(BaseModel, Runnable, ABC):
         return input_data
 
     def transform_input(
-        self, input_data: dict, depends_result: dict[Any, RunnableResult], use_input_transformer: bool = True, **kwa
+        self, input_data: dict, depends_result: dict[Any, RunnableResult], use_input_transformer: bool = True, **kwargs
     ) -> dict:
         """
         Transform input data for the node.
@@ -378,7 +378,7 @@ class Node(BaseModel, Runnable, ABC):
             dict: Transformed input data.
         """
         # Apply input transformer
-        if self.input_transformer.path or self.input_transformer.selector and use_input_transformer:
+        if (self.input_transformer.path or self.input_transformer.selector) and use_input_transformer:
             depends_result_as_dict = {k: result.to_depend_dict() for k, result in depends_result.items()}
             inputs = self.transform(input_data | depends_result_as_dict, self.input_transformer, self.id)
         else:

@@ -13,8 +13,6 @@ from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.function_tool import FunctionTool
 from dynamiq.nodes.types import NodeGroup
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.utils.jsonpath import filter as jsonpath_filter
-from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
 
 
@@ -119,12 +117,21 @@ class GraphState(Node):
             if task.is_postponed_component_init:
                 task.init_components(connection_manager)
 
-    def validate_input_transformer(self, task, input_data, **kwargs):
+    def validate_input_transformer(self, task: Node, input_data: dict[str, Any], **kwargs) -> bool:
+        """
+        Validates whether input data after transformation is a correct input for the task.
+
+        Args:
+            task (Node): Task that have to be executed.
+            input_data (dict[str, Any]): Original input to the task.
+
+        Return:
+            str: Whether input data is correct.
+        """
 
         if task.input_transformer:
             try:
-                output = jsonpath_filter(input_data, task.input_transformer.path, task.id)
-                output = jsonpath_mapper(output, task.input_transformer.selector, task.id)
+                output = task.transform(input_data, task.input_transformer, task.id)
                 task.validate_input_schema(output, **kwargs)
 
                 return True
