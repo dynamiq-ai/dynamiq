@@ -417,11 +417,6 @@ class ReActAgent(Agent):
 
         for loop_num in range(self.max_loops):
 
-            print("DEBUG: Loop number: ", loop_num)
-            print("DEBUG: Prompt messages: ")
-            for msg in self._prompt.messages:
-                print(msg.role, msg.content)
-
             try:
                 llm_result = self._run_llm(
                     self._prompt.messages,
@@ -432,9 +427,6 @@ class ReActAgent(Agent):
                 )
                 action, action_input = None, None
                 llm_generated_output = ""
-
-                print("DEBUG: LLM result content: ", llm_result.output.get("content"))
-                print("DEBUG: LLM result: ", llm_result.output)
 
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:

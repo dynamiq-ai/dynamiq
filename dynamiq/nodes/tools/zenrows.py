@@ -9,7 +9,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION = """## ZenRows Web Scraper Tool
+DESCRIPTION_ZENROWS = """## ZenRows Web Scraper Tool
 ### Description
 A powerful web scraping tool that extracts content from any web page.
 ### Capabilities
@@ -40,10 +40,7 @@ class ZenRowsTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Zenrows Scraper Tool"
-    description: str = (
-        "A tool for scraping web pages, powered by ZenRows. "
-        "You can use this tool to scrape the content of a web page."
-    )
+    description: str = DESCRIPTION_ZENROWS
     connection: ZenRows
     url: str | None = None
     markdown_response: bool = Field(

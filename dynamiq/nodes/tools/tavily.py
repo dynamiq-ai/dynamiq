@@ -10,7 +10,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION = """## Tavily Search Tool
+DESCRIPTION_TAVILY = """## Tavily Search Tool
 ### Description
 A web search tool that delivers relevant results from trusted internet sources, specializing in factual information, current events, and topic-specific knowledge.
 
@@ -22,7 +22,7 @@ A web search tool that delivers relevant results from trusted internet sources, 
 - Access current information beyond your knowledge base.
 
 ### Parameters
-- `query` (required): Your search query (e.g., "latest quantum computing advances").
+- `query`: Your search query (e.g., "latest quantum computing advances").
 - `search_depth`: Must be either `basic` or `advanced` (default: `basic`).
 - `topic`: Must be either `general` (default) or `news`.
 - `max_results`: Number of results (default: 5, range: 1-20).
@@ -89,7 +89,7 @@ class TavilyTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Tavily Search Tool"
-    description: str = "A tool for searching the web."
+    description: str = DESCRIPTION_TAVILY
     connection: Tavily
 
     search_depth: str = Field(default="basic", description="The search depth to use.")
