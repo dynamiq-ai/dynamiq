@@ -14,10 +14,7 @@ DESCRIPTION = """# ZenRows Web Scraper Tool
 A powerful web scraping tool that extracts content from any web page while bypassing anti-bot protection,
 CAPTCHAs, and browser fingerprinting. Handles both static and JavaScript-rendered content.
 ## Capabilities
-- Extracts complete text from web pages and converts HTML to clean, readable Markdown
-- Handles dynamic JavaScript content requiring browser interaction
-- Bypasses common anti-scraping measures
-- Retrieves structured data from websites
+- Extracts complete text from web pages
 ## When to Use
 - To access specific web content not in knowledge base or requiring up-to-date information
 - To extract information from articles, documentation, or product pages

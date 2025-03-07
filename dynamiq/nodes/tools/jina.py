@@ -12,28 +12,21 @@ from dynamiq.utils.logger import logger
 
 DESCRIPTION_SCRAPE = """# Jina Scrape Tool
 ## Overview
-The Jina Scrape Tool extracts content from web pages in multiple formats
-(text, HTML, Markdown, screenshots), handling both static and JavaScript-rendered content on modern, responsive websites.
+The Jina Scrape Tool extracts content from web pages.
 
 ## Capabilities
 - Extract web content in various formats
-- Capture full-page or partial screenshots
 - Process JavaScript-rendered dynamic content
 - Handle different text encodings and international characters
 - Return well-formatted content for further processing
 
 ## When to Use
 - Extract information from specific webpages
-- Capture visual representations of web content
 - Convert web content to more readable formats
 - Analyze webpage structure
-- Monitor website content changes
 
 ## Input Parameters
 - **url** (string, required): Complete URL of the webpage to scrape
-
-## Best Practices
-- Start with default response format before trying specific formats
 """  # noqa: E501
 
 DESCRIPTION_SEARCH = """# Jina Search Tool

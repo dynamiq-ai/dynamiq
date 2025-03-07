@@ -24,14 +24,12 @@ Exa Search Tool provides web search capabilities powered by Exa AI's semantic se
 ## Input Parameters
 - **query** (string, required): Search query text
 - **include_full_content** (boolean, optional, default: false): Retrieves complete content when true
-- **use_autoprompt** (boolean, optional, default: false): Enhances query automatically when true
+- **use_autoprompt** (boolean, optional, default: false): Enhances query automatically when true.
+Enabled by default for auto search, optional for neural search, and not available for keyword search.
 - **query_type** (string, optional, default: "auto"): "keyword" (exact match), "neural" (semantic), or "auto"
-- **category** (string, optional): Focus on specific data types (e.g., "company", "research paper")
+- **category** (string, optional): Focus on specific data types
+(only company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report)
 - **limit** (integer, optional, default: 10): Number of results to return (1-100)
-- **include_domains** (array, optional): Domains to include (e.g., ["wikipedia.org", "github.com"])
-- **exclude_domains** (array, optional): Domains to exclude
-- **include_text** (array, optional): Text strings that must appear in results
-- **exclude_text** (array, optional): Text strings that must not appear in results
 
 ## Output Format
 Results include:
@@ -51,7 +49,7 @@ Results include:
 ### Filtered Domain Search
 {
   "query": "machine learning applications",
-  "include_domains": ["arxiv.org", "ieee.org"],
+  "category": "research paper",
   "limit": 15
 }
 
@@ -62,14 +60,6 @@ Results include:
   "query_type": "neural",
   "include_full_content": true,
   "category": "research paper",
-  "exclude_domains": ["blog.com", "socialmedia.net"]
-}
-
-### Finding Specific Content
-{
-  "query": "python web framework comparison",
-  "include_text": ["performance metrics", "scalability"],
-  "exclude_text": ["paid", "subscription"]
 }
 
 ## Best Practices
@@ -94,20 +84,27 @@ class ExaInputSchema(BaseModel):
     include_full_content: bool | None = Field(
         default=None,
         description="If true, retrieve full content, highlights, and summaries for search results.",
-        is_accessible_to_agent=False,
+        is_accessible_to_agent=True,
     )
     use_autoprompt: bool | None = Field(
-        default=None, description="If true, query will be converted to a Exa query.", is_accessible_to_agent=False
+        default=None,
+        description="If true, query will be converted to a Exa query."
+        "Enabled by default for auto search, optional for neural search, and not available for keyword search.",
+        is_accessible_to_agent=False,
     )
     query_type: QueryType | None = Field(
         default=None,
-        description="Type of query to be used. Options are 'keyword', 'neural', or 'auto'.",
+        description="Type of query to be used. Options are 'keyword', 'neural', or 'auto'."
+        "Neural uses an embeddings-based model, keyword is google-like SERP. "
+        "Default is auto, which automatically decides between keyword and neural.",
         is_accessible_to_agent=False,
     )
     category: str | None = Field(
         default=None,
-        description="A data category to focus on (e.g., company, research paper, news article).",
-        is_accessible_to_agent=False,
+        description="A data category to focus on."
+        "Options are company, research paper, news, pdf,"
+        " github, tweet, personal site, linkedin profile, financial report.",
+        is_accessible_to_agent=True,
     )
     limit: int | None = Field(
         default=None, ge=1, le=100, description="Number of search results to return.", is_accessible_to_agent=False
