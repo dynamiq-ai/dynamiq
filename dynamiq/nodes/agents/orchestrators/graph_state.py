@@ -126,7 +126,7 @@ class GraphState(Node):
             input_data (dict[str, Any]): Original input to the task.
 
         Return:
-            str: Whether input data is correct.
+            bool: Whether input data is correct.
         """
 
         if task.input_transformer:
