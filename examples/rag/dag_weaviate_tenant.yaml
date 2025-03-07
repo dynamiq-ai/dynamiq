@@ -71,7 +71,7 @@ nodes:
     type: dynamiq.nodes.writers.WeaviateDocumentWriter
     name: Weaviate Document Writer
     connection: weaviate-conn
-    index_name: default
+    index_name: default1
     tenant_name: tenant1
     create_if_not_exist: true
     depends:
@@ -91,7 +91,7 @@ nodes:
     type: dynamiq.nodes.retrievers.WeaviateDocumentRetriever
     name: Weaviate Document Retriever
     connection: weaviate-conn
-    index_name: default
+    index_name: default1
     tenant_name: tenant1
     depends:
       - node: openai-text-embedder-1
