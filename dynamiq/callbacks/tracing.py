@@ -184,6 +184,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
                 prompt = prompt.model_dump()
             serialized["prompt"] = prompt
 
+        truncate_metadata = {}
+        formatted_input, truncate_metadata.setdefault("truncated", {})["input"] = format_value(
+            kwargs.get("input_data"), truncate_enabled=True
+        )
         run = Run(
             id=run_id,
             name=serialized.get("name"),
@@ -198,9 +202,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
                 "run_depends": kwargs.get("run_depends", []),
                 "host": self.host,
                 **self.metadata,
+                **truncate_metadata,
             },
             tags=self.tags,
-            input=format_value(kwargs.get("input_data")),
+            input=formatted_input,
         )
         return run
 
@@ -215,6 +220,11 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             **kwargs (Any): Additional arguments.
         """
         run_id = get_run_id(kwargs)
+
+        truncate_metadata = {}
+        formatted_input, truncate_metadata.setdefault("truncated", {})["input"] = format_value(
+            input_data, truncate_enabled=True
+        )
         self.runs[run_id] = Run(
             id=run_id,
             name="Workflow",
@@ -223,11 +233,12 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             source_id=self.source_id,
             session_id=self.session_id,
             start_time=datetime.now(UTC),
-            input=format_value(input_data),
+            input=formatted_input,
             metadata={
                 "workflow": {"id": serialized.get("id"), "version": serialized.get("version")},
                 "host": self.host,
                 **self.metadata,
+                **truncate_metadata,
             },
             tags=self.tags,
         )
@@ -244,7 +255,9 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-        run.output = format_value(output_data)
+        run.output, run.metadata.setdefault("truncated", {})["output"] = format_value(
+            output_data, truncate_enabled=True
+        )
         run.status = RunStatus.SUCCEEDED
 
         self.flush()
@@ -279,6 +292,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run_id = get_run_id(kwargs)
         parent_run_id = get_parent_run_id(kwargs)
+        truncate_metadata = {}
+        formatted_input, truncate_metadata.setdefault("truncated", {})["input"] = format_value(
+            input_data, truncate_enabled=True
+        )
 
         self.runs[run_id] = Run(
             id=run_id,
@@ -289,8 +306,8 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             session_id=self.session_id,
             start_time=datetime.now(UTC),
             parent_run_id=parent_run_id,
-            input=format_value(input_data),
-            metadata={"flow": {"id": serialized.get("id")}, "host": self.host, **self.metadata},
+            input=formatted_input,
+            metadata={"flow": {"id": serialized.get("id")}, "host": self.host, **self.metadata, **truncate_metadata},
             tags=self.tags,
         )
 
@@ -306,7 +323,9 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-        run.output = format_value(output_data)
+        run.output, run.metadata.setdefault("truncated", {})["output"] = format_value(
+            output_data, truncate_enabled=True
+        )
         run.status = RunStatus.SUCCEEDED
 
     def on_flow_error(
@@ -339,7 +358,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run_id = get_run_id(kwargs)
         run = self._get_node_base_run(serialized, **kwargs)
-        run.input = format_value(input_data)
+        run.input, run.metadata.setdefault("truncated", {})["input"] = format_value(input_data, truncate_enabled=True)
         self.runs[run_id] = run
 
     def on_node_end(
@@ -354,7 +373,9 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-        run.output = format_value(output_data)
+        run.output, run.metadata.setdefault("truncated", {})["output"] = format_value(
+            output_data, truncate_enabled=True
+        )
         run.status = RunStatus.SUCCEEDED
         run.metadata["is_output_from_cache"] = kwargs.get("is_output_from_cache", False)
 
@@ -400,10 +421,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             run = self._get_node_base_run(serialized, **kwargs)
             self.runs[run_id] = run
 
-        run.input = format_value(input_data)
+        run.input, run.metadata.setdefault("truncated", {})["input"] = format_value(input_data, truncate_enabled=True)
         run.end_time = run.start_time
         run.status = RunStatus.SKIPPED
-        run.metadata["skip"] = format_value(skip_data)
+        run.metadata["skip"] = format_value(skip_data)[0]
 
     def on_node_execute_start(
         self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
@@ -417,10 +438,15 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         execution_run_id = get_execution_run_id(kwargs)
+        truncate_metadata = {}
+        formatted_input, truncate_metadata.setdefault("truncated", {})["input"] = format_value(
+            input_data, truncate_enabled=True
+        )
         execution = ExecutionRun(
             id=execution_run_id,
             start_time=datetime.now(UTC),
-            input=format_value(input_data),
+            input=formatted_input,
+            metadata=truncate_metadata,
         )
         run.executions.append(execution)
 
@@ -437,7 +463,9 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run = ensure_run(get_run_id(kwargs), self.runs)
         execution = ensure_execution_run(get_execution_run_id(kwargs), run.executions)
         execution.end_time = datetime.now(UTC)
-        execution.output = format_value(output_data)
+        execution.output, execution.metadata.setdefault("truncated", {})["output"] = format_value(
+            output_data, truncate_enabled=True
+        )
         execution.status = RunStatus.SUCCEEDED
 
     def on_node_execute_error(
