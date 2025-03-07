@@ -63,16 +63,17 @@ def run_agent_with_tokens():
     cat_fact_token = "cat_api_token_12345"  # nosec B105
     dog_fact_token = "dog_api_key_67890"  # nosec B105
 
+    input_data = {
+        "input": "Get me a cat fact and a dog fact",
+        "tool_params": {
+            "global": {"timeout": 30},
+            "by_name": {"CatFactApi": {"headers": {"Authorization": f"Bearer {cat_fact_token}"}}},
+            "by_id": {"dog-facts-api-789": {"headers": {"Authorization": f"Bearer {dog_fact_token}"}}},
+        },
+    }
+
     result = agent.run(
-        input_data={
-            "input": "Get me a cat fact using the CatFactApi tool, "
-            "then find and return a dog fact using the DogFactApi tool.",
-            "tool_params": {
-                "global": {"timeout": 30},
-                "CatFactApi": {"headers": {"Authorization": f"Bearer {cat_fact_token}"}},
-                "dog-facts-api-789": {"headers": {"Authorization": f"Bearer {dog_fact_token}"}},
-            },
-        }
+        input_data=input_data,
     )
 
     print("\nAgent Final Result:")

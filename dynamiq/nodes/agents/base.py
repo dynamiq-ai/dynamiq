@@ -107,6 +107,12 @@ class AgentIntermediateStep(BaseModel):
     final_answer: str | dict | None = None
 
 
+class ToolParams(BaseModel):
+    global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
+    by_name: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    by_id: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
 class AgentInputSchema(BaseModel):
     files: list[io.BytesIO | bytes] = Field(default=None, description="Parameter to provide files to the agent.")
 
@@ -116,11 +122,12 @@ class AgentInputSchema(BaseModel):
 
     model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
 
-    tool_params: dict[str, Any] = Field(
-        default_factory=dict,
+    tool_params: ToolParams = Field(
+        default_factory=ToolParams,
         description=(
-            "Parameters to be passed directly to tools without LLM exposure. "
-            "Can contain 'global' key for all tools, or tool name/id keys for specific tools."
+            "Structured parameters for tools. Use 'global_params' for all tools, "
+            "'by_name' for tool names, or 'by_id' for tool IDs. "
+            "Values are dictionaries merged with tool inputs."
         ),
         is_accessible_to_agent=False,
     )
@@ -525,7 +532,7 @@ class Agent(Node):
                 tool_input["files"] = self.files
 
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
-        tool_params = kwargs.get("tool_params", {})
+        tool_params = kwargs.get("tool_params", ToolParams())
 
         if tool_params:
             debug_info = []
@@ -534,18 +541,19 @@ class Agent(Node):
                 debug_info.append(f"Starting with input: {merged_input}")
 
             # 1. Apply global parameters (lowest priority)
-            global_params = tool_params.get("global", {})
+            global_params = tool_params.global_params
             if global_params:
                 self._apply_parameters(merged_input, global_params, "global", debug_info)
 
             # 2. Apply parameters by tool name (medium priority)
-            tool_name = self.sanitize_tool_name(tool.name)
-            name_params = tool_params.get(tool.name, {}) or tool_params.get(tool_name, {})
+            name_params = tool_params.by_name.get(tool.name, {}) or tool_params.by_name.get(
+                self.sanitize_tool_name(tool.name), {}
+            )
             if name_params:
                 self._apply_parameters(merged_input, name_params, f"name:{tool.name}", debug_info)
 
             # 3. Apply parameters by tool ID (highest priority)
-            id_params = tool_params.get(tool.id, {})
+            id_params = tool_params.by_id.get(tool.id, {})
             if id_params:
                 self._apply_parameters(merged_input, id_params, f"id:{tool.id}", debug_info)
 
