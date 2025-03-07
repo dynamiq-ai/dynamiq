@@ -109,8 +109,8 @@ class AgentIntermediateStep(BaseModel):
 
 class ToolParams(BaseModel):
     global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
-    by_name: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    by_id: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    by_name_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_name")
+    by_id_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_id")
 
 
 class AgentInputSchema(BaseModel):
@@ -512,18 +512,16 @@ class Agent(Node):
             )
         return tool
 
-    def _apply_parameters(self, merged_input: dict, params: dict, source: str, debug_info: list = None):
+    def _apply_parameters(self, merged_input: dict, params: dict, source: str, debug_info: list = []):
         """Apply parameters from the specified source to the merged input."""
         for key, value in params.items():
             if key in merged_input and isinstance(value, dict) and isinstance(merged_input[key], dict):
                 merged_nested = merged_input[key].copy()
                 merged_input[key] = self.deep_merge(value, merged_nested)
-                if debug_info is not None:
-                    debug_info.append(f"  - From {source}: Merged nested {key}")
+                debug_info.append(f"  - From {source}: Merged nested {key}")
             else:
                 merged_input[key] = value
-                if debug_info is not None:
-                    debug_info.append(f"  - From {source}: Set {key}={value}")
+                debug_info.append(f"  - From {source}: Set {key}={value}")
 
     def _run_tool(self, tool: Node, tool_input: dict, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
@@ -532,7 +530,10 @@ class Agent(Node):
                 tool_input["files"] = self.files
 
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
-        tool_params = kwargs.get("tool_params", ToolParams())
+        raw_tool_params = kwargs.get("tool_params", ToolParams())
+        tool_params = (
+            ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
+        )
 
         if tool_params:
             debug_info = []
@@ -546,14 +547,14 @@ class Agent(Node):
                 self._apply_parameters(merged_input, global_params, "global", debug_info)
 
             # 2. Apply parameters by tool name (medium priority)
-            name_params = tool_params.by_name.get(tool.name, {}) or tool_params.by_name.get(
+            name_params = tool_params.by_name_params.get(tool.name, {}) or tool_params.by_name_params.get(
                 self.sanitize_tool_name(tool.name), {}
             )
             if name_params:
                 self._apply_parameters(merged_input, name_params, f"name:{tool.name}", debug_info)
 
             # 3. Apply parameters by tool ID (highest priority)
-            id_params = tool_params.by_id.get(tool.id, {})
+            id_params = tool_params.by_id_params.get(tool.id, {})
             if id_params:
                 self._apply_parameters(merged_input, id_params, f"id:{tool.id}", debug_info)
 
