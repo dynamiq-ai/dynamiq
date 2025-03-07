@@ -20,3 +20,4 @@ from .replicate import Replicate
 from .sambanova import SambaNova
 from .togetherai import TogetherAI
 from .watsonx import WatsonX
+from .xai import xAI

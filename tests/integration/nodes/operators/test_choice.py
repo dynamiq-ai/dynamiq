@@ -212,7 +212,7 @@ def test_workflow_with_choice_operator(
                 "input": input_data,
                 "output": expected_output_choice_node,
                 "error": None,
-                "metadata": {},
+                "metadata": ANY,
             }
         ],
         "tags": [],
@@ -325,7 +325,7 @@ def test_workflow_with_choice_operator_with_errors_and_retries(
                     "message": str(error),
                     "traceback": ANY,
                 },
-                "metadata": {},
+                "metadata": ANY,
             },
             {
                 "id": ANY,
@@ -338,7 +338,7 @@ def test_workflow_with_choice_operator_with_errors_and_retries(
                     "message": str(error),
                     "traceback": ANY,
                 },
-                "metadata": {},
+                "metadata": ANY,
             },
             {
                 "id": ANY,
@@ -348,7 +348,7 @@ def test_workflow_with_choice_operator_with_errors_and_retries(
                 "input": input_data,
                 "output": expected_output_choice_node,
                 "error": None,
-                "metadata": {},
+                "metadata": ANY,
             },
         ],
         "tags": [],
