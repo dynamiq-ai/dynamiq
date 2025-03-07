@@ -410,7 +410,7 @@ class ReActAgent(Agent):
         stop_sequences = []
 
         if self.inference_mode == InferenceMode.XML:
-            stop_sequences.extend(["<observation>", "</output>"])
+            stop_sequences.extend(["<observation>"])
         elif self.inference_mode == InferenceMode.DEFAULT:
             stop_sequences.extend(["Observation: "])
         self.llm.stop = stop_sequences
