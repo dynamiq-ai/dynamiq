@@ -17,6 +17,7 @@ from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import deep_merge
 
 AGENT_PROMPT_TEMPLATE = """
 You are a helpful AI assistant designed to assist users with various tasks and queries.
@@ -107,6 +108,12 @@ class AgentIntermediateStep(BaseModel):
     final_answer: str | dict | None = None
 
 
+class ToolParams(BaseModel):
+    global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
+    by_name_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_name")
+    by_id_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_id")
+
+
 class AgentInputSchema(BaseModel):
     files: list[io.BytesIO | bytes] = Field(default=None, description="Parameter to provide files to the agent.")
 
@@ -115,6 +122,16 @@ class AgentInputSchema(BaseModel):
     metadata: dict | list = Field(default={}, description="Parameter to provide metadata.")
 
     model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
+
+    tool_params: ToolParams = Field(
+        default_factory=ToolParams,
+        description=(
+            "Structured parameters for tools. Use 'global_params' for all tools, "
+            "'by_name' for tool names, or 'by_id' for tool IDs. "
+            "Values are dictionaries merged with tool inputs."
+        ),
+        is_accessible_to_agent=False,
+    )
 
     @model_validator(mode="after")
     def validate_input_fields(self, context):
@@ -306,6 +323,9 @@ class Agent(Node):
             self.files = files
             self._prompt_variables["file_description"] = self.file_description
 
+        if input_data.tool_params:
+            kwargs["tool_params"] = input_data.tool_params
+
         self._prompt_variables.update(dict(input_data))
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
@@ -493,14 +513,59 @@ class Agent(Node):
             )
         return tool
 
-    def _run_tool(self, tool: Node, tool_input: str, config, **kwargs) -> Any:
+    def _apply_parameters(self, merged_input: dict, params: dict, source: str, debug_info: list = None):
+        """Apply parameters from the specified source to the merged input."""
+        if debug_info is None:
+            debug_info = []
+        for key, value in params.items():
+            if key in merged_input and isinstance(value, dict) and isinstance(merged_input[key], dict):
+                merged_nested = merged_input[key].copy()
+                merged_input[key] = deep_merge(value, merged_nested)
+                debug_info.append(f"  - From {source}: Merged nested {key}")
+            else:
+                merged_input[key] = value
+                debug_info.append(f"  - From {source}: Set {key}={value}")
+
+    def _run_tool(self, tool: Node, tool_input: dict, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
         if self.files:
             if tool.is_files_allowed is True:
                 tool_input["files"] = self.files
 
+        merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
+        raw_tool_params = kwargs.get("tool_params", ToolParams())
+        tool_params = (
+            ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
+        )
+
+        if tool_params:
+            debug_info = []
+            if self.verbose:
+                debug_info.append(f"Tool parameter merging for {tool.name} (ID: {tool.id}):")
+                debug_info.append(f"Starting with input: {merged_input}")
+
+            # 1. Apply global parameters (lowest priority)
+            global_params = tool_params.global_params
+            if global_params:
+                self._apply_parameters(merged_input, global_params, "global", debug_info)
+
+            # 2. Apply parameters by tool name (medium priority)
+            name_params = tool_params.by_name_params.get(tool.name, {}) or tool_params.by_name_params.get(
+                self.sanitize_tool_name(tool.name), {}
+            )
+            if name_params:
+                self._apply_parameters(merged_input, name_params, f"name:{tool.name}", debug_info)
+
+            # 3. Apply parameters by tool ID (highest priority)
+            id_params = tool_params.by_id_params.get(tool.id, {})
+            if id_params:
+                self._apply_parameters(merged_input, id_params, f"id:{tool.id}", debug_info)
+
+            if self.verbose and debug_info:
+                logger.debug("\n".join(debug_info))
+
         tool_result = tool.run(
-            input_data=tool_input,
+            input_data=merged_input,
             config=config,
             run_depends=self._run_depends,
             **(kwargs | {"recoverable_error": True}),
