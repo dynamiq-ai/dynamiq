@@ -17,6 +17,7 @@ from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import deep_merge
 
 AGENT_PROMPT_TEMPLATE = """
 You are a helpful AI assistant designed to assist users with various tasks and queries.
@@ -512,12 +513,14 @@ class Agent(Node):
             )
         return tool
 
-    def _apply_parameters(self, merged_input: dict, params: dict, source: str, debug_info: list = []):
+    def _apply_parameters(self, merged_input: dict, params: dict, source: str, debug_info: list = None):
         """Apply parameters from the specified source to the merged input."""
+        if debug_info is None:
+            debug_info = []
         for key, value in params.items():
             if key in merged_input and isinstance(value, dict) and isinstance(merged_input[key], dict):
                 merged_nested = merged_input[key].copy()
-                merged_input[key] = self.deep_merge(value, merged_nested)
+                merged_input[key] = deep_merge(value, merged_nested)
                 debug_info.append(f"  - From {source}: Merged nested {key}")
             else:
                 merged_input[key] = value
