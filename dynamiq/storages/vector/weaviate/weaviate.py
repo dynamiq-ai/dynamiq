@@ -45,10 +45,24 @@ class WeaviateVectorStore:
     """
 
     PATTERN_COLLECTION_NAME = re.compile(r"^[A-Z][_0-9A-Za-z]*$")
+    PATTERN_PROPERTY_NAME = re.compile(r"^[_A-Za-z][_0-9A-Za-z]*$")
 
     @staticmethod
     def is_valid_collection_name(name: str) -> bool:
         return bool(WeaviateVectorStore.PATTERN_COLLECTION_NAME.fullmatch(name))
+
+    @staticmethod
+    def is_valid_property_name(name: str) -> bool:
+        """
+        Check if a property name is valid according to Weaviate naming rules.
+
+        Args:
+            name (str): The property name to check
+
+        Returns:
+            bool: True if the name is valid, False otherwise
+        """
+        return bool(WeaviateVectorStore.PATTERN_PROPERTY_NAME.fullmatch(name))
 
     @classmethod
     def _fix_and_validate_index_name(cls, index_name: str) -> str:
@@ -270,14 +284,34 @@ class WeaviateVectorStore:
 
         Returns:
             dict[str, Any]: A dictionary representing the Weaviate data object.
+
+        Raises:
+            ValueError: If any property name is invalid according to Weaviate naming rules
         """
         data = document.to_dict()
         data[content_key or self.content_key] = data.pop("content", "")
         data["_original_id"] = data.pop("id")
         metadata = data.get("metadata", {})
 
+        # Validate and add metadata properties
         for key, val in metadata.items():
+            if not self.is_valid_property_name(key):
+                raise ValueError(
+                    f"Invalid property name: '{key}'. Property names must match the pattern: [_A-Za-z][_0-9A-Za-z]*"
+                )
             data[key] = val
+
+        # Ensure all property names in the data object are valid
+        invalid_props = []
+        for key in data:
+            if key not in ["_original_id", "embedding", "metadata"] and not self.is_valid_property_name(key):
+                invalid_props.append(key)
+
+        if invalid_props:
+            raise ValueError(
+                f"Invalid property names: {invalid_props}. "
+                "Property names must match the pattern: [_A-Za-z][_0-9A-Za-z]*"
+            )
 
         del data["embedding"]
         del data["metadata"]
@@ -607,6 +641,12 @@ class WeaviateVectorStore:
                     "properties": self._to_data_object(doc, content_key=content_key),
                     "vector": doc.embedding,
                 }
+
+                # Add tenant parameter if multi-tenancy is enabled and tenant is specified
+                # Note: This shouldn't be necessary when using self._collection with tenant context,
+                # but added for consistency with _batch_write
+                if self._multi_tenancy_enabled and self._tenant_name:
+                    insert_params["tenant"] = self._tenant_name
 
                 self._collection.data.insert(**insert_params)
                 written += 1
