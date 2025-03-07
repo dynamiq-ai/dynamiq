@@ -52,7 +52,7 @@ class LangfuseCallbackHandler(LangfuseBaseCallbackHandler, BaseCallbackHandler):
         run_id = get_run_id(kwargs)
         self._generate_trace_and_parent(
             serialized=serialized,
-            inputs=format_value(input_data),
+            inputs=format_value(input_data)[0],
             run_id=run_id,
             version=self.version,
         )
@@ -60,7 +60,7 @@ class LangfuseCallbackHandler(LangfuseBaseCallbackHandler, BaseCallbackHandler):
         content = {
             "name": "Workflow",
             "metadata": {"workflow": {"id": serialized.get("id"), "version": serialized.get("version")}},
-            "input": format_value(input_data),
+            "input": format_value(input_data)[0],
             "version": self.version,
         }
 
@@ -73,7 +73,7 @@ class LangfuseCallbackHandler(LangfuseBaseCallbackHandler, BaseCallbackHandler):
         run_id = get_run_id(kwargs)
 
         self.runs[run_id] = self.runs[run_id].end(
-            output=format_value(output_data),
+            output=format_value(output_data)[0],
             version=self.version,
             end_time=_get_timestamp(),
         )
@@ -97,7 +97,7 @@ class LangfuseCallbackHandler(LangfuseBaseCallbackHandler, BaseCallbackHandler):
         content = {
             "name": "Flow",
             "metadata": {"flow": {"id": serialized.get("id")}},
-            "input": format_value(input_data),
+            "input": format_value(input_data)[0],
             "version": self.version,
         }
         self.runs[run_id] = self.runs[parent_run_id].span(**content)
@@ -107,7 +107,7 @@ class LangfuseCallbackHandler(LangfuseBaseCallbackHandler, BaseCallbackHandler):
         parent_run_id = get_parent_run_id(kwargs)
 
         self.runs[run_id] = self.runs[run_id].end(
-            output=format_value(output_data),
+            output=format_value(output_data)[0],
             version=self.version,
             end_time=_get_timestamp(),
         )
@@ -131,7 +131,7 @@ class LangfuseCallbackHandler(LangfuseBaseCallbackHandler, BaseCallbackHandler):
         metadata = {"node": serialized, "run_depends": kwargs.get("run_depends", [])}
         self._generate_trace_and_parent(
             serialized,
-            inputs=format_value(input_data),
+            inputs=format_value(input_data)[0],
             run_id=run_id,
             parent_run_id=parent_run_id,
             metadata=metadata,
@@ -140,7 +140,7 @@ class LangfuseCallbackHandler(LangfuseBaseCallbackHandler, BaseCallbackHandler):
 
         content = {
             "name": serialized.get("name"),
-            "input": format_value(input_data),
+            "input": format_value(input_data)[0],
             "metadata": metadata,
             "version": self.version,
         }
@@ -166,7 +166,7 @@ class LangfuseCallbackHandler(LangfuseBaseCallbackHandler, BaseCallbackHandler):
         parent_run_id = get_parent_run_id(kwargs)
 
         content = {
-            "output": format_value(output_data),
+            "output": format_value(output_data)[0],
             "version": self.version,
             "end_time": _get_timestamp(),
         }
