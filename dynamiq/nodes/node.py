@@ -468,7 +468,7 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs,
         )
         data["depends"] = [depend.to_dict(**kwargs) for depend in self.depends]
-        data["input_mapping"] = format_value(self.input_mapping)
+        data["input_mapping"] = format_value(self.input_mapping)[0]
         return data
 
     def send_streaming_approval_message(
@@ -650,7 +650,7 @@ class Node(BaseModel, Runnable, ABC):
                 return RunnableResult(
                     status=RunnableStatus.SKIP,
                     input=transformed_input,
-                    output=format_value(e, recoverable=e.recoverable),
+                    output=format_value(e, recoverable=e.recoverable)[0],
                 )
 
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
@@ -686,7 +686,7 @@ class Node(BaseModel, Runnable, ABC):
             return RunnableResult(
                 status=RunnableStatus.FAILURE,
                 input=input_data,
-                output=format_value(e, recoverable=recoverable),
+                output=format_value(e, recoverable=recoverable)[0],
             )
 
     def execute_with_retry(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs):
