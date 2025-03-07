@@ -32,9 +32,8 @@ class WeaviateWriterVectorStoreParams(BaseVectorStoreParams):
     tenant_name: str | None = None
 
 
-class WeaviteRetrieverVectorStoreParams(BaseVectorStoreParams):
+class WeaviateRetrieverVectorStoreParams(BaseVectorStoreParams):
     """Parameters for using existing Weaviate collections with tenant context."""
-
     alpha: float = 0.5
     tenant_name: str | None = None
 
@@ -100,53 +99,89 @@ class WeaviateVectorStore:
             tenant_name (str | None): The name of the tenant to use for all operations.
                 If provided, multi-tenancy will be enabled for the collection.
         """
+        # Validate and normalize the index name
         index_name = self._fix_and_validate_index_name(index_name)
+        collection_name = index_name
 
+        # Initialize client
         self.client = client
         if self.client is None:
             if connection is None:
                 connection = Weaviate()
             self.client = connection.connect()
 
-        collection_name = index_name
-
-        # Infer multi-tenancy from tenant_name
+        # Store multi-tenancy configuration
         self._multi_tenancy_enabled = tenant_name is not None
         self._auto_tenant_creation = auto_tenant_creation
+        self.content_key = content_key
 
+        # Create collection if needed or validate existing collection
         if not self.client.collections.exists(collection_name):
             if create_if_not_exist:
-                # Create collection with appropriate configuration
-                collection_config = {"inverted_index_config": Configure.inverted_index(index_null_state=True)}
-
-                # Add multi-tenancy configuration if tenant_name is provided
-                if tenant_name is not None:
-                    mt_config = {"enabled": True}
-                    if auto_tenant_creation is not None:
-                        mt_config["auto_tenant_creation"] = auto_tenant_creation
-
-                    collection_config["multi_tenancy_config"] = Configure.multi_tenancy(**mt_config)
-
-                self.client.collections.create(name=collection_name, **collection_config)
+                self._create_collection(collection_name, tenant_name, auto_tenant_creation)
             else:
                 raise ValueError(
                     f"Collection '{collection_name}' does not exist. Set 'create_if_not_exist' to True to create it."
                 )
 
-        self.content_key = content_key
+        # Get the base collection
         base_collection = self.client.collections.get(collection_name)
 
         # Get the actual multi-tenancy configuration from the collection
-        collection_config = base_collection.config.get()
-        actual_multi_tenancy_enabled = False
-        if hasattr(collection_config, "multi_tenancy_config") and collection_config.multi_tenancy_config:
-            actual_multi_tenancy_enabled = collection_config.multi_tenancy_config.enabled
-
-        # Update the instance variable to reflect the actual configuration
-        self._multi_tenancy_enabled = actual_multi_tenancy_enabled
+        self._update_multi_tenancy_status(base_collection)
 
         # Set up the collection - either with tenant context or without
         self._setup_collection(base_collection, collection_name, tenant_name)
+
+    def _create_collection(self, collection_name: str, tenant_name: str | None, auto_tenant_creation: bool | None):
+        """
+        Create a new Weaviate collection with appropriate configuration.
+
+        Args:
+            collection_name: Name of the collection to create
+            tenant_name: Optional tenant name to enable multi-tenancy
+            auto_tenant_creation: Whether to enable auto tenant creation
+        """
+
+        # Set up basic collection configuration
+        collection_config = {"inverted_index_config": Configure.inverted_index(index_null_state=True)}
+
+        # Add multi-tenancy configuration if tenant_name is provided
+        if tenant_name is not None:
+            mt_config = {"enabled": True}
+            if auto_tenant_creation is not None:
+                mt_config["auto_tenant_creation"] = auto_tenant_creation
+
+            collection_config["multi_tenancy_config"] = Configure.multi_tenancy(**mt_config)
+
+        # Create the collection
+        self.client.collections.create(name=collection_name, **collection_config)
+        logger.info(f"Created collection '{collection_name}'")
+
+    def _update_multi_tenancy_status(self, collection):
+        """
+        Update the multi-tenancy status based on the actual collection configuration.
+
+        Args:
+            collection: The Weaviate collection
+        """
+        try:
+            collection_config = collection.config.get()
+            actual_multi_tenancy_enabled = False
+
+            if hasattr(collection_config, "multi_tenancy_config") and collection_config.multi_tenancy_config:
+                actual_multi_tenancy_enabled = collection_config.multi_tenancy_config.enabled
+
+                # Update auto tenant creation if available in the config
+                if hasattr(collection_config.multi_tenancy_config, "auto_tenant_creation"):
+                    self._auto_tenant_creation = collection_config.multi_tenancy_config.auto_tenant_creation
+
+            # Update instance variable to reflect actual configuration
+            self._multi_tenancy_enabled = actual_multi_tenancy_enabled
+
+        except Exception as e:
+            logger.warning(f"Failed to retrieve multi-tenancy configuration: {str(e)}")
+            # Keep the inferred multi-tenancy setting as fallback
 
     def _setup_collection(self, base_collection, collection_name, tenant_name):
         """
@@ -184,74 +219,43 @@ class WeaviateVectorStore:
             collection: The Weaviate collection
             tenant_name: Name of the tenant to check/create
         """
-        tenant_check_succeeded = False
-
-        # First try: Check if tenant exists and create if needed
         try:
-            # Get list of existing tenants
-            tenants = collection.tenants.get()
+            # Use get_by_name method from Weaviate client if available
+            tenant = None
+            try:
+                # Modern Weaviate client approach
+                tenant = collection.tenants.get_by_name(tenant_name)
+            except AttributeError:
+                # Fallback for older clients - search in the list
+                tenants = collection.tenants.get()
 
-            # Log tenant data for debugging
-            logger.debug(f"Retrieved tenants: {tenants} (type: {type(tenants)})")
+                # Handle different response formats
+                if isinstance(tenants, dict) and tenant_name in tenants:
+                    tenant = tenants[tenant_name]
+                elif isinstance(tenants, list):
+                    for t in tenants:
+                        if (
+                            (isinstance(t, dict) and t.get("name") == tenant_name)
+                            or (hasattr(t, "name") and t.name == tenant_name)
+                            or (str(t) == tenant_name)
+                        ):
+                            tenant = t
+                            break
 
-            # Check if tenant exists - handle different response formats from Weaviate
-            tenant_exists = False
-
-            # Case 1: Tenants is a dictionary with tenant names as keys (as seen in your logs)
-            if isinstance(tenants, dict):
-                tenant_exists = tenant_name in tenants
-                logger.debug(f"Checking tenant existence in dictionary: {tenant_name} exists: {tenant_exists}")
-
-            # Case 2: Tenants is a list of objects or dictionaries
-            elif isinstance(tenants, list):
-                for tenant in tenants:
-                    # Handle dictionary format
-                    if isinstance(tenant, dict) and tenant.get("name") == tenant_name:
-                        tenant_exists = True
-                        break
-                    # Handle object format
-                    elif hasattr(tenant, "name") and tenant.name == tenant_name:
-                        tenant_exists = True
-                        break
-                    # Handle string format
-                    elif str(tenant) == tenant_name:
-                        tenant_exists = True
-                        break
-                logger.debug(f"Checking tenant existence in list: {tenant_name} exists: {tenant_exists}")
-
-            # Create the tenant if it doesn't exist
-            if not tenant_exists:
+            # Create tenant if it doesn't exist
+            if not tenant:
                 from weaviate.classes.tenants import Tenant
-
                 logger.info(f"Creating new tenant '{tenant_name}' in collection")
                 collection.tenants.create(tenants=[Tenant(name=tenant_name)])
                 logger.info(f"Successfully created tenant '{tenant_name}'")
             else:
                 logger.info(f"Tenant '{tenant_name}' already exists, no need to create")
 
-            tenant_check_succeeded = True
-
         except Exception as e:
-            # Provide more detailed error information
-            logger.warning(
-                f"Error while checking tenant existence '{tenant_name}': {str(e)}\n"
-                f"Error type: {type(e).__name__}\n"
-                f"Will attempt direct tenant creation as fallback."
-            )
-
-        # Second try (fallback): Try to create the tenant directly without checking
-        if not tenant_check_succeeded:
-            try:
-                from weaviate.classes.tenants import Tenant
-
-                logger.info(f"Attempting direct tenant creation for '{tenant_name}' (fallback)")
-                collection.tenants.create(tenants=[Tenant(name=tenant_name)])
-                logger.info(f"Successfully created tenant '{tenant_name}' via fallback method")
-            except Exception as e:
-                # If this fails too, log the error but continue
-                # This could happen if the tenant already exists
+            # Only log the error if auto_tenant_creation is not enabled
+            if not self._auto_tenant_creation:
                 logger.warning(
-                    f"Fallback tenant creation also failed for '{tenant_name}': {str(e)}\n"
+                    f"Error while checking/creating tenant '{tenant_name}': {str(e)}\n"
                     f"Error type: {type(e).__name__}\n"
                     f"Will continue with the assumption that the tenant exists or will be auto-created."
                 )
@@ -392,12 +396,31 @@ class WeaviateVectorStore:
             tenant_name (str): Name of the tenant to get.
 
         Returns:
-            dict[str, Any] | None: Tenant information if found, None otherwise.
+            dict[str, Any] | None: Tenant information or None if tenant doesn't exist.
         """
         if not self._multi_tenancy_enabled:
             raise ValueError("Multi-tenancy is not enabled for this collection")
 
-        return self._collection.tenants.get_by_name(tenant_name)
+        try:
+            # Try using direct tenant lookup if available in the client version
+            try:
+                return self._collection.tenants.get_by_name(tenant_name)
+            except AttributeError:
+                # Fallback for older client versions
+                tenants = self.list_tenants()
+
+                # Search through the list of tenants
+                for tenant in tenants:
+                    if isinstance(tenant, dict) and tenant.get("name") == tenant_name:
+                        return tenant
+                    elif hasattr(tenant, "name") and tenant.name == tenant_name:
+                        return tenant
+
+                # Not found
+                return None
+        except Exception as e:
+            logger.warning(f"Error getting tenant '{tenant_name}': {str(e)}")
+            return None
 
     def update_tenant_status(self, tenant_name: str, status: TenantActivityStatus) -> None:
         """
@@ -405,24 +428,52 @@ class WeaviateVectorStore:
 
         Args:
             tenant_name (str): Name of the tenant to update.
-            status (TenantActivityStatus): New activity status for the tenant.
+            status (TenantActivityStatus): New activity status (ACTIVE, INACTIVE, or OFFLOADED).
+
+        Raises:
+            ValueError: If multi-tenancy is not enabled or the tenant doesn't exist.
         """
         if not self._multi_tenancy_enabled:
             raise ValueError("Multi-tenancy is not enabled for this collection")
 
-        self._collection.tenants.update(tenants=[Tenant(name=tenant_name, activity_status=status)])
+        # Check if tenant exists
+        tenant = self.get_tenant(tenant_name)
+        if not tenant:
+            raise ValueError(f"Tenant '{tenant_name}' does not exist")
+
+        try:
+            from weaviate.classes.tenants import Tenant
+
+            self._collection.tenants.update(tenants=[Tenant(name=tenant_name, activity_status=status)])
+            logger.info(f"Updated tenant '{tenant_name}' status to {status}")
+        except Exception as e:
+            logger.error(f"Failed to update tenant '{tenant_name}' status: {str(e)}")
+            raise
 
     def update_auto_tenant_creation(self, enabled: bool) -> None:
         """
-        Update the auto-tenant creation setting for the collection.
+        Update the automatic tenant creation setting for the collection.
 
         Args:
-            enabled (bool): Whether to enable auto-tenant creation.
+            enabled (bool): Whether to enable automatic tenant creation.
+
+        Raises:
+            ValueError: If multi-tenancy is not enabled for this collection.
         """
         if not self._multi_tenancy_enabled:
             raise ValueError("Multi-tenancy is not enabled for this collection")
 
-        self._collection.config.update(multi_tenancy_config=Reconfigure.multi_tenancy(auto_tenant_creation=enabled))
+        try:
+
+            # Update the collection configuration
+            self._collection.config.update(multi_tenancy_config=Reconfigure.multi_tenancy(auto_tenant_creation=enabled))
+
+            # Update the local setting
+            self._auto_tenant_creation = enabled
+            logger.info(f"Updated auto tenant creation to: {enabled}")
+        except Exception as e:
+            logger.error(f"Failed to update auto tenant creation: {str(e)}")
+            raise
 
     def _query(self) -> list[dict[str, Any]]:
         """
