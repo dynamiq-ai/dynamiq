@@ -8,7 +8,7 @@ from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.llms import OpenAI
 
 llm = OpenAI(
-    connection=OpenAIConnection(api_key="OPENAI_API_KEY"),
+    connection=OpenAIConnection(),
     model="gpt-4o",
     temperature=0.1,
 )
@@ -32,7 +32,7 @@ def gather_feedback(context: dict[str, Any], **kwargs):
     feedback = input(
         f"Email draft:\n"
         f"{draft}\n"
-        f"Type in SEND to send email, CANCEL to exit, or provide feedback to refine email: \n"
+        f"Type in nothing to send email, provide feedback to refine it: \n"
     )
 
     result = f"Gathered feedback: {feedback}"
@@ -75,7 +75,5 @@ orchestrator.add_conditional_edge("gather_feedback", ["generate_sketch", END], r
 if __name__ == "__main__":
     print("Welcome to email writer.")
     email_details = input("Provide email details: ")
-    orchestrator.run(
-        input_data={"input": f"Write and post email, provide feedback about status of email: {email_details}"}
-    )
+    orchestrator.run(input_data={"input": f"Write and post email: {email_details}"})
     print(orchestrator._chat_history[-1]["content"])
