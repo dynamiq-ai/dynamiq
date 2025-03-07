@@ -2,12 +2,14 @@ import datetime
 import re
 from typing import TYPE_CHECKING, Any, Optional
 
+from weaviate.classes.config import Configure
 from weaviate.classes.query import HybridFusion
+from weaviate.classes.tenants import Tenant, TenantActivityStatus
 from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateQueryError
 from weaviate.util import generate_uuid5
 
 from dynamiq.connections import Weaviate
-from dynamiq.storages.vector.base import BaseVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.storages.vector.utils import create_file_id_filter
@@ -24,8 +26,15 @@ if TYPE_CHECKING:
 DEFAULT_QUERY_LIMIT = 9999
 
 
-class WeaviteRetrieverVectorStoreParams(BaseVectorStoreParams):
+class WeaviateWriterVectorStoreParams(BaseWriterVectorStoreParams):
+    """Parameters for creating and managing Weaviate collections with multi-tenancy."""
+    tenant_name: str | None = None
+
+
+class WeaviateRetrieverVectorStoreParams(BaseVectorStoreParams):
+    """Parameters for using existing Weaviate collections with tenant context."""
     alpha: float = 0.5
+    tenant_name: str | None = None
 
 
 class WeaviateVectorStore:
@@ -36,10 +45,24 @@ class WeaviateVectorStore:
     """
 
     PATTERN_COLLECTION_NAME = re.compile(r"^[A-Z][_0-9A-Za-z]*$")
+    PATTERN_PROPERTY_NAME = re.compile(r"^[_A-Za-z][_0-9A-Za-z]*$")
 
     @staticmethod
     def is_valid_collection_name(name: str) -> bool:
         return bool(WeaviateVectorStore.PATTERN_COLLECTION_NAME.fullmatch(name))
+
+    @staticmethod
+    def is_valid_property_name(name: str) -> bool:
+        """
+        Check if a property name is valid according to Weaviate naming rules.
+
+        Args:
+            name (str): The property name to check
+
+        Returns:
+            bool: True if the name is valid, False otherwise
+        """
+        return bool(WeaviateVectorStore.PATTERN_PROPERTY_NAME.fullmatch(name))
 
     @classmethod
     def _fix_and_validate_index_name(cls, index_name: str) -> str:
@@ -69,6 +92,7 @@ class WeaviateVectorStore:
         index_name: str = "default",
         create_if_not_exist: bool = False,
         content_key: str = "content",
+        tenant_name: str | None = None,
     ):
         """
         Initialize a new instance of WeaviateDocumentStore and connect to the
@@ -82,32 +106,158 @@ class WeaviateVectorStore:
             index_name (str): The name of the index to use. Defaults to "default".
             content_key (Optional[str]): The field used to store content in the
                 storage.
+            tenant_name (str | None): The name of the tenant to use for all operations.
+                If provided, multi-tenancy will be enabled for the collection.
         """
+        # Validate and normalize the index name
         index_name = self._fix_and_validate_index_name(index_name)
+        collection_name = index_name
 
+        # Initialize client
         self.client = client
         if self.client is None:
             if connection is None:
                 connection = Weaviate()
             self.client = connection.connect()
 
-        collection_settings = {
-            "class": index_name,
-            "invertedIndexConfig": {"indexNullState": True},
-        }
+        # Store multi-tenancy configuration
+        self._multi_tenancy_enabled = tenant_name is not None
+        self.content_key = content_key
 
-        if not self.client.collections.exists(collection_settings["class"]):
+        # Create collection if needed or validate existing collection
+        if not self.client.collections.exists(collection_name):
             if create_if_not_exist:
-                self.client.collections.create_from_dict(collection_settings)
+                self._create_collection(collection_name, tenant_name)
             else:
                 raise ValueError(
-                    f"Collection '{collection_settings['class']}' does not exist. "
-                    "Set 'create_if_not_exist' to True to create it."
+                    f"Collection '{collection_name}' does not exist. Set 'create_if_not_exist' to True to create it."
                 )
 
-        self._collection_settings = collection_settings
-        self.content_key = content_key
-        self._collection = self.client.collections.get(collection_settings["class"])
+        # Get the base collection
+        base_collection = self.client.collections.get(collection_name)
+
+        # Get the actual multi-tenancy configuration from the collection
+        self._update_multi_tenancy_status(base_collection)
+
+        # Set up the collection - either with tenant context or without
+        self._setup_collection(base_collection, collection_name, tenant_name)
+
+    def _create_collection(self, collection_name: str, tenant_name: str | None):
+        """
+        Create a new Weaviate collection with appropriate configuration.
+
+        Args:
+            collection_name: Name of the collection to create
+            tenant_name: Optional tenant name to enable multi-tenancy
+        """
+
+        # Set up basic collection configuration
+        collection_config = {"inverted_index_config": Configure.inverted_index(index_null_state=True)}
+
+        # Add multi-tenancy configuration if tenant_name is provided
+        if tenant_name is not None:
+            mt_config = {"enabled": True}
+
+            collection_config["multi_tenancy_config"] = Configure.multi_tenancy(**mt_config)
+
+        # Create the collection
+        self.client.collections.create(name=collection_name, **collection_config)
+        logger.info(f"Created collection '{collection_name}'")
+
+    def _update_multi_tenancy_status(self, collection):
+        """
+        Update the multi-tenancy status based on the actual collection configuration.
+
+        Args:
+            collection: The Weaviate collection
+        """
+        try:
+            collection_config = collection.config.get()
+            actual_multi_tenancy_enabled = False
+
+            if hasattr(collection_config, "multi_tenancy_config") and collection_config.multi_tenancy_config:
+                actual_multi_tenancy_enabled = collection_config.multi_tenancy_config.enabled
+
+            # Update instance variable to reflect actual configuration
+            self._multi_tenancy_enabled = actual_multi_tenancy_enabled
+
+        except Exception as e:
+            logger.warning(f"Failed to retrieve multi-tenancy configuration: {str(e)}")
+            # Keep the inferred multi-tenancy setting as fallback
+
+    def _setup_collection(self, base_collection, collection_name, tenant_name):
+        """
+        Set up the collection with or without tenant context.
+
+        Args:
+            base_collection: The base Weaviate collection
+            collection_name: Name of the collection
+            tenant_name: Optional tenant name to use
+        """
+        # No tenant specified - use the base collection
+        if not tenant_name:
+            self._collection = base_collection
+            self._tenant_name = None
+            return
+
+        # Tenant specified but multi-tenancy is disabled in the collection
+        if not self._multi_tenancy_enabled:
+            raise ValueError(
+                f"Collection '{collection_name}' has multi-tenancy disabled, "
+                f"but tenant_name '{tenant_name}' was provided. "
+                f"To use a tenant, create the collection with a tenant_name parameter."
+            )
+
+        # Tenant specified and multi-tenancy is enabled
+        self._ensure_tenant_exists(base_collection, tenant_name)
+        self._collection = base_collection.with_tenant(tenant_name)
+        self._tenant_name = tenant_name
+
+    def _ensure_tenant_exists(self, collection, tenant_name):
+        """
+        Check if the tenant exists and create it if it doesn't.
+
+        Args:
+            collection: The Weaviate collection
+            tenant_name: Name of the tenant to check/create
+        """
+        try:
+            # Use get_by_name method from Weaviate client if available
+            tenant = None
+            try:
+                # Modern Weaviate client approach
+                tenant = collection.tenants.get_by_name(tenant_name)
+            except AttributeError:
+                # Fallback for older clients - search in the list
+                tenants = collection.tenants.get()
+
+                # Handle different response formats
+                if isinstance(tenants, dict) and tenant_name in tenants:
+                    tenant = tenants[tenant_name]
+                elif isinstance(tenants, list):
+                    for t in tenants:
+                        if (
+                            (isinstance(t, dict) and t.get("name") == tenant_name)
+                            or (hasattr(t, "name") and t.name == tenant_name)
+                            or (str(t) == tenant_name)
+                        ):
+                            tenant = t
+                            break
+
+            # Create tenant if it doesn't exist
+            if not tenant:
+                logger.info(f"Creating new tenant '{tenant_name}' in collection")
+                collection.tenants.create(tenants=[Tenant(name=tenant_name)])
+                logger.info(f"Successfully created tenant '{tenant_name}'")
+            else:
+                logger.info(f"Tenant '{tenant_name}' already exists, no need to create")
+
+        except Exception as e:
+            logger.warning(
+                f"Error while checking/creating tenant '{tenant_name}': {str(e)}\n"
+                f"Error type: {type(e).__name__}\n"
+                f"Will continue with the assumption that the tenant exists."
+            )
 
     def close(self):
         """Close the connection to Weaviate."""
@@ -134,14 +284,34 @@ class WeaviateVectorStore:
 
         Returns:
             dict[str, Any]: A dictionary representing the Weaviate data object.
+
+        Raises:
+            ValueError: If any property name is invalid according to Weaviate naming rules
         """
         data = document.to_dict()
         data[content_key or self.content_key] = data.pop("content", "")
         data["_original_id"] = data.pop("id")
         metadata = data.get("metadata", {})
 
+        # Validate and add metadata properties
         for key, val in metadata.items():
+            if not self.is_valid_property_name(key):
+                raise ValueError(
+                    f"Invalid property name: '{key}'. Property names must match the pattern: [_A-Za-z][_0-9A-Za-z]*"
+                )
             data[key] = val
+
+        # Ensure all property names in the data object are valid
+        invalid_props = []
+        for key in data:
+            if key not in ["_original_id", "embedding", "metadata"] and not self.is_valid_property_name(key):
+                invalid_props.append(key)
+
+        if invalid_props:
+            raise ValueError(
+                f"Invalid property names: {invalid_props}. "
+                "Property names must match the pattern: [_A-Za-z][_0-9A-Za-z]*"
+            )
 
         del data["embedding"]
         del data["metadata"]
@@ -199,6 +369,103 @@ class WeaviateVectorStore:
         logger.debug(f"Document loaded from Weaviate: {data}")
 
         return Document(**data)
+
+    def add_tenants(self, tenant_names: list[str]) -> None:
+        """
+        Add new tenants to the collection.
+
+        Args:
+            tenant_names (list[str]): List of tenant names to add.
+        """
+        if not self._multi_tenancy_enabled:
+            raise ValueError("Multi-tenancy is not enabled for this collection")
+
+        tenants = [Tenant(name=name) for name in tenant_names]
+        self._collection.tenants.create(tenants=tenants)
+
+    def remove_tenants(self, tenant_names: list[str]) -> None:
+        """
+        Remove tenants from the collection.
+
+        Args:
+            tenant_names (list[str]): List of tenant names to remove.
+        """
+        if not self._multi_tenancy_enabled:
+            raise ValueError("Multi-tenancy is not enabled for this collection")
+
+        self._collection.tenants.remove(tenant_names)
+
+    def list_tenants(self) -> list[dict[str, Any]]:
+        """
+        List all tenants in the collection.
+
+        Returns:
+            list[dict[str, Any]]: List of tenant information.
+        """
+        if not self._multi_tenancy_enabled:
+            raise ValueError("Multi-tenancy is not enabled for this collection")
+
+        return self._collection.tenants.get()
+
+    def get_tenant(self, tenant_name: str) -> dict[str, Any] | None:
+        """
+        Get information about a specific tenant.
+
+        Args:
+            tenant_name (str): Name of the tenant to get.
+
+        Returns:
+            dict[str, Any] | None: Tenant information or None if tenant doesn't exist.
+        """
+        if not self._multi_tenancy_enabled:
+            raise ValueError("Multi-tenancy is not enabled for this collection")
+
+        try:
+            # Try using direct tenant lookup if available in the client version
+            try:
+                return self._collection.tenants.get_by_name(tenant_name)
+            except AttributeError:
+                # Fallback for older client versions
+                tenants = self.list_tenants()
+
+                # Search through the list of tenants
+                for tenant in tenants:
+                    if isinstance(tenant, dict) and tenant.get("name") == tenant_name:
+                        return tenant
+                    elif hasattr(tenant, "name") and tenant.name == tenant_name:
+                        return tenant
+
+                # Not found
+                return None
+        except Exception as e:
+            logger.warning(f"Error getting tenant '{tenant_name}': {str(e)}")
+            return None
+
+    def update_tenant_status(self, tenant_name: str, status: TenantActivityStatus) -> None:
+        """
+        Update the activity status of a tenant.
+
+        Args:
+            tenant_name (str): Name of the tenant to update.
+            status (TenantActivityStatus): New activity status (ACTIVE, INACTIVE, or OFFLOADED).
+
+        Raises:
+            ValueError: If multi-tenancy is not enabled or the tenant doesn't exist.
+        """
+        if not self._multi_tenancy_enabled:
+            raise ValueError("Multi-tenancy is not enabled for this collection")
+
+        # Check if tenant exists
+        tenant = self.get_tenant(tenant_name)
+        if not tenant:
+            raise ValueError(f"Tenant '{tenant_name}' does not exist")
+
+        try:
+            self._collection.tenants.update(tenants=[Tenant(name=tenant_name, activity_status=status)])
+            logger.info(f"Updated tenant '{tenant_name}' status to {status}")
+        except Exception as e:
+            logger.error(f"Failed to update tenant '{tenant_name}' status: {str(e)}")
+            raise
 
     def _query(self) -> list[dict[str, Any]]:
         """
@@ -309,18 +576,27 @@ class WeaviateVectorStore:
                     msg = f"Expected a Document, got '{type(doc)}' instead."
                     raise ValueError(msg)
 
-                batch.add_object(
-                    properties=self._to_data_object(doc, content_key=content_key),
-                    collection=self._collection.name,
-                    uuid=generate_uuid5(doc.id),
-                    vector=doc.embedding,
-                )
+                # Create the batch add parameters
+                batch_params = {
+                    "properties": self._to_data_object(doc, content_key=content_key),
+                    "collection": self._collection.name,
+                    "uuid": generate_uuid5(doc.id),
+                    "vector": doc.embedding,
+                }
+
+                # Add tenant parameter if multi-tenancy is enabled and tenant is specified
+                if self._multi_tenancy_enabled and self._tenant_name:
+                    batch_params["tenant"] = self._tenant_name
+
+                # Add the object with the appropriate parameters
+                batch.add_object(**batch_params)
+
         if failed_objects := self.client.batch.failed_objects:
             mapped_objects = {}
             for obj in failed_objects:
                 properties = obj.object_.properties or {}
                 id_ = properties.get("_original_id", obj.object_.uuid)
-                mapped_objects[id_] = obj.data
+                mapped_objects[id_] = obj.message if hasattr(obj, "message") else str(obj)
 
             msg = "\n".join(
                 [
@@ -359,11 +635,20 @@ class WeaviateVectorStore:
                 continue
 
             try:
-                self._collection.data.insert(
-                    uuid=generate_uuid5(doc.id),
-                    properties=self._to_data_object(doc, content_key=content_key),
-                    vector=doc.embedding,
-                )
+                # Create the insert parameters
+                insert_params = {
+                    "uuid": generate_uuid5(doc.id),
+                    "properties": self._to_data_object(doc, content_key=content_key),
+                    "vector": doc.embedding,
+                }
+
+                # Add tenant parameter if multi-tenancy is enabled and tenant is specified
+                # Note: This shouldn't be necessary when using self._collection with tenant context,
+                # but added for consistency with _batch_write
+                if self._multi_tenancy_enabled and self._tenant_name:
+                    insert_params["tenant"] = self._tenant_name
+
+                self._collection.data.insert(**insert_params)
                 written += 1
             except UnexpectedStatusCodeError:
                 if policy == DuplicatePolicy.FAIL:

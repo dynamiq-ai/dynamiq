@@ -65,6 +65,7 @@ if __name__ == "__main__":
     data_folder_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
     with get_connection_manager() as cm:
         for yaml_file_name in (
+            "dag_weaviate_tenant.yaml",
             "dag_html_pinecone.yaml",
             "dag_qdrant.yaml",
             "dag_chroma.yaml",

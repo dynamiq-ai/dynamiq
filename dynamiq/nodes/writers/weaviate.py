@@ -3,11 +3,11 @@ from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.writers.base import Writer, WriterInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import WeaviateVectorStore
-from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
+from dynamiq.storages.vector.weaviate import WeaviateWriterVectorStoreParams
 from dynamiq.utils.logger import logger
 
 
-class WeaviateDocumentWriter(Writer, BaseWriterVectorStoreParams):
+class WeaviateDocumentWriter(Writer, WeaviateWriterVectorStoreParams):
     """
     Document Writer Node using Weaviate Vector Store.
 
@@ -43,7 +43,7 @@ class WeaviateDocumentWriter(Writer, BaseWriterVectorStoreParams):
 
     @property
     def vector_store_params(self):
-        return self.model_dump(include=set(BaseWriterVectorStoreParams.model_fields)) | {
+        return self.model_dump(include=set(WeaviateWriterVectorStoreParams.model_fields)) | {
             "connection": self.connection,
             "client": self.client,
         }
