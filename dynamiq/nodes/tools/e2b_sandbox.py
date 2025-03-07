@@ -12,28 +12,38 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION = """
-This tool enables interaction with an E2B sandbox environment,
-providing capabilities for Python code and shell command execution.
-It offers internet access, API request functionality, and filesystem operations.
-Features:
-1. Python Code Execution
-2. Shell Command Execution
-3. Internet Access
-4. API Request Capability
-5. Filesystem Access (Read/Write)
-Instructions:
-1. Shell Command Execution:
-   - Provide the command in the 'shell_command' field.
-2. Python Code Execution:
-   - Provide the Python code in the 'python' field.
-   - Optionally specify packages to install in the 'packages' field (comma-separated).
-   - The code will be executed in a clean environment with default packages installed.
-   - IMPORTANT: Always write the whole code from beginning to end, including imports.
-   - IMPORTANT: Always print the final result when executing Python code.
-   - IMPORTANT: Always provide packages, which are used in the code
-Notes:
-- For API requests or Filesystem operations, use either shell commands or Python code
+DESCRIPTION_E2B = """## E2B Code Interpreter
+### Description
+A secure sandbox environment for code execution, file management, and external resource interaction.
+### Capabilities
+- Execute Python code with extensive library support
+- Run shell commands in Linux environment
+- Manage files (upload, download, manipulate)
+- Access internet resources and APIs
+- Create data visualizations
+- Install custom Python packages
+- Maintain state between executions
+- Execute code in isolated sandbox
+### Required Guidelines
+- Include all necessary imports.
+- Always use print statements to display results.
+- If any errors occur, recheck the code for syntax or runtime issues and fix them.
+- Always specify the required packages to be installed for code execution.
+### Usage Examples
+#### Python Execution
+{ "python": "import pandas as pd\n\ndf = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})\nprint(df)", "packages": "pandas,matplotlib" }
+#### Shell Commands
+{ "shell_command": "ls -la && echo 'Current directory contents'" }
+#### API/Internet Guidelines
+- Use `requests` library for API calls or curl via shell commands
+- Use actual endpoints specified by users
+- Prioritize free and open APIs when user doesn't specify an API provider
+- Recommended open search APIs: DuckDuckGo
+- For general data: OpenData APIs, public government datasets, or open-source repositories
+- Provide attribution for data sources
+#### File Operations
+- Access uploaded files using provided paths
+- Generate and access files programmatically
 """  # noqa: E501
 
 
@@ -141,7 +151,7 @@ class E2BInterpreterTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "E2b Code Interpreter Tool"
-    description: str = DESCRIPTION
+    description: str = DESCRIPTION_E2B
     connection: E2BConnection
     installed_packages: list = []
     files: list[FileData] | None = None
