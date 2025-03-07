@@ -28,7 +28,6 @@ DEFAULT_QUERY_LIMIT = 9999
 
 class WeaviateWriterVectorStoreParams(BaseVectorStoreParams):
     """Parameters for creating and managing Weaviate collections with multi-tenancy."""
-    multi_tenancy_enabled: bool | None = None
     auto_tenant_creation: bool | None = None
     tenant_name: str | None = None
 
@@ -38,7 +37,6 @@ class WeaviteRetrieverVectorStoreParams(BaseVectorStoreParams):
 
     alpha: float = 0.5
     tenant_name: str | None = None
-    multi_tenancy_enabled: bool | None = None
 
 
 class WeaviateVectorStore:
@@ -82,7 +80,6 @@ class WeaviateVectorStore:
         index_name: str = "default",
         create_if_not_exist: bool = False,
         content_key: str = "content",
-        multi_tenancy_enabled: bool | None = None,
         auto_tenant_creation: bool | None = None,
         tenant_name: str | None = None,
     ):
@@ -98,11 +95,10 @@ class WeaviateVectorStore:
             index_name (str): The name of the index to use. Defaults to "default".
             content_key (Optional[str]): The field used to store content in the
                 storage.
-            multi_tenancy_enabled (bool | None): Whether to enable multi-tenancy for the collection.
-                Defaults to None (use Weaviate default).
             auto_tenant_creation (bool | None): Whether to automatically create tenants if they don't exist.
-                Only used if multi_tenancy_enabled is True. Defaults to None (use Weaviate default).
+                Only used if tenant_name is provided. Defaults to None (use Weaviate default).
             tenant_name (str | None): The name of the tenant to use for all operations.
+                If provided, multi-tenancy will be enabled for the collection.
         """
         index_name = self._fix_and_validate_index_name(index_name)
 
@@ -113,7 +109,9 @@ class WeaviateVectorStore:
             self.client = connection.connect()
 
         collection_name = index_name
-        self._multi_tenancy_enabled = multi_tenancy_enabled
+
+        # Infer multi-tenancy from tenant_name
+        self._multi_tenancy_enabled = tenant_name is not None
         self._auto_tenant_creation = auto_tenant_creation
 
         if not self.client.collections.exists(collection_name):
@@ -121,9 +119,9 @@ class WeaviateVectorStore:
                 # Create collection with appropriate configuration
                 collection_config = {"inverted_index_config": Configure.inverted_index(index_null_state=True)}
 
-                # Add multi-tenancy configuration if explicitly set
-                if multi_tenancy_enabled is not None:
-                    mt_config = {"enabled": multi_tenancy_enabled}
+                # Add multi-tenancy configuration if tenant_name is provided
+                if tenant_name is not None:
+                    mt_config = {"enabled": True}
                     if auto_tenant_creation is not None:
                         mt_config["auto_tenant_creation"] = auto_tenant_creation
 
@@ -165,11 +163,12 @@ class WeaviateVectorStore:
             self._tenant_name = None
             return
 
-        # Tenant specified but multi-tenancy is disabled
+        # Tenant specified but multi-tenancy is disabled in the collection
         if not self._multi_tenancy_enabled:
             raise ValueError(
                 f"Collection '{collection_name}' has multi-tenancy disabled, "
-                f"but tenant_name '{tenant_name}' was provided"
+                f"but tenant_name '{tenant_name}' was provided. "
+                f"To use a tenant, create the collection with a tenant_name parameter."
             )
 
         # Tenant specified and multi-tenancy is enabled
