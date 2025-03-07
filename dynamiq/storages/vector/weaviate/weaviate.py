@@ -534,18 +534,27 @@ class WeaviateVectorStore:
                     msg = f"Expected a Document, got '{type(doc)}' instead."
                     raise ValueError(msg)
 
-                batch.add_object(
-                    properties=self._to_data_object(doc, content_key=content_key),
-                    collection=self._collection.name,
-                    uuid=generate_uuid5(doc.id),
-                    vector=doc.embedding,
-                )
+                # Create the batch add parameters
+                batch_params = {
+                    "properties": self._to_data_object(doc, content_key=content_key),
+                    "collection": self._collection.name,
+                    "uuid": generate_uuid5(doc.id),
+                    "vector": doc.embedding,
+                }
+
+                # Add tenant parameter if multi-tenancy is enabled and tenant is specified
+                if self._multi_tenancy_enabled and self._tenant_name:
+                    batch_params["tenant"] = self._tenant_name
+
+                # Add the object with the appropriate parameters
+                batch.add_object(**batch_params)
+
         if failed_objects := self.client.batch.failed_objects:
             mapped_objects = {}
             for obj in failed_objects:
                 properties = obj.object_.properties or {}
                 id_ = properties.get("_original_id", obj.object_.uuid)
-                mapped_objects[id_] = obj.data
+                mapped_objects[id_] = obj.message if hasattr(obj, "message") else str(obj)
 
             msg = "\n".join(
                 [
@@ -584,11 +593,14 @@ class WeaviateVectorStore:
                 continue
 
             try:
-                self._collection.data.insert(
-                    uuid=generate_uuid5(doc.id),
-                    properties=self._to_data_object(doc, content_key=content_key),
-                    vector=doc.embedding,
-                )
+                # Create the insert parameters
+                insert_params = {
+                    "uuid": generate_uuid5(doc.id),
+                    "properties": self._to_data_object(doc, content_key=content_key),
+                    "vector": doc.embedding,
+                }
+
+                self._collection.data.insert(**insert_params)
                 written += 1
             except UnexpectedStatusCodeError:
                 if policy == DuplicatePolicy.FAIL:
