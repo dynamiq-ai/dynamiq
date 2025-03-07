@@ -112,7 +112,7 @@ def format_value(
         value (Any): The value to format.
         skip_format_types (set, optional): Types to skip formatting.
         force_format_types (set, optional): Types to force formatting.
-        truncate_enabled(bool,optional): Whether to apply truncation.
+        truncate_enabled (bool, optional): Whether to apply truncation.
         truncate_limit (int): The maximum allowed length for the value; if exceeded, the value will be truncated.
         **kwargs: Additional keyword arguments.
 
