@@ -442,8 +442,6 @@ class WeaviateVectorStore:
             raise ValueError(f"Tenant '{tenant_name}' does not exist")
 
         try:
-            from weaviate.classes.tenants import Tenant
-
             self._collection.tenants.update(tenants=[Tenant(name=tenant_name, activity_status=status)])
             logger.info(f"Updated tenant '{tenant_name}' status to {status}")
         except Exception as e:
