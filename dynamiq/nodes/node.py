@@ -1130,6 +1130,31 @@ class Node(BaseModel, Runnable, ABC):
             self.input_mapping[key] = value
         return self
 
+    def deep_merge(self, source: dict, destination: dict) -> dict:
+        """
+        Recursively merge dictionaries with proper override behavior.
+
+        Args:
+            source: Source dictionary with higher priority values
+            destination: Destination dictionary with lower priority values
+
+        Returns:
+            dict: Merged dictionary where source values override destination values,
+                  and lists are concatenated when both source and destination have lists
+        """
+        result = destination.copy()
+        for key, value in source.items():
+            if key in result:
+                if isinstance(value, dict) and isinstance(result[key], dict):
+                    result[key] = self.deep_merge(value, result[key])
+                elif isinstance(value, list) and isinstance(result[key], list):
+                    result[key] = result[key] + value
+                else:
+                    result[key] = value
+            else:
+                result[key] = value
+        return result
+
 
 class ConnectionNode(Node, ABC):
     """
