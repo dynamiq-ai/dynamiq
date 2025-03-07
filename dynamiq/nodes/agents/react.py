@@ -716,7 +716,7 @@ class ReActAgent(Agent):
 
         return param_type
 
-    def generate_property_schema(self, properties, name, field, tool):
+    def generate_property_schema(self, properties, name, field):
         if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
             description = field.description or "No description"
             description += f" Defaults to: {field.default}." if field.default else ""
@@ -744,7 +744,7 @@ class ReActAgent(Agent):
         for tool in self.tools:
             properties = {}
             for name, field in tool.input_schema.model_fields.items():
-                self.generate_property_schema(properties, name, field, tool)
+                self.generate_property_schema(properties, name, field)
 
             schema = {
                 "type": "function",
