@@ -9,7 +9,7 @@ from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateQueryError
 from weaviate.util import generate_uuid5
 
 from dynamiq.connections import Weaviate
-from dynamiq.storages.vector.base import BaseVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.storages.vector.utils import create_file_id_filter
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 DEFAULT_QUERY_LIMIT = 9999
 
 
-class WeaviateWriterVectorStoreParams(BaseVectorStoreParams):
+class WeaviateWriterVectorStoreParams(BaseWriterVectorStoreParams):
     """Parameters for creating and managing Weaviate collections with multi-tenancy."""
     tenant_name: str | None = None
 
