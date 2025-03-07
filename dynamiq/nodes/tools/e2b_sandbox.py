@@ -24,6 +24,11 @@ A secure sandbox environment for code execution, file management, and external r
 - Install custom Python packages
 - Maintain state between executions
 - Execute code in isolated sandbox
+### Required Guidelines
+- Include all necessary imports.
+- Always use print statements to display results.
+- If any errors occur, recheck the code for syntax or runtime issues and fix them.
+- Always specify the required packages to be installed for code execution.
 ### Usage Examples
 #### Python Execution
 { "python": "import pandas as pd\n\ndf = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})\nprint(df)", "packages": "pandas,matplotlib" }
@@ -39,12 +44,6 @@ A secure sandbox environment for code execution, file management, and external r
 #### File Operations
 - Access uploaded files using provided paths
 - Generate and access files programmatically
-### Best Practices
-- Include all necessary imports
-- Always use print statements for displaying results
-- Break complex operations into smaller steps
-- Specify required packages
-- Use persistent sessions for multi-step workflows
 """  # noqa: E501
 
 
