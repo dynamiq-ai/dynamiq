@@ -10,87 +10,73 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION = """# Tavily Search Tool
-## Description
-A web search tool that delivers relevant results from trusted internet sources,
- specializing in factual information, current events, and topic-specific knowledge.
+DESCRIPTION = """## Tavily Search Tool
+### Description
+A web search tool that delivers relevant results from trusted internet sources, specializing in factual information, current events, and topic-specific knowledge.
 
-## Capabilities
-- Perform natural language web searches with adjustable depth and focus
-- Filter by topic categories and specific domains
-- Control result quantity and quality
-- Include optional image content, summarized answers, and raw page data
-- Access current information beyond your knowledge base
+### Capabilities
+- Perform natural language web searches with adjustable depth and focus.
+- Filter by topic categories and specific domains.
+- Control result quantity and quality.
+- Include optional image content, summarized answers, and raw page data.
+- Access current information beyond your knowledge base.
 
-## Parameters
-- `query` (required): Your search query (e.g., "latest quantum computing advances")
-- `search_depth`: Search comprehensiveness
-  - `basic`: Quick results (default)
-  - `advanced`: More thorough results
-- `topic`: Focus category
-  - Options: `general` (default), `academic`, `finance`, `health`, `news`, `shopping`, `technology`
-- `max_results`: Number of results (default: 5, range: 1-100)
-- `include_images`: Retrieve image results (default: false)
-- `include_answer`: Provide summarized answer (default: false)
-- `include_raw_content`: Include full page content (default: false)
-- `include_domains`: Specific domains to include
-- `exclude_domains`: Domains to exclude
-- `use_cache`: Use cached results when available (default: true)
+### Parameters
+- `query` (required): Your search query (e.g., "latest quantum computing advances").
+- `search_depth`: Must be either `basic` or `advanced` (default: `basic`).
+- `topic`: Must be either `general` (default) or `news`.
+- `max_results`: Number of results (default: 5, range: 1-20).
+- `include_raw_content`: Include full page content (default: false).
 
-## Usage Examples
+### Usage Examples
 1. Basic search:
    {
      "query": "effects of climate change on coral reefs"
-    }
+   }
 2. Advanced topic-specific search:
-    {
+   {
      "query": "breakthrough Alzheimer's treatments",
      "search_depth": "advanced",
-     "topic": "health",
-     "max_results": 10
+     "include_raw_content": true
    }
 
-3. Filtered search with answer:
-   {
-     "query": "electric vehicles carbon emissions impact",
-     "include_answer": true,
-     "include_domains": ["nature.com", "science.org", "epa.gov"],
-     "exclude_domains": ["blog.com"]
-   }
-
-## Tips
-- More specific queries yield more relevant results
-- `search_depth: advanced` improves quality but increases response time
-- `include_raw_content` significantly increases response size
-- Topic-specific searches filter out irrelevant content
-- Relevance scores help identify authoritative sources
+### Tips
+- More specific queries yield more relevant results.
+- `search_depth: advanced` improves quality but increases response time.
+- `include_raw_content` significantly increases response size.
+- Topic-specific searches filter out irrelevant content.
+- Relevance scores help identify authoritative sources.
 """  # noqa E501
 
 
 class TavilyInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide a search query.")
-    search_depth: str | None = Field(default=None, description="The search depth to use.", is_accessible_to_agent=False)
-    topic: str | None = Field(default=None, description="The topic to search for.", is_accessible_to_agent=False)
+    search_depth: str | None = Field(
+        default=None, description="The search depth to use; must be either `basic` or `advanced`."
+    )
+    topic: str | None = Field(
+        default=None,
+        description="The topic to search for; must be either `general` or `news`.",
+        is_accessible_to_agent=False,
+    )
     max_results: int | None = Field(
-        default=None, description="The maximum number of search results to return.", is_accessible_to_agent=False
+        default=None, description="The maximum number of search results to return (default: 5, range: 1-20)."
     )
     include_images: bool | None = Field(
         default=None, description="Include images in search results.", is_accessible_to_agent=False
     )
     include_answer: bool | None = Field(
-        default=None, description="Include answer in search results.", is_accessible_to_agent=False
+        default=None, description="Include a summarized answer in search results.", is_accessible_to_agent=False
     )
-    include_raw_content: bool | None = Field(
-        default=None, description="Include raw content in search results.", is_accessible_to_agent=False
-    )
+    include_raw_content: bool | None = Field(default=None, description="Include full page content in search results.")
     include_domains: list[str] | None = Field(
-        default=None, description="The domains to include in search results.", is_accessible_to_agent=False
+        default=None, description="Specific domains to include in search results.", is_accessible_to_agent=False
     )
     exclude_domains: list[str] | None = Field(
-        default=None, description="The domains to exclude from search results.", is_accessible_to_agent=False
+        default=None, description="Domains to exclude from search results.", is_accessible_to_agent=False
     )
     use_cache: bool | None = Field(
-        default=None, description="Use cache for search results.", is_accessible_to_agent=False
+        default=None, description="Use cached results when available.", is_accessible_to_agent=False
     )
 
 
@@ -114,22 +100,15 @@ class TavilyTool(ConnectionNode):
         le=100,
         description="The maximum number of search results to return.",
     )
-    include_images: bool = Field(
-        default=False, description="Include images in search results."
+    include_images: bool = Field(default=False, description="Include images in search results.")
+    include_answer: bool = Field(default=False, description="Include answer in search results.")
+    include_raw_content: bool = Field(default=False, description="Include raw content in search results.")
+    include_domains: list[str] = Field(default_factory=list, description="The domains to include in search results.")
+    exclude_domains: list[str] = Field(default_factory=list, description="The domains to exclude from search results.")
+    use_cache: bool = Field(
+        default=True,
+        description="Use cache for search results.",
     )
-    include_answer: bool = Field(
-        default=False, description="Include answer in search results."
-    )
-    include_raw_content: bool = Field(
-        default=False, description="Include raw content in search results."
-    )
-    include_domains: list[str] = Field(
-        default_factory=list, description="The domains to include in search results."
-    )
-    exclude_domains: list[str] = Field(
-        default_factory=list, description="The domains to exclude from search results."
-    )
-    use_cache: bool = Field(default=True, description="Use cache for search results.")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

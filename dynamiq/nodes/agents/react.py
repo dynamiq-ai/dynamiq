@@ -410,12 +410,17 @@ class ReActAgent(Agent):
         stop_sequences = []
 
         if self.inference_mode == InferenceMode.XML:
-            stop_sequences.extend(["<observation>"])
+            stop_sequences.extend(["<observation>", "</output>"])
         elif self.inference_mode == InferenceMode.DEFAULT:
             stop_sequences.extend(["Observation: "])
         self.llm.stop = stop_sequences
 
         for loop_num in range(self.max_loops):
+
+            print("DEBUG: Loop number: ", loop_num)
+            print("DEBUG: Prompt messages: ")
+            for msg in self._prompt.messages:
+                print(msg.role, msg.content)
 
             try:
                 llm_result = self._run_llm(
@@ -427,6 +432,9 @@ class ReActAgent(Agent):
                 )
                 action, action_input = None, None
                 llm_generated_output = ""
+
+                print("DEBUG: LLM result content: ", llm_result.output.get("content"))
+                print("DEBUG: LLM result: ", llm_result.output)
 
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:

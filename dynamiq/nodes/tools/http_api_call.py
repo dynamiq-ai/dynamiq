@@ -10,30 +10,26 @@ from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutio
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 
-DESCRIPTION_HTTP = """# HTTP API Call Tool
-## Overview
+DESCRIPTION_HTTP = """## HTTP API Call Tool
+### Overview
 Make web requests to external APIs and services with support for various HTTP methods, payload formats, and response types.
-
-## Capabilities
+### Capabilities
 - Execute all standard HTTP methods (GET, POST, PUT, DELETE, PATCH)
 - Configure headers, query parameters, and request body
 - Handle multiple payload formats (raw or JSON) and response types
 - Customize timeout and success response criteria
-
-## When to Use
+### When to Use
 - Fetch data from external web services
 - Submit data to external systems
 - Interact with HTTP-based APIs including RESTful services
 - Access authenticated third-party services
-
-## Parameters
+### Parameters
 - **url** (string): Required endpoint URL if not configured in tool settings
 - **data** (object, optional): Request body payload (JSON-serializable)
 - **headers** (object, optional): HTTP request headers
 - **params** (object, optional): URL query parameters
 - **payload_type** (string, optional): Format of payload ("raw" or "json", default: "raw")
-
-## Configuration
+### Configuration
 - **method** (string): HTTP method (GET, POST, PUT, DELETE, etc.)
 - **timeout** (number): Request timeout in seconds (default: 30)
 - **success_codes** (array): HTTP status codes considered successful (default: [200])
@@ -42,13 +38,10 @@ Make web requests to external APIs and services with support for various HTTP me
   - "raw": Returns raw response content as bytes
   - "json": Parses response as JSON object
   - Responses with "application/json" content-type automatically parse as JSON
-
-## Examples
-
-### Basic GET Request
+### Examples
+#### Basic GET Request
 {"url": "https://api.example.com/data"}
-
-### POST with JSON Payload
+#### POST with JSON Payload
 {
   "url": "https://api.example.com/submit",
   "data": {"name": "John Doe", "email": "john@example.com"},
@@ -58,14 +51,12 @@ Make web requests to external APIs and services with support for various HTTP me
     "Authorization": "Bearer token123"
   }
 }
-
-### GET with Query Parameters
+#### GET with Query Parameters
 {
   "url": "https://api.example.com/search",
   "params": {"q": "search term", "limit": 10}
 }
-
-## Best Practices
+### Best Practices
 1. Set appropriate timeouts based on expected response times
 2. Include authentication in headers rather than URLs
 3. Use "json" response type for JSON APIs, "text" for HTML/plain text

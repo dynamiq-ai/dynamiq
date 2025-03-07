@@ -7,15 +7,13 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
 
 if __name__ == "__main__":
-    import os
-
     connection_exa = Exa()
     tool_search = ExaTool(connection=connection_exa)
     llm = TogetherAI(
-        connection=TogetherAIConnection(api_key=os.environ.get("TOGETHER_API_KEY_DYN")),
+        connection=TogetherAIConnection(),
         model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
         temperature=0,
-        max_tokens=8000,
+        max_tokens=4000,
     )
     agent = ReActAgent(
         name="Agent",

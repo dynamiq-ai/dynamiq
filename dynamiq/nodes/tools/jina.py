@@ -10,65 +10,52 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SCRAPE = """# Jina Scrape Tool
-## Overview
+DESCRIPTION_SCRAPE = """## Jina Scrape Tool
+### Overview
 The Jina Scrape Tool extracts content from web pages.
-
-## Capabilities
+### Capabilities
 - Extract web content in various formats
-- Process JavaScript-rendered dynamic content
-- Handle different text encodings and international characters
 - Return well-formatted content for further processing
-
-## When to Use
+### When to Use
 - Extract information from specific webpages
 - Convert web content to more readable formats
-- Analyze webpage structure
-
-## Input Parameters
+### Input Parameters
 - **url** (string, required): Complete URL of the webpage to scrape
 """  # noqa: E501
 
-DESCRIPTION_SEARCH = """# Jina Search Tool
-
-## Overview
-The Jina Search Tool enables web searches using Jina AI's search engine, delivering structured results to quickly find relevant information across the internet.
-
-## Capabilities
+DESCRIPTION_SEARCH = """## Jina Search Tool
+### Overview
+The Jina Search Tool enables web searches using Jina AI's search engine,
+delivering structured results to quickly find relevant information across the internet.
+### Capabilities
 - Process natural language and keyword queries
 - Return search results with titles, descriptions, and URLs
 - Optionally include images from results
 - Retrieve full content from specific results when needed
 - Limit results to focus on most relevant information
 - Present results in a readable, structured format
-
-## When to Use
+### When to Use
 - Research topics requiring multiple perspectives
 - Discover resources related to specific queries
 - Access current information that may not be in your knowledge base
-
-## Input Parameters
+### Input Parameters
 - **query** (string, required): The search query text in natural language or keywords
 - **max_results** (integer, optional, default: 5): Maximum number of results to return (1-100)
-
-## Usage Examples
-### Basic Search
+### Usage Examples
+#### Basic Search
 {
   "query": "climate change solutions 2025"
 }
-
-### Search with More Results
+#### Search with More Results
 {
   "query": "best programming languages for beginners",
   "max_results": 10
 }
-
-
-## Best Practices
-1. **Be Specific**: Use clear, specific queries for better results
-2. **Limit Results**: Start with fewer results (3-5) for focused information
-3. **Use Natural Language**: Phrases or questions provide better semantic matching
-4. **Add Context**: Include relevant terms to narrow results (e.g., "Python language" vs. "Python")
+### Best Practices
+1. **Be Specific**: Use clear, specific queries for better results.
+2. **Limit Results**: Start with fewer results (3-5) for focused information.
+3. **Use Natural Language**: Phrases or questions provide better semantic matching.
+4. **Add Context**: Include relevant terms to narrow results (e.g., "Python language" vs. "Python").
 """  # noqa: E501
 
 

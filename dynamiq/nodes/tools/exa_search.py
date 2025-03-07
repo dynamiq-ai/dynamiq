@@ -11,58 +11,41 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_EXA = """# Exa Search Tool
-## Overview
-Exa Search Tool provides web search capabilities powered by Exa AI's semantic search technology. Search the internet for current information with powerful filtering options and retrieve full webpage content when needed.
-
-## Capabilities
+DESCRIPTION_EXA = """## Exa Search Tool
+### Overview
+Exa Search Tool provides web search capabilities powered by Exa AI's semantic search technology.
+Search the internet for current information with powerful filtering options and retrieve full webpage content when needed.
+### Capabilities
 - Perform keyword and semantic searches across the web
 - Filter results by domains, text content, and categories
 - Retrieve highlights, summaries, and full content from webpages
 - Access metadata including titles, URLs, dates, and authors
-
-## Input Parameters
+### Input Parameters
 - **query** (string, required): Search query text
 - **include_full_content** (boolean, optional, default: false): Retrieves complete content when true
-- **use_autoprompt** (boolean, optional, default: false): Enhances query automatically when true.
-Enabled by default for auto search, optional for neural search, and not available for keyword search.
+- **use_autoprompt** (boolean, optional, default: false): Enhances query automatically when true. Enabled by default for auto search, optional for neural search, and not available for keyword search.
 - **query_type** (string, optional, default: "auto"): "keyword" (exact match), "neural" (semantic), or "auto"
-- **category** (string, optional): Focus on specific data types
-(only company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report)
+- **category** (string, optional): Focus on specific data types (only company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report)
 - **limit** (integer, optional, default: 10): Number of results to return (1-100)
-
-## Output Format
-Results include:
-- Title and URL
-- Published date and author (when available)
-- Relevance score
-- Highlights (key passages)
-- Summary (if requested)
-
-## Usage Examples
-
-### Basic Search
+### Examples of action input for tool usage
+#### Basic Search
 {
   "query": "renewable energy advancements 2024"
 }
-
-### Filtered Domain Search
+#### Filtered Domain Search
 {
   "query": "machine learning applications",
   "category": "research paper",
   "limit": 15
 }
-
-
-### Comprehensive Research
+#### Comprehensive Research
 {
   "query": "climate change policy",
   "query_type": "neural",
   "include_full_content": true,
-  "category": "research paper",
+  "category": "research paper"
 }
-
-## Best Practices
+### Best Practices
 1. Use specific queries with key terms and context
 2. Combine domain and text filters for improved relevance
 3. Use "neural" for concept searches, "keyword" for exact matches

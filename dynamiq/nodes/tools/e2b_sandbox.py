@@ -12,10 +12,10 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_E2B = """# E2B Advanced Code Interpreter
+DESCRIPTION_E2B = """## E2B Code Interpreter
+### Description
 A secure sandbox environment for code execution, file management, and external resource interaction.
-
-## Capabilities:
+### Capabilities
 - Execute Python code with extensive library support
 - Run shell commands in Linux environment
 - Manage files (upload, download, manipulate)
@@ -24,26 +24,22 @@ A secure sandbox environment for code execution, file management, and external r
 - Install custom Python packages
 - Maintain state between executions
 - Execute code in isolated sandbox
-
-## Usage Examples:
-
-### Python Execution:
+### Usage Examples
+#### Python Execution
 { "python": "import pandas as pd\n\ndf = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})\nprint(df)", "packages": "pandas,matplotlib" }
-### Shell Commands:
+#### Shell Commands
 { "shell_command": "ls -la && echo 'Current directory contents'" }
-### API/Internet Guidelines:
+#### API/Internet Guidelines
 - Use `requests` library for API calls or curl via shell commands
 - Use actual endpoints specified by users
 - Prioritize free and open APIs when user doesn't specify an API provider
 - Recommended open search APIs: DuckDuckGo
 - For general data: OpenData APIs, public government datasets, or open-source repositories
 - Provide attribution for data sources
-
-### File Operations:
+#### File Operations
 - Access uploaded files using provided paths
 - Generate and access files programmatically
-
-## Best Practices:
+### Best Practices
 - Include all necessary imports
 - Always use print statements for displaying results
 - Break complex operations into smaller steps
