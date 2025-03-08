@@ -11,6 +11,48 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
+DESCRIPTION_EXA = """## Exa Search Tool
+### Overview
+Exa Search Tool provides web search capabilities powered by Exa AI's semantic search technology.
+Search the internet for current information with powerful filtering options and retrieve full webpage content when needed.
+### Capabilities
+- Perform keyword and semantic searches across the web
+- Filter results by domains, text content, and categories
+- Retrieve highlights, summaries, and full content from webpages
+- Access metadata including titles, URLs, dates, and authors
+### Input Parameters
+- **query** (string, required): Search query text
+- **include_full_content** (boolean, optional, default: false): Retrieves complete content when true
+- **use_autoprompt** (boolean, optional, default: false): Enhances query automatically when true. Enabled by default for auto search, optional for neural search, and not available for keyword search.
+- **query_type** (string, optional, default: "auto"): "keyword" (exact match), "neural" (semantic), or "auto"
+- **category** (string, optional): Focus on specific data types (only company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report)
+- **limit** (integer, optional, default: 10): Number of results to return (1-100)
+### Examples of action input for tool usage
+#### Basic Search
+{
+  "query": "renewable energy advancements 2024"
+}
+#### Filtered Domain Search
+{
+  "query": "machine learning applications",
+  "category": "research paper",
+  "limit": 15
+}
+#### Comprehensive Research
+{
+  "query": "climate change policy",
+  "query_type": "neural",
+  "include_full_content": true,
+  "category": "research paper"
+}
+### Best Practices
+1. Use specific queries with key terms and context
+2. Combine domain and text filters for improved relevance
+3. Use "neural" for concept searches, "keyword" for exact matches
+4. Request fewer results (5-15) for higher quality information
+5. Use include_full_content sparingly to maintain response speed
+"""  # noqa E501
+
 
 class QueryType(str, Enum):
     keyword = "keyword"
@@ -25,20 +67,27 @@ class ExaInputSchema(BaseModel):
     include_full_content: bool | None = Field(
         default=None,
         description="If true, retrieve full content, highlights, and summaries for search results.",
-        is_accessible_to_agent=False,
+        is_accessible_to_agent=True,
     )
     use_autoprompt: bool | None = Field(
-        default=None, description="If true, query will be converted to a Exa query.", is_accessible_to_agent=False
+        default=None,
+        description="If true, query will be converted to a Exa query."
+        "Enabled by default for auto search, optional for neural search, and not available for keyword search.",
+        is_accessible_to_agent=False,
     )
     query_type: QueryType | None = Field(
         default=None,
-        description="Type of query to be used. Options are 'keyword', 'neural', or 'auto'.",
+        description="Type of query to be used. Options are 'keyword', 'neural', or 'auto'."
+        "Neural uses an embeddings-based model, keyword is google-like SERP. "
+        "Default is auto, which automatically decides between keyword and neural.",
         is_accessible_to_agent=False,
     )
     category: str | None = Field(
         default=None,
-        description="A data category to focus on (e.g., company, research paper, news article).",
-        is_accessible_to_agent=False,
+        description="A data category to focus on."
+        "Options are company, research paper, news, pdf,"
+        " github, tweet, personal site, linkedin profile, financial report.",
+        is_accessible_to_agent=True,
     )
     limit: int | None = Field(
         default=None, ge=1, le=100, description="Number of search results to return.", is_accessible_to_agent=False
@@ -82,10 +131,7 @@ class ExaTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Exa Search Tool"
-    description: str = (
-        "A tool for searching the web using Exa AI. "
-        "Provides advanced search capabilities with options for filtering results."
-    )
+    description: str = DESCRIPTION_EXA
     connection: Exa
 
     include_full_content: bool = Field(
