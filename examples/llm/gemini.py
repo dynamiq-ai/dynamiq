@@ -1,9 +1,9 @@
 """
 Integration of Gemini LLM into Dynamiq Framework
 
-This script demonstrates how to integrate the Gemini Large Language Model (LLM) 
-within the Dynamiq framework using a predefined prompt template. The model is 
-configured with specific parameters to generate a short response based on the 
+This script demonstrates how to integrate the Gemini Large Language Model (LLM)
+within the Dynamiq framework using a predefined prompt template. The model is
+configured with specific parameters to generate a short response based on the
 provided input text.
 
 Dependencies:
