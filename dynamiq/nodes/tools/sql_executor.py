@@ -9,6 +9,17 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
+DESCRIPTION_SQL = """# SQL Executor Tool
+A tool that executes SQL queries against databases like PostgreSQL, MySQL, Snowflake, and AWS Redshift.
+**Functionality:**
+- Executes SQL queries provided through input parameters or pre-configured in the tool
+- Returns query results in a formatted structure or confirmation messages
+- Handles execution errors with clear error messages
+**Usage:**
+Provide a SQL query string to execute against the configured database connection.
+The tool will return the query results or appropriate status messages.
+"""  # noqa: E501
+
 
 class SQLInputSchema(BaseModel):
     query: str | None = Field(None, description="Parameter to provide a query that needs to be executed.")
@@ -29,10 +40,7 @@ class SQLExecutor(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "SQL Executor Tool"
-    description: str = (
-        "A tool for SQL query execution."
-        "You can use this tool to execute the query, specified for PostgreSQL, MySQL, Snowflake, AWS Redshift."
-    )
+    description: str = DESCRIPTION_SQL
     connection: PostgreSQL | MySQL | Snowflake | AWSRedshift
     query: str | None = None
 

@@ -9,6 +9,23 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
+DESCRIPTION_ZENROWS = """## ZenRows Web Scraper Tool
+### Description
+A powerful web scraping tool that extracts content from any web page.
+### Capabilities
+- Extracts complete text from web pages
+### When to Use
+- To access specific web content not in your knowledge base or requiring up-to-date information.
+- To extract information from articles, documentation, or product pages.
+- When you need detailed content from a known URL rather than general search results.
+### Input Parameters
+- `url` (required): The complete URL of the web page to scrape (e.g., "https://www.example.com/article/12345").
+### Usage Examples
+{"url": "https://www.bbc.com/news/science-environment-12345678"}
+### Notes
+- Always provide the complete URL including the protocol (http:// or https://).
+"""
+
 
 class ZenRowsInputSchema(BaseModel):
     url: str = Field(default="", description="Parameter to provide a url of the page to scrape.")
@@ -23,10 +40,7 @@ class ZenRowsTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Zenrows Scraper Tool"
-    description: str = (
-        "A tool for scraping web pages, powered by ZenRows. "
-        "You can use this tool to scrape the content of a web page."
-    )
+    description: str = DESCRIPTION_ZENROWS
     connection: ZenRows
     url: str | None = None
     markdown_response: bool = Field(
