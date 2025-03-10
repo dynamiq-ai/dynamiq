@@ -1,5 +1,4 @@
 from pydantic import BaseModel, PrivateAttr, field_validator, model_validator
-
 from dynamiq.evaluations import BaseEvaluator
 from dynamiq.evaluations.llm_evaluator import LLMEvaluator
 from dynamiq.nodes.llms import BaseLLM
@@ -23,15 +22,15 @@ class ContextPrecisionInput(BaseModel):
     verbose: bool = False
 
     @field_validator("contexts_list", mode="before")
-    def normalize_contexts_list(cls, v):
+    def normalize_contexts_list(cls, value):
         # If the user provides a list[str], wrap it into [list[str]].
         # If the user provides a list[list[str]], leave as-is.
         # Otherwise, raise an error.
-        if isinstance(v, list):
-            if all(isinstance(item, str) for item in v):
-                return [v]  # e.g. ["foo", "bar"] becomes [["foo", "bar"]]
-            if all(isinstance(item, list) and all(isinstance(x, str) for x in item) for item in v):
-                return v
+        if isinstance(value, list):
+            if all(isinstance(item, str) for item in value):
+                return [value]  # e.g. ["foo", "bar"] becomes [["foo", "bar"]]
+            if all(isinstance(item, list) and all(isinstance(x, str) for x in item) for item in value):
+                return value
         raise ValueError("contexts_list must be either a list of strings or a list of list of strings.")
 
     @model_validator(mode="after")
@@ -77,10 +76,10 @@ class VerdictResult(BaseModel):
 
     @field_validator("verdict")
     @classmethod
-    def validate_verdict(cls, v):
-        if v not in (0, 1):
+    def validate_verdict(cls, value):
+        if value not in (0, 1):
             raise ValueError("Verdict must be either 0 or 1.")
-        return v
+        return value
 
 
 class ContextPrecisionEvaluator(BaseEvaluator):
@@ -208,11 +207,11 @@ class ContextPrecisionEvaluator(BaseEvaluator):
         total_relevant = sum(verdicts)
         if total_relevant == 0:
             return 0.0
-        for i, verdict in enumerate(verdicts):
+        for index, verdict in enumerate(verdicts):
             if verdict == 1:
                 cumulative_hits += 1
-                precision_at_i = cumulative_hits / (i + 1)
-                numerator += precision_at_i
+                precision_at_index = cumulative_hits / (index + 1)
+                numerator += precision_at_index
         average_precision = numerator / total_relevant
         return round(float(average_precision), 2)
 
@@ -244,21 +243,72 @@ class ContextPrecisionEvaluator(BaseEvaluator):
         Returns:
             str: Detailed reasoning.
         """
-        reasoning_strs = ["Reasoning:", "", f"Question: {question}", f"Answer: {answer}", "", "Context Evaluations:"]
-
-        for ctx, v, detail in zip(contexts, verdicts, verdict_details):
-            mark = "✅" if v == 1 else "❌"
-            reasoning_strs.extend(
-                [f" - Context: {ctx}", f"   Verdict: {mark} (value: {v})", f"   Explanation: {detail}", ""]
+        reasoning_strings = ["Reasoning:", "", f"Question: {question}", f"Answer: {answer}", "", "Context Evaluations:"]
+        for context_text, verdict_value, detail in zip(contexts, verdicts, verdict_details):
+            verdict_mark = "✅" if verdict_value == 1 else "❌"
+            reasoning_strings.extend(
+                [
+                    f" - Context: {context_text}",
+                    f"   Verdict: {verdict_mark} (value: {verdict_value})",
+                    f"   Explanation: {detail}",
+                    "",
+                ]
             )
+        reasoning_strings.append(f"Average Precision Score = {average_precision:.2f}")
+        return "\n".join(reasoning_strings)
 
-        reasoning_strs.extend(
-            [
-                f"Average Precision Score = {average_precision:.2f}",
-            ]
-        )
+    def run_single(
+        self, question: str, answer: str, contexts: list[str], verbose: bool = False
+    ) -> ContextPrecisionRunResult:
+        """
+        Evaluate the context precision for a single sample.
 
-        return "\n".join(reasoning_strs)
+        Args:
+            question (str): The question.
+            answer (str): The corresponding answer.
+            contexts (list[str]): A list of contexts for this question.
+            verbose (bool): Flag to enable verbose logging.
+
+        Returns:
+            ContextPrecisionRunResult: Contains the computed average precision score and detailed reasoning.
+        """
+        verdicts = []
+        verdict_details = []
+        for context in contexts:
+            evaluation_result = self._context_precision_evaluator.run(
+                question=[question], answer=[answer], context=[context]
+            )
+            if ("results" not in evaluation_result) or (not evaluation_result["results"]):
+                default_verdict = 0
+                verdicts.append(default_verdict)
+                verdict_details.append("No results returned from evaluator.")
+                if verbose:
+                    logger.debug(f"Missing results for context: {context}. Defaulting verdict to {default_verdict}.")
+                continue
+
+            result_item = evaluation_result["results"][0]
+            verdict_raw = result_item.get("verdict", "0")
+            try:
+                verdict = int(verdict_raw) if not isinstance(verdict_raw, str) else int(verdict_raw.strip())
+            except (ValueError, AttributeError):
+                verdict = 0
+            verdicts.append(verdict)
+            verdict_details.append(result_item.get("reason", "No reasoning provided"))
+
+            if verbose:
+                logger.debug(f"Question: {question}")
+                logger.debug(f"Answer: {answer}")
+                logger.debug(f"Context: {context}")
+                logger.debug(f"Verdict: {verdict}")
+                logger.debug(f"Reason: {result_item.get('reason', 'No reasoning provided')}")
+                logger.debug("-" * 50)
+
+        average_precision = self.calculate_average_precision(verdicts)
+        reasoning_text = self._build_reasoning(question, answer, contexts, verdicts, verdict_details, average_precision)
+        if verbose:
+            logger.debug(f"Average Precision Score: {average_precision}")
+            logger.debug("=" * 50)
+        return ContextPrecisionRunResult(score=average_precision, reasoning=reasoning_text)
 
     def run(
         self,
@@ -280,67 +330,19 @@ class ContextPrecisionEvaluator(BaseEvaluator):
         Returns:
             ContextPrecisionOutput: Contains a list of context precision scores and reasoning.
         """
-        # Pass everything to the Pydantic model.
-        input_data = ContextPrecisionInput(
+        run_input = ContextPrecisionInput(
             questions=questions,
             answers=answers,
             contexts_list=contexts_list,
             verbose=verbose,
         )
-
-        results_out = []
-        for idx in range(len(input_data.questions)):
-            question = input_data.questions[idx]
-            answer = input_data.answers[idx]
-            contexts = input_data.contexts_list[idx]
-
-            verdicts = []
-            verdict_details = []
-            for context in contexts:
-                # Prepare inputs for the evaluator.
-                result = self._context_precision_evaluator.run(
-                    question=[question],
-                    answer=[answer],
-                    context=[context],
-                )
-                # Check if results are present.
-                if ("results" not in result) or (not result["results"]):
-                    # if no results are returned, assign a default verdict and note in details.
-                    default_verdict = 0
-                    verdicts.append(default_verdict)
-                    verdict_details.append("No results returned from evaluator.")
-                    if input_data.verbose:
-                        logger.debug(
-                            f"Missing results for context: {context}. Defaulting verdict to {default_verdict}."
-                        )
-                    continue
-
-                res = result["results"][0]
-                verdict_raw = res.get("verdict", "0")
-                try:
-                    # Convert verdict to int.
-                    verdict = int(verdict_raw) if not isinstance(verdict_raw, str) else int(verdict_raw.strip())
-                except (ValueError, AttributeError):
-                    # In case conversion fails, default the verdict.
-                    verdict = 0
-                verdicts.append(verdict)
-                verdict_details.append(res.get("reason", "No reasoning provided"))
-
-                if input_data.verbose:
-                    logger.debug(f"Question: {question}")
-                    logger.debug(f"Answer: {answer}")
-                    logger.debug(f"Context: {context}")
-                    logger.debug(f"Verdict: {verdict}")
-                    logger.debug(f"Reason: {res.get('reason', 'No reasoning provided')}")
-                    logger.debug("-" * 50)
-
-            avg_precision = self.calculate_average_precision(verdicts)
-
-            reasoning_str = self._build_reasoning(question, answer, contexts, verdicts, verdict_details, avg_precision)
-
-            results_out.append(ContextPrecisionRunResult(score=avg_precision, reasoning=reasoning_str))
-            if input_data.verbose:
-                logger.debug(f"Average Precision Score: {avg_precision}")
-                logger.debug("=" * 50)
-
-        return ContextPrecisionOutput(results=results_out)
+        results_output = []
+        for index in range(len(run_input.questions)):
+            question = run_input.questions[index]
+            answer = run_input.answers[index]
+            contexts = run_input.contexts_list[index]
+            result_single = self.run_single(
+                question=question, answer=answer, contexts=contexts, verbose=run_input.verbose
+            )
+            results_output.append(result_single)
+        return ContextPrecisionOutput(results=results_output)

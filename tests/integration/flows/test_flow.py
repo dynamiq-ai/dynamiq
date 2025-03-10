@@ -123,6 +123,7 @@ def test_workflow_with_depend_nodes_with_tracing(
             client=ANY,
             response_format=None,
             drop_params=True,
+            api_base="https://api.openai.com/v1",
         ),
         mock.call(
             tools=None,
@@ -149,7 +150,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert wf_run.metadata["workflow"]["id"] == wf.id
     assert wf_run.metadata["workflow"]["version"] == wf.version
     assert wf_run.metadata["host"]
-    assert wf_run.output == format_value(expected_output)
+    assert wf_run.output == format_value(expected_output)[0]
     assert wf_run.status == RunStatus.SUCCEEDED
     assert wf_run.tags == tags
     assert metadata.items() <= wf_run.metadata.items()
@@ -157,7 +158,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert flow_run.metadata["flow"]["id"] == wf.flow.id
     assert flow_run.metadata["host"]
     assert flow_run.parent_run_id == wf_run.id
-    assert flow_run.output == format_value(expected_output)
+    assert flow_run.output == format_value(expected_output)[0]
     assert flow_run.status == RunStatus.SUCCEEDED
     assert flow_run.tags == tags
     assert metadata.items() <= flow_run.metadata.items()
@@ -169,7 +170,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert openai_run.metadata.get("usage")
     assert openai_run.parent_run_id == flow_run.id
     assert openai_run.input == expected_tracing_input
-    assert openai_run.output == format_value(expected_output_openai)
+    assert openai_run.output == format_value(expected_output_openai)[0]
     assert openai_run.status == RunStatus.SUCCEEDED
     assert openai_run.tags == tags
     assert metadata.items() <= openai_run.metadata.items()
@@ -180,8 +181,8 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert anthropic_run.metadata["host"]
     assert anthropic_run.metadata.get("usage")
     assert anthropic_run.parent_run_id == flow_run.id
-    assert anthropic_run.input == format_value(expected_input_anthropic)
-    assert anthropic_run.output == format_value(expected_output_anthropic)
+    assert anthropic_run.input == format_value(expected_input_anthropic)[0]
+    assert anthropic_run.output == format_value(expected_output_anthropic)[0]
     assert anthropic_run.status == RunStatus.SUCCEEDED
     assert anthropic_run.tags == tags
     assert metadata.items() <= anthropic_run.metadata.items()
@@ -190,8 +191,8 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert output_node_run.metadata["host"]
     assert output_node_run.metadata.get("usage") is None
     assert output_node_run.parent_run_id == flow_run.id
-    assert output_node_run.input == format_value(expected_input_output)
-    assert output_node_run.output == format_value(expected_input_output)
+    assert output_node_run.input == format_value(expected_input_output)[0]
+    assert output_node_run.output == format_value(expected_input_output)[0]
     assert output_node_run.status == RunStatus.SUCCEEDED
     assert output_node_run.tags == tags
     assert output_node_run.executions
@@ -277,6 +278,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
             top_p=None,
             response_format=None,
             drop_params=True,
+            api_base="https://api.openai.com/v1",
         )
     ]
 

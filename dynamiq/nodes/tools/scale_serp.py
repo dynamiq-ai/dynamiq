@@ -11,6 +11,42 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
+DESCRIPTION_SERP = """## Scale SERP Search Tool
+### Overview
+A web search tool that retrieves current information from the internet using Scale SERP API.
+Access search results including web pages, news, images, and videos with organized titles, links, and descriptive snippets.
+### When to Use
+- Find current information beyond your knowledge base.
+- Verify facts or recent developments.
+- Research specific topics, people, companies, or events.
+- Locate authoritative sources.
+- Discover relevant visual content.
+### Parameters
+- `query`: Search term (e.g., "latest climate change report")
+- `url`: Specific website to search (e.g., "https://www.example.com")
+- `limit`: Number of results (default: 10, max: 1000)
+- `search_type`: Search category:
+  - `web`: Standard results (default)
+  - `news`: Recent articles
+  - `images`: Image results
+  - `videos`: Video results
+### Examples
+1. Basic web search:
+   {
+     "query": "renewable energy breakthroughs 2024",
+     "limit": 5
+   }
+2. News search:
+   {
+     "query": "latest economic policy updates",
+     "search_type": "news",
+     "limit": 3
+   }
+### Notes
+- Use specific, concise search terms for best results.
+- News results reflect most recent publications.
+"""  # noqa E501
+
 
 class SearchType(str, enum.Enum):
     WEB = "web"
@@ -33,14 +69,14 @@ class ScaleSerpInputSchema(BaseModel):
     query: str | None = Field(default=None, description="Parameter to provide a search query.")
     url: str | None = Field(default=None, description="Parameter to provide a search url.")
     limit: int | None = Field(default=None, description="Parameter to specify the number of results to return.")
-    search_type: SearchType | None = Field(
-        default=None, description="Type of search to perform (web, news, images, videos)"
+    search_type: SearchType = Field(
+        default=SearchType.WEB, description="Type of search to perform (web, news, images, videos)"
     )
 
     @model_validator(mode="after")
     def validate_query_url(self):
         """Validate that either query or url is specified if both are provided"""
-        if self.url is not None and self.query is not None:
+        if self.url and self.query:
             raise ValueError("Cannot specify both 'query' and 'url' at the same time.")
         return self
 
@@ -65,10 +101,7 @@ class ScaleSerpTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Scale Serp Search Tool"
-    description: str = (
-        "A tool for searching the web, powered by Scale SERP. "
-        "You can use this tool to search the web for information."
-    )
+    description: str = DESCRIPTION_SERP
     connection: ScaleSerp
 
     query: str = Field(default="", description="The default search query to use")
