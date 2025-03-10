@@ -3,6 +3,7 @@ import time
 from typing import Any, Literal
 
 from dynamiq.callbacks import BaseCallbackHandler, TracingCallbackHandler
+from dynamiq.clients import BaseTracingClient
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 class TracingWrapper(Node):
     group: Literal[NodeGroup.UTILS] = NodeGroup.UTILS
+    client: BaseTracingClient | None = None
 
     def __init__(self, obj: Any, path: str = "openai", trace: bool = False, **kwargs):
         super().__init__(**kwargs)
@@ -29,16 +31,28 @@ class TracingWrapper(Node):
         if callable(attr):
             return lambda *args, **kwargs: self.run(
                 {"method": attr, "method_path": f"{self._path}.{name}", "kwargs": kwargs},
-                config=RunnableConfig(callbacks=[TracingCallbackHandler()]) if self._trace is True else None,
+                config=(
+                    RunnableConfig(
+                        callbacks=[TracingCallbackHandler(client=self.client, source_id=self.client.project_id)]
+                    )
+                    if self._trace is True
+                    else None
+                ),
             ).output
 
-        return TracingWrapper(attr, f"{self._path}.{name}", self._trace)
+        return TracingWrapper(attr, f"{self._path}.{name}", self._trace, client=self.client)
 
     def __call__(self, *args, **kwargs):
         if callable(self._obj):
             return self.run(
                 {"method": self._obj, "path": self._path, "kwargs": kwargs},
-                config=RunnableConfig(callbacks=[TracingCallbackHandler()]) if self._trace is True else None,
+                config=(
+                    RunnableConfig(
+                        callbacks=[TracingCallbackHandler(client=self.client, source_id=self.client.project_id)]
+                    )
+                    if self._trace is True
+                    else None
+                ),
             ).output
         raise TypeError(f"'{self._path}' object is not callable")
 
@@ -80,22 +94,26 @@ class TracingWrapper(Node):
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
 
-class LLMDynamiqClient:
+class DynamiqClient:
 
-    def __init__(self, api_key: str | None = None, trace=False):
+    def __init__(self, api_key: str | None = None, trace=False, project_id: str | None = None):
         self.api_key = api_key
         self.trace = trace
+        self.project_id = project_id
+        self.client = None
+        if self.trace:
+            self.client = BaseTracingClient(api_key=api_key, project_id=project_id)
 
     def __getattr__(self, name: str) -> Any:
         if name == "openai":
             import openai as openai_module
 
-            return TracingWrapper(openai_module, "openai", self.trace)
+            return TracingWrapper(openai_module, "openai", self.trace, client=self.client)
 
         elif name == "anthropic":
             import anthropic as anthropic_module
 
-            return TracingWrapper(anthropic_module, "anthropic", self.trace)
+            return TracingWrapper(anthropic_module, "anthropic", self.trace, client=self.client)
 
         else:
             raise AttributeError(f"Module {__name__} has no attribute {name}")
