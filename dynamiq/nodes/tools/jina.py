@@ -10,6 +10,54 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
+DESCRIPTION_SCRAPE = """## Jina Scrape Tool
+### Overview
+The Jina Scrape Tool extracts content from web pages.
+### Capabilities
+- Extract web content in various formats
+- Return well-formatted content for further processing
+### When to Use
+- Extract information from specific webpages
+- Convert web content to more readable formats
+### Input Parameters
+- **url** (string, required): Complete URL of the webpage to scrape
+"""  # noqa: E501
+
+DESCRIPTION_SEARCH = """## Jina Search Tool
+### Overview
+The Jina Search Tool enables web searches using Jina AI's search engine,
+delivering structured results to quickly find relevant information across the internet.
+### Capabilities
+- Process natural language and keyword queries
+- Return search results with titles, descriptions, and URLs
+- Optionally include images from results
+- Retrieve full content from specific results when needed
+- Limit results to focus on most relevant information
+- Present results in a readable, structured format
+### When to Use
+- Research topics requiring multiple perspectives
+- Discover resources related to specific queries
+- Access current information that may not be in your knowledge base
+### Input Parameters
+- **query** (string, required): The search query text in natural language or keywords
+- **max_results** (integer, optional, default: 5): Maximum number of results to return (1-100)
+### Usage Examples
+#### Basic Search
+{
+  "query": "climate change solutions 2025"
+}
+#### Search with More Results
+{
+  "query": "best programming languages for beginners",
+  "max_results": 10
+}
+### Best Practices
+1. **Be Specific**: Use clear, specific queries for better results.
+2. **Limit Results**: Start with fewer results (3-5) for focused information.
+3. **Use Natural Language**: Phrases or questions provide better semantic matching.
+4. **Add Context**: Include relevant terms to narrow results (e.g., "Python language" vs. "Python").
+"""  # noqa: E501
+
 
 class JinaScrapeInputSchema(BaseModel):
     url: str | None = Field(None, description="Parameter to provide a url of the page to scrape.")
@@ -45,9 +93,7 @@ class JinaScrapeTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Jina Scraper Tool"
-    description: str = (
-        "A tool for scraping web pages, powered by Jina. " "You can use this tool to scrape the content of a web page."
-    )
+    description: str = DESCRIPTION_SCRAPE
     response_format: JinaResponseFormat = JinaResponseFormat.DEFAULT
     connection: Jina
     timeout: int = 60
@@ -145,7 +191,7 @@ class JinaSearchTool(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Jina Search Tool"
-    description: str = "A tool for searching the web, powered by Jina."
+    description: str = DESCRIPTION_SEARCH
     connection: Jina
     include_images: bool = Field(default=False, description="Include images in search results.")
     include_full_content: bool = False

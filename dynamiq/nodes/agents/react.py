@@ -397,7 +397,6 @@ class ReActAgent(Agent):
         """
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
-
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(
@@ -425,7 +424,6 @@ class ReActAgent(Agent):
                     inference_mode=self.inference_mode,
                     **kwargs,
                 )
-
                 action, action_input = None, None
                 llm_generated_output = ""
 
@@ -718,9 +716,10 @@ class ReActAgent(Agent):
 
         return param_type
 
-    def generate_property_schema(self, properties, name, field, tool):
+    def generate_property_schema(self, properties, name, field):
         if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
             description = field.description or "No description"
+            description += f" Defaults to: {field.default}." if field.default else ""
             param = self.filter_format_type(field.annotation)
 
             if param_type := TYPE_MAPPING.get(param):
@@ -745,11 +744,10 @@ class ReActAgent(Agent):
         for tool in self.tools:
             properties = {}
             for name, field in tool.input_schema.model_fields.items():
-                self.generate_property_schema(properties, name, field, tool)
+                self.generate_property_schema(properties, name, field)
 
             schema = {
                 "type": "function",
-                "strict": True,
                 "function": {
                     "name": self.sanitize_tool_name(tool.name),
                     "description": tool.description[:1024],
@@ -764,10 +762,14 @@ class ReActAgent(Agent):
                                 "type": "object",
                                 "description": "Input for chosen action.",
                                 "properties": properties,
+                                "required": list(properties.keys()),
+                                "additionalProperties": False,
                             },
                         },
+                        "additionalProperties": False,
                         "required": ["thought", "action_input"],
                     },
+                    "strict": True,
                 },
             }
 
