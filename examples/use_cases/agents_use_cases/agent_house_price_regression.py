@@ -23,10 +23,10 @@ Calculate the loss and return the code.
 Set a seed to ensure the results are reproducible and provide the exact MSE result.
 """
 
-FILE_PATH = "data.csv"
+FILE_PATH = "./data/house_prices.csv"
 
-FILE_DESCRIPTION = """
-- The file is `data.csv`.
+FILE_DESCRIPTION = f"""
+- The file is `{FILE_PATH}`.
 - The CSV file uses a comma (`,`) as the delimiter.
 - It contains the following columns (examples included):
     - bedrooms: number of bedrooms
@@ -98,7 +98,7 @@ def run_workflow(prompt: str, files_to_upload: list[io.BytesIO]) -> tuple[str, d
             input_data={"input": prompt, "files": files_to_upload},
         )
 
-        return result["content"], result.get("intermediate_steps", {})
+        return result.output.get("content"), result.output.get("intermediate_steps", {})
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         return "", {}
@@ -106,7 +106,7 @@ def run_workflow(prompt: str, files_to_upload: list[io.BytesIO]) -> tuple[str, d
 
 if __name__ == "__main__":
     csv_file_io = read_file_as_bytesio(
-        file_path=FILE_PATH, filename="custom_house_data.csv", description=FILE_DESCRIPTION
+        file_path=FILE_PATH, filename=FILE_PATH.split("/")[-1], description=FILE_DESCRIPTION
     )
 
     output, steps = run_workflow(prompt=PROMPT, files_to_upload=[csv_file_io])

@@ -6,11 +6,15 @@ This directory contains examples demonstrating how to apply Dynamiq agents to so
 
 ### Agent Analyst with Files
 
-- **`agent_analyst_with_files.py`**: Showcases an agent that can analyze data from CSV files. This example demonstrates how to:
+- **`house_price_regression.py`**: Showcases an agent that can analyze data from CSV files. This example demonstrates how to:
     - Upload files to the agent's environment using the `E2BInterpreterTool`.
     - Provide file descriptions to help the agent understand the data structure.
     - Craft prompts that instruct the agent to perform specific data analysis tasks (e.g., linear regression).
     - Retrieve and interpret the agent's results.
+
+** Ensure you have the necessary API keys: **
+   - `OPENAI_API_KEY`: Your OpenAI API key.
+   - `E2B_API_KEY`: Your E2B API key.
 
 ### Financial Agent
 
@@ -18,6 +22,10 @@ This directory contains examples demonstrating how to apply Dynamiq agents to so
     - Configure an agent with tools for accessing external APIs (e.g., for retrieving cryptocurrency prices).
     - Define a goal that encourages the agent to generate and execute code to solve the user's query.
     - Observe the agent's reasoning process and the final answer it provides.
+
+** Ensure you have the necessary API keys: **
+   - `OPENAI_API_KEY`: Your OpenAI API key.
+   - `E2B_API_KEY`: Your E2B API key.
 
 ## Usage
 
