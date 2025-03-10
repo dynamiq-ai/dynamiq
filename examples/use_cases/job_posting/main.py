@@ -1,3 +1,5 @@
+import io
+
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Anthropic, ScaleSerp
@@ -9,6 +11,7 @@ from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
+from examples.tools.file_reader import FileReaderTool
 
 # Load environment variables
 AGENT_RESEARCHER_ROLE = (
@@ -29,6 +32,13 @@ AGENT_REVIEWER_ROLE = (
     "and aligned with the company's values and needs."
 )
 
+FILE_PATH = "job_example.md"
+
+with open(FILE_PATH, "rb") as f:
+    file_content = f.read()
+
+FILE_IO = io.BytesIO(file_content)
+
 
 def create_workflow() -> Workflow:
     """
@@ -40,6 +50,7 @@ def create_workflow() -> Workflow:
     # Initialize connections
     anthropic_connection = Anthropic()
     search_connection = ScaleSerp()
+    tool_file_read = FileReaderTool(files=[FILE_IO])
 
     # Initialize LLM
     llm = AnthropicLLM(
@@ -63,13 +74,13 @@ def create_workflow() -> Workflow:
         name="job-description-writer",
         role=AGENT_WRITER_ROLE,
         llm=llm,
-        tools=[tool_search],
+        tools=[tool_search, tool_file_read],
     )
     agent_reviewer = ReActAgent(
         name="job-description-reviewer-and-editor",
         role=AGENT_REVIEWER_ROLE,
         llm=llm,
-        tools=[tool_search],
+        tools=[tool_search, tool_file_read],
     )
     agent_manager = LinearAgentManager(llm=llm)
 

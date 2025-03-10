@@ -1,7 +1,7 @@
 import io
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
-from pydantic import ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -19,6 +19,15 @@ Input format:
 - List of files with byte content (bytes or BytesIO) with filename and description attributes.
 </tool_description>
 """
+
+
+class FileReaderSchema(BaseModel):
+    """Schema for FileReaderTool input parameters."""
+
+    files: list[Any] | None = Field(
+        default=None,
+        description="List of byte streams to process.",
+    )
 
 
 class FileReaderTool(Node):
@@ -39,6 +48,7 @@ class FileReaderTool(Node):
     is_files_allowed: bool = True
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_schema: ClassVar[type[FileReaderSchema]] = FileReaderSchema
 
     def _load_file_content(self, file: bytes | io.BytesIO) -> str:
         """
@@ -76,12 +86,12 @@ class FileReaderTool(Node):
             logger.error(f"Failed to read file: {file_description}. Error: {e}")
             raise ToolExecutionException(f"Failed to read the file: {file_description}. Error: {e}", recoverable=True)
 
-    def execute(self, input_data: dict[str, Any], config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+    def execute(self, input_data: FileReaderSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
         Execute the tool with the provided input data and configuration.
 
         Args:
-            input_data (dict[str, Any]): The input data containing:
+            input_data (FileReaderSchema): The input data containing:
                 - files: List of byte streams to process
             config (RunnableConfig, optional): The configuration for the runnable.
             **kwargs: Additional keyword arguments.
@@ -97,7 +107,7 @@ class FileReaderTool(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        files = input_data.get("files", self.files)
+        files = input_data.files or self.files
 
         if not files:
             raise ToolExecutionException(
