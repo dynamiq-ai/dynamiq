@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_execution_run_id, get_parent_run_id, get_run_id
-from dynamiq.clients import BaseTracingClient
+from dynamiq.clients import BaseTracingClient, DynamiqTracingClient
 from dynamiq.utils import JsonWorkflowEncoder, format_value, generate_uuid
 
 UTC = timezone.utc
@@ -549,3 +549,13 @@ def ensure_execution_run(execution_run_id: UUID, executions: list[ExecutionRun])
             return execution
 
     raise ValueError(f"execution run {execution_run_id} not found")
+
+
+class DynamiqCallbackHandler(TracingCallbackHandler):
+    client: DynamiqTracingClient | None = None
+
+    def __init__(self, project_id: str, api_key: str | None = None, **kwargs):
+        super().__init__(**kwargs)
+        self.source_id = project_id
+        if self.client is None:
+            self.client = DynamiqTracingClient(api_key=api_key)

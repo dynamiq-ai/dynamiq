@@ -1,4 +1,3 @@
 from .base import BaseCallbackHandler, NodeCallbackHandler
-from .dynamiq import DynamiqCallbackHandler
 from .streaming import AsyncStreamingIteratorCallbackHandler, StreamingQueueCallbackHandler
-from .tracing import TracingCallbackHandler
+from .tracing import DynamiqCallbackHandler, TracingCallbackHandler
