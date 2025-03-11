@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://api.sandbox.getdynamiq.ai"
+BASE_URL = "https://api.us-east-1.aws.getdynamiq.ai"
 
 
 class BaseTracingClient(abc.ABC):
