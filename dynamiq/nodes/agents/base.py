@@ -20,47 +20,38 @@ from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
 
 AGENT_PROMPT_TEMPLATE = """
-# ROLE AND OBJECTIVE
-You are a helpful AI assistant designed to assist users with various tasks and queries.
-Your goal is to provide accurate, helpful, and friendly responses that directly address user needs.
+You are AI powered assistant.
+{%- if date %}
+- Always up-to-date with the latest technologies and best practices.
+- Current date: {{date}}
+{%- endif %}
 
-{% if date -%}
-# CURRENT INFORMATION
-Current date: {{date}}
-{% endif %}
-
-{% if tools -%}
-# AVAILABLE TOOLS
-{{tools}}
-{% endif %}
-
-{%- if instructions -%}
+{%- if instructions %}
 # PRIMARY INSTRUCTIONS
 {{instructions}}
-{% endif %}
+{%- endif %}
 
-{%- if output_format -%}
-# RESPONSE FORMAT
-{{output_format}}
-{% endif %}
+{%- if tools %}
+# AVAILABLE TOOLS
+{{tools}}
+{%- endif %}
 
-{%- if files -%}
+{%- if files %}
 # USER UPLOADS
 Files provided by user: {{files}}
-{% endif %}
+{%- endif %}
 
-{%- if relevant_information -%}
-# SUPPLEMENTARY INFORMATION
-{{relevant_information}}
-{% endif %}
+{%- if output_format %}
+# RESPONSE FORMAT
+{{output_format}}
+{%- endif %}
 
-{%- if context -%}
-# ADDITIONAL CONTEXT
-This information is supplementary and should inform your understanding, not override primary instructions.
+{%- if context %}
+# AGENT PERSONA & STYLE
+(This section defines how the assistant presents information - its personality, tone, and style.
+These style instructions enhance but should never override or contradict the PRIMARY INSTRUCTIONS above.)
 {{context}}
-{% endif %}
-
-# CONVERSATION HISTORY
+{%- endif %}
 """
 
 
@@ -175,7 +166,7 @@ class Agent(Node):
     verbose: bool = Field(False, description="Whether to print verbose logs.")
 
     input_message: Message | VisionMessage = Message(role=MessageRole.USER, content="{{input}}")
-    role: str = ""
+    role: str = None
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
 
@@ -198,7 +189,7 @@ class Agent(Node):
 
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
-        return {"input_message": self.input_message, "role": self.role}
+        return {"input_message": self.input_message}
 
     @property
     def to_dict_exclude_params(self):
@@ -249,15 +240,11 @@ class Agent(Node):
             "tools": "{tool_description}",
             "files": "{file_description}",
             "instructions": "",
-            "output_format": "",
-            "relevant_information": "{relevant_memory}",
-            "context": "",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
             "file_description": self.file_description,
             "date": datetime.now().strftime("%d %B %Y"),
-            "relevant_memory": "",
         }
 
     def set_block(self, block_name: str, content: str):
@@ -282,12 +269,16 @@ class Agent(Node):
         Returns:
             dict: Processed metadata
         """
-        EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata"}
+        EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata", "files", "tool_params"}
 
         custom_metadata = input_data.get("metadata", {}).copy()
         custom_metadata.update({k: v for k, v in input_data.items() if k not in EXCLUDED_KEYS})
 
-        # Add user and session IDs if present
+        if "files" in custom_metadata:
+            del custom_metadata["files"]
+        if "tool_params" in custom_metadata:
+            del custom_metadata["tool_params"]
+
         user_id = input_data.get("user_id")
         session_id = input_data.get("session_id")
 
@@ -319,8 +310,19 @@ class Agent(Node):
         input_message = input_message.format_message(**dict(input_data))
 
         if self.memory:
+            history_messages = self._retrieve_memory(dict(input_data))
+            if len(history_messages) > 0:
+                history_messages.insert(
+                    0,
+                    Message(
+                        role=MessageRole.SYSTEM,
+                        content="Below is the previous conversation history. "
+                        "Use this context to inform your response.",
+                    ),
+                )
             self.memory.add(role=MessageRole.USER, content=input_message.content, metadata=custom_metadata)
-            self._retrieve_memory(dict(input_data))
+        else:
+            history_messages = None
 
         if self.role:
             self._prompt_blocks["context"] = Template(self.role).render(**dict(input_data))
@@ -337,7 +339,7 @@ class Agent(Node):
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
-        result = self._run_agent(input_message, config=config, **kwargs)
+        result = self._run_agent(input_message, history_messages, config=config, **kwargs)
 
         if self.memory:
             self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
@@ -374,25 +376,28 @@ class Agent(Node):
         user_filters = self._make_filters(user_id, session_id)
 
         if session_id:
-            all_session_messages_str = self.memory.get_search_results_as_string(query=None, filters=user_filters)
-            self._prompt_variables["conversation_history"] = all_session_messages_str
+            messages = self.memory.search(query=None, filters=user_filters)
 
         else:
             user_query = input_data.get("input", "")
 
             if self.memory_retrieval_strategy == MemoryRetrievalStrategy.RELEVANT:
-                relevant_memory = self.memory.get_search_results_as_string(query=user_query, filters=user_filters)
-                self._prompt_variables["relevant_memory"] = relevant_memory
+                messages = self.memory.search(query=user_query, filters=user_filters)
 
             elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.ALL:
-                all_messages = self.memory.get_all_messages_as_string()
-                self._prompt_variables["conversation_history"] = all_messages
+                messages = self.memory.get_all()
 
             elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.BOTH:
-                relevant_memory = self.memory.get_search_results_as_string(query=user_query, filters=user_filters)
-                all_messages = self.memory.get_all_messages_as_string()
-                self._prompt_variables["relevant_memory"] = relevant_memory
-                self._prompt_variables["conversation_history"] = all_messages
+                relevant_history_messages = self.memory.search(query=user_query, filters=user_filters)
+                messages_all = self.memory.get_all()
+                seen = set()
+                messages = []
+                for msg in relevant_history_messages + messages_all:
+                    if msg.content not in seen:
+                        messages.append(msg)
+                        seen.add(msg.content)
+
+        return messages
 
     def _run_llm(self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and handles streaming or full responses."""
@@ -478,13 +483,17 @@ class Agent(Node):
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
+        history_messages: list[Message] | None = None,
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> str:
         """Runs the agent with the generated prompt and handles exceptions."""
         formatted_prompt = self.generate_prompt()
         system_message = Message(role=MessageRole.SYSTEM, content=formatted_prompt)
-        self._prompt.messages = [system_message, input_message]
+        if history_messages:
+            self._prompt.messages = [system_message, *history_messages, input_message]
+        else:
+            self._prompt.messages = [system_message, input_message]
 
         try:
             llm_result = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
@@ -632,16 +641,21 @@ class Agent(Node):
         temp_variables = self._prompt_variables.copy()
         temp_variables.update(kwargs)
 
-        formated_prompt_blocks = {}
+        formatted_prompt_blocks = {}
         for block, content in self._prompt_blocks.items():
             if block_names is None or block in block_names:
 
                 formatted_content = content.format(**temp_variables)
                 if content:
-                    formated_prompt_blocks[block] = formatted_content
+                    formatted_prompt_blocks[block] = formatted_content
 
-        prompt = Template(self.AGENT_PROMPT_TEMPLATE).render(formated_prompt_blocks).strip()
+        prompt = Template(self.AGENT_PROMPT_TEMPLATE).render(formatted_prompt_blocks).strip()
+        prompt = self._clean_prompt(prompt)
         return textwrap.dedent(prompt)
+
+    def _clean_prompt(self, prompt_text):
+        cleaned = re.sub(r"\n{3,}", "\n\n", prompt_text)
+        return cleaned.strip()
 
 
 class AgentManagerInputSchema(BaseModel):

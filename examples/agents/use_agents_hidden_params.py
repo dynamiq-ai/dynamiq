@@ -66,9 +66,9 @@ def run_agent_with_tokens():
     input_data = {
         "input": "Get me a cat fact and a dog fact",
         "tool_params": {
-            "global_params": {"timeout": 30},
-            "by_name_params": {"CatFactApi": {"headers": {"Authorization": f"Bearer {cat_fact_token}"}}},
-            "by_id_params": {"dog-facts-api-789": {"headers": {"Authorization": f"Bearer {dog_fact_token}"}}},
+            "global": {"timeout": 30},
+            "by_name": {"CatFactApi": {"headers": {"Authorization": f"Bearer {cat_fact_token}"}}},
+            "by_id": {"dog-facts-api-789": {"headers": {"Authorization": f"Bearer {dog_fact_token}"}}},
         },
     }
 
