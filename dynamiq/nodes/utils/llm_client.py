@@ -2,8 +2,9 @@ import logging
 import time
 from typing import Any, Literal
 
-from dynamiq.callbacks import BaseCallbackHandler, TracingCallbackHandler
+from dynamiq.callbacks import DynamiqCallbackHandler
 from dynamiq.clients import BaseTracingClient
+from dynamiq.clients.dynamiq import DynamiqTracingClient
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
@@ -16,12 +17,13 @@ class TracingWrapper(Node):
     group: Literal[NodeGroup.UTILS] = NodeGroup.UTILS
     client: BaseTracingClient | None = None
 
-    def __init__(self, obj: Any, path: str = "openai", trace: bool = False, **kwargs):
+    def __init__(self, obj: Any, path: str = "openai", trace: bool = False, project_id: str | None = None, **kwargs):
         super().__init__(**kwargs)
         self._obj = obj
         self.name = path
         self._path = path
         self._trace = trace
+        self._project_id = project_id
 
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._obj, name, None)
@@ -32,24 +34,20 @@ class TracingWrapper(Node):
             return lambda *args, **kwargs: self.run(
                 {"method": attr, "method_path": f"{self._path}.{name}", "kwargs": kwargs},
                 config=(
-                    RunnableConfig(
-                        callbacks=[TracingCallbackHandler(client=self.client, source_id=self.client.project_id)]
-                    )
+                    RunnableConfig(callbacks=[DynamiqCallbackHandler(client=self.client, project_id=self._project_id)])
                     if self._trace is True
                     else None
                 ),
             ).output
 
-        return TracingWrapper(attr, f"{self._path}.{name}", self._trace, client=self.client)
+        return TracingWrapper(attr, f"{self._path}.{name}", self._trace, self._project_id, client=self.client)
 
     def __call__(self, *args, **kwargs):
         if callable(self._obj):
             return self.run(
                 {"method": self._obj, "path": self._path, "kwargs": kwargs},
                 config=(
-                    RunnableConfig(
-                        callbacks=[TracingCallbackHandler(client=self.client, source_id=self.client.project_id)]
-                    )
+                    RunnableConfig(callbacks=[DynamiqCallbackHandler(client=self.client, project_id=self._project_id)])
                     if self._trace is True
                     else None
                 ),
@@ -79,20 +77,6 @@ class TracingWrapper(Node):
             logger.error(f"Failed {method_path} in {duration:.2f}s with error: {str(e)}")
             raise
 
-    def run_on_node_end(
-        self,
-        callbacks: list[BaseCallbackHandler],
-        output_data: dict[str, Any],
-        **kwargs,
-    ) -> None:
-        for callback in callbacks + self.callbacks:
-            try:
-                callback.on_node_end(self.model_dump(), output_data, **kwargs)
-                if isinstance(callback, TracingCallbackHandler):
-                    callback.flush()
-            except Exception as e:
-                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
-
 
 class DynamiqClient:
 
@@ -102,18 +86,16 @@ class DynamiqClient:
         self.project_id = project_id
         self.client = None
         if self.trace:
-            self.client = BaseTracingClient(api_key=api_key, project_id=project_id)
+            self.client = DynamiqTracingClient(api_key=api_key)
 
     def __getattr__(self, name: str) -> Any:
         if name == "openai":
             import openai as openai_module
 
-            return TracingWrapper(openai_module, "openai", self.trace, client=self.client)
-
+            return TracingWrapper(openai_module, "openai", self.trace, self.project_id, client=self.client)
         elif name == "anthropic":
             import anthropic as anthropic_module
 
-            return TracingWrapper(anthropic_module, "anthropic", self.trace, client=self.client)
-
+            return TracingWrapper(anthropic_module, "anthropic", self.trace, self.project_id, client=self.client)
         else:
             raise AttributeError(f"Module {__name__} has no attribute {name}")

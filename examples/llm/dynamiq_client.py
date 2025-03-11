@@ -1,12 +1,14 @@
 import os
 
-from dynamiq.nodes.llms import DynamiqClient
+from dynamiq.nodes.utils import DynamiqClient
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+DYNAMIQ_PROJECT_ID = os.getenv("DYNAMIQ_PROJECT_ID")
+DYNAMIQ_API_KEY = os.getenv("DYNAMIQ_API_KEY")
 
 
 def run_llm_client_with_openai_with_tracing():
-    llm_client = DynamiqClient(trace=True)
+    llm_client = DynamiqClient(trace=True, project_id=DYNAMIQ_PROJECT_ID, api_key=DYNAMIQ_API_KEY)
 
     client = llm_client.openai
     response = client.chat.completions.create(

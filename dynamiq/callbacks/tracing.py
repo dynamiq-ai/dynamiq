@@ -327,6 +327,8 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             output_data, truncate_enabled=True
         )
         run.status = RunStatus.SUCCEEDED
+        if run.parent_run_id is None:
+            self.flush()
 
     def on_flow_error(
         self, serialized: dict[str, Any], error: BaseException, **kwargs: Any
@@ -378,6 +380,8 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         )
         run.status = RunStatus.SUCCEEDED
         run.metadata["is_output_from_cache"] = kwargs.get("is_output_from_cache", False)
+        if run.parent_run_id is None:
+            self.flush()
 
     def on_node_error(
         self, serialized: dict[str, Any], error: BaseException, **kwargs: Any
