@@ -122,14 +122,14 @@ class AgentInputSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_input_fields(self, context):
+        ctx_msg = "" if context.context.get("role", "") is None else context.context.get("role", "")
         messages = [
             context.context.get("input_message"),
-            Message(role=MessageRole.USER, content=context.context.get("role")),
+            Message(role=MessageRole.USER, content=ctx_msg),
         ]
         required_parameters = Prompt(messages=messages).get_required_parameters()
 
         parameters = self.model_dump()
-
         provided_parameters = set(parameters.keys())
 
         if not required_parameters.issubset(provided_parameters):
@@ -166,7 +166,7 @@ class Agent(Node):
     verbose: bool = Field(False, description="Whether to print verbose logs.")
 
     input_message: Message | VisionMessage = Message(role=MessageRole.USER, content="{{input}}")
-    role: str = None
+    role: str | None = ""
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
 
@@ -189,7 +189,7 @@ class Agent(Node):
 
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
-        return {"input_message": self.input_message}
+        return {"input_message": self.input_message, "role": self.role}
 
     @property
     def to_dict_exclude_params(self):

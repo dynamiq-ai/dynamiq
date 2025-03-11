@@ -15,6 +15,6 @@ if __name__ == "__main__":
         tools=[tool_search],
         inference_mode=InferenceMode.XML,
     )
-    result = agent.run(input_data={"input": "Who won USA elections 2024?"})
+    result = agent.run(input_data={"input": "Search for the best restaurants in New York"})
     output_content = result.output.get("content")
     print("Agent response:", output_content)
