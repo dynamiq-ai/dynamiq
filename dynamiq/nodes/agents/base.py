@@ -12,8 +12,9 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
+from dynamiq.nodes.agents.utils import create_message_from_input
 from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage
+from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
@@ -102,6 +103,10 @@ class ToolParams(BaseModel):
 
 
 class AgentInputSchema(BaseModel):
+    input: str = Field(default="", description="Text input for the agent.")
+    images: list[str | bytes | io.BytesIO] = Field(
+        default=None, description="Image inputs (URLs, bytes, or file objects)."
+    )
     files: list[io.BytesIO | bytes] = Field(default=None, description="Parameter to provide files to the agent.")
 
     user_id: str = Field(default=None, description="Parameter to provide user ID.")
@@ -159,6 +164,7 @@ class Agent(Node):
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
+    images: list[str | bytes | io.BytesIO] = None
     name: str = "Agent"
     max_loops: int = 1
     memory: Memory | None = Field(None, description="Memory node for the agent.")
@@ -198,6 +204,7 @@ class Agent(Node):
             "tools": True,
             "memory": True,
             "files": True,
+            "images": True,
         }
 
     def to_dict(self, **kwargs) -> dict:
@@ -208,6 +215,8 @@ class Agent(Node):
         data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
         if self.files:
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
+        if self.images:
+            data["images"] = [{"name": getattr(f, "name", f"image_{i}")} for i, f in enumerate(self.images)]
         return data
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
@@ -306,6 +315,8 @@ class Agent(Node):
 
         custom_metadata = self._prepare_metadata(dict(input_data))
 
+        input_message = create_message_from_input(dict(input_data))
+
         input_message = input_message or self.input_message
         input_message = input_message.format_message(**dict(input_data))
 
@@ -320,7 +331,14 @@ class Agent(Node):
                         "Use this context to inform your response.",
                     ),
                 )
-            self.memory.add(role=MessageRole.USER, content=input_message.content, metadata=custom_metadata)
+            if isinstance(input_message, Message):
+                memory_content = input_message.content
+            else:
+                text_parts = [
+                    content.text for content in input_message.content if isinstance(content, VisionMessageTextContent)
+                ]
+                memory_content = " ".join(text_parts) if text_parts else "Image input"
+            self.memory.add(role=MessageRole.USER, content=memory_content, metadata=custom_metadata)
         else:
             history_messages = None
 
