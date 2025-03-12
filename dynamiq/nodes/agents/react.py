@@ -474,10 +474,12 @@ class ReActAgent(Agent):
                 )
                 action, action_input = None, None
                 llm_generated_output = ""
-                logger.info(
-                    f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, "
-                    f"reasoning:\n{llm_result.output.get('content')[:200]}..."
+                llm_reasoning = (
+                    llm_result.output.get("content")[:200]
+                    if llm_result.output.get("content")
+                    else str(llm_result.output.get("tool_calls", ""))[:200]
                 )
+                logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, " f"reasoning:\n{llm_reasoning}...")
 
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
