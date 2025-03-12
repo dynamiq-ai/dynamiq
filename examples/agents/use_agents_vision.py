@@ -5,7 +5,6 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Exa
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.agents.reflection import ReflectionAgent
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
@@ -16,58 +15,9 @@ IMAGE_URL = "https://media.istockphoto.com/id/1183183783/pl/zdj%C4%99cie/kobieta
 IMAGE_FILE = "img.jpeg"
 
 
-def run_text_only_workflow():
-    """Example workflow with text-only input"""
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=1)
-    agent = ReActAgent(
-        name="TextAgent",
-        id="text_agent",
-        llm=llm,
-        inference_mode=InferenceMode.XML,
-    )
-
-    tracing = TracingCallbackHandler()
-    wf = Workflow(flow=Flow(nodes=[agent]))
-
-    result = wf.run(
-        input_data={"input": "What is the capital of France?"},
-        config=RunnableConfig(callbacks=[tracing]),
-    )
-
-    # Extract and print the result
-    agent_output = result.output[agent.id]["output"]["content"]
-    print("Text-only workflow response:", agent_output)
-
-    return agent_output, tracing.runs
-
-
-def run_image_url_workflow():
-    """Example workflow with image URL input"""
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=1)
-    agent = ReActAgent(
-        name="ImageURLAgent",
-        id="image_url_agent",
-        llm=llm,
-        inference_mode=InferenceMode.XML,
-    )
-
-    tracing = TracingCallbackHandler()
-    wf = Workflow(flow=Flow(nodes=[agent]))
-
-    result = wf.run(
-        input_data={"input": "What can you tell me about this artwork?", "images": [IMAGE_URL]},
-        config=RunnableConfig(callbacks=[tracing]),
-    )
-
-    agent_output = result.output[agent.id]["output"]["content"]
-    print("Image URL workflow response:", agent_output)
-
-    return agent_output, tracing.runs
-
-
 def run_simple_agent_image_workflow():
     """Example workflow with image URL using SimpleAgent"""
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=1)
+    llm = setup_llm(model_provider="gemini", model_name="gemini-2.0-flash", temperature=1)
     agent = SimpleAgent(
         name="SimpleImageAgent",
         id="simple_image_agent",
@@ -84,29 +34,6 @@ def run_simple_agent_image_workflow():
 
     agent_output = result.output[agent.id]["output"]["content"]
     print("SimpleAgent image workflow response:", agent_output)
-
-    return agent_output, tracing.runs
-
-
-def run_reflection_agent_image_workflow():
-    """Example workflow with image URL using ReflectionAgent"""
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=1)
-    agent = ReflectionAgent(
-        name="ReflectionImageAgent",
-        id="reflection_image_agent",
-        llm=llm,
-    )
-
-    tracing = TracingCallbackHandler()
-    wf = Workflow(flow=Flow(nodes=[agent]))
-
-    result = wf.run(
-        input_data={"input": "What can you tell me about this artwork?", "images": [IMAGE_URL]},
-        config=RunnableConfig(callbacks=[tracing]),
-    )
-
-    agent_output = result.output[agent.id]["output"]["content"]
-    print("ReflectionAgent image workflow response:", agent_output)
 
     return agent_output, tracing.runs
 
@@ -226,10 +153,7 @@ def run_files_with_images_workflow():
 
 
 if __name__ == "__main__":
-    run_text_only_workflow()
-    run_image_url_workflow()
     run_simple_agent_image_workflow()
-    run_reflection_agent_image_workflow()
     run_image_bytes_workflow()
     run_multiple_images_workflow()
     run_tools_with_image_workflow()

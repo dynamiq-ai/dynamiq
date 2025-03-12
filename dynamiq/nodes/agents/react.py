@@ -319,6 +319,22 @@ class ReActAgent(Agent):
         action = self.parse_xml_content(output_content, "action")
         action_input_text = self.parse_xml_content(output_content, "action_input")
 
+        if not thought or not action or not action_input_text:
+            missing = []
+            if not thought:
+                missing.append("thought")
+            if not action:
+                missing.append("action")
+            if not action_input_text:
+                missing.append("action_input")
+
+            error_message = (
+                f"Error: Missing required XML tags: {', '.join(missing)}. "
+                "Your response must include complete <output>, <thought>, <action>, "
+                "and <action_input> tags."
+            )
+            raise ActionParsingException(error_message, recoverable=True)
+
         try:
             action_input = json.loads(action_input_text)
         except json.JSONDecodeError as e:
