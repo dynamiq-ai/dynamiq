@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, Callable, ClassVar
 
 from jinja2 import Template
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
@@ -115,7 +115,7 @@ class AgentInputSchema(BaseModel):
 
     model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
 
-    tool_params: ToolParams = Field(
+    tool_params: ToolParams | None = Field(
         default_factory=ToolParams,
         description=(
             "Structured parameters for tools. Use 'global_params' for all tools, "
@@ -124,6 +124,13 @@ class AgentInputSchema(BaseModel):
         ),
         is_accessible_to_agent=False,
     )
+
+    @field_validator("tool_params", mode="before")
+    @classmethod
+    def handle_empty_tool_params(cls, v):
+        if v == "" or v is None:
+            return ToolParams()
+        return v
 
     @model_validator(mode="after")
     def validate_input_fields(self, context):
