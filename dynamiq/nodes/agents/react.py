@@ -454,11 +454,12 @@ class ReActAgent(Agent):
         else:
             self._prompt.messages = [system_message, input_message]
 
-        stop_sequences = ["Observation: ", "\nObservation:"]
+        stop_sequences = []
+        if self.inference_mode in [InferenceMode.XML, InferenceMode.DEFAULT]:
+            stop_sequences.extend(["Observation: ", "\nObservation:"])
         self.llm.stop = stop_sequences
 
         for loop_num in range(self.max_loops):
-
             try:
                 llm_result = self._run_llm(
                     self._prompt.messages,
