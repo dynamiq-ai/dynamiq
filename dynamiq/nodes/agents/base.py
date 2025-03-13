@@ -475,6 +475,8 @@ class Agent(Node):
 
     def stream_by_tokens(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
         """Streams the input content to the callbacks."""
+        if isinstance(content, dict):
+            return self.stream_response(content, source, step, config, **kwargs)
         tokens = content.split(" ")
         final_response = []
         for token in tokens:
