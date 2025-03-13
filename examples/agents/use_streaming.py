@@ -16,7 +16,7 @@ def run_agent(event: str = "data") -> str:
     """
     Runs the Agent node with streaming enabled.
     """
-    llm = setup_llm(model_provider="gpt", model_name="gpt-3.5-turbo-1106")
+    llm = setup_llm(model_provider="gpt", model_name="gpt-4o")
 
     e2b_tool = E2BInterpreterTool(
         name="e2b-tool",

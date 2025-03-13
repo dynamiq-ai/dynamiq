@@ -287,7 +287,7 @@ class ReActAgent(Agent):
         """
         logger.info(
             "\n------------------------------------------\n"
-            f"Agent {self.name}: Loop {loop_num }\n"
+            f"Agent {self.name}: Loop {loop_num}\n"
             f"Final answer: {final_output}"
             "\n------------------------------------------\n"
         )
