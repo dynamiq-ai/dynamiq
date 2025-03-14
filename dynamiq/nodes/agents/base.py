@@ -174,8 +174,8 @@ class Agent(Node):
     images: list[str | bytes | io.BytesIO] = None
     name: str = "Agent"
     max_loops: int = 1
-    max_tool_output_length: int = TOOL_MAX_TOKENS
-    truncate_tool_output_enabled: bool = True
+    tool_output_max_length: int = TOOL_MAX_TOKENS
+    tool_output_truncate_enabled: bool = True
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.BOTH
     verbose: bool = Field(False, description="Whether to print verbose logs.")
@@ -626,8 +626,8 @@ class Agent(Node):
         tool_result_content = tool_result.output.get("content")
         tool_result_content_processed = process_tool_output_for_agent(
             content=tool_result_content,
-            max_length=self.max_tool_output_length,
-            truncate=self.truncate_tool_output_enabled,
+            max_tokens=self.tool_output_max_length,
+            truncate=self.tool_output_truncate_enabled,
         )
         return tool_result_content_processed
 
