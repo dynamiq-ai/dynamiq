@@ -30,11 +30,14 @@ class DynamiqTracingClient(BaseTracingClient):
             runs (list["Run"]): List of runs to trace.
         """
         try:
-            requests.post(
+            response = requests.post(
                 urljoin(self.base_url, "/v1/tracing/traces"),
                 headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
                 data=json.dumps({"runs": [run.to_dict() for run in runs]}, cls=JsonWorkflowEncoder),
                 timeout=60,
             )
+            if response.status_code not in [200, 201, 202]:
+                logger.error(f"Failed to send traces. Error details: {response.json()}")
+
         except Exception as e:
             logger.error(f"Failed to send traces. Error {e}")

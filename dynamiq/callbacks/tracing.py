@@ -327,6 +327,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             output_data, truncate_enabled=True
         )
         run.status = RunStatus.SUCCEEDED
+        # If parent_run_id is None, the run is the highest in the execution tree
         if run.parent_run_id is None:
             self.flush()
 
@@ -380,6 +381,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         )
         run.status = RunStatus.SUCCEEDED
         run.metadata["is_output_from_cache"] = kwargs.get("is_output_from_cache", False)
+        # If parent_run_id is None, the run is the highest in the execution tree
         if run.parent_run_id is None:
             self.flush()
 
@@ -551,7 +553,7 @@ def ensure_execution_run(execution_run_id: UUID, executions: list[ExecutionRun])
     raise ValueError(f"execution run {execution_run_id} not found")
 
 
-class DynamiqCallbackHandler(TracingCallbackHandler):
+class DynamiqTracingCallbackHandler(TracingCallbackHandler):
     client: DynamiqTracingClient | None = None
 
     def __init__(self, project_id: str, api_key: str | None = None, **kwargs):
