@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 
 import filetype
 
@@ -152,3 +153,39 @@ def bytes_to_data_url(image_bytes: bytes) -> str:
     except Exception as e:
         logger.error(f"Error converting image to data URL: {str(e)}")
         raise ValueError(f"Failed to convert image to data URL: {str(e)}")
+
+
+def process_tool_output_for_agent(content, max_length=64000, truncate=True):
+    """
+    Process tool output.
+
+    Args:
+        content: The content from tool execution
+        max_length: Maximum allowed length for the content
+        truncate: Whether to truncate the content if it exceeds max_length
+
+    Returns:
+        Processed string content suitable for agent consumption
+    """
+    if not isinstance(content, str):
+        if isinstance(content, dict):
+            if "content" in content:
+                inner_content = content["content"]
+                if isinstance(inner_content, str):
+                    content = inner_content
+                else:
+                    content = json.dumps(inner_content, indent=2)
+            else:
+                content = json.dumps(content, indent=2)
+        elif isinstance(content, (list, tuple)):
+            content = "\n".join(str(item) for item in content)
+        else:
+            content = str(content)
+
+    max_len_in_char = max_length * 4
+    if len(content) > max_len_in_char and truncate:
+        half_length = (max_len_in_char - 100) // 2
+        truncation_message = "\n...[Content truncated]...\n"
+        content = content[:half_length] + truncation_message + content[-half_length:]
+
+    return content
