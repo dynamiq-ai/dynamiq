@@ -53,7 +53,10 @@ class Memory(BaseModel):
         try:
             metadata = metadata or {}
             metadata["timestamp"] = datetime.utcnow().timestamp()
-            message = Message(role=role, content=content, metadata=metadata)
+            sanitized_metadata = {}
+            for key, value in metadata.items():
+                sanitized_metadata[key] = "" if value is None else value
+            message = Message(role=role, content=content, metadata=sanitized_metadata)
             self.backend.add(message)
             logger.debug(
                 f"Memory {self.backend.name}: "
@@ -66,8 +69,9 @@ class Memory(BaseModel):
     def get_all(self) -> list[Message]:
         """Retrieves all messages from the memory."""
         messages = self.backend.get_all()
-        logger.debug(f"Memory {self.backend.name}: Retrieved {len(messages)} messages")
-        return messages
+        sorted_messages = sorted(messages, key=lambda msg: msg.metadata.get("timestamp", 0))
+        logger.debug(f"Memory {self.backend.name}: Retrieved {len(sorted_messages)} messages")
+        return sorted_messages
 
     def get_all_messages_as_string(self, format_type: FormatType = FormatType.PLAIN) -> str:
         """Retrieves all messages as a formatted string."""
@@ -79,11 +83,13 @@ class Memory(BaseModel):
         search_results = self.backend.search(
             query=query, limit=self.search_limit, filters=filters or self.search_filters
         )
+        sorted_results = sorted(search_results, key=lambda msg: msg.metadata.get("timestamp", 0))
+
         logger.debug(
-            f"Memory {self.backend.name}: Found {len(search_results)} search results for query: {query}, "
+            f"Memory {self.backend.name}: Found {len(sorted_results)} search results for query: {query}, "
             f"filters: {filters}"
         )
-        return search_results
+        return sorted_results
 
     def get_search_results_as_string(
         self, query: str, filters: dict | None = None, format_type: FormatType = FormatType.PLAIN
