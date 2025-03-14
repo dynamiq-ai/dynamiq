@@ -11,7 +11,7 @@ from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-from examples.tools.file_reader import FileReaderTool
+from examples.components.tools.custom_tools.file_reader import FileReaderTool
 
 # Load environment variables
 AGENT_RESEARCHER_ROLE = (
