@@ -46,7 +46,7 @@ nodes:
         description: Gets a random dog fact from CatFact API for demo - ok
     role: is to help users retrieve interesting animal facts
     max_tool_output_length: 64000
-    truncate_tool_output: true
+    truncate_tool_output_enabled: true
 
 flows:
   animal-facts-flow:
