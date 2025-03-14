@@ -21,7 +21,7 @@ app = typer.Typer()
 @app.command()
 def main(
     question: str = "How to build an advanced RAG pipeline?",
-    dag_yaml_file_path: str = "examples/rag/dag_pinecone.yaml",
+    dag_yaml_file_path: str = "examples/components/rag/vector_stores/dag/dag_pinecone.yaml",
 ):
     with get_connection_manager() as cm:
         wf_data = WorkflowYAMLLoader.load(
