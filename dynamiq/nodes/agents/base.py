@@ -12,7 +12,7 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
-from dynamiq.nodes.agents.utils import create_message_from_input
+from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_input, process_tool_output_for_agent
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -174,6 +174,8 @@ class Agent(Node):
     images: list[str | bytes | io.BytesIO] = None
     name: str = "Agent"
     max_loops: int = 1
+    tool_output_max_length: int = TOOL_MAX_TOKENS
+    tool_output_truncate_enabled: bool = True
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.BOTH
     verbose: bool = Field(False, description="Whether to print verbose logs.")
@@ -618,7 +620,13 @@ class Agent(Node):
                 raise ToolExecutionException({error_message})
             else:
                 raise ValueError({error_message})
-        return tool_result.output["content"]
+        tool_result_content = tool_result.output.get("content")
+        tool_result_content_processed = process_tool_output_for_agent(
+            content=tool_result_content,
+            max_tokens=self.tool_output_max_length,
+            truncate=self.tool_output_truncate_enabled,
+        )
+        return tool_result_content_processed
 
     @property
     def tool_description(self) -> str:
