@@ -285,13 +285,14 @@ class Agent(Node):
         Returns:
             dict: Processed metadata
         """
-        EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata", "files", "tool_params"}
-
+        EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata", "files", "images", "tool_params"}
         custom_metadata = input_data.get("metadata", {}).copy()
         custom_metadata.update({k: v for k, v in input_data.items() if k not in EXCLUDED_KEYS})
 
         if "files" in custom_metadata:
             del custom_metadata["files"]
+        if "images" in custom_metadata:
+            del custom_metadata["images"]
         if "tool_params" in custom_metadata:
             del custom_metadata["tool_params"]
 
@@ -474,6 +475,8 @@ class Agent(Node):
 
     def stream_by_tokens(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
         """Streams the input content to the callbacks."""
+        if isinstance(content, dict):
+            return self.stream_response(content, source, step, config, **kwargs)
         tokens = content.split(" ")
         final_response = []
         for token in tokens:
