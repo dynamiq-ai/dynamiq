@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+from typing import Any
 
 import filetype
 
@@ -13,6 +14,8 @@ from dynamiq.prompts import (
     VisionMessageTextContent,
 )
 from dynamiq.utils.logger import logger
+
+TOOL_MAX_TOKENS = 64000
 
 
 def create_message_from_input(input_data: dict) -> Message | VisionMessage:
@@ -155,26 +158,29 @@ def bytes_to_data_url(image_bytes: bytes) -> str:
         raise ValueError(f"Failed to convert image to data URL: {str(e)}")
 
 
-def process_tool_output_for_agent(content, max_length=64000, truncate=True):
+def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKENS, truncate: bool = True) -> str:
     """
-    Process tool output.
+    Process tool output for agent consumption.
+
+    This function converts various types of tool outputs into a string representation.
+    It handles dictionaries (with or without a 'content' key), lists, tuples, and other
+    types by converting them to a string. If the resulting string exceeds the maximum
+    allowed length (calculated from max_tokens), it is truncated.
 
     Args:
-        content: The content from tool execution
-        max_length: Maximum allowed length for the content
-        truncate: Whether to truncate the content if it exceeds max_length
+        content: The output from tool execution, which can be of various types.
+        max_tokens: Maximum allowed token count for the content. The effective character
+            limit is computed as max_tokens * 4 (assuming ~4 characters per token).
+        truncate: Whether to truncate the content if it exceeds the maximum length.
 
     Returns:
-        Processed string content suitable for agent consumption
+        A processed string suitable for agent consumption.
     """
     if not isinstance(content, str):
         if isinstance(content, dict):
             if "content" in content:
                 inner_content = content["content"]
-                if isinstance(inner_content, str):
-                    content = inner_content
-                else:
-                    content = json.dumps(inner_content, indent=2)
+                content = inner_content if isinstance(inner_content, str) else json.dumps(inner_content, indent=2)
             else:
                 content = json.dumps(content, indent=2)
         elif isinstance(content, (list, tuple)):
@@ -182,10 +188,11 @@ def process_tool_output_for_agent(content, max_length=64000, truncate=True):
         else:
             content = str(content)
 
-    max_len_in_char = max_length * 4
+    max_len_in_char: int = max_tokens * 4  # This assumes an average of 4 characters per token.
+
     if len(content) > max_len_in_char and truncate:
-        half_length = (max_len_in_char - 100) // 2
-        truncation_message = "\n...[Content truncated]...\n"
+        half_length: int = (max_len_in_char - 100) // 2
+        truncation_message: str = "\n...[Content truncated]...\n"
         content = content[:half_length] + truncation_message + content[-half_length:]
 
     return content

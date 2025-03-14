@@ -12,7 +12,7 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
-from dynamiq.nodes.agents.utils import create_message_from_input, process_tool_output_for_agent
+from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_input, process_tool_output_for_agent
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -174,7 +174,7 @@ class Agent(Node):
     images: list[str | bytes | io.BytesIO] = None
     name: str = "Agent"
     max_loops: int = 1
-    max_tool_output_length: int = 64000
+    max_tool_output_length: int = TOOL_MAX_TOKENS
     truncate_tool_output_enabled: bool = True
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.BOTH
