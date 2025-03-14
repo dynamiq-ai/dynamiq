@@ -33,9 +33,7 @@ def load_environment_variables():
     load_dotenv()
 
 
-async def run_wf_async(
-    wf: Workflow, wf_data: dict, streaming: AsyncStreamingIteratorCallbackHandler
-) -> None:
+async def run_wf_async(wf: Workflow, wf_data: dict, streaming: AsyncStreamingIteratorCallbackHandler) -> None:
     wf_run = partial(
         wf.run,
         input_data=wf_data,
@@ -98,9 +96,7 @@ async def main(message: cl.Message):
     async with cl.Step(name="React Agent processing") as step:
         step.input = input_msg
 
-        await asyncio.create_task(
-            run_wf_async(agent_wf, {"input": input_msg}, streaming)
-        )
+        await asyncio.create_task(run_wf_async(agent_wf, {"input": input_msg}, streaming))
         await asyncio.sleep(0.01)
 
         idx = 1

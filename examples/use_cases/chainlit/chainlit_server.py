@@ -11,9 +11,7 @@ from dynamiq.nodes import llms
 from dynamiq.types.streaming import StreamingConfig
 
 
-async def run_wf_async(
-    wf: Workflow, wf_data: dict, streaming: AsyncStreamingIteratorCallbackHandler
-) -> None:
+async def run_wf_async(wf: Workflow, wf_data: dict, streaming: AsyncStreamingIteratorCallbackHandler) -> None:
     wf_run = partial(
         wf.run,
         input_data=wf_data,
@@ -61,9 +59,7 @@ async def main(message: cl.Message):
     streaming = AsyncStreamingIteratorCallbackHandler()
 
     # Run in async mode to avoid blocking the main thread
-    await asyncio.create_task(
-        run_wf_async(wf, {"prompt_content": message.content}, streaming)
-    )
+    await asyncio.create_task(run_wf_async(wf, {"prompt_content": message.content}, streaming))
     await asyncio.sleep(0.01)
 
     async for event in streaming:
