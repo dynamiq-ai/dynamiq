@@ -10,7 +10,7 @@ from dynamiq.nodes.embedders import MistralDocumentEmbedder
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 
 # Please use your own pdf file path
-PYPDF_FILE_PATH = "introduction-to-llm.pdf"
+PYPDF_FILE_PATH = "../../data/file.pdf"
 
 
 def main():

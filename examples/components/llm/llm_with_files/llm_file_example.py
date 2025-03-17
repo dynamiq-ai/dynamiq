@@ -6,7 +6,8 @@ from examples.llm_setup import setup_llm
 
 llm = setup_llm()
 
-file_path = "image_file_path"
+file_path = "../../data/img.jpeg"
+
 
 if __name__ == "__main__":
 

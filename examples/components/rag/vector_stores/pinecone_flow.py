@@ -74,7 +74,7 @@ def create_indexing_flow(index_name="default"):
 
 @app.command()
 def indexing_flow(
-    folder_path: str = os.path.join(os.path.dirname(ROOT_PATH), "examples/data/"), index_name: str = "default"
+    folder_path: str = os.path.join(os.path.dirname(ROOT_PATH), "examples/components/data"), index_name: str = "default"
 ):
 
     indexing_flow = create_indexing_flow(index_name=index_name)
@@ -185,7 +185,7 @@ def retrieval_flow(
 
 @app.command()
 def main(
-    folder_path=os.path.join(os.path.dirname(ROOT_PATH), "examples/data/"),
+    folder_path=os.path.join(os.path.dirname(ROOT_PATH), "examples/components/data"),
     question="How to build an advanced RAG pipeline?",
 ):
     indexing_flow(folder_path)

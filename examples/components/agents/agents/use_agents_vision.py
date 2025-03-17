@@ -12,7 +12,7 @@ from dynamiq.runnables import RunnableConfig
 from examples.llm_setup import setup_llm
 
 IMAGE_URL = "https://media.istockphoto.com/id/1183183783/pl/zdj%C4%99cie/kobieta-artystka-pracuje-nad-abstrakcyjnym-malarstwem-olejnym-poruszaj%C4%85cym-p%C4%99dzlem.jpg?s=1024x1024&w=is&k=20&c=MG-drev2xDnvOFjl0tl5Zx2kL5LBW1bLTZYESx3qJFc="  # noqa E501
-IMAGE_FILE = "./data/img.jpeg"
+IMAGE_FILE = "../../data/img.jpeg"
 
 
 def run_simple_agent_image_workflow():

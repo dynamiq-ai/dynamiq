@@ -1,9 +1,7 @@
 import logging
-import os
-import uuid
 
 from dynamiq import Workflow, runnables
-from dynamiq.connections import connections
+from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import Flow
 from dynamiq.nodes.llms import OpenAI
@@ -15,19 +13,12 @@ from dynamiq.prompts import prompts
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
 CM = ConnectionManager()
-
-OPENAI_CONNECTION = connections.OpenAI(
-    id=str(uuid.uuid4()),
-    api_key=OPENAI_API_KEY,
-)
 
 OPENAI_NODE = OpenAI(
     name="OpenAI",
     model="gpt-3.5-turbo",
-    connection=OPENAI_CONNECTION,
+    connection=OpenAIConnection(),
     prompt=prompts.Prompt(
         messages=[
             prompts.Message(

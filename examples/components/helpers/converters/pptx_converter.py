@@ -23,7 +23,7 @@ load_dotenv(find_dotenv())
 
 
 # Please use your own pptx file path
-PPTX_FILE_PATH = "introduction-to-llm.pptx"
+PPTX_FILE_PATH = "../../data/file.pptx"
 
 
 def pptx_converter(pptx_file: BytesIO):

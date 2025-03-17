@@ -1,10 +1,9 @@
 from io import BytesIO
 
 from dynamiq.nodes import llms
-from dynamiq.nodes.converters.llm_text_extractor import LLMPDFConverter
+from dynamiq.nodes.converters.llm_text_extractor import LLMPDFConverter, LLMPDFConverterInputSchema
 
-# Please use your own file path
-PDF_FILE_PATH = "layout-parser-paper.pdf"
+PDF_FILE_PATH = "../../data/file.pdf"
 
 
 def main():
@@ -29,12 +28,7 @@ def main():
             files.append(bytes_io)
 
     # Execute the extractor
-    output = converter.execute(
-        input_data={
-            "file_paths": file_paths,
-            "files": files,
-        }
-    )
+    output = converter.execute(input_data=LLMPDFConverterInputSchema(file_paths=file_paths, files=files))
 
     # Print the output
     print(output)

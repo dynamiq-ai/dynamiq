@@ -10,7 +10,7 @@ from dynamiq.nodes.embedders import MistralDocumentEmbedder
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 
 # Please use your own HTML file path
-HTML_FILE_PATH = "example.html"
+HTML_FILE_PATH = "../../data/sample.html"
 
 
 def main():

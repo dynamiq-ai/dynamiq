@@ -14,8 +14,8 @@ from dynamiq.prompts import (
     VisionMessageTextContent,
 )
 
-# Please use your own file path
-PDF_FILE_PATH = "layout-parser-paper.pdf"
+
+PDF_FILE_PATH = "../../data/file.pdf"
 
 
 def convert_image_to_url(image: Image) -> str:

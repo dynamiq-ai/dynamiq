@@ -15,7 +15,7 @@ from dynamiq.utils.logger import logger
 
 connection_manager = ConnectionManager()
 
-REGRESSION_DATA_PATH = ".data/sample_regression_data.csv"
+REGRESSION_DATA_PATH = "../../data/sample_regression_data.csv"
 
 
 def create_embedder_node(source_node) -> OpenAIDocumentEmbedder:
@@ -47,7 +47,7 @@ def process_csv_with_embeddings(
     """
     local_tracer = TracingCallbackHandler()
 
-    csv_node = CSVConverter()
+    csv_node = CSVConverter(content_column=content_column)
     embedder_node = create_embedder_node(csv_node)
 
     workflow = Workflow(

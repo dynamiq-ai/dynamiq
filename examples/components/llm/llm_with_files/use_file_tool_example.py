@@ -13,7 +13,7 @@ from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
 
 INPUT_PROMPT = "Calculate the mean values for all columns in the CSV"
-FILE_PATH = ".data/sample_regression_data.csv"
+FILE_PATH = "../../data/sample_regression_data.csv"
 
 
 def read_file_as_bytesio(file_path: str, filename: str = None, description: str = None) -> io.BytesIO:
@@ -83,24 +83,26 @@ def run_workflow(
         return "", {}
 
 
-csv_bytes_io = read_file_as_bytesio(
-    FILE_PATH, filename="custom_regression_data.csv", description="Custom CSV file with regression data"
-)
+if __name__ == "__main__":
+    csv_bytes_io = read_file_as_bytesio(
+        FILE_PATH, filename="custom_regression_data.csv", description="Custom CSV file with regression data"
+    )
 
-python_tool = E2BInterpreterTool(connection=E2B())
+    python_tool = E2BInterpreterTool(connection=E2B())
 
-llm = setup_llm()
+    llm = setup_llm()
 
-agent = ReActAgent(
-    name="Agent",
-    id="Agent",
-    llm=llm,
-    tools=[python_tool],
-)
+    agent = ReActAgent(
+        name="Agent",
+        id="Agent",
+        llm=llm,
+        tools=[python_tool],
+    )
 
-output, traces = run_workflow(
-    agent=agent,
-    input_prompt=INPUT_PROMPT,
-    input_files=[csv_bytes_io],
-)
-print("Agent Output:", output)
+    output, traces = run_workflow(
+        agent=agent,
+        input_prompt=INPUT_PROMPT,
+        input_files=[csv_bytes_io],
+    )
+
+    print("Agent Output:", output)

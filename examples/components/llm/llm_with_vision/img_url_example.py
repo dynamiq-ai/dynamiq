@@ -113,7 +113,7 @@ def main():
     run_gemini(prompt)
 
     # Please use your own pptx file path
-    image_file_path = "path_to_your_image.jpg"
+    image_file_path = "../../data/img.jpeg"
     run_openai_img_local(prompt, image_file_path)
 
 
