@@ -1,53 +1,69 @@
+from dynamiq import Workflow
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
-from dynamiq.connections import E2B
+from dynamiq.flows import Flow
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
+from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
-from examples.llm_setup import setup_llm
-
-# Constants
-AGENT_ROLE = "Helpful assistant with the goal of providing useful information and answering questions."
-INPUT_QUESTION = "Add the first 10 numbers and determine if the result is a prime number."
 
 
-def run_agent(event: str = "data") -> str:
+def run_workflow_with_streaming():
     """
-    Runs the Agent node with streaming enabled.
-    """
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o")
+    Execute a workflow with two different agents and different streaming configurations:
+    1. A ReActAgent that streams all content (reasoning, tool usage, and answers)
+    2. A SimpleAgent that only streams the final answer
 
-    e2b_tool = E2BInterpreterTool(
-        name="e2b-tool",
-        connection=E2B(),
-        id="e2b_tool",
+    Shows how to use:
+    - Different streaming event channels
+    - Different streaming modes
+    - Token-based vs chunk-based streaming
+    - Event filtering in the streaming handler
+    """
+    # Set up LLM
+    llm = OpenAI(
+        model="gpt-4o",
+        temperature=0.7,
     )
-    agent = ReActAgent(
-        name="React Agent",
-        id="agent",
+
+    # Set up ReActAgent with full streaming (reasoning, tools, answers)
+    react_agent = ReActAgent(
+        name="Research Assistant",
+        id="research_agent",
         llm=llm,
-        tools=[e2b_tool],
-        streaming=StreamingConfig(enabled=True, event=event, mode=StreamingMode.ALL, by_tokens=True),
+        tools=[],
+        role="Research assistant that provides detailed analysis with step-by-step reasoning.",
+        streaming=StreamingConfig(
+            enabled=True,
+            event="research_stream",  # Custom event channel name
+            mode=StreamingMode.FINAL,
+            by_tokens=True,  # Stream complete chunks rather than token-by-token
+        ),
+        max_loops=5,
         inference_mode=InferenceMode.DEFAULT,
     )
 
+    # Set up streaming callback handler
     streaming_handler = StreamingIteratorCallbackHandler()
 
-    response = agent.run(input_data={"input": INPUT_QUESTION}, config=RunnableConfig(callbacks=[streaming_handler]))
-    print("Response:", response)
+    # Create workflow with both agents
+    wf = Workflow(flow=Flow(nodes=[react_agent]))
 
-    print("Streaming Output:")
-    full_content = ""
+    # Run workflow
+    result = wf.run(
+        input_data={
+            "input": "Hey",
+        },
+        config=RunnableConfig(callbacks=[streaming_handler]),
+    )
+
+    print("\n=== STREAMING OUTPUT ===\n")
+
     for chunk in streaming_handler:
-        chunk_data = chunk.data
-        content = chunk_data.get("choices", [{}])[0].get("delta", {}).get("content")
-        if content:
-            full_content += str(content)
-            print(content, end=" ")
-    return full_content
+        print(chunk)
+
+    print(result)
 
 
-output = run_agent(event="event")
-
-print("Streamed Output:", output)
+if __name__ == "__main__":
+    run_workflow_with_streaming()

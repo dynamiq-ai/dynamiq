@@ -89,7 +89,10 @@ def generate_agent_response(orchestrator: AdaptiveOrchestrator, user_input: str)
     """
     if orchestrator.streaming.enabled:
         streaming_handler = StreamingIteratorCallbackHandler()
-        orchestrator.run(input_data={"input": user_input}, config=RunnableConfig(callbacks=[streaming_handler]))
+        orchestrator.run(
+            input_data={"input": user_input, "user_id": "1", "session_id": "1"},
+            config=RunnableConfig(callbacks=[streaming_handler]),
+        )
 
         response_text = ""
 

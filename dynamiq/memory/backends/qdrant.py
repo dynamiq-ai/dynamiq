@@ -27,6 +27,7 @@ class Qdrant(MemoryBackend):
     connection: QdrantConnection
     embedder: DocumentEmbedder
     index_name: str = Field(default="conversations")
+    dimension: int = Field(default=1536)
     metric: str = Field(default="cosine")
     on_disk: bool = Field(default=False)
     create_if_not_exist: bool = Field(default=True)
@@ -52,6 +53,7 @@ class Qdrant(MemoryBackend):
             self.vector_store = QdrantVectorStore(
                 connection=self.connection,
                 index_name=self.index_name,
+                dimension=self.dimension,
                 metric=self.metric,
                 on_disk=self.on_disk,
                 create_if_not_exist=self.create_if_not_exist,
@@ -101,9 +103,18 @@ class Qdrant(MemoryBackend):
         except Exception as e:
             raise QdrantError(f"Failed to retrieve messages from Qdrant: {e}") from e
 
-    def search(self, query: str | None = None, limit: int = 10, filters: dict | None = None) -> list[Message]:
+    def search(self, query: str | None = None, limit: int = 1000, filters: dict | None = None) -> list[Message]:
         """Searches for messages in Qdrant."""
         try:
+            try:
+                if not self._collection_exists():
+                    if self.create_if_not_exist:
+                        self._create_connection()
+                    else:
+                        return []
+            except Exception:
+                return []
+
             qdrant_filters = self._prepare_filters(filters)
             if query:
                 embedding_result = (
@@ -164,3 +175,15 @@ class Qdrant(MemoryBackend):
             self.vector_store.delete_documents(delete_all=True)
         except Exception as e:
             raise QdrantError(f"Failed to clear Qdrant collection: {e}") from e
+
+    def _collection_exists(self) -> bool:
+        """Check if the collection exists in Qdrant."""
+        collections = self._client.get_collections()
+        return any(collection.name == self.index_name for collection in collections.collections)
+
+    def _create_collection(self) -> None:
+        """Create the collection in Qdrant."""
+        self._client.create_collection(
+            collection_name=self.index_name,
+            vectors_config={"default": {"size": self.dimension, "distance": self.metric}},
+        )

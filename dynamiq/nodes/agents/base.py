@@ -177,7 +177,8 @@ class Agent(Node):
     tool_output_max_length: int = TOOL_MAX_TOKENS
     tool_output_truncate_enabled: bool = True
     memory: Memory | None = Field(None, description="Memory node for the agent.")
-    memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.BOTH
+    memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
+    memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
 
     input_message: Message | VisionMessage = Message(role=MessageRole.USER, content="{{input}}")
@@ -273,10 +274,6 @@ class Agent(Node):
         """Sets or updates a prompt variable."""
         self._prompt_variables[variable_name] = value
 
-    def _retrieve_chat_history(self, messages: list[Message]) -> str:
-        """Converts a list of messages to a formatted string."""
-        return "\n".join([f"**{msg.role.value}:** {msg.content}" for msg in messages])
-
     def _prepare_metadata(self, input_data: dict) -> dict:
         """
         Prepare metadata from input data.
@@ -330,7 +327,9 @@ class Agent(Node):
         input_message = input_message or self.input_message
         input_message = input_message.format_message(**dict(input_data))
 
-        if self.memory:
+        use_memory = self.memory and (dict(input_data).get("user_id") or dict(input_data).get("session_id"))
+
+        if use_memory:
             history_messages = self._retrieve_memory(dict(input_data))
             if len(history_messages) > 0:
                 history_messages.insert(
@@ -369,7 +368,7 @@ class Agent(Node):
 
         result = self._run_agent(input_message, history_messages, config=config, **kwargs)
 
-        if self.memory:
+        if use_memory:
             self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
 
         execution_result = {
@@ -380,52 +379,72 @@ class Agent(Node):
 
         return execution_result
 
-    @staticmethod
-    def _make_filters(user_id: str | None, session_id: str | None) -> dict | None:
-        """Build a filter dictionary based on user_id and session_id."""
+    def retrieve_conversation_history(
+        self,
+        user_query: str = None,
+        user_id: str = None,
+        session_id: str = None,
+        limit: int = None,
+        strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.ALL,
+    ) -> list[Message]:
+        """
+        Retrieves conversation history for the agent using the specified strategy.
+
+        Args:
+            user_query: Current user input to find relevant context (for RELEVANT/HYBRID strategies)
+            user_id: Optional user identifier
+            session_id: Optional session identifier
+            limit: Maximum number of messages to return (defaults to memory_limit)
+            strategy: Which retrieval strategy to use (ALL, RELEVANT, or HYBRID)
+
+        Returns:
+            List of messages forming a valid conversation context
+        """
+        if not self.memory or not (user_id or session_id):
+            return []
+
         filters = {}
         if user_id:
             filters["user_id"] = user_id
         if session_id:
             filters["session_id"] = session_id
 
-        return filters if filters else None
+        limit = limit or self.memory_limit
 
-    def _retrieve_memory(self, input_data):
+        if strategy == MemoryRetrievalStrategy.RELEVANT and not user_query:
+            logger.warning("RELEVANT strategy selected but no user_query provided - falling back to ALL")
+            strategy = MemoryRetrievalStrategy.ALL
+
+        conversation = self.memory.get_agent_conversation(
+            query=user_query,  # Pass the user query for relevance search
+            limit=limit,
+            filters=filters,
+            strategy=strategy,
+        )
+
+        if self.verbose:
+            logger.debug(
+                f"Agent {self.name} retrieved {len(conversation)} messages using {strategy.value} strategy. "
+                f"First message role: {conversation[0].role.value if conversation else 'None'}"
+            )
+
+        return conversation
+
+    def _retrieve_memory(self, input_data: dict) -> list[Message]:
         """
-        Retrieves memory based on the selected strategy:
-        - RELEVANT: retrieves relevant memory based on the user input
-        - ALL: retrieves all messages in the memory
-        - BOTH: retrieves both relevant memory and all messages
+        Retrieves memory messages when user_id and/or session_id are provided.
         """
         user_id = input_data.get("user_id")
         session_id = input_data.get("session_id")
 
-        user_filters = self._make_filters(user_id, session_id)
+        user_query = input_data.get("input", "")
 
-        if session_id:
-            messages = self.memory.search(query=None, filters=user_filters)
-
-        else:
-            user_query = input_data.get("input", "")
-
-            if self.memory_retrieval_strategy == MemoryRetrievalStrategy.RELEVANT:
-                messages = self.memory.search(query=user_query, filters=user_filters)
-
-            elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.ALL:
-                messages = self.memory.get_all()
-
-            elif self.memory_retrieval_strategy == MemoryRetrievalStrategy.BOTH:
-                relevant_history_messages = self.memory.search(query=user_query, filters=user_filters)
-                messages_all = self.memory.get_all()
-                seen = set()
-                messages = []
-                for msg in relevant_history_messages + messages_all:
-                    if msg.content not in seen:
-                        messages.append(msg)
-                        seen.add(msg.content)
-
-        return messages
+        return self.retrieve_conversation_history(
+            user_query=user_query,
+            user_id=user_id,
+            session_id=session_id,
+            strategy=self.memory_retrieval_strategy,
+        )
 
     def _run_llm(self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and handles streaming or full responses."""
@@ -526,6 +545,9 @@ class Agent(Node):
             self._prompt.messages = [system_message, input_message]
 
         try:
+
+            print("SELF MESSAGES")
+            print(self._prompt.messages)
             llm_result = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_result))
 
