@@ -109,7 +109,7 @@ class Qdrant(MemoryBackend):
             try:
                 if not self._collection_exists():
                     if self.create_if_not_exist:
-                        self._create_connection()
+                        self._create_collection()
                     else:
                         return []
             except Exception:

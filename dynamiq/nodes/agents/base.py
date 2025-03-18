@@ -545,9 +545,6 @@ class Agent(Node):
             self._prompt.messages = [system_message, input_message]
 
         try:
-
-            print("SELF MESSAGES")
-            print(self._prompt.messages)
             llm_result = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_result))
 
