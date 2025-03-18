@@ -53,6 +53,17 @@ class WeaviateDocumentRetriever(Retriever, WeaviateRetrieverVectorStoreParams):
     def vector_store_cls(self):
         return WeaviateVectorStore
 
+    @property
+    def vector_store_params(self):
+        params = self.model_dump(include=set(WeaviateRetrieverVectorStoreParams.model_fields))
+        params.update(
+            {
+                "connection": self.connection,
+                "client": self.client,
+            }
+        )
+        return params
+
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
         Initialize the components of the retriever.
