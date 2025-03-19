@@ -14,7 +14,7 @@ from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 app = typer.Typer()
 
 python_code = """
-def run(inputs):
+def run(input_data):
     from dynamiq.types import Document
 
     raw_content = input_data.get('content')
@@ -49,7 +49,7 @@ def create_indexing_flow(index_name="default"):
         ],
         input_transformer=InputTransformer(
             selector={
-                "documents": f"${[python_node.id]}.output.documents",
+                "documents": f"${[python_node.id]}.output.content.documents",
             },
         ),
     )
@@ -113,4 +113,4 @@ def main(
 
 
 if __name__ == "__main__":
-    app()
+    typer.run(main)

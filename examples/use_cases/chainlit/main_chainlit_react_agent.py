@@ -117,14 +117,13 @@ async def main(message: cl.Message):
                         tool_step.input = tool_input
                         tool_step.output = tool_output
 
-                final_answer = event.data.get("final_answer")
+                final_answer = event.data.get("choices", [])[0].get("delta", {}).get("content")
                 if final_answer:
                     async with cl.Step(name="Final Answer") as final_step:
                         final_step.output = final_answer
                     step.output = final_answer
-                    msg.content = final_answer
+                    msg.content = msg.content + final_answer
                     await msg.update()
-                    break
 
     if not msg.content:
         msg.content = "I apologize, but I couldn't generate a final answer. Please try asking your question again."

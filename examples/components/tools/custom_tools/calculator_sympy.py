@@ -64,3 +64,13 @@ class CalculatorTool(Node):
 
         logger.debug(f"Tool {self.name} - {self.id}: finished with result {result}")
         return {"content": result}
+
+
+if __name__ == "__main__":
+    calculator_tool = CalculatorTool()
+    result = calculator_tool.execute(
+        {
+            "input": "1 + 2",
+        }
+    )
+    print(result)

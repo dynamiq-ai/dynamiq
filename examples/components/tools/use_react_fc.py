@@ -14,7 +14,7 @@ if __name__ == "__main__":
     llm = setup_llm()
 
     @function_tool
-    def calculate_age(input_age, current_year) -> int:
+    def calculate_age(input_age: int, current_year: int, **kwargs) -> int:
         """
         Calculate a person's age based on their birth year.
 
@@ -26,7 +26,6 @@ if __name__ == "__main__":
             age (int): The person's age.
         """
         age = int(current_year) - int(input_age)
-
         return age
 
     calculate_age_tool = calculate_age()

@@ -133,7 +133,7 @@ def draw_graph_in_png(graph: Graph, output_path: str) -> None:
 def draw_simple_agent_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "simple_agent_graph.png")
 ) -> None:
-    from examples.agents.use_simple_wf import run_simple_custom_workflow
+    from examples.components.agents.agents.simple_agent_wf import run_simple_custom_workflow
 
     _, traces = run_simple_custom_workflow()
     graph = get_graph_by_traces([run for _, run in traces.items()])
@@ -143,7 +143,7 @@ def draw_simple_agent_graph_in_png(
 def draw_simple_graph_orchestrator_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "simple_graph_orchestrator.png")
 ) -> None:
-    from examples.graph_like.graph_orchestrator_yaml import run_workflow
+    from examples.components.agents.orchestrators.graph_orchestrator.graph_orchestrator_yaml import run_workflow
 
     traces = run_workflow()
 
@@ -154,7 +154,7 @@ def draw_simple_graph_orchestrator_graph_in_png(
 def draw_graph_orchestrator_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "graph_orchestrator.png")
 ) -> None:
-    from examples.graph_like.code_assistant import run_orchestrator
+    from examples.components.agents.orchestrators.graph_orchestrator.code_assistant import run_orchestrator
 
     _, traces = run_orchestrator(request="Write 100 lines of code.")
 
@@ -165,7 +165,7 @@ def draw_graph_orchestrator_graph_in_png(
 def draw_reflexion_agent_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "reflexion_agent_graph.png")
 ) -> None:
-    from examples.agents.use_reflection_wf import run_workflow
+    from examples.components.agents.agents.reflection_agent_wf import run_workflow
 
     _, traces = run_workflow()
     graph = get_graph_by_traces([run for _, run in traces.items()])
@@ -175,7 +175,7 @@ def draw_reflexion_agent_graph_in_png(
 def draw_react_agent_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "react_agent_graph.png")
 ) -> None:
-    from examples.agents.use_react_wf import run_workflow
+    from examples.components.agents.agents.react_agent_wf import run_workflow
 
     _, traces = run_workflow()
 
@@ -186,7 +186,7 @@ def draw_react_agent_graph_in_png(
 def draw_simple_agent_with_memory_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "simple_agent__with_memory_graph.png")
 ) -> None:
-    from examples.memory.demo_memory_agent_wf import run_simple_workflow
+    from examples.components.core.memory.demo_memory_agent_wf import run_simple_workflow
 
     _, traces = run_simple_workflow()
     graph = get_graph_by_traces([run for _, run in traces.items()])
@@ -196,7 +196,7 @@ def draw_simple_agent_with_memory_graph_in_png(
 def draw_job_posting_linear_agent_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "job_posting_linear_agent_graph.png")
 ) -> None:
-    from examples.job_posting.use_planner import run_planner
+    from examples.use_cases.job_posting.main import run_planner
 
     _, traces = run_planner()
     graph = get_graph_by_traces([run for _, run in traces.items()])
@@ -206,7 +206,7 @@ def draw_job_posting_linear_agent_graph_in_png(
 def draw_literature_overview_adaptive_agent_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "literature_overview_adaptive_agent.png")
 ) -> None:
-    from examples.literature_overview.use_orchestrator import run_workflow
+    from examples.use_cases.literature_overview.main_orchestrator import run_workflow
 
     _, traces = run_workflow()
     graph = get_graph_by_traces([run for _, run in traces.items()])
@@ -216,7 +216,7 @@ def draw_literature_overview_adaptive_agent_graph_in_png(
 def draw_adaptive_coding_react_agent_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "adaptive_coding_react_agent.png")
 ) -> None:
-    from examples.orchestrators.adaptive_coding_workflow import run_coding_task
+    from examples.components.agents.orchestrators.adaptive_orchestrator.adaptive_coding_workflow import run_coding_task
 
     _, traces = run_coding_task()
     graph = get_graph_by_traces([run for _, run in traces.items()])

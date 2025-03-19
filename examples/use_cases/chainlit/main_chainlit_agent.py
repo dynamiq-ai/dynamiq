@@ -75,16 +75,19 @@ async def main(message: cl.Message):
         await asyncio.sleep(0.01)
 
         idx = 1
+        full_content = ""
         async for event in streaming:
             if event.event == AGENT_STREAMING_EVENT:
-                content = event.data["content"]
+                print("Event: ", event.data)
+                content = event.data.get("choices", [])[0].get("delta", {}).get("content")
+                full_content += content
                 async with cl.Step(name=f"Writer Agent step {idx}") as child_step:
                     child_step.output = content
                 idx += 1
 
-        step.output = content
+        step.output = full_content
 
-    msg.content = content
+    msg.content = full_content
     await msg.update()
 
 

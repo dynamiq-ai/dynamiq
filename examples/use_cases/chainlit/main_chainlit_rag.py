@@ -24,7 +24,7 @@ from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
-from examples.components.rag.rerankers.bge.node.bge import BGEDocumentRanker
+from examples.use_cases.chainlit.bge.node.bge import BGEDocumentRanker
 from examples.use_cases.chainlit.utils import default_prompt_template
 
 logger.setLevel(logging.INFO)
