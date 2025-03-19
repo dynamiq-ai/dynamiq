@@ -78,7 +78,6 @@ async def main(message: cl.Message):
         full_content = ""
         async for event in streaming:
             if event.event == AGENT_STREAMING_EVENT:
-                print("Event: ", event.data)
                 content = event.data.get("choices", [])[0].get("delta", {}).get("content")
                 full_content += content
                 async with cl.Step(name=f"Writer Agent step {idx}") as child_step:
