@@ -15,7 +15,7 @@ def rag_examples_folder():
 
 @pytest.fixture
 def rag_data_path():
-    return os.path.join(os.path.dirname(ROOT_PATH), "examples", "data")
+    return os.path.join(os.path.dirname(ROOT_PATH), "examples", "components", "rag", "vector_stores", "dag")
 
 
 @pytest.mark.parametrize("rag_yaml_file_name", ["dag_html_pinecone.yaml"])
