@@ -19,5 +19,6 @@ from .perplexity import Perplexity
 from .replicate import Replicate
 from .sambanova import SambaNova
 from .togetherai import TogetherAI
+from .vertexai import VertexAI
 from .watsonx import WatsonX
 from .xai import xAI
