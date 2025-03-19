@@ -9,7 +9,7 @@ from dynamiq.nodes import llms
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.node import StreamingConfig
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
-from examples.components.basic_concepts.websocket.ws_server_fastapi import WorkflowWSHandler
+from examples.components.core.websocket.ws_server_fastapi import WorkflowWSHandler
 
 app = FastAPI()
 

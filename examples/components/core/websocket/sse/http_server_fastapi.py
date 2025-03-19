@@ -9,7 +9,7 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.runnables import RunnableConfig
-from examples.components.basic_concepts.websocket.ws_server_fastapi import OPENAI_NODE, WF_ID
+from examples.components.core.websocket.ws_server_fastapi import OPENAI_NODE, WF_ID
 
 app = FastAPI()
 

@@ -8,7 +8,7 @@ from dynamiq.memory import Memory
 from dynamiq.nodes import llms
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.node import StreamingConfig
-from examples.components.basic_concepts.websocket.ws_server_fastapi import WorkflowWSHandler
+from examples.components.core.websocket.ws_server_fastapi import WorkflowWSHandler
 
 app = FastAPI()
 

@@ -8,7 +8,7 @@ from dynamiq.nodes import llms
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils.logger import logger
-from examples.components.basic_concepts.websocket.ws_server_fastapi import WorkflowWSHandler
+from examples.components.core.websocket.ws_server_fastapi import WorkflowWSHandler
 
 app = FastAPI()
 

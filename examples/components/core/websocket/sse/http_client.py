@@ -6,8 +6,8 @@ import httpx
 from httpx_sse import aconnect_sse
 
 from dynamiq.types.streaming import StreamingEventMessage
-from examples.components.basic_concepts.websocket.sse.http_server_fastapi import HOST, PORT
-from examples.components.basic_concepts.websocket.ws_server_fastapi import (
+from examples.components.core.websocket.sse.http_server_fastapi import HOST, PORT
+from examples.components.core.websocket.ws_server_fastapi import (
     OPENAI_2_NODE_STREAMING_EVENT,
     OPENAI_NODE_STREAMING_EVENT,
 )

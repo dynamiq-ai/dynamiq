@@ -6,7 +6,7 @@ import streamlit as st
 import websocket
 
 from dynamiq.utils.logger import logger
-from examples.components.basic_concepts.websocket.ws_streamlit.example_llm.server import (
+from examples.components.core.websocket.ws_streamlit.example_llm.server import (
     HOST,
     OPENAI_NODE_STREAMING_EVENT,
     PORT,

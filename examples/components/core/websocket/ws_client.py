@@ -6,7 +6,7 @@ import websockets
 
 from dynamiq.nodes.tools.human_feedback import HFStreamingInputEventMessage, HFStreamingInputEventMessageData
 from dynamiq.types.streaming import StreamingEventMessage
-from examples.components.basic_concepts.websocket.ws_server_fastapi import HF_NODE_STREAMING_EVENT, HOST, PORT, WF_ID
+from examples.components.core.websocket.ws_server_fastapi import HF_NODE_STREAMING_EVENT, HOST, PORT, WF_ID
 
 logger = logging.getLogger(__name__)
 
