@@ -9,10 +9,12 @@ from .cohere import Cohere
 from .custom_llm import CustomLLM
 from .deepinfra import DeepInfra
 from .deepseek import DeepSeek
+from .fireworksai import FireworksAI
 from .gemini import Gemini
 from .groq import Groq
 from .huggingface import HuggingFace
 from .mistral import Mistral
+from .nvidia_nim import Nvidia_NIM
 from .ollama import Ollama
 from .openai import OpenAI
 from .perplexity import Perplexity

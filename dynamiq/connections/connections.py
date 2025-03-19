@@ -1130,3 +1130,17 @@ class xAI(BaseApiKeyConnection):
 
     def connect(self):
         pass
+
+
+class FireworksAI(BaseApiKeyConnection):
+    api_key: str = Field(default_factory=partial(get_env_var, "FIREWORKS_AI_API_KEY"))
+
+    def connect(self):
+        pass
+
+
+class Nvidia_NIM(BaseApiKeyConnection):
+    api_key: str = Field(default_factory=partial(get_env_var, "NVIDIA_NIM_API_KEY"))
+
+    def connect(self):
+        pass
