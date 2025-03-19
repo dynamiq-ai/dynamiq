@@ -19,7 +19,7 @@ from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.utils.logger import logger
-from examples.tools.scraper import ScraperSummarizerTool
+from examples.components.tools.custom_tools.scraper import ScraperSummarizerTool
 
 # Constants
 GPT_MODEL = "gpt-4o"

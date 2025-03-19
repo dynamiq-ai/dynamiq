@@ -12,7 +12,7 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
-from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_input, process_tool_output_for_agent
+from dynamiq.nodes.agents.utils import create_message_from_input
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -174,8 +174,6 @@ class Agent(Node):
     images: list[str | bytes | io.BytesIO] = None
     name: str = "Agent"
     max_loops: int = 1
-    tool_output_max_length: int = TOOL_MAX_TOKENS
-    tool_output_truncate_enabled: bool = True
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_retrieval_strategy: MemoryRetrievalStrategy = MemoryRetrievalStrategy.BOTH
     verbose: bool = Field(False, description="Whether to print verbose logs.")
@@ -287,14 +285,13 @@ class Agent(Node):
         Returns:
             dict: Processed metadata
         """
-        EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata", "files", "images", "tool_params"}
+        EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata", "files", "tool_params"}
+
         custom_metadata = input_data.get("metadata", {}).copy()
         custom_metadata.update({k: v for k, v in input_data.items() if k not in EXCLUDED_KEYS})
 
         if "files" in custom_metadata:
             del custom_metadata["files"]
-        if "images" in custom_metadata:
-            del custom_metadata["images"]
         if "tool_params" in custom_metadata:
             del custom_metadata["tool_params"]
 
@@ -477,8 +474,6 @@ class Agent(Node):
 
     def stream_by_tokens(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
         """Streams the input content to the callbacks."""
-        if isinstance(content, dict):
-            return self.stream_response(content, source, step, config, **kwargs)
         tokens = content.split(" ")
         final_response = []
         for token in tokens:
@@ -623,13 +618,7 @@ class Agent(Node):
                 raise ToolExecutionException({error_message})
             else:
                 raise ValueError({error_message})
-        tool_result_content = tool_result.output.get("content")
-        tool_result_content_processed = process_tool_output_for_agent(
-            content=tool_result_content,
-            max_tokens=self.tool_output_max_length,
-            truncate=self.tool_output_truncate_enabled,
-        )
-        return tool_result_content_processed
+        return tool_result.output["content"]
 
     @property
     def tool_description(self) -> str:
