@@ -513,10 +513,12 @@ def main():
     print("Welcome to the AI Chat! (Type 'exit' to end)")
     while True:
         user_input = input("You: ")
+        user_id = "user"
+        session_id = "session"
         if user_input.lower() == "exit":
             break
 
-        response = agent.run({"input": user_input})
+        response = agent.run({"input": user_input, "user_id": user_id, "session_id": session_id})
         response_content = response.output.get("content")
         print(f"AI: {response_content}")
 

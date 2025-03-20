@@ -29,6 +29,8 @@ result = agent.run(
             "Show me the project and team list. "
             "Create the one task with simple description in any available project."
         ),
+        "user_id": "1",
+        "session_id": "1",
     },
     config=None,
 )

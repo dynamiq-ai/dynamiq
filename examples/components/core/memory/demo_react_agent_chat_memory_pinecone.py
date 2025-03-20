@@ -48,8 +48,8 @@ def chat_loop(agent):
     print("Welcome to the AI Chat! (Type 'exit' to end)")
     while True:
         user_input = input("You: ")
-        user_id = "oleks"
-        session_id = "oleks_session_4"
+        user_id = "default"
+        session_id = "default"
         if user_input.lower() == "exit":
             break
 
