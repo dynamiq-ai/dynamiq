@@ -53,7 +53,10 @@ class Memory(BaseModel):
         try:
             metadata = metadata or {}
             metadata["timestamp"] = datetime.utcnow().timestamp()
-            message = Message(role=role, content=content, metadata=metadata)
+            sanitized_metadata = {}
+            for key, value in metadata.items():
+                sanitized_metadata[key] = "" if value is None else value
+            message = Message(role=role, content=content, metadata=sanitized_metadata)
             self.backend.add(message)
             logger.debug(
                 f"Memory {self.backend.name}: "
