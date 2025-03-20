@@ -157,28 +157,19 @@ class HttpApiCall(ConnectionNode):
         headers = input_data.headers
         params = input_data.params
 
-        try:
-            response = self.client.request(
-                method=self.connection.method,
-                url=url,
-                headers=self.connection.headers | self.headers | headers,
-                params=self.connection.params | self.params | params,
-                timeout=self.timeout,
-                **extras,
-            )
-        except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
-            raise ToolExecutionException(
-                f"Request failed with error: {str(e)}. Please analyze the error and take appropriate action.",
-                recoverable=True,
-            )
+        response = self.client.request(
+            method=self.connection.method,
+            url=url,
+            headers=self.connection.headers | self.headers | headers,
+            params=self.connection.params | self.params | params,
+            timeout=self.timeout,
+            **extras,
+        )
 
         if response.status_code not in self.success_codes:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results.")
             raise ToolExecutionException(
                 f"Request failed with unexpected status code: {response.status_code} and response: {response.text}. "
-                f"Please analyze the error and take appropriate action.",
-                recoverable=True,
+                f"Please analyze the error and take appropriate action."
             )
 
         response_type = self.response_type
