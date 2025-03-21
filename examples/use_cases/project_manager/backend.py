@@ -41,7 +41,10 @@ def generate_agent_response(agent: ReActAgent, user_input: str):
     """
     if agent.streaming.enabled:
         streaming_handler = StreamingIteratorCallbackHandler()
-        agent.run(input_data={"input": user_input}, config=RunnableConfig(callbacks=[streaming_handler]))
+        agent.run(
+            input_data={"input": user_input, "user_id": "1", "session_id": "1"},
+            config=RunnableConfig(callbacks=[streaming_handler]),
+        )
 
         response_text = ""
 

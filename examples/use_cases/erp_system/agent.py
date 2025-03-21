@@ -51,6 +51,8 @@ dynamiq_name_assistant = ReActAgent(
 result = dynamiq_name_assistant.run(
     input_data={
         "input": ("Show me the inventory"),
+        "user_id": "1",
+        "session_id": "1",
     },
     config=None,
 )
