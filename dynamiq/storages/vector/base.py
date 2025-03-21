@@ -6,6 +6,7 @@ class BaseVectorStoreParams(BaseModel):
 
     Attributes:
         index_name (str): Name of the index. Defaults to "default".
+        content_key (str): Key for content field. Defaults to "content".
     """
     index_name: str = "default"
     content_key: str = "content"
