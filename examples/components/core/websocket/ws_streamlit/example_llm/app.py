@@ -93,7 +93,7 @@ def main():
             workflow_input = {
                 "event": "start",
                 "entity_id": WF_ID,
-                "data": {"input": prompt},
+                "data": {"input": prompt, "user_id": "123", "session_id": "456"},
             }
 
             # Log the input being sent to the workflow

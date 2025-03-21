@@ -1,29 +1,25 @@
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.connections import Pinecone as PineconeConnection
+from dynamiq.connections import Qdrant as QdrantConnection
 from dynamiq.memory import Memory
-from dynamiq.memory.backends import Pinecone
+from dynamiq.memory.backends import Qdrant
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
-from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from examples.llm_setup import setup_llm
 
 
 def setup_agent():
     llm = setup_llm()
-    pinecone_connection = PineconeConnection()
+    qdrant_connection = QdrantConnection()
     openai_connection = OpenAIConnection()
     embedder = OpenAIDocumentEmbedder(connection=openai_connection)
 
-    backend = Pinecone(
-        index_name="default",
-        connection=pinecone_connection,
+    backend = Qdrant(
+        connection=qdrant_connection,
         embedder=embedder,
-        index_type=PineconeIndexType.SERVERLESS,
-        cloud="aws",
-        region="us-east-1",
+        index_name="default",
     )
 
-    memory_pinecone = Memory(backend=backend)
+    memory_qdrant = Memory(backend=backend)
 
     AGENT_ROLE = "Helpful assistant with the goal of providing useful information and answering questions."
     agent = SimpleAgent(
@@ -31,7 +27,7 @@ def setup_agent():
         llm=llm,
         role=AGENT_ROLE,
         id="agent",
-        memory=memory_pinecone,
+        memory=memory_qdrant,
     )
     return agent
 

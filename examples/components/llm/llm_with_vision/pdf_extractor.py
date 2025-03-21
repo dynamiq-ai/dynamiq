@@ -14,7 +14,6 @@ from dynamiq.prompts import (
     VisionMessageTextContent,
 )
 
-
 PDF_FILE_PATH = "../../data/file.pdf"
 
 

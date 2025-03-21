@@ -52,11 +52,11 @@ def test_workflow_with_agent_and_in_memory_memory(openai_node):
     wf = Workflow(flow=flows.Flow(nodes=[agent]))
 
     user_input_1 = "Hi, what's the weather like today?"
-    result_1 = wf.run(input_data={"input": user_input_1})
+    result_1 = wf.run(input_data={"input": user_input_1, "user_id": "123", "session_id": "456"})
     assert result_1.status == RunnableStatus.SUCCESS
 
     user_input_2 = "And what about tomorrow?"
-    result_2 = wf.run(input_data={"input": user_input_2})
+    result_2 = wf.run(input_data={"input": user_input_2, "user_id": "123", "session_id": "456"})
     assert result_2.status == RunnableStatus.SUCCESS
 
     all_messages = memory.get_all()
