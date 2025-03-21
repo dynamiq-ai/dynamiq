@@ -15,6 +15,7 @@ from dynamiq.connections import PostgreSQL
 from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
+from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -595,22 +596,24 @@ class PGVectorStore:
             if not document_ids:
                 logger.warning("No document IDs provided. No documents will be deleted.")
             else:
-                self.delete_documents_by_file_id(document_ids)
+                with self._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        query = SQL("DELETE FROM {schema_name}.{table_name} WHERE id = ANY(%s::text[])").format(
+                            schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name)
+                        )
+                        self._execute_sql_query(query, (document_ids,), cursor=cur)
+                        conn.commit()
 
-    def delete_documents_by_file_id(self, document_ids: list[str]) -> None:
+    def delete_documents_by_file_id(self, file_id: str) -> None:
         """
-        Delete documents from the pgvector vector store by document IDs.
+        Delete documents from the vector store based on the provided file ID.
+            file_id should be located in the metadata of the document.
 
         Args:
-            document_ids (list[str]): List of document IDs to delete.
+            file_id (str): The file ID to filter by.
         """
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                query = SQL("DELETE FROM {schema_name}.{table_name} WHERE id = ANY(%s::text[])").format(
-                    schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name)
-                )
-                self._execute_sql_query(query, (document_ids,), cursor=cur)
-                conn.commit()
+        filters = create_file_id_filter(file_id)
+        self.delete_documents_by_filters(filters)
 
     def list_documents(
         self, include_embeddings: bool = False, content_key: str | None = None, embedding_key: str | None = None
