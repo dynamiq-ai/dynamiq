@@ -243,8 +243,9 @@ class ElasticsearchVectorStore:
 
             if operations:
                 result = self.client.bulk(operations=operations, refresh=True)
-                total_written += (
-                    result.raw.get("items", [0])[0].get("index", {}).get("_shards", {}).get("successful", 0)
+                total_written += sum(
+                    item.get("index", {}).get("_shards", {}).get("successful", 0)
+                    for item in result.raw.get("items", [])
                 )
 
         return total_written
