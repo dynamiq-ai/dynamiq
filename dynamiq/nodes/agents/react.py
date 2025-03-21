@@ -766,31 +766,36 @@ class ReActAgent(Agent):
         """Filters proper type for a function calling schema."""
 
         if get_origin(param_type) in (Union, types.UnionType):
-            param_type = next((arg for arg in get_args(param_type) if arg is not type(None)), None)
+            return get_args(param_type)
 
-        return param_type
+        return [param_type]
 
     def generate_property_schema(self, properties, name, field):
         if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
             description = field.description or "No description"
-            description += f" Defaults to: {field.default}." if field.default else ""
-            param = self.filter_format_type(field.annotation)
 
-            if param_type := TYPE_MAPPING.get(param):
-                properties[name] = {"type": param_type, "description": description}
+            description += f" Defaults to: {field.default}." if field.default and not field.is_required() else ""
+            params = self.filter_format_type(field.annotation)
 
-            elif issubclass(param, Enum):
-                element_type = TYPE_MAPPING.get(
-                    self.filter_format_type(type(list(field.annotation.__members__.values())[0].value))
-                )
-                properties[name] = {
-                    "type": element_type,
-                    "description": description,
-                    "enum": [field.value for field in field.annotation.__members__.values()],
-                }
+            properties[name] = {"type": [], "description": description}
 
-            elif param.__origin__ is list:
-                properties[name] = {"type": "array", "items": {"type": TYPE_MAPPING.get(param.__args__[0])}}
+            for param in params:
+                if param is type(None):
+                    properties[name]["type"].append("null")
+
+                elif param_type := TYPE_MAPPING.get(param):
+                    properties[name]["type"].append(param_type)
+
+                elif issubclass(param, Enum):
+                    element_type = TYPE_MAPPING.get(
+                        self.filter_format_type(type(list(field.annotation.__members__.values())[0].value))[0]
+                    )
+                    properties[name]["type"].append(element_type)
+                    properties[name]["enum"] = [field.value for field in field.annotation.__members__.values()]
+
+                elif param.__origin__ is list:
+                    properties[name]["type"].append("array")
+                    properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
