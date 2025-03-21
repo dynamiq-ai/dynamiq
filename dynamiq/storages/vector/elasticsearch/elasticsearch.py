@@ -411,9 +411,10 @@ class ElasticsearchVectorStore:
 
         self.client.delete_by_query(index=self.index_name, query=bool_query, refresh=True)
 
-    def delete_document_by_file_id(self, file_id: str):
+    def delete_documents_by_file_id(self, file_id: str) -> None:
         """
-        Delete documents from the Pinecone vector store by file ID.
+        Delete documents from the vector store based on the provided file ID.
+            file_id should be located in the metadata of the document.
 
         Args:
             file_id (str): The file ID to filter by.
