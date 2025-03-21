@@ -45,7 +45,6 @@ def get_vertexai_workflow(
     [("vertex_ai/gemini-pro", "vertex_ai/gemini-pro"), ("gemini-pro", "vertex_ai/gemini-pro")],
 )
 def test_workflow_with_vertex_ai_llm(mock_llm_response_text, mock_llm_executor, model, expected_model):
-    model = model
     google_params = {
         "project_id": "your_project_id",
         "private_key_id": "your_private_key_id",

@@ -300,7 +300,7 @@ class GoogleCloud(BaseConnection):
         """
         Returns the parameters required for the connection.
 
-        This property returns a dictionary containing the project ID and project location.
+        This property returns a dictionary containing Google Cloud service account credentials.
 
         Returns:
             dict: A dictionary with the keys 'vertex_project' and 'vertex_location'.
@@ -321,7 +321,7 @@ class GoogleCloud(BaseConnection):
 
 class VertexAI(GoogleCloud):
     """
-    Represents a connection to the Gemini Vertex AI service.
+    Represents a connection to the Vertex AI service.
 
     This connection requires additional GCP application credentials. The credentials should be provided in the
     connection fields (related to Google Cloud) or set in the environment variables.
