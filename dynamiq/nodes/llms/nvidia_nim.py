@@ -3,7 +3,7 @@ from dynamiq.nodes.llms.base import BaseLLM
 
 
 class Nvidia_NIM(BaseLLM):
-    """Nvidia_NIM LLM node.
+    """Nvidia NIM LLM node.
 
     This class provides an implementation for the Nvidia NIM Language Model node.
 
@@ -16,7 +16,7 @@ class Nvidia_NIM(BaseLLM):
     MODEL_PREFIX = "nvidia_nim/"
 
     def __init__(self, **kwargs):
-        """Initialize the Nvidia_NIM LLM node.
+        """Initialize the Nvidia NIM LLM node.
 
         Args:
             **kwargs: Additional keyword arguments.
