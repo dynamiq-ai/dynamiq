@@ -5,21 +5,21 @@ import pytest
 from dynamiq import Workflow, connections
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.llms import Nvidia_NIM
+from dynamiq.nodes.llms import NvidiaNIM
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 
 
 def get_nvidia_workflow(
     model: str,
-    connection: connections.Nvidia_NIM,
+    connection: connections.NvidiaNIM,
 ):
     wf_nvidia = Workflow(
         id=str(uuid.uuid4()),
         flow=Flow(
             nodes=[
-                Nvidia_NIM(
-                    name="Nvidia_NIM",
+                NvidiaNIM(
+                    name="NvidiaNIM",
                     model=model,
                     connection=connection,
                     prompt=Prompt(
@@ -44,7 +44,7 @@ def get_nvidia_workflow(
     [("nvidia_nim/google/gemma-7b", "nvidia_nim/google/gemma-7b"), ("google/gemma-7b", "nvidia_nim/google/gemma-7b")],
 )
 def test_workflow_with_nvidia_llm(mock_llm_response_text, mock_llm_executor, model, expected_model):
-    connection = connections.Nvidia_NIM(
+    connection = connections.NvidiaNIM(
         id=str(uuid.uuid4()),
         api_key="api_key",
     )

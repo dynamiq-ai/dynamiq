@@ -1139,7 +1139,7 @@ class FireworksAI(BaseApiKeyConnection):
         pass
 
 
-class Nvidia_NIM(BaseApiKeyConnection):
+class NvidiaNIM(BaseApiKeyConnection):
     url: str = Field(default_factory=partial(get_env_var, "NVIDIA_NIM_URL"))
     api_key: str = Field(default_factory=partial(get_env_var, "NVIDIA_NIM_API_KEY"))
 
