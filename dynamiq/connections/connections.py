@@ -1,4 +1,5 @@
 import enum
+import json
 from abc import ABC, abstractmethod
 from functools import cached_property, partial
 from typing import TYPE_CHECKING, Any, Literal
@@ -261,21 +262,77 @@ class Gemini(BaseApiKeyConnection):
         pass
 
 
-class GeminiVertexAI(BaseConnection):
+class GoogleCloud(BaseConnection):
     """
-    Represents a connection to the Gemini Vertex AI service.
-
-    This connection requires additional GCP application credentials. The credentials should be set in the
-    `application_default_credentials.json` file. The path to this credentials file should be defined in the
-    `GOOGLE_APPLICATION_CREDENTIALS` environment variable.
+    Represents a connection to Google Cloud Platform (GCP) using service account credentials.
 
     Attributes:
         project_id (str): The GCP project ID.
-        project_location (str): The location of the GCP project.
+        private_key_id (str): The private key ID used for authentication.
+        private_key (str): The private key used for secure access.
+        client_email (str): The service account email address.
+        client_id (str): The unique client ID for authentication.
+        auth_uri (str): The URI for Google's authentication endpoint.
+        token_uri (str): The URI for obtaining OAuth tokens.
+        auth_provider_x509_cert_url (str): The URL for Google's authentication provider X.509 certificates.
+        client_x509_cert_url (str): The URL for the client's X.509 certificate.
+        universe_domain (str): The domain associated with the Google Cloud environment.
     """
 
-    project_id: str
-    project_location: str
+    project_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PROJECT_ID"))
+    private_key_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY_ID"))
+    private_key: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY"))
+    client_email: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_EMAIL"))
+    client_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_ID"))
+    auth_uri: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_URI"))
+    token_uri: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_TOKEN_URI"))
+    auth_provider_x509_cert_url: str = Field(
+        default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_PROVIDER_X509_CERT_URL")
+    )
+    client_x509_cert_url: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_X509_CERT_URL"))
+    universe_domain: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_UNIVERSE_DOMAIN"))
+
+    def connect(self):
+        pass
+
+    @property
+    def conn_params(self):
+        """
+        Returns the parameters required for the connection.
+
+        This property returns a dictionary containing Google Cloud service account credentials.
+
+        Returns:
+            dict: A dictionary with the keys 'vertex_project' and 'vertex_location'.
+        """
+        return {
+            "project_id": self.project_id,
+            "private_key_id": self.private_key_id,
+            "private_key": self.private_key,
+            "client_email": self.client_email,
+            "client_id": self.client_id,
+            "client_x509_cert_url": self.client_x509_cert_url,
+            "auth_uri": self.auth_uri,
+            "token_uri": self.token_uri,
+            "auth_provider_x509_cert_url": self.auth_provider_x509_cert_url,
+            "universe_domain": self.universe_domain,
+        }
+
+
+class VertexAI(GoogleCloud):
+    """
+    Represents a connection to the Vertex AI service.
+
+    This connection requires additional GCP application credentials. The credentials should be provided in the
+    connection fields (related to Google Cloud) or set in the environment variables.
+
+    Attributes:
+        vertex_project_id (str): The GCP project ID.
+        vertex_project_location (str): The location of the GCP project.
+    """
+
+    vertex_project_id: str = Field(default_factory=partial(get_env_var, "VERTEXAI_PROJECT_ID"))
+    vertex_project_location: str = Field(default_factory=partial(get_env_var, "VERTEXAI_PROJECT_LOCATION"))
 
     def connect(self):
         pass
@@ -290,9 +347,11 @@ class GeminiVertexAI(BaseConnection):
         Returns:
             dict: A dictionary with the keys 'vertex_project' and 'vertex_location'.
         """
+        vertex_credentials = json.dumps(super().conn_params.copy())
         return {
-            "vertex_project": self.project_id,
-            "vertex_location": self.project_location,
+            "vertex_project": self.vertex_project_id,
+            "vertex_location": self.vertex_project_location,
+            "vertex_credentials": vertex_credentials,
         }
 
 
