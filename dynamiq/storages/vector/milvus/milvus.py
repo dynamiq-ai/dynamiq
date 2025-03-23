@@ -210,14 +210,14 @@ class MilvusVectorStore:
 
         return self._get_result_to_documents(result, content_key=content_key, embedding_key=embedding_key)
 
-    def search_embeddings(
+    def _embedding_retrieval(
         self,
         query_embeddings: list[list[float]],
         top_k: int,
         filters: dict[str, Any] | None = None,
         content_key: str | None = None,
         embedding_key: str | None = None,
-        return_embedding: bool = False,
+        return_embeddings: bool = False,
     ) -> list[Document]:
         """
         Perform vector search on the stored documents using query embeddings.
@@ -228,7 +228,7 @@ class MilvusVectorStore:
             filters (dict[str, Any] | None): A dictionary of filters to apply to the search. Defaults to None.
             content_key (Optional[str]): The field used to store content in the storage.
             embedding_key (Optional[str]): The field used to store vector in the storage.
-            return_embedding (bool): Whether to return the embeddings of the retrieved documents.
+            return_embeddings (bool): Whether to return the embeddings of the retrieved documents.
 
         Returns:
             List[Document]: A list of Document objects containing the retrieved documents.
@@ -248,7 +248,7 @@ class MilvusVectorStore:
         )
 
         return self._convert_query_result_to_documents(
-            results[0], content_key=content_key, embedding_key=embedding_key, return_embedding=return_embedding
+            results[0], content_key=content_key, embedding_key=embedding_key, return_embeddings=return_embeddings
         )
 
     def _convert_query_result_to_documents(
@@ -256,7 +256,7 @@ class MilvusVectorStore:
         result: list[dict[str, Any]],
         content_key: str | None = None,
         embedding_key: str | None = None,
-        return_embedding: bool = False,
+        return_embeddings: bool = False,
     ) -> list[Document]:
         """
         Convert Milvus search results to Document objects.
@@ -265,7 +265,7 @@ class MilvusVectorStore:
             result (List[Dict[str, Any]]): The result from a Milvus search operation.
             content_key (Optional[str]): The field used to store content in the storage.
             embedding_key (Optional[str]): The field used to store vector in the storage.
-            return_embedding (bool): Whether to return the embeddings of the retrieved documents.
+            return_embeddings (bool): Whether to return the embeddings of the retrieved documents.
 
         Returns:
             List[Document]: A list of Document instances created from the Milvus search result.
@@ -285,7 +285,7 @@ class MilvusVectorStore:
                 metadata=metadata,
                 score=hit.get("distance", None),
             )
-            if return_embedding:
+            if return_embeddings:
                 doc.embedding = embedding
 
             documents.append(doc)
@@ -356,7 +356,7 @@ class MilvusVectorStore:
 
         return documents
 
-    def search_hybrid(
+    def _hybrid_retrieval(
         self,
         query: str,
         query_embeddings: list[list[float]],
@@ -365,7 +365,7 @@ class MilvusVectorStore:
         top_k_sparse: int | None = None,
         content_key: str | None = None,
         embedding_key: str | None = None,
-        return_embedding: bool = False,
+        return_embeddings: bool = False,
         drop_ratio_build: float = 0.0,
     ) -> list[Document]:
         """
@@ -381,7 +381,7 @@ class MilvusVectorStore:
                 If None, defaults to `top_k`.
             content_key (Optional[str]): The field used to store content in the storage.
             embedding_key (Optional[str]): The field used to store vector in the storage.
-            return_embedding (bool): Whether to return the embeddings of the retrieved documents.
+            return_embeddings (bool): Whether to return the embeddings of the retrieved documents.
             drop_ratio_build (float): The ratio of small vector values to be dropped during indexing during text search.
 
         Returns:
@@ -416,5 +416,5 @@ class MilvusVectorStore:
         )
 
         return self._convert_query_result_to_documents(
-            results[0], content_key=content_key, embedding_key=embedding_key, return_embedding=return_embedding
+            results[0], content_key=content_key, embedding_key=embedding_key, return_embeddings=return_embeddings
         )
