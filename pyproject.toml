@@ -47,7 +47,7 @@ black = "~24.8.0"
 pypdf = "~4.3.1"
 python-pptx = "1.0.2"
 qdrant-client = "~1.11.3"
-pymilvus = "~2.4.3"
+pymilvus = ">=2.5"
 psycopg = { version = "~3.2.3", extras = ["binary"] }
 pgvector = "~0.3.6"
 mysql-connector-python = "~9.0.0"
