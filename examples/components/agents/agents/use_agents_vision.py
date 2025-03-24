@@ -4,8 +4,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Exa
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -18,7 +17,7 @@ IMAGE_FILE = "../../data/img.jpeg"
 def run_simple_agent_image_workflow():
     """Example workflow with image URL using SimpleAgent"""
     llm = setup_llm(model_provider="gemini", model_name="gemini-2.0-flash", temperature=1)
-    agent = SimpleAgent(
+    agent = Agent(
         name="SimpleImageAgent",
         id="simple_image_agent",
         llm=llm,
@@ -41,7 +40,7 @@ def run_simple_agent_image_workflow():
 def run_image_bytes_workflow():
     """Example workflow with image bytes input"""
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=1)
-    agent = ReActAgent(
+    agent = Agent(
         name="ImageBytesAgent",
         id="image_bytes_agent",
         llm=llm,
@@ -68,7 +67,7 @@ def run_image_bytes_workflow():
 def run_multiple_images_workflow():
     """Example workflow with multiple images of different types"""
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=1)
-    agent = ReActAgent(
+    agent = Agent(
         name="MultiImageAgent",
         id="multi_image_agent",
         llm=llm,
@@ -98,7 +97,7 @@ def run_tools_with_image_workflow():
     tool_search = ExaTool(connection=connection_exa)
 
     llm = setup_llm(model_provider="gpt", model_name="gpt-4.5-preview-2025-02-27", temperature=1)
-    agent = ReActAgent(
+    agent = Agent(
         name="ToolsImageAgent",
         id="tools_image_agent",
         llm=llm,
@@ -126,7 +125,7 @@ def run_tools_with_image_workflow():
 def run_files_with_images_workflow():
     """Example workflow that automatically detects images in the files field"""
     llm = setup_llm(model_provider="gpt", model_name="gpt-4.5-preview-2025-02-27", temperature=1)
-    agent = SimpleAgent(
+    agent = Agent(
         name="FilesImageAgent",
         id="files_image_agent",
         llm=llm,
@@ -154,7 +153,7 @@ def run_files_with_images_workflow():
 
 if __name__ == "__main__":
     run_simple_agent_image_workflow()
-    run_image_bytes_workflow()
-    run_multiple_images_workflow()
-    run_tools_with_image_workflow()
-    run_files_with_images_workflow()
+    # run_image_bytes_workflow()
+    # run_multiple_images_workflow()
+    # run_tools_with_image_workflow()
+    # run_files_with_images_workflow()
