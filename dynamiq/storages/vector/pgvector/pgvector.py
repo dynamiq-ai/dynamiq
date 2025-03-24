@@ -48,6 +48,8 @@ VECTOR_FUNCTION_TO_SCORE_DEFINITION = {
 }
 
 DEFAULT_TABLE_NAME = "dynamiq_vector_store"
+DEFAULT_INDEX_NAME = "dynamiq_index"
+DEFAULT_KEYWORD_INDEX_NAME = "dynamiq_keyword_index"
 DEFAULT_SCHEMA_NAME = "public"
 DEFAULT_LANGUAGE = "english"
 
@@ -81,11 +83,11 @@ class PGVectorStore:
         dimension: int = 1536,
         vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY,
         index_method: PGVectorIndexMethod = PGVectorIndexMethod.EXACT,
-        index_name: str | None = None,
+        index_name: str = DEFAULT_INDEX_NAME,
         create_if_not_exist: bool = False,
         content_key: str = "content",
         embedding_key: str = "embedding",
-        keyword_index_name: str | None = None,
+        keyword_index_name: str = DEFAULT_KEYWORD_INDEX_NAME,
         language: str = DEFAULT_LANGUAGE,
     ):
         """
@@ -208,8 +210,8 @@ class PGVectorStore:
         )
 
         with conn.cursor() as cur:
-            self._execute_sql_query(query, (self.schema_name,), cursor=cur)
-            return cur.fetchone()[0]
+            result = self._execute_sql_query(query, (self.schema_name,), cursor=cur).fetchone()
+            return bool(result["exists"])
 
     def _check_if_table_exists(self, conn: psycopg.Connection) -> bool:
         """
@@ -234,8 +236,8 @@ class PGVectorStore:
         )
 
         with conn.cursor() as cur:
-            self._execute_sql_query(query, (self.schema_name, self.table_name), cursor=cur)
-            return cur.fetchone()[0]
+            result = self._execute_sql_query(query, (self.schema_name, self.table_name), cursor=cur).fetchone()
+            return bool(result["exists"])
 
     def _execute_sql_query(self, sql_query: Any, params: tuple | None = None, cursor: Cursor | None = None) -> Any:
         """
@@ -404,17 +406,15 @@ class PGVectorStore:
             USING gin(to_tsvector({language}, {content_key}));
             """
         ).format(
-            index_name=SQLLiteral(self.keyword_index_name),
-            schema_name=SQLLiteral(self.schema_name),
-            table_name=SQLLiteral(self.table_name),
-            content_key=SQLLiteral(content_key),
+            index_name=Identifier(self.keyword_index_name),
+            schema_name=Identifier(self.schema_name),
+            table_name=Identifier(self.table_name),
+            content_key=Identifier(content_key),
             language=SQLLiteral(self.language),
         )
 
         with conn.cursor() as cur:
-            self._execute_sql_query(check_if_keyword_index_exists_query, cursor=cur)
-            index_exists = bool(cur.fetchone())
-
+            index_exists = bool(self._execute_sql_query(check_if_keyword_index_exists_query, cursor=cur).fetchone())
             if not index_exists:
                 self._execute_sql_query(create_keyword_index_query, cursor=cur)
                 conn.commit()
