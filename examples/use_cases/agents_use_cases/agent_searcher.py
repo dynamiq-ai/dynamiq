@@ -1,5 +1,5 @@
 from dynamiq.connections import Exa
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
 from examples.llm_setup import setup_llm
@@ -8,7 +8,7 @@ if __name__ == "__main__":
     connection_exa = Exa()
     tool_search = ExaTool(connection=connection_exa)
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=1)
-    agent = ReActAgent(
+    agent = Agent(
         name="Agent",
         id="Agent",
         llm=llm,

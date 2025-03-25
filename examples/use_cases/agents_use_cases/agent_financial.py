@@ -1,5 +1,5 @@
 from dynamiq.connections import E2B
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
@@ -20,7 +20,7 @@ if __name__ == "__main__":
 
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="Agent",
         id="Agent",
         llm=llm,

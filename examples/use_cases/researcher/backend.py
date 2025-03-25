@@ -4,7 +4,7 @@ from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import E2B, Firecrawl, ScaleSerp
 from dynamiq.memory import Memory
 from dynamiq.memory.backends import InMemory
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
@@ -43,7 +43,7 @@ def read_file_as_bytesio(file) -> io.BytesIO:
     return file_io
 
 
-def setup_agent() -> ReActAgent:
+def setup_agent() -> Agent:
     """
     Set up and configure the ReAct agent.
     """
@@ -61,7 +61,7 @@ def setup_agent() -> ReActAgent:
 
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0.001)
 
-    return ReActAgent(
+    return Agent(
         name="Assistant",
         llm=llm,
         role=AGENT_ROLE,
@@ -75,7 +75,7 @@ def setup_agent() -> ReActAgent:
     )
 
 
-def generate_agent_response(agent: ReActAgent, user_input: str, files=None):
+def generate_agent_response(agent: Agent, user_input: str, files=None):
     """
     Generate a response using the agent, with optional file processing.
     """

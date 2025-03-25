@@ -6,13 +6,13 @@ from composio_tool import ComposioTool
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.in_memory import InMemory
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from examples.llm_setup import setup_llm
 
 
-def setup_agent() -> ReActAgent:
+def setup_agent() -> Agent:
     """
     Initializes an AI agent with a specified role and streaming configuration.
     """
@@ -24,7 +24,7 @@ def setup_agent() -> ReActAgent:
     memory = Memory(backend=InMemory())
     streaming_config = StreamingConfig(enabled=True, mode=StreamingMode.FINAL, by_tokens=True)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="PM Manager",
         llm=llm,
         tools=[tool_1, tool_2, tool_3],
@@ -35,7 +35,7 @@ def setup_agent() -> ReActAgent:
     return agent
 
 
-def generate_agent_response(agent: ReActAgent, user_input: str):
+def generate_agent_response(agent: Agent, user_input: str):
     """
     Processes the user input using the agent. Supports both streaming and non-streaming responses.
     """

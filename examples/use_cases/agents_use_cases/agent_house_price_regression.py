@@ -1,7 +1,7 @@
 import io
 
 from dynamiq.connections import E2B
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
@@ -68,7 +68,7 @@ def create_agent():
     tool = E2BInterpreterTool(connection=E2B())
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.001)
 
-    agent_software = ReActAgent(
+    agent_software = Agent(
         name="React Agent",
         llm=llm,
         tools=[tool],

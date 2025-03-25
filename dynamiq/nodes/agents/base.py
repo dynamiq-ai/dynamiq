@@ -533,40 +533,53 @@ class Agent(Node):
     ############################################################################
 
     def _init_prompt_blocks(self):
-        """
-        Initializes default blocks for our Jinja2-based system prompt.
-        Then sets instructions differently depending on whether we do multi-step or single-shot.
-        """
+        """Initializes prompt blocks and generates mode-specific schemas."""
+        # Base blocks and variables
         self._prompt_blocks = {
             "date": "{date}",
-            "tools": "{tool_description}",
-            "files": "{file_description}",
-            "instructions": "",
+            "tools": "{tool_description}",  # Placeholder, filled later if tools exist
+            "files": "{file_description}",  # Placeholder, filled later if files exist
+            "instructions": "",  # Determined below
+            "output_format": "",  # Optional, can be set
+            "context": "",  # Optional, filled if self.role exists
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
             "file_description": self.file_description,
             "date": datetime.now().strftime("%d %B %Y"),
+            "tools_name": self.tool_names,  # Needed for instructions
+            "input_formats": self.generate_input_formats(self.tools) if self.tools else "",  # Needed for instructions
         }
 
-        if not self.tools or self.max_loops <= 1:
-            simple_instructions = REACT_BLOCK_INSTRUCTIONS_NO_TOOLS
-            self._prompt_blocks["instructions"] = simple_instructions
+        # Determine instructions based on tools and mode
+        if not self.tools:
+            # Simple mode (no tools)
+            if self.inference_mode == InferenceMode.XML:
+                instructions = REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS
+            else:
+                # Default simple instructions
+                instructions = REACT_BLOCK_INSTRUCTIONS_NO_TOOLS
+            self._prompt_blocks["tools"] = ""  # No tools block needed
         else:
+            # ReAct mode (with tools)
+            self._prompt_blocks["output_format"] = REACT_BLOCK_OUTPUT_FORMAT  # Add this for ReAct
+
             if self.inference_mode == InferenceMode.XML:
                 instructions = REACT_BLOCK_XML_INSTRUCTIONS
+                # Keep default tools block
             elif self.inference_mode == InferenceMode.FUNCTION_CALLING:
                 instructions = REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING
-                self.generate_function_calling_schemas()
-
+                self._prompt_blocks["tools"] = REACT_BLOCK_TOOLS_NO_FORMATS  # Use simplified tools block
+                self.generate_function_calling_schemas()  # Generate schemas
             elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
                 instructions = REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT
-                self.generate_structured_output_schemas()
-
-            else:
+                # Keep default tools block
+                self.generate_structured_output_schemas()  # Generate schemas
+            else:  # Default ReAct mode
                 instructions = REACT_BLOCK_INSTRUCTIONS
+                # Keep default tools block
 
-            self._prompt_blocks["instructions"] = instructions
+        self._prompt_blocks["instructions"] = instructions
 
     def set_block(self, block_name: str, content: str):
         """Update a named block of the system prompt."""
@@ -583,6 +596,12 @@ class Agent(Node):
         """
         temp_vars = self._prompt_variables.copy()
         temp_vars.update(kwargs)
+
+        temp_vars.setdefault("tools_name", self.tool_names)
+        temp_vars.setdefault("input_formats", self.generate_input_formats(self.tools) if self.tools else "")
+        temp_vars.setdefault("tool_description", self.tool_description)
+        temp_vars.setdefault("file_description", self.file_description)
+        temp_vars.setdefault("date", datetime.now().strftime("%d %B %Y"))
 
         formatted_blocks = {}
         for block, content in self._prompt_blocks.items():
@@ -1097,10 +1116,11 @@ class Agent(Node):
                 ),
             )
 
+        messages = [system_message]
         if history_messages:
-            self._prompt.messages = [system_message, *history_messages, input_message]
-        else:
-            self._prompt.messages = [system_message, input_message]
+            messages.extend(history_messages)
+        messages.append(input_message)
+        self._prompt.messages = messages
 
         if not self.tools:
             logger.info(f"Agent {self.name} - {self.id}: Using simple approach with no tools.")
@@ -1114,6 +1134,7 @@ class Agent(Node):
             full_text = llm_result.output.get("content", "")
 
             final_text = self.parse_single_shot_response(full_text)
+
             if self.streaming.enabled:
                 self.stream_content(final_text, source=self.name, step="final_answer", config=config)
             return final_text
@@ -1122,6 +1143,7 @@ class Agent(Node):
             f"Agent {self.name} - {self.id}: Using ReAct approach with max_loops={self.max_loops} "
             f"and {len(self.tools)} tools."
         )
+
         if self.inference_mode in [InferenceMode.DEFAULT, InferenceMode.XML]:
             self.llm.stop = ["Observation:", "\nObservation:"]
 
@@ -1166,6 +1188,7 @@ class Agent(Node):
                     try:
                         tool = self._get_tool(func_name)
                         tool_result = self._run_tool(tool, action_input, config, **kwargs)
+
                     except RecoverableAgentException as e:
                         tool_result = f"{type(e).__name__}: {str(e)}"
 
@@ -1243,16 +1266,69 @@ class Agent(Node):
                 ).model_dump()
             )
 
+        logger.warning(f"Agent {self.name} - {self.id}: Reached maximum loops ({self.max_loops})")
         if self.behaviour_on_max_loops == Behavior.RAISE:
             raise MaxLoopsExceededException(f"Reached maximum loops ({self.max_loops}) with no final answer.")
         else:
-            fallback = (
-                f"Could not finalize answer within {self.max_loops} steps. "
-                "Try increasing max_loops or simplifying the request."
-            )
-            if self.streaming.enabled:
-                self.stream_content(fallback, source=self.name, step="answer", config=config)
-            return fallback
+            logger.info(f"Agent {self.name} - {self.id}: Attempting final summarization call after max loops.")
+            final_system_message = Message(role=MessageRole.SYSTEM, content=REACT_MAX_LOOPS_PROMPT)
+            final_messages = [final_system_message] + self._prompt.messages[1:]
+            try:
+                final_llm_result = self._run_llm(
+                    messages=final_messages,
+                    config=config,
+                    schema=None,
+                    stop=None,
+                    **kwargs,
+                )
+                final_output_text = final_llm_result.output.get("content", "")
+
+                answer_match = re.search(r"<answer>(.*?)</answer>", final_output_text, re.DOTALL)
+                if answer_match:
+                    final_answer = answer_match.group(1).strip()
+                else:
+                    logger.warning(
+                        f"Agent {self.name} - {self.id}: Final summarization call "
+                        f"did not produce <answer> tags. Using full output."
+                    )
+                    final_answer = final_output_text.strip()
+
+                if not final_answer:
+                    final_answer = (
+                        "Could not finalize answer within the maximum number of steps. "
+                        "Consider increasing max_loops, reviewing tool settings, or revising the input."
+                    )
+
+                logger.info(
+                    f"Agent {self.name} - {self.id}: Final answer after"
+                    f" max loops summarization: {final_answer[:200]}..."
+                )
+
+                self._intermediate_steps[self.max_loops + 1] = AgentIntermediateStep(
+                    input_data={"prompt": final_messages},
+                    model_observation=AgentIntermediateStepModelObservation(initial=final_output_text),
+                    final_answer=final_answer,
+                ).model_dump()
+
+                if self.streaming.enabled:
+                    self.stream_content(
+                        final_answer, source=self.name, step="answer", config=config, by_tokens=True, **kwargs
+                    )
+
+                return final_answer
+
+            except Exception as final_call_e:
+                logger.error(f"Agent {self.name} - {self.id}: Error during final summarization call: {final_call_e}")
+                fallback_message = (
+                    f"Could not finalize answer within {self.max_loops} steps, "
+                    f"and the final summarization attempt failed. "
+                    "Try increasing max_loops or simplifying the request."
+                )
+                if self.streaming.enabled:
+                    self.stream_content(
+                        fallback_message, source=self.name, step="answer", config=config, by_tokens=True, **kwargs
+                    )
+                return fallback_message
 
     ############################################################################
     # ReAct Parsing Helpers
