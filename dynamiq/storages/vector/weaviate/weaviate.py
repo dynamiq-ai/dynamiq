@@ -93,6 +93,7 @@ class WeaviateVectorStore:
         create_if_not_exist: bool = False,
         content_key: str = "content",
         tenant_name: str | None = None,
+        alpha: float = 0.5,
     ):
         """
         Initialize a new instance of WeaviateDocumentStore and connect to the
@@ -108,6 +109,8 @@ class WeaviateVectorStore:
                 storage.
             tenant_name (str | None): The name of the tenant to use for all operations.
                 If provided, multi-tenancy will be enabled for the collection.
+            alpha (float): The alpha value used for hybrid retrieval operations. Controls
+                the balance between keyword and vector search. Defaults to 0.5.
         """
         # Validate and normalize the index name
         index_name = self._fix_and_validate_index_name(index_name)
@@ -123,6 +126,7 @@ class WeaviateVectorStore:
         # Store multi-tenancy configuration
         self._multi_tenancy_enabled = tenant_name is not None
         self.content_key = content_key
+        self.alpha = alpha
 
         # Create collection if needed or validate existing collection
         if not self.client.collections.exists(collection_name):
@@ -821,6 +825,7 @@ class WeaviateVectorStore:
         """
         properties = [p.name for p in self._collection.config.get().properties]
 
+        query_alpha = self.alpha if alpha is None else alpha
         result = self._collection.query.hybrid(
             query=query,
             vector=query_embedding,
@@ -830,7 +835,7 @@ class WeaviateVectorStore:
             query_properties=[content_key or self.content_key],
             return_properties=properties,
             return_metadata=["score"],
-            alpha=alpha,
+            alpha=query_alpha,
             fusion_type=fusion_type,
         )
 

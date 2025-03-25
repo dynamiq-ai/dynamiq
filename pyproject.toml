@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "dynamiq"
-version = "0.11.1"
+version = "0.12.2"
 description = "Dynamiq is an orchestration framework for agentic AI and LLM applications"
 authors = ["Dynamiq Team <hello@getdynamiq.ai>"]
 license = "Apache License 2.0"
@@ -30,7 +30,7 @@ google-generativeai = "~0.5.0"
 google-cloud-aiplatform = "~1.47.0"
 litellm = "1.59.12"
 requests = "~2.31.0"
-RestrictedPython = "~7.1"
+RestrictedPython = "~8.0"
 jsonpath-ng = "~1.6.1"
 jsonpickle = "~3.0.3"
 pinecone-client = "~3.2.2"

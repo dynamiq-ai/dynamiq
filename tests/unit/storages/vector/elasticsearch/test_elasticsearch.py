@@ -99,7 +99,7 @@ def test_delete_documents_by_file_id(es_vector_store, mock_es_client, mock_es_fi
     with patch(
         "dynamiq.storages.vector.elasticsearch.elasticsearch.create_file_id_filter", return_value=mock_es_filters
     ):
-        es_vector_store.delete_document_by_file_id(file_id)
+        es_vector_store.delete_documents_by_file_id(file_id)
     norm_filters = {"must": [{"match": {"company": "BMW"}}, {"range": {"year": {"gt": 2010}}}]}
 
     mock_es_client.delete_by_query.assert_called_once_with(
@@ -108,10 +108,12 @@ def test_delete_documents_by_file_id(es_vector_store, mock_es_client, mock_es_fi
 
 
 def test_write_documents(es_vector_store, mock_es_client):
-    mock_es_client.bulk.return_value = {"upsert_count": 2}
+    mock_es_client.bulk.return_value.raw = {
+        "items": [{"index": {"_shards": {"total": 2, "successful": 2, "failed": 0}}}]
+    }
     documents = [
-        Document(id="123", content="Document 1", embedding=[0.1, 0.2], metadata={"type": "test"}),
-        Document(id="234", content="Document 2", embedding=[0.3, 0.4], metadata={"type": "test"}),
+        Document(id="123", content="Document 1", embedding=[0.1] * 1537, metadata={"type": "test"}),
+        Document(id="234", content="Document 2", embedding=[0.3] * 1537, metadata={"type": "test"}),
     ]
     assert es_vector_store.write_documents(documents, policy="overwrite") == 2
     mock_es_client.bulk.assert_called_once()

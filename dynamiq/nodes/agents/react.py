@@ -31,78 +31,90 @@ and you are responsible for using them in any order you choose to complete the t
 {tool_description}
 """
 
-REACT_BLOCK_NO_TOOLS = "You do not have access to any tools."
+REACT_BLOCK_NO_TOOLS = """Always follow this exact format in your responses:
 
-REACT_BLOCK_XML_INSTRUCTIONS = """
-Here is how you will think about the user's request
+Thought: [Your detailed reasoning about the user's question]
+Answer: [Your complete answer to the user's question]
+
+IMPORTANT RULES:
+- ALWAYS start with "Thought:" to explain your reasoning process
+- Provide a clear, direct answer after your thought
+- If you cannot fully answer, explain why in your thought
+- Be thorough and helpful in your response
+- Do not mention tools or actions since you don't have access to any
+"""
+
+REACT_BLOCK_XML_INSTRUCTIONS = """Always use this exact XML format in your responses:
 <output>
     <thought>
-        Here you reason about the next step
+        [Your detailed reasoning about what to do next]
     </thought>
     <action>
-        Here you choose the tool to use from [{tools_name}]
+        [Tool name from ONLY [{tools_name}]]
     </action>
     <action_input>
-        Here you provide the input to the tool, correct JSON format
+        [JSON input for the tool]
     </action_input>
 </output>
 
-REMEMBER:
-* Inside 'action' provide just name of one tool from this list: [{tools_name}]. Don't wrap it with <>.
-* Each 'action' has its own input format strictly adhere to it.
+After each action, you'll receive:
+Observation: [Result from the tool]
 
-After each action, the user will provide an "Observation" with the result.
-Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
-When you have sufficient information, provide your final answer in one of these two formats:
-If you can answer the request:
+When you have enough information to provide a final answer:
 <output>
     <thought>
-        I can answer without using any tools
+        [Your reasoning for the final answer]
     </thought>
     <answer>
-        Your answer here
+        [Your complete answer to the user's question]
     </answer>
 </output>
 
-If you cannot answer the request:
+For questions that don't require tools:
 <output>
     <thought>
-        I cannot answer with the tools I have
+        [Your reasoning about the question]
     </thought>
     <answer>
-        Explanation of why you cannot answer
+        [Your direct response]
     </answer>
 </output>
+
+IMPORTANT RULES:
+- ALWAYS include <thought> tags with detailed reasoning
+- For tool use, include action and action_input tags
+- For direct answers, only include thought and answer tags
+- Ensure action_input contains valid JSON with double quotes
+- Properly close all XML tags
+- Do not use markdown formatting inside XML
 """  # noqa: E501
 
 
-REACT_BLOCK_INSTRUCTIONS = """Always structure your responses in the following format:
-Thought: [Your reasoning for the next step]
-Action: [The tool you choose to use, if any, from ONLY [{tools_name}]]
-Action Input: [The input you provide to the tool]
-Remember:
-- Each tool has its specific input format you have strickly adhere to it.
-- Avoid using triple quotes (multi-line strings, docstrings) when providing multi-line code.
-- Action Input must be in JSON format.
-- Always begin each response with a 'Thought' explaining your reasoning.
-- If you use a tool, follow the 'Thought' with an 'Action' (chosen from the available tools) and an 'Action Input'.
-- After each action, the user will provide an 'Observation' with the result.
-- Continue this Thought/Action/Action Input/Observation sequence until you have enough information to answer the request.
+REACT_BLOCK_INSTRUCTIONS = """Always follow this exact format in your responses:
 
-When you have sufficient information, provide your final answer in one of these two formats:
-If you can answer the request:
-Thought: I can answer without using any tools
-Answer: [Your answer here]
+Thought: [Your detailed reasoning about what to do next]
+Action: [Tool name from ONLY [{tools_name}]]
+Action Input: [JSON input for the tool]
 
-If you cannot answer the request:
-Thought: I cannot answer with the tools I have
-Answer: [Explanation of why you cannot answer]
+After each action, you'll receive:
+Observation: [Result from the tool]
 
-Remember:
-- Always start with a Thought.
-- In Thought provide your reasoning about your action.
-- Never use markdown code markers in your response.
+When you have enough information to provide a final answer:
+Thought: [Your reasoning for the final answer]
+Answer: [Your complete answer to the user's question]
 
+For questions that don't require tools:
+Thought: [Your reasoning about the question]
+Answer: [Your direct response]
+
+IMPORTANT RULES:
+- ALWAYS start with "Thought:" even for simple responses
+- Ensure Action Input is valid JSON without markdown formatting
+- Use proper JSON syntax with double quotes for keys and string values
+- Never use markdown code blocks (```) around your JSON
+- JSON must be properly formatted with correct commas and brackets
+- Only use tools from the provided list
+- If you can answer directly, use only Thought followed by Answer
 """  # noqa: E501
 
 
@@ -122,10 +134,12 @@ Structure you responses in JSON format.
 action: [The tool you choose to use, if any from ONLY [{tools_name}]],
 action_input: [JSON input in correct format you provide to the tool]}}
 
-Remember:
-- Each tool has is specific input format you have strickly adhere to it.
-- In action_input you have to provide input in JSON format.
+IMPORTANT RULES:
+- You MUST ALWAYS include "thought" as the FIRST field in your JSON
+- Each tool has a specific input format you must strictly follow
+- In action_input field, provide properly formatted JSON with double quotes
 - Avoid using extra backslashes
+- Do not use markdown code blocks around your JSON
 """  # noqa: E501
 
 
@@ -140,26 +154,38 @@ Call this function if initial user input does not have any actionable request.
 
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
-Always structure your responses in the following format:
-Thought: [Your reasoning for why you cannot fully answer the initial question]
-Observation: [Answer to the initial question or part of it]
-- Only include information relevant to the main request.
-- Always start each response with a 'Thought' explaining your reasoning.
-- After each action, the user will provide an 'Observation' with the result.
-- Continue this Thought/Action/Action Input/Observation sequence until you have enough information to fully answer the request.
+Always structure your responses in this exact format:
 
-When you have sufficient information, provide your final answer in one of these formats:
-If you can answer the request:
-Thought: I can answer without using any tools
-Answer: [Your answer here]
-If you cannot answer the request:
-Thought: I cannot answer with the tools I have
-Answer: [Explanation of why you cannot answer]
+Thought: [Your detailed reasoning about the user's question]
+Answer: [Your complete response to the user's question]
 
-Remember:
-- Always begin with a Thought.
-- Do not use markdown code markers in your response."
+IMPORTANT RULES:
+- ALWAYS begin with "Thought:" to show your reasoning process
+- Use the "Thought" section to analyze the question and plan your response
+- Only after thinking through the problem, provide your answer
+- If you cannot fully answer, explain why in your thinking
+- Be thorough and helpful in your response
+- Do not mention tools or actions as you don't have access to any
+
 """  # noqa: E501
+
+REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in your responses:
+<output>
+    <thought>
+        [Your detailed reasoning about the question]
+    </thought>
+    <answer>
+        [Your direct response to the user's question]
+    </answer>
+</output>
+
+IMPORTANT RULES:
+- ALWAYS include <thought> tags with detailed reasoning
+- Only use thought and answer tags
+- Properly close all XML tags
+- Do not use markdown formatting inside XML
+- Do not mention tools or actions since you don't have access to any
+"""
 
 
 REACT_BLOCK_OUTPUT_FORMAT = (
@@ -261,7 +287,7 @@ class ReActAgent(Agent):
         """
         logger.info(
             "\n------------------------------------------\n"
-            f"Agent {self.name}: Loop {loop_num + 1}\n"
+            f"Agent {self.name}: Loop {loop_num}\n"
             f"Final answer: {final_output}"
             "\n------------------------------------------\n"
         )
@@ -292,6 +318,22 @@ class ReActAgent(Agent):
         thought = self.parse_xml_content(output_content, "thought")
         action = self.parse_xml_content(output_content, "action")
         action_input_text = self.parse_xml_content(output_content, "action_input")
+
+        if not thought or not action or not action_input_text:
+            missing = []
+            if not thought:
+                missing.append("thought")
+            if not action:
+                missing.append("action")
+            if not action_input_text:
+                missing.append("action_input")
+
+            error_message = (
+                f"Error: Missing required XML tags: {', '.join(missing)}. "
+                "Your response must include complete <output>, <thought>, <action>, "
+                "and <action_input> tags."
+            )
+            raise ActionParsingException(error_message, recoverable=True)
 
         try:
             action_input = json.loads(action_input_text)
@@ -354,14 +396,14 @@ class ReActAgent(Agent):
                 action_input = json.loads(action_input)
                 return self._parse_thought(output), action, action_input
             else:
-                logger.error("ActionParsingException")
                 raise ActionParsingException()
         except Exception as e:
             raise ActionParsingException(
                 (
-                    f"Error {e}: Unable to parse action and action input."
-                    "Please rewrite using the correct Action/Action Input format"
+                    f"Error {e}: Unable to parse thought, action and action input or thought and answer."
+                    "Please rewrite using the correct Thought/Action/Action Input format"
                     "with action input as a valid dictionary."
+                    "Or in case of direct answer or clarification, use Thought/Answer format."
                     "Ensure all quotes are included."
                 ),
                 recoverable=True,
@@ -381,6 +423,7 @@ class ReActAgent(Agent):
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
+        history_messages: list[Message] | None = None,
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> str:
@@ -397,6 +440,7 @@ class ReActAgent(Agent):
         """
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
+
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(
@@ -404,18 +448,18 @@ class ReActAgent(Agent):
                 input_formats=self.generate_input_formats(self.tools),
             ),
         )
-        self._prompt.messages = [system_message, input_message]
+
+        if history_messages:
+            self._prompt.messages = [system_message, *history_messages, input_message]
+        else:
+            self._prompt.messages = [system_message, input_message]
 
         stop_sequences = []
-
-        if self.inference_mode == InferenceMode.XML:
-            stop_sequences.extend(["<observation>"])
-        elif self.inference_mode == InferenceMode.DEFAULT:
-            stop_sequences.extend(["Observation: "])
+        if self.inference_mode in [InferenceMode.XML, InferenceMode.DEFAULT]:
+            stop_sequences.extend(["Observation: ", "\nObservation:"])
         self.llm.stop = stop_sequences
 
-        for loop_num in range(self.max_loops):
-
+        for loop_num in range(1, self.max_loops + 1):
             try:
                 llm_result = self._run_llm(
                     self._prompt.messages,
@@ -426,20 +470,22 @@ class ReActAgent(Agent):
                 )
                 action, action_input = None, None
                 llm_generated_output = ""
+                llm_reasoning = (
+                    llm_result.output.get("content")[:200]
+                    if llm_result.output.get("content")
+                    else str(llm_result.output.get("tool_calls", ""))[:200]
+                )
+                logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, " f"reasoning:\n{llm_reasoning}...")
 
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
-                        llm_generated_output = llm_result.output["content"]
-
-                        logger.info(
-                            f"Agent {self.name} - {self.id}: Loop {loop_num + 1}, reasoning:\n{llm_generated_output}"
-                        )
+                        llm_generated_output = llm_result.output.get("content", "")
 
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
 
                         if "Answer:" in llm_generated_output:
                             final_answer = self._extract_final_answer(llm_generated_output)
-                            self.log_final_output(final_answer, loop_num + 1)
+                            self.log_final_output(final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             if self.streaming.enabled:
                                 self.stream_content(
@@ -453,13 +499,13 @@ class ReActAgent(Agent):
                             return final_answer
 
                         thought, action, action_input = self._parse_action(llm_generated_output)
-                        self.log_reasoning(thought, action, action_input, loop_num + 1)
+                        self.log_reasoning(thought, action, action_input, loop_num)
 
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content={"thought": thought, "action": action, "action_input": action_input},
                                 source=self.name,
-                                step=f"reasoning_{loop_num + 1}",
+                                step=f"reasoning_{loop_num}",
                                 config=config,
                                 by_tokens=False,
                                 **kwargs,
@@ -486,7 +532,7 @@ class ReActAgent(Agent):
 
                         if action == "provide_final_answer":
                             final_answer = llm_generated_output_json["answer"]
-                            self.log_final_output(final_answer, loop_num + 1)
+                            self.log_final_output(final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             if self.streaming.enabled:
                                 self.stream_content(
@@ -501,13 +547,13 @@ class ReActAgent(Agent):
                         thought = llm_generated_output_json["thought"]
                         action_input = llm_generated_output_json["action_input"]
 
-                        self.log_reasoning(thought, action, action_input, loop_num + 1)
+                        self.log_reasoning(thought, action, action_input, loop_num)
 
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content={"thought": thought, "action": action, "action_input": action_input},
                                 source=self.name,
-                                step=f"reasoning_{loop_num + 1}",
+                                step=f"reasoning_{loop_num}",
                                 config=config,
                                 by_tokens=False,
                                 **kwargs,
@@ -526,7 +572,7 @@ class ReActAgent(Agent):
                         action_input = llm_generated_output_json["action_input"]
 
                         if action == "finish":
-                            self.log_final_output(action_input, loop_num + 1)
+                            self.log_final_output(action_input, loop_num)
                             self.tracing_final(loop_num, action_input, config, kwargs)
                             if self.streaming.enabled:
                                 self.stream_content(
@@ -539,13 +585,13 @@ class ReActAgent(Agent):
                             return action_input
 
                         action_input = json.loads(action_input)
-                        self.log_reasoning(thought, action, action_input, loop_num + 1)
+                        self.log_reasoning(thought, action, action_input, loop_num)
 
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content={"thought": thought, "action": action, "action_input": action_input},
                                 source=self.name,
-                                step=f"reasoning_{loop_num + 1}",
+                                step=f"reasoning_{loop_num}",
                                 config=config,
                                 by_tokens=False,
                                 **kwargs,
@@ -560,7 +606,7 @@ class ReActAgent(Agent):
 
                         if "<answer>" in llm_generated_output:
                             final_answer = self._extract_final_answer_xml(llm_generated_output)
-                            self.log_final_output(final_answer, loop_num + 1)
+                            self.log_final_output(final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             if self.streaming.enabled:
                                 self.stream_content(
@@ -573,13 +619,13 @@ class ReActAgent(Agent):
                             return final_answer
 
                         thought, action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
-                        self.log_reasoning(thought, action, action_input, loop_num + 1)
+                        self.log_reasoning(thought, action, action_input, loop_num)
 
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content={"thought": thought, "action": action, "action_input": action_input},
                                 source=self.name,
-                                step=f"reasoning_{loop_num + 1}",
+                                step=f"reasoning_{loop_num}",
                                 config=config,
                                 by_tokens=False,
                                 **kwargs,
@@ -619,7 +665,15 @@ class ReActAgent(Agent):
                         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
 
             except ActionParsingException as e:
-                self._prompt.messages.append(Message(role=MessageRole.USER, content=f"{type(e).__name__}: {e}"))
+                self._prompt.messages.append(
+                    Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output)
+                )
+                self._prompt.messages.append(
+                    Message(
+                        role=MessageRole.ASSISTANT,
+                        content=f"Fix the reasoning error: {type(e).__name__}: {e}",
+                    )
+                )
                 continue
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
@@ -780,8 +834,8 @@ class ReActAgent(Agent):
         super()._init_prompt_blocks()
 
         prompt_blocks = {
-            "tools": REACT_BLOCK_TOOLS if self.tools else REACT_BLOCK_NO_TOOLS,
-            "instructions": REACT_BLOCK_INSTRUCTIONS if self.tools else REACT_BLOCK_INSTRUCTIONS_NO_TOOLS,
+            "tools": "" if not self.tools else REACT_BLOCK_TOOLS,
+            "instructions": REACT_BLOCK_INSTRUCTIONS_NO_TOOLS if not self.tools else REACT_BLOCK_INSTRUCTIONS,
             "output_format": REACT_BLOCK_OUTPUT_FORMAT,
         }
 
@@ -789,16 +843,16 @@ class ReActAgent(Agent):
             case InferenceMode.FUNCTION_CALLING:
                 self.generate_function_calling_schemas()
                 prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING
-                prompt_blocks["tools"] = REACT_BLOCK_TOOLS_NO_FORMATS
+                if self.tools:
+                    prompt_blocks["tools"] = REACT_BLOCK_TOOLS_NO_FORMATS
 
             case InferenceMode.STRUCTURED_OUTPUT:
                 self.generate_structured_output_schemas()
                 prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT
-            case InferenceMode.DEFAULT:
-                if not self.tools:
-                    prompt_blocks["tools"] = REACT_BLOCK_NO_TOOLS
-                    prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_NO_TOOLS
+
             case InferenceMode.XML:
-                prompt_blocks["instructions"] = REACT_BLOCK_XML_INSTRUCTIONS
+                prompt_blocks["instructions"] = (
+                    REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS if not self.tools else REACT_BLOCK_XML_INSTRUCTIONS
+                )
 
         self._prompt_blocks.update(prompt_blocks)
