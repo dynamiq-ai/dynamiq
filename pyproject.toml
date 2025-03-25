@@ -51,7 +51,7 @@ pymilvus = "~2.4.3"
 psycopg = { version = "~3.2.3", extras = ["binary"] }
 pgvector = "~0.3.6"
 mysql-connector-python = "~9.0.0"
-snowflake-connector-python = ">=3.12.4,<3.14.0"
+snowflake-connector-python = "~3.13.2"
 rapidfuzz = "~3.11.0"
 sacrebleu = "~2.5.1"
 rouge-score = "~0.1.2"
