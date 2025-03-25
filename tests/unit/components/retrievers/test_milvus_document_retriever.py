@@ -31,7 +31,7 @@ class TestMilvusDocumentRetriever:
             embedding_key=None,
             return_embeddings=True,
         )
-        print(result)
+
         expected_documents = [
             Document(id="1", content="Document 1", embedding=[0.1, 0.2, 0.3]),
             Document(id="2", content="Document 2", embedding=[0.4, 0.5, 0.6]),
