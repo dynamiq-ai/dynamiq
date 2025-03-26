@@ -122,12 +122,12 @@ REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient informati
 If you can answer on request:
 {{thought: [Why you can provide final answer],
 action: finish
-action_input: [Response for request]}}
+action_input: [Response for initial request]}}
 
 If you can't answer on request:
 {{thought: [Why you can not answer on request],
 action: finish
-answer: [Response for request]}}
+action_input: [Response for initial request]}}
 
 Structure you responses in JSON format.
 {{thought: [Your reasoning about the next step],
@@ -140,6 +140,7 @@ IMPORTANT RULES:
 - In action_input field, provide properly formatted JSON with double quotes
 - Avoid using extra backslashes
 - Do not use markdown code blocks around your JSON
+- Never keep action_input empty.
 """  # noqa: E501
 
 
