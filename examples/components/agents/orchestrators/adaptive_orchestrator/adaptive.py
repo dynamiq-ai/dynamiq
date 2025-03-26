@@ -1,9 +1,9 @@
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.connections import Tavily as TavilyConnection
 from dynamiq.connections import ZenRows as ZenRowsConnection
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.tavily import TavilyTool
 from dynamiq.nodes.tools.zenrows import ZenRowsTool
@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=1)
 
-    agent_coding = ReActAgent(
+    agent_coding = Agent(
         name="Coding Agent",
         llm=llm,
         tools=[python_tool],
@@ -40,7 +40,7 @@ if __name__ == "__main__":
         inference_mode=InferenceMode.DEFAULT,
     )
 
-    agent_searcher = ReActAgent(
+    agent_searcher = Agent(
         name="Searcher Agent",
         llm=llm,
         tools=[tavily_tool, zenrows_tool],

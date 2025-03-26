@@ -13,10 +13,9 @@ from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.base import Agent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
@@ -130,7 +129,7 @@ def run_workflow(
     tool_search = ScaleSerpTool(connection=search_connection)
 
     # Create agents
-    agent_researcher = ReActAgent(
+    agent_researcher = Agent(
         name="Research Analyst",
         llm=llm_react_agent,
         tools=[tool_search],

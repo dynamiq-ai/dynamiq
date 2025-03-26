@@ -2,7 +2,7 @@ from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import E2B, ScaleSerp
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.in_memory import InMemory
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
@@ -10,7 +10,7 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from examples.llm_setup import setup_llm
 
 
-def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str, streaming_tokens: bool) -> ReActAgent:
+def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str, streaming_tokens: bool) -> Agent:
     """
     Initializes an AI agent with a specified role and streaming configuration.
     """
@@ -21,7 +21,7 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str, s
     streaming_config = StreamingConfig(enabled=streaming_enabled, mode=mode, by_tokens=streaming_tokens)
     tool_search = ScaleSerpTool(connection=ScaleSerp())
     tool_code = E2BInterpreterTool(connection=E2B())
-    agent = ReActAgent(
+    agent = Agent(
         name="Agent",
         llm=llm,
         role=agent_role,
@@ -33,7 +33,7 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str, s
     return agent
 
 
-def generate_agent_response(agent: ReActAgent, user_input: str):
+def generate_agent_response(agent: Agent, user_input: str):
     """
     Processes the user input using the agent. Supports both streaming and non-streaming responses.
     """

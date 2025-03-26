@@ -7,7 +7,7 @@ connections:
 
 nodes:
   memory-agent:
-    type: dynamiq.nodes.agents.simple.SimpleAgent
+    type: dynamiq.nodes.agents.Agent
     llm:
       id: memory-agent-llm
       type: dynamiq.nodes.llms.OpenAI

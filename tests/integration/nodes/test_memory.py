@@ -5,7 +5,7 @@ import pytest
 from dynamiq import Workflow, connections, flows, prompts
 from dynamiq.memory import Memory
 from dynamiq.memory.backends import InMemory
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.prompts import MessageRole
 from dynamiq.runnables import RunnableStatus
@@ -41,7 +41,7 @@ def openai_node(openai_connection):
 
 def test_workflow_with_agent_and_in_memory_memory(openai_node):
     memory = Memory(backend=InMemory())
-    agent = SimpleAgent(
+    agent = Agent(
         name="Agent",
         llm=openai_node,
         role=AGENT_ROLE,

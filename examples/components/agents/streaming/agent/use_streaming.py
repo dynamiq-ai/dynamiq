@@ -1,7 +1,7 @@
 from dynamiq import Workflow
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -27,7 +27,7 @@ def run_workflow_with_streaming():
     )
 
     # Set up ReActAgent with full streaming (reasoning, tools, answers)
-    react_agent = ReActAgent(
+    react_agent = Agent(
         name="Research Assistant",
         id="research_agent",
         llm=llm,
