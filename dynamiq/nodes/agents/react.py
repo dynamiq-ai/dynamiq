@@ -762,17 +762,24 @@ class ReActAgent(Agent):
         self.format_schema = schema
 
     @staticmethod
-    def filter_format_type(param_type: str | type) -> str:
-        """Filters proper type for a function calling schema."""
+    def filter_format_type(param_annotation: Any) -> list[str]:
+        """
+        Filters proper type for a function calling schema.
 
-        if get_origin(param_type) in (Union, types.UnionType):
-            return get_args(param_type)
+        Args:
+            param_annotation (Any): Parameter annotation.
+        Returns:
+            list[str]: List of parameter types that describe provided annotation.
+        """
 
-        return [param_type]
+        if get_origin(param_annotation) in (Union, types.UnionType):
+            return get_args(param_annotation)
+
+        return [param_annotation]
 
     def generate_property_schema(self, properties, name, field):
         if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
-            description = field.description or "No description"
+            description = field.description or "No description."
 
             description += f" Defaults to: {field.default}." if field.default and not field.is_required() else ""
             params = self.filter_format_type(field.annotation)
@@ -788,12 +795,12 @@ class ReActAgent(Agent):
 
                 elif issubclass(param, Enum):
                     element_type = TYPE_MAPPING.get(
-                        self.filter_format_type(type(list(field.annotation.__members__.values())[0].value))[0]
+                        self.filter_format_type(type(list(param.__members__.values())[0].value))[0]
                     )
                     properties[name]["type"].append(element_type)
-                    properties[name]["enum"] = [field.value for field in field.annotation.__members__.values()]
+                    properties[name]["enum"] = [field.value for field in param.__members__.values()]
 
-                elif param.__origin__ is list:
+                elif getattr(param, "__origin__", None) is list:
                     properties[name]["type"].append("array")
                     properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
 
