@@ -5,20 +5,21 @@ import pytest
 from dynamiq import Workflow, connections
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.llms import Gemini
+from dynamiq.nodes.llms import FireworksAI
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 
 
-def get_gemini_workflow(
+def get_fireworksai_workflow(
     model: str,
-    connection: connections.Gemini,
+    connection: connections.FireworksAI,
 ):
-    wf_gemini = Workflow(
+    wf_fireworksai = Workflow(
+        id=str(uuid.uuid4()),
         flow=Flow(
             nodes=[
-                Gemini(
-                    name="Gemini",
+                FireworksAI(
+                    name="FireworksAI",
                     model=model,
                     connection=connection,
                     prompt=Prompt(
@@ -35,24 +36,24 @@ def get_gemini_workflow(
         ),
     )
 
-    return wf_gemini
+    return wf_fireworksai
 
 
 @pytest.mark.parametrize(
     ("model", "expected_model"),
-    [("gemini/gemini-pro", "gemini/gemini-pro"), ("gemini-pro", "gemini/gemini-pro")],
+    [
+        ("fireworks_ai/mixtral-8x7b-instruct", "fireworks_ai/mixtral-8x7b-instruct"),
+        ("mixtral-8x7b-instruct", "fireworks_ai/mixtral-8x7b-instruct"),
+    ],
 )
-def test_workflow_with_gemini_llm_and_gemini_ai_studio_conn(
-    mock_llm_response_text, mock_llm_executor, model, expected_model
-):
-    model = model
-    connection = connections.Gemini(
+def test_workflow_with_fireworksai_llm(mock_llm_response_text, mock_llm_executor, model, expected_model):
+    connection = connections.FireworksAI(
         id=str(uuid.uuid4()),
         api_key="api_key",
     )
-    wf_gemini_ai_studio = get_gemini_workflow(model=model, connection=connection)
+    wf_fireworks_ai = get_fireworksai_workflow(model=model, connection=connection)
 
-    response = wf_gemini_ai_studio.run(
+    response = wf_fireworks_ai.run(
         input_data={},
         config=RunnableConfig(callbacks=[TracingCallbackHandler()]),
     )
@@ -62,7 +63,7 @@ def test_workflow_with_gemini_llm_and_gemini_ai_studio_conn(
         input={},
         output={"content": mock_llm_response_text},
     ).to_dict()
-    expected_output = {wf_gemini_ai_studio.flow.nodes[0].id: expected_result}
+    expected_output = {wf_fireworks_ai.flow.nodes[0].id: expected_result}
     assert response == RunnableResult(
         status=RunnableStatus.SUCCESS,
         input={},
@@ -73,16 +74,16 @@ def test_workflow_with_gemini_llm_and_gemini_ai_studio_conn(
         tools=None,
         tool_choice=None,
         model=expected_model,
-        messages=wf_gemini_ai_studio.flow.nodes[0].prompt.format_messages(),
+        messages=wf_fireworks_ai.flow.nodes[0].prompt.format_messages(),
         stream=False,
         temperature=0.1,
-        api_key=connection.api_key,
         max_tokens=1000,
+        stop=None,
         seed=None,
         frequency_penalty=None,
         presence_penalty=None,
         top_p=None,
-        stop=None,
+        api_key=connection.api_key,
         response_format=None,
         drop_params=True,
     )
