@@ -37,6 +37,7 @@ class MilvusDocumentRetriever:
     def run(
         self,
         query_embedding: list[float],
+        query: str | None = None,
         exclude_document_embeddings: bool = True,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
@@ -49,6 +50,7 @@ class MilvusDocumentRetriever:
         Args:
             query_embedding (List[float]): The embedding vector of the query for which similar documents are to be
             retrieved.
+            query(Optional[str]): The query string to search for (when using hybrid search). Defaults to None.
             exclude_document_embeddings (bool, optional): Specifies whether to exclude the embeddings of the retrieved
             documents from the output.
             top_k (int, optional): The maximum number of documents to return. Defaults to None.
@@ -64,16 +66,23 @@ class MilvusDocumentRetriever:
         top_k = top_k or self.top_k
         filters = filters or self.filters
 
-        docs = self.vector_store.search_embeddings(
-            query_embeddings=query_embeddings,
-            filters=filters,
-            top_k=top_k,
-            content_key=content_key,
-            embedding_key=embedding_key,
-        )
+        if query is not None:
+            docs = self.vector_store._hybrid_retrieval(
+                query=query,
+                query_embeddings=query_embeddings,
+                top_k=top_k,
+                content_key=content_key,
+                embedding_key=embedding_key,
+                return_embeddings=not exclude_document_embeddings,
+            )
+        else:
+            docs = self.vector_store._embedding_retrieval(
+                query_embeddings=query_embeddings,
+                filters=filters,
+                top_k=top_k,
+                content_key=content_key,
+                embedding_key=embedding_key,
+                return_embeddings=not exclude_document_embeddings,
+            )
 
-        # Optionally exclude embeddings from the retrieved documents
-        if exclude_document_embeddings:
-            for doc in docs:
-                doc.embedding = None
         return {"documents": docs}
