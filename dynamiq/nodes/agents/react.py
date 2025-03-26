@@ -122,12 +122,12 @@ REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient informati
 If you can answer on request:
 {{thought: [Why you can provide final answer],
 action: finish
-action_input: [Response for request]}}
+action_input: [Response for initial request]}}
 
 If you can't answer on request:
 {{thought: [Why you can not answer on request],
 action: finish
-answer: [Response for request]}}
+action_input: [Response for initial request]}}
 
 Structure you responses in JSON format.
 {{thought: [Your reasoning about the next step],
@@ -140,6 +140,7 @@ IMPORTANT RULES:
 - In action_input field, provide properly formatted JSON with double quotes
 - Avoid using extra backslashes
 - Do not use markdown code blocks around your JSON
+- Never keep action_input empty.
 """  # noqa: E501
 
 
@@ -762,35 +763,47 @@ class ReActAgent(Agent):
         self.format_schema = schema
 
     @staticmethod
-    def filter_format_type(param_type: str | type) -> str:
-        """Filters proper type for a function calling schema."""
+    def filter_format_type(param_annotation: Any) -> list[str]:
+        """
+        Filters proper type for a function calling schema.
 
-        if get_origin(param_type) in (Union, types.UnionType):
-            param_type = next((arg for arg in get_args(param_type) if arg is not type(None)), None)
+        Args:
+            param_annotation (Any): Parameter annotation.
+        Returns:
+            list[str]: List of parameter types that describe provided annotation.
+        """
 
-        return param_type
+        if get_origin(param_annotation) in (Union, types.UnionType):
+            return get_args(param_annotation)
+
+        return [param_annotation]
 
     def generate_property_schema(self, properties, name, field):
         if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
-            description = field.description or "No description"
-            description += f" Defaults to: {field.default}." if field.default else ""
-            param = self.filter_format_type(field.annotation)
+            description = field.description or "No description."
 
-            if param_type := TYPE_MAPPING.get(param):
-                properties[name] = {"type": param_type, "description": description}
+            description += f" Defaults to: {field.default}." if field.default and not field.is_required() else ""
+            params = self.filter_format_type(field.annotation)
 
-            elif issubclass(param, Enum):
-                element_type = TYPE_MAPPING.get(
-                    self.filter_format_type(type(list(field.annotation.__members__.values())[0].value))
-                )
-                properties[name] = {
-                    "type": element_type,
-                    "description": description,
-                    "enum": [field.value for field in field.annotation.__members__.values()],
-                }
+            properties[name] = {"type": [], "description": description}
 
-            elif param.__origin__ is list:
-                properties[name] = {"type": "array", "items": {"type": TYPE_MAPPING.get(param.__args__[0])}}
+            for param in params:
+                if param is type(None):
+                    properties[name]["type"].append("null")
+
+                elif param_type := TYPE_MAPPING.get(param):
+                    properties[name]["type"].append(param_type)
+
+                elif issubclass(param, Enum):
+                    element_type = TYPE_MAPPING.get(
+                        self.filter_format_type(type(list(param.__members__.values())[0].value))[0]
+                    )
+                    properties[name]["type"].append(element_type)
+                    properties[name]["enum"] = [field.value for field in param.__members__.values()]
+
+                elif getattr(param, "__origin__", None) is list:
+                    properties[name]["type"].append("array")
+                    properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
