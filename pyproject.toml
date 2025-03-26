@@ -60,7 +60,7 @@ elasticsearch = "~8.12.0"
 numpy = "~1.26.0"
 
 [tool.poetry.group.dev.dependencies]
-setuptools = "~69.1.1"
+setuptools = "~70.0.0"
 pre-commit = "~3.7.0"
 pytest = "~8.1.1"
 pytest-mock = "~3.14.0"
