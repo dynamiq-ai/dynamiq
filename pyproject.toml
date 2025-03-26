@@ -50,7 +50,7 @@ qdrant-client = "~1.11.3"
 pymilvus = "~2.5.6"
 psycopg = { version = "~3.2.3", extras = ["binary"] }
 pgvector = "~0.3.6"
-mysql-connector-python = "~9.0.0"
+mysql-connector-python = ">=9.0,<9.2"
 snowflake-connector-python = "~3.13.2"
 rapidfuzz = "~3.11.0"
 sacrebleu = "~2.5.1"
