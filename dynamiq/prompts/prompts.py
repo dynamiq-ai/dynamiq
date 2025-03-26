@@ -56,11 +56,13 @@ class Message(BaseModel):
         content (str): The content of the message.
         role (MessageRole): The role of the message sender.
         metadata (dict | None): Additional metadata for the message, default is None.
+        prefix (bool | None): Whether the message should be prefixed, default is None.
     """
 
     content: str
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
+    prefix: bool | None = None
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -74,6 +76,7 @@ class Message(BaseModel):
         return Message(
             role=self.role,
             content=self._Template(self.content).render(**kwargs),
+            prefix=self.prefix,
         )
 
 
@@ -353,6 +356,8 @@ class Prompt(BasePrompt):
                 out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
             else:
                 raise ValueError(f"Invalid message type: {type(msg)}")
+
+        print(out)
 
         return out
 
