@@ -357,8 +357,6 @@ class Prompt(BasePrompt):
             else:
                 raise ValueError(f"Invalid message type: {type(msg)}")
 
-        print(out)
-
         return out
 
     def format_tools(self, **kwargs) -> list[dict] | None:
