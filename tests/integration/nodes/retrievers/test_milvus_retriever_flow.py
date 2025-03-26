@@ -34,7 +34,7 @@ def mock_milvus_vector_store(mock_milvus_client, mock_milvus_connection):
 @pytest.fixture
 def mock_search_embeddings(mock_documents):
     with patch(
-        "dynamiq.storages.vector.milvus.milvus.MilvusVectorStore.search_embeddings",
+        "dynamiq.storages.vector.milvus.milvus.MilvusVectorStore._embedding_retrieval",
         return_value=mock_documents,
     ) as mock_search_embeddings:
         yield mock_search_embeddings
@@ -112,4 +112,5 @@ def test_milvus_retrieve_workflow(
         top_k=input_data["top_k"],
         content_key=None,
         embedding_key=None,
+        return_embeddings=False,
     )

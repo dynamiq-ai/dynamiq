@@ -74,6 +74,7 @@ def test_execute(milvus_document_retriever):
         top_k=input_data.top_k,
         content_key=None,
         embedding_key=None,
+        query=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -102,6 +103,7 @@ def test_execute_with_default_filters_and_top_k(milvus_document_retriever):
         top_k=milvus_document_retriever.top_k,
         content_key=None,
         embedding_key=None,
+        query=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
