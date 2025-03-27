@@ -91,11 +91,6 @@ class AgentIntermediateStep(BaseModel):
     final_answer: str | dict | None = None
 
 
-##############################################################################
-# TOOL PARAMS & INPUT SCHEMA
-##############################################################################
-
-
 class ToolParams(BaseModel):
     """
     Defines optional parameters for each tool, or global defaults.
@@ -220,10 +215,6 @@ class Agent(Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
 
-    ############################################################################
-    # Initialization & Validation
-    ############################################################################
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._prompt = Prompt(messages=[])
@@ -258,20 +249,12 @@ class Agent(Node):
                 raise ValueError(f"Model {self.llm.model} does not support structured JSON output.")
         return self
 
-    ############################################################################
-    # Schema Context
-    ############################################################################
-
     def get_context_for_input_schema(self) -> dict:
         """
         Provides context for input schema validation:
         used by AgentInputSchema to check required parameters in the prompt.
         """
         return {"input_message": self.input_message, "role": self.role}
-
-    ############################################################################
-    # Serialization
-    ############################################################################
 
     @property
     def to_dict_exclude_params(self):
@@ -297,53 +280,45 @@ class Agent(Node):
             data["images"] = [{"name": getattr(f, "name", f"image_{i}")} for i, f in enumerate(self.images)]
         return data
 
-    ############################################################################
-    # Prompt Blocks & Generation
-    ############################################################################
-
     def _init_prompt_blocks(self):
         """Initializes prompt blocks and generates mode-specific schemas."""
         # Base blocks and variables
         self._prompt_blocks = {
             "date": "{date}",
-            "tools": "{tool_description}",  # Placeholder, filled later if tools exist
-            "files": "{file_description}",  # Placeholder, filled later if files exist
-            "instructions": "",  # Determined below
-            "output_format": "",  # Optional, can be set
-            "context": "",  # Optional, filled if self.role exists
+            "tools": "{tool_description}",
+            "files": "{file_description}",
+            "instructions": "",
+            "output_format": "",
+            "context": "",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
             "file_description": self.file_description,
             "date": datetime.now().strftime("%d %B %Y"),
-            "tools_name": self.tool_names,  # Needed for instructions
-            "input_formats": self.generate_input_formats(self.tools) if self.tools else "",  # Needed for instructions
+            "tools_name": self.tool_names,
+            "input_formats": self.generate_input_formats(self.tools) if self.tools else "",
         }
 
-        # Determine instructions based on tools and mode
         if not self.tools:
             if self.inference_mode == InferenceMode.XML:
                 instructions = REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS
             else:
                 instructions = REACT_BLOCK_INSTRUCTIONS_NO_TOOLS
-            self._prompt_blocks["tools"] = ""  # No tools block needed
+            self._prompt_blocks["tools"] = ""
         else:
-            # ReAct mode (with tools)
-            self._prompt_blocks["output_format"] = REACT_BLOCK_OUTPUT_FORMAT  # Add this for ReAct
+            self._prompt_blocks["output_format"] = REACT_BLOCK_OUTPUT_FORMAT
 
             if self.inference_mode == InferenceMode.XML:
                 instructions = REACT_BLOCK_XML_INSTRUCTIONS
             elif self.inference_mode == InferenceMode.FUNCTION_CALLING:
                 instructions = REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING
-                self._prompt_blocks["tools"] = REACT_BLOCK_TOOLS_NO_FORMATS  # Use simplified tools block
-                self.generate_function_calling_schemas()  # Generate schemas
+                self._prompt_blocks["tools"] = REACT_BLOCK_TOOLS_NO_FORMATS
+                self.generate_function_calling_schemas()
             elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
                 instructions = REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT
-                # Keep default tools block
-                self.generate_structured_output_schemas()  # Generate schemas
-            else:  # Default ReAct mode
+                self.generate_structured_output_schemas()
+            else:
                 instructions = REACT_BLOCK_INSTRUCTIONS
-                # Keep default tools block
 
         self._prompt_blocks["instructions"] = instructions
 
@@ -378,10 +353,6 @@ class Agent(Node):
         prompt = Template(self.AGENT_PROMPT_TEMPLATE).render(formatted_blocks).strip()
         prompt = re.sub(r"\n{3,}", "\n\n", prompt).strip()
         return textwrap.dedent(prompt)
-
-    ############################################################################
-    # Tool & File Descriptions
-    ############################################################################
 
     @property
     def tool_description(self) -> str:
@@ -420,10 +391,6 @@ class Agent(Node):
         """Remove spaces and special chars from tool name to produce a simpler key."""
         s = s.replace(" ", "-")
         return re.sub(r"[^a-zA-Z0-9_-]", "", s)
-
-    ############################################################################
-    # Function-Calling / Structured-Output Schema Generators
-    ############################################################################
 
     def generate_function_calling_schemas(self):
         """Generate the schemas for function calling, one function per tool, plus a finalize function.
@@ -597,10 +564,6 @@ class Agent(Node):
             logger.warning(f"Error in _filter_format_type: {e}. Defaulting to string type.")
             return str
 
-    ############################################################################
-    # Execution
-    ############################################################################
-
     def execute(
         self,
         input_data: AgentInputSchema,
@@ -701,10 +664,6 @@ class Agent(Node):
         self._intermediate_steps = {}
         self._run_depends = []
 
-    ############################################################################
-    # Memory Retrieval
-    ############################################################################
-
     def retrieve_conversation_history(
         self,
         user_query: str = None,
@@ -757,10 +716,6 @@ class Agent(Node):
             session_id=session_id,
             strategy=self.memory_retrieval_strategy,
         )
-
-    ############################################################################
-    # Core LLM & Tools Execution
-    ############################################################################
 
     def _run_llm(self, messages: list[Message], config: RunnableConfig | None = None, **kwargs) -> Any:
         """
@@ -854,10 +809,6 @@ class Agent(Node):
             else:
                 merged_input[key] = value
                 debug_info.append(f" - from {source}: set {key}={value}")
-
-    ############################################################################
-    # Simple vs React Execution
-    ############################################################################
 
     def _run_agent(
         self,
@@ -979,10 +930,8 @@ class Agent(Node):
             if tool_calls:
                 logger.info(f"Agent {self.name} - {self.id}: Loop {loop_idx} - Tool calls: {str(tool_calls)[:200]}")
 
-            # Log intermediate step
             self.tracing_intermediate(loop_idx, self._prompt.messages, output_text or str(tool_calls))
 
-            # Handle inference modes
             if self.inference_mode == InferenceMode.FUNCTION_CALLING and tool_calls:
                 for _, call_info in tool_calls.items():
                     func_name = call_info["function"]["name"]
@@ -1057,7 +1006,7 @@ class Agent(Node):
                     return final_ans
                 thought, action, action_input = self.parse_xml_and_extract_info(output_text)
 
-            else:  # DEFAULT
+            else:
                 if "Answer:" in output_text:
                     final_ans = self._extract_final_answer(output_text)
                     self.tracing_final(loop_idx, final_ans, config, kwargs)
@@ -1091,7 +1040,6 @@ class Agent(Node):
                     ).model_dump()
                 )
 
-        # Handle max loops exceeded
         logger.warning(f"Agent {self.name} - {self.id}: Reached maximum loops ({self.max_loops})")
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
@@ -1119,9 +1067,6 @@ class Agent(Node):
                 self.stream_content(final_answer, source=self.name, step="answer", config=config, **kwargs)
             return final_answer
 
-    ############################################################################
-    # ReAct Parsing Helpers
-    ############################################################################
     def parse_xml_content(self, text: str, tag: str) -> str:
         """Extract content from XML-like tags."""
         match = re.search(f"<{tag}>(.*?)</{tag}>", text, re.DOTALL)
@@ -1236,10 +1181,6 @@ class Agent(Node):
         match = re.search(r"Answer:\s*(.*)", text, re.DOTALL)
         return match.group(1).strip() if match else text
 
-    ############################################################################
-    # Tool Access
-    ############################################################################
-
     def _get_tool(self, action: str) -> Node:
         """
         Return the Node tool matching the sanitized action name.
@@ -1251,10 +1192,6 @@ class Agent(Node):
                 f"Unknown tool: '{action}'. Use only the available tools: {list(self.tool_by_names.keys())}"
             )
         return tool
-
-    ############################################################################
-    # Streaming Helpers
-    ############################################################################
 
     def stream_content(
         self,
@@ -1333,10 +1270,6 @@ class Agent(Node):
             **kwargs,
         )
         return content
-
-    ############################################################################
-    # Logging & Finalization
-    ############################################################################
 
     def tracing_final(self, loop_num, final_answer, config, kwargs):
         """
