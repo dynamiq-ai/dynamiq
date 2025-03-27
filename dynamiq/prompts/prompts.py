@@ -56,9 +56,10 @@ class Message(BaseModel):
         content (str): The content of the message.
         role (MessageRole): The role of the message sender.
         metadata (dict | None): Additional metadata for the message, default is None.
-        prefix (bool | None): Whether the message should be prefixed, default is None.
+        prefix (bool | None): Optional flag for message prefixing (affects Mistral model behavior).
+            Mostly influences Mistral model Assistant message, learn more here:
+            https://docs.mistral.ai/capabilities/completion/
     """
-
     content: str
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
