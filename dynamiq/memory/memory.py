@@ -102,8 +102,11 @@ class Memory(BaseModel):
             effective_limit = limit if limit is not None else self.message_limit
 
             messages = self.backend.get_all(limit=effective_limit)
-            logger.debug(f"Memory {self.backend.name}: Retrieved {len(messages)} messages")
-            return messages
+            retrieved_messages = [Message(**msg.model_dump()) for msg in messages]
+            if retrieved_messages and retrieved_messages[-1].role == MessageRole.ASSISTANT:
+                retrieved_messages[-1].prefix = True
+            logger.debug(f"Memory {self.backend.name}: Retrieved {len(retrieved_messages)} messages")
+            return retrieved_messages
         except Exception as e:
             logger.error(f"Unexpected error retrieving messages: {e}")
             raise MemoryError(f"Unexpected error retrieving messages: {e}") from e
@@ -150,11 +153,14 @@ class Memory(BaseModel):
 
             results = self.backend.search(query=query, filters=effective_filters, limit=effective_limit)
 
+            retrieved_messages = [Message(**msg.model_dump()) for msg in results]
+            if retrieved_messages and retrieved_messages[-1].role == MessageRole.ASSISTANT:
+                retrieved_messages[-1].prefix = True
             logger.debug(
-                f"Memory {self.backend.name}: Found {len(results)} search results for query: {query}, "
+                f"Memory {self.backend.name}: Found {len(retrieved_messages)} search results for query: {query}, "
                 f"filters: {effective_filters}"
             )
-            return results
+            return retrieved_messages
         except Exception as e:
             logger.error(f"Unexpected error searching memory: {e}")
             raise MemoryError(f"Unexpected error searching memory: {e}") from e
@@ -314,7 +320,10 @@ class Memory(BaseModel):
             else:
                 messages = self.search(query=None, filters=filters, limit=effective_limit)
 
-            return self._extract_valid_conversation(messages, effective_limit)
+            final_messages = self._extract_valid_conversation(messages, effective_limit)
+            if final_messages and final_messages[-1].role == MessageRole.ASSISTANT:
+                final_messages[-1].prefix = True
+            return final_messages
         except Exception as e:
             logger.error(f"Error retrieving agent conversation: {e}")
             raise MemoryError(f"Failed to retrieve agent conversation: {e}") from e
