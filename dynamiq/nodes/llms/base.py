@@ -72,6 +72,8 @@ class BaseLLM(ConnectionNode):
         presence_penalty (float | None): Penalize new tokens based on their existence in the text.
         frequency_penalty (float | None): Penalize new tokens based on their frequency in the text.
         tool_choice (str | None): Value to control which function is called by the model.
+        thinking_enabled (bool): Enables advanced reasoning if set to True.
+        budget_tokens (int): Maximum number of tokens allocated for thinking.
         inference_mode (InferenceMode): Determines how the model handles inference tasks and formats outputs.
         - InferenceMode.DEFAULT: Generates unstructured, free-form natural language text.
         - InferenceMode.STRUCTURED_OUTPUT: Produces structured JSON output.
