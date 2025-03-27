@@ -94,6 +94,8 @@ class BaseLLM(ConnectionNode):
     presence_penalty: float | None = None
     frequency_penalty: float | None = None
     tool_choice: str | None = None
+    thinking_enabled: bool | None = None
+    budget_tokens: int = 1024
     inference_mode: InferenceMode = InferenceMode.DEFAULT
     schema_: dict[str, Any] | type[BaseModel] | None = Field(
         None, description="Schema for structured output or function calling.", alias="schema"
@@ -314,6 +316,8 @@ class BaseLLM(ConnectionNode):
         params = self.connection.conn_params.copy()
         if self.client and not isinstance(self.connection, HttpApiKey):
             params.update({"client": self.client})
+        if self.thinking_enabled:
+            params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
 
         current_inference_mode = inference_mode or self.inference_mode
         current_schema = schema or self.schema_
