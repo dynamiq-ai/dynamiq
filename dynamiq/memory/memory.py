@@ -321,38 +321,48 @@ class Memory(BaseModel):
 
     def _extract_valid_conversation(self, messages: list[Message], limit: int) -> list[Message]:
         """
-        Extracts a valid conversation from a list of messages.
+        Extracts a valid conversation from a list of messages, ensuring it starts with a user message.
 
         Ensures:
-        1. Messages are sorted by timestamp
-        2. For messages with identical timestamps, user messages come before assistant messages
-        3. The first message is from a user
-        4. We respect the limit but prioritize keeping full conversation flows
+        1. Messages are sorted chronologically (timestamp, with USER priority for ties).
+        2. The final list respects the message limit (most recent messages).
+        3. The returned list *always* starts with a USER message, unless empty.
 
         Args:
-            messages: List of messages to process
-            limit: Maximum number of messages to include in the result
+            messages: List of messages to process.
+            limit: Maximum number of messages to include in the result.
 
         Returns:
-            List of messages forming a valid conversation
+            List of messages forming a valid conversation, starting with USER, or an empty list.
         """
         if not messages:
             return []
 
         def message_sort_key(msg):
-            timestamp = msg.metadata.get("timestamp", 0)
+            timestamp = msg.metadata.get("timestamp", float("inf"))
             role_priority = 0 if msg.role == MessageRole.USER else 0.1
             return (timestamp, role_priority)
 
         sorted_messages = sorted(messages, key=message_sort_key)
 
         if limit and len(sorted_messages) > limit:
-            sorted_messages = sorted_messages[-limit:]
+            limited_messages = sorted_messages[-limit:]
+        else:
+            limited_messages = sorted_messages
 
-        if sorted_messages and sorted_messages[0].role != MessageRole.USER:
-            first_user_idx = next((i for i, msg in enumerate(sorted_messages) if msg.role == MessageRole.USER), None)
+        if not limited_messages:
+            return []
+
+        if limited_messages[0].role == MessageRole.USER:
+            return limited_messages
+        else:
+            first_user_idx = next((i for i, msg in enumerate(limited_messages) if msg.role == MessageRole.USER), None)
 
             if first_user_idx is not None:
-                sorted_messages = sorted_messages[first_user_idx:]
-
-        return sorted_messages
+                return limited_messages[first_user_idx:]
+            else:
+                logger.warning(
+                    f"Memory._extract_valid_conversation: No USER message found within the "
+                    f"last {len(limited_messages)} messages. Returning empty history."
+                )
+                return []
