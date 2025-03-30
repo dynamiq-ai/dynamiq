@@ -762,8 +762,7 @@ class Agent(Node):
 
     def generate_structured_output_schemas(self):
         """Create a single JSON schema for structured output with {thought, action, action_input}."""
-        self.format_schema = [
-            {
+        self.format_schema = {
                 "type": "json_schema",
                 "json_schema": {
                     "name": "plan_next_action",
@@ -787,7 +786,7 @@ class Agent(Node):
                     },
                 },
             }
-        ]
+
 
     def generate_input_formats(self, tools: list[Node]) -> str:
         """Generate formatted input descriptions for each tool."""
