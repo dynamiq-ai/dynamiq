@@ -5,6 +5,7 @@ from typing import Any
 
 import filetype
 
+from dynamiq.nodes.agents.constants import TOOL_MAX_TOKENS
 from dynamiq.prompts import (
     Message,
     MessageRole,
@@ -14,8 +15,6 @@ from dynamiq.prompts import (
     VisionMessageTextContent,
 )
 from dynamiq.utils.logger import logger
-
-TOOL_MAX_TOKENS = 64000
 
 
 def create_message_from_input(input_data: dict) -> Message | VisionMessage:
