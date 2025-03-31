@@ -58,7 +58,7 @@ class StreamingQueueCallbackHandler(BaseCallbackHandler):
             run_id=str(get_run_id(kwargs)),
             wf_run_id=kwargs.get("wf_run_id"),
             entity_id=serialized.get("id"),
-            data=format_value(chunk),
+            data=format_value(chunk)[0],
             event=serialized.get("streaming", {}).get("event"),
         )
         self.send_to_queue(event)
@@ -77,7 +77,7 @@ class StreamingQueueCallbackHandler(BaseCallbackHandler):
             run_id=str(get_run_id(kwargs)),
             wf_run_id=kwargs.get("wf_run_id"),
             entity_id=serialized.get("id"),
-            data=format_value(output_data),
+            data=format_value(output_data)[0],
             event=serialized.get("streaming", {}).get("event"),
         )
         self.send_to_queue(event)

@@ -117,6 +117,30 @@ class GraphState(Node):
             if task.is_postponed_component_init:
                 task.init_components(connection_manager)
 
+    def validate_input_transformer(self, task: Node, input_data: dict[str, Any], **kwargs) -> bool:
+        """
+        Validates whether input data after transformation is a correct input for the task.
+
+        Args:
+            task (Node): Task that have to be executed.
+            input_data (dict[str, Any]): Original input to the task.
+
+        Return:
+            bool: Whether input data is correct.
+        """
+
+        if task.input_transformer:
+            try:
+                output = task.transform(input_data, task.input_transformer, task.id)
+                task.validate_input_schema(output, **kwargs)
+
+                return True
+
+            except Exception:
+                return False
+        else:
+            return False
+
     def _submit_task(
         self,
         task: Node,
@@ -144,47 +168,57 @@ class GraphState(Node):
         """
 
         run_depends = []
+
         if isinstance(task, Agent):
-            manager_result = self.manager.run(
-                input_data={
-                    "action": "assign",
-                    "task": self.agent_description(task),
-                    "chat_history": chat_history,
-                },
-                run_depends=run_depends,
-                config=config,
-                **kwargs,
-            )
-
-            run_depends = [NodeDependency(node=self.manager).to_dict()]
-
-            if manager_result.status != RunnableStatus.SUCCESS:
-                logger.error(f"GraphOrchestrator: Error generating actions for state: {manager_result}")
-                raise OrchestratorError(f"GraphOrchestrator: Error generating actions for state: {manager_result}")
-
-            try:
-                agent_input = json.loads(
-                    manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
-                )["input"]
-
-                response = task.run(
-                    input_data={"input": agent_input},
-                    config=config,
+            agent_input = {"context": global_context | {"history": chat_history}}
+            is_input_correct = self.validate_input_transformer(task, agent_input, **kwargs)
+            if not is_input_correct:
+                manager_result = self.manager.run(
+                    input_data={
+                        "action": "assign",
+                        "task": self.agent_description(task),
+                        "chat_history": chat_history,
+                    },
                     run_depends=run_depends,
+                    config=config,
                     **kwargs,
                 )
 
-                result = response.output.get("content")
+                run_depends = [NodeDependency(node=self.manager).to_dict()]
 
-                if response.status != RunnableStatus.SUCCESS:
-                    logger.error(f"GraphOrchestrator: Failed to execute Agent {task.name} with Error: {result}")
-                    raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {result}")
+                if manager_result.status != RunnableStatus.SUCCESS:
+                    logger.error(f"GraphOrchestrator: Error generating actions for state: {manager_result}")
+                    raise OrchestratorError(f"GraphOrchestrator: Error generating actions for state: {manager_result}")
 
-                return result, {}
+                try:
+                    agent_input = {
+                        "input": json.loads(
+                            manager_result.output.get("content")
+                            .get("result")
+                            .replace("json", "")
+                            .replace("```", "")
+                            .strip()
+                        )["input"]
+                    }
+                except Exception as e:
+                    logger.error(f"GraphOrchestrator: Error when parsing response about next state {e}")
+                    raise OrchestratorError(f"Error when parsing response about next state {e}")
 
-            except Exception as e:
-                logger.error(f"GraphOrchestrator: Error when parsing response about next state {e}")
-                raise OrchestratorError(f"Error when parsing response about next state {e}")
+            response = task.run(
+                input_data=agent_input,
+                config=config,
+                run_depends=run_depends,
+                use_input_transformer=is_input_correct,
+                **kwargs,
+            )
+
+            result = response.output.get("content")
+
+            if response.status != RunnableStatus.SUCCESS:
+                logger.error(f"GraphOrchestrator: Failed to execute Agent {task.name} with Error: {result}")
+                raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {result}")
+
+            return result, {}
 
         elif isinstance(task, FunctionTool):
             input_data = {"context": global_context | {"history": chat_history}}

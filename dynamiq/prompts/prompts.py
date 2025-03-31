@@ -127,6 +127,29 @@ class VisionMessage(BaseModel):
     content: list[VisionMessageTextContent | VisionMessageImageContent]
     role: MessageRole = MessageRole.USER
 
+    def parse_bytes_to_base64(self, file_bytes: bytes) -> str:
+        """
+        Parses file bytes in base64 format.
+
+        Args:
+            file_bytes (bytes): File bytes.
+
+        Returns:
+            str: Base64 encoded file.
+        """
+        extension = filetype.guess_extension(file_bytes)
+        if not extension:
+            extension = "txt"
+
+        encoded_str = base64.b64encode(file_bytes).decode("utf-8")
+
+        mime_type, _ = mimetypes.guess_type(f"file.{extension}")
+
+        if mime_type is None:
+            mime_type = "text/plain"
+
+        return f"data:{mime_type};base64,{encoded_str}"
+
     def parse_image_url_parameters(self, url_template: str, kwargs: dict) -> None:
         """
         Converts image URL parameters in kwargs to Base64-encoded Data URLs if they contain image data.
@@ -152,18 +175,10 @@ class VisionMessage(BaseModel):
 
             if isinstance(value, io.BytesIO):
                 image_bytes = value.getvalue()
-                extension = filetype.guess_extension(image_bytes)
-                if not extension:
-                    raise ValueError(f"Cannot determine file type for parameter '{param}'.")
-                encoded_str = base64.b64encode(image_bytes).decode("utf-8")
-                processed_value = f"data:image/{extension};base64,{encoded_str}"
+                processed_value = self.parse_bytes_to_base64(image_bytes)
 
             elif isinstance(value, bytes):
-                extension = filetype.guess_extension(value)
-                if not extension:
-                    raise ValueError(f"Cannot determine file type for parameter '{param}'.")
-                encoded_str = base64.b64encode(value).decode("utf-8")
-                processed_value = f"data:image/{extension};base64,{encoded_str}"
+                processed_value = self.parse_bytes_to_base64(value)
 
             elif isinstance(value, str):
                 pass  # No action needed; assuming it's a regular URL or already a Data URL
@@ -198,7 +213,7 @@ class VisionMessage(BaseModel):
                 raise ValueError(f"Invalid content type: {content.type}")
 
         if len(out_msg_content) == 1 and out_msg_content[0].type == VisionMessageType.TEXT:
-            return Message(self.role, content=out_msg_content[0].text)
+            return Message(role=self.role, content=out_msg_content[0].text)
 
         return VisionMessage(role=self.role, content=out_msg_content)
 
@@ -319,69 +334,6 @@ class Prompt(BasePrompt):
                 raise ValueError(f"Invalid message type: {type(msg)}")
 
         return parameters
-
-    def parse_bytes_to_base64(self, file_bytes: bytes) -> str:
-        """
-        Parses file bytes in base64 format.
-
-        Args:
-            file_bytes (bytes): File bytes.
-
-        Returns:
-            str: Base64 encoded file.
-        """
-        extension = filetype.guess_extension(file_bytes)
-        if not extension:
-            extension = "txt"
-
-        encoded_str = base64.b64encode(file_bytes).decode("utf-8")
-
-        mime_type, _ = mimetypes.guess_type(f"file.{extension}")
-
-        if mime_type is None:
-            mime_type = "text/plain"
-
-        return f"data:{mime_type};base64,{encoded_str}"
-
-    def parse_image_url_parameters(self, url_template: str, kwargs: dict) -> None:
-        """
-        Converts image URL parameters in kwargs to Base64-encoded Data URLs if they contain image data.
-
-        Args:
-            url_template (str): Jinja template for the image URL.
-            kwargs (dict): Dictionary of parameters to be used with the template.
-
-        Raises:
-            KeyError: If a required parameter is missing in kwargs.
-            ValueError: If the file type cannot be determined or unsupported data type is provided.
-        """
-        template_params = self.get_parameters_for_template(url_template)
-
-        for param in template_params:
-            if param not in kwargs:
-                raise KeyError(f"Missing required parameter: '{param}'")
-
-            value = kwargs[param]
-
-            # Initialize as unchanged; will be modified if image data is detected
-            processed_value = value
-
-            if isinstance(value, io.BytesIO):
-                image_bytes = value.getvalue()
-                processed_value = self.parse_bytes_to_base64(image_bytes)
-
-            elif isinstance(value, bytes):
-                processed_value = self.parse_bytes_to_base64(value)
-
-            elif isinstance(value, str):
-                pass  # No action needed; assuming it's a regular URL or already a Data URL
-
-            else:
-                # Unsupported data type for image parameter
-                raise ValueError(f"Unsupported data type for parameter '{param}': {type(value)}")
-
-            # Update the parameter with the processed value
-            kwargs[param] = processed_value
 
     def format_messages(self, **kwargs) -> list[dict]:
         """

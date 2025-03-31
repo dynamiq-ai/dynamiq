@@ -83,7 +83,6 @@ class ElasticsearchDocumentWriter(Writer, ElasticsearchVectorStoreWriterParams):
         upserted_count = self.vector_store.write_documents(
             documents=input_data.documents,
             policy=DuplicatePolicy.FAIL,
-            batch_size=None,
             content_key=input_data.content_key,
             embedding_key=input_data.embedding_key,
         )

@@ -117,8 +117,8 @@ class RunnableResult(BaseModel):
 
         return {
             "status": self.status.value,
-            "input": format_value(self.input, skip_format_types, force_format_types),
-            "output": format_value(self.output, skip_format_types, force_format_types),
+            "input": format_value(self.input, skip_format_types, force_format_types)[0],
+            "output": format_value(self.output, skip_format_types, force_format_types)[0],
         }
 
 

@@ -88,7 +88,7 @@ def test_milvus_connect_host_without_token(mock_milvus_client_class):
     mock_milvus_client_instance = MagicMock()
     mock_milvus_client_class.return_value = mock_milvus_client_instance
 
-    milvus = MilvusConnection(deployment_type=MilvusDeploymentType.HOST, uri="http://localhost:19530")
+    milvus = MilvusConnection(deployment_type=MilvusDeploymentType.HOST, uri="http://localhost:19530", api_key=None)
     client = milvus.connect()
 
     mock_milvus_client_class.assert_called_once_with(uri="http://localhost:19530")

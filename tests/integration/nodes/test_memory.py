@@ -5,7 +5,7 @@ import pytest
 from dynamiq import Workflow, connections, flows, prompts
 from dynamiq.memory import Memory
 from dynamiq.memory.backends import InMemory
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.prompts import MessageRole
 from dynamiq.runnables import RunnableStatus
@@ -41,7 +41,7 @@ def openai_node(openai_connection):
 
 def test_workflow_with_agent_and_in_memory_memory(openai_node):
     memory = Memory(backend=InMemory())
-    agent = SimpleAgent(
+    agent = Agent(
         name="Agent",
         llm=openai_node,
         role=AGENT_ROLE,
@@ -52,11 +52,11 @@ def test_workflow_with_agent_and_in_memory_memory(openai_node):
     wf = Workflow(flow=flows.Flow(nodes=[agent]))
 
     user_input_1 = "Hi, what's the weather like today?"
-    result_1 = wf.run(input_data={"input": user_input_1})
+    result_1 = wf.run(input_data={"input": user_input_1, "user_id": "123", "session_id": "456"})
     assert result_1.status == RunnableStatus.SUCCESS
 
     user_input_2 = "And what about tomorrow?"
-    result_2 = wf.run(input_data={"input": user_input_2})
+    result_2 = wf.run(input_data={"input": user_input_2, "user_id": "123", "session_id": "456"})
     assert result_2.status == RunnableStatus.SUCCESS
 
     all_messages = memory.get_all()

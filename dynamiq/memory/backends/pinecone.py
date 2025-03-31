@@ -27,6 +27,7 @@ class Pinecone(MemoryBackend):
     embedder: DocumentEmbedder
     index_type: PineconeIndexType
     index_name: str = Field(default="conversations")
+    dimension: int = Field(default=1536)
     create_if_not_exist: bool = Field(default=True)
     namespace: str = Field(default="default")
     cloud: str | None = Field(default=None)
@@ -56,6 +57,7 @@ class Pinecone(MemoryBackend):
                 index_name=self.index_name,
                 namespace=self.namespace,
                 create_if_not_exist=self.create_if_not_exist,
+                dimension=self.dimension,
                 index_type=self.index_type,
                 cloud=self.cloud,
                 region=self.region,
@@ -115,7 +117,7 @@ class Pinecone(MemoryBackend):
             return {"operator": "AND", "conditions": conditions}
         return filters
 
-    def search(self, query: str | None = None, filters: dict | None = None, limit: int = 10) -> list[Message]:
+    def search(self, query: str | None = None, filters: dict | None = None, limit: int = 1000) -> list[Message]:
         """Searches for messages in Pinecone based on the query and/or filters."""
         try:
             normalized_filters = self._prepare_filters(filters)

@@ -360,13 +360,16 @@ class Node(BaseModel, Runnable, ABC):
 
         return input_data
 
-    def transform_input(self, input_data: dict, depends_result: dict[Any, RunnableResult]) -> dict:
+    def transform_input(
+        self, input_data: dict, depends_result: dict[Any, RunnableResult], use_input_transformer: bool = True, **kwargs
+    ) -> dict:
         """
         Transform input data for the node.
 
         Args:
             input_data (dict): Input data for the node.
             depends_result (dict): Results of dependent nodes.
+            use_input_transformer (bool): Determines if InputTransformer will be applied to the input.
 
         Raises:
             NodeException: If a dependency result is missing or input mapping fails.
@@ -375,7 +378,7 @@ class Node(BaseModel, Runnable, ABC):
             dict: Transformed input data.
         """
         # Apply input transformer
-        if self.input_transformer.path or self.input_transformer.selector:
+        if (self.input_transformer.path or self.input_transformer.selector) and use_input_transformer:
             depends_result_as_dict = {k: result.to_depend_dict() for k, result in depends_result.items()}
             inputs = self.transform(input_data | depends_result_as_dict, self.input_transformer, self.id)
         else:
@@ -468,7 +471,7 @@ class Node(BaseModel, Runnable, ABC):
             **kwargs,
         )
         data["depends"] = [depend.to_dict(**kwargs) for depend in self.depends]
-        data["input_mapping"] = format_value(self.input_mapping)
+        data["input_mapping"] = format_value(self.input_mapping)[0]
         return data
 
     def send_streaming_approval_message(
@@ -650,10 +653,10 @@ class Node(BaseModel, Runnable, ABC):
                 return RunnableResult(
                     status=RunnableStatus.SKIP,
                     input=transformed_input,
-                    output=format_value(e, recoverable=e.recoverable),
+                    output=format_value(e, recoverable=e.recoverable)[0],
                 )
 
-            transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result)
+            transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result, **kwargs)
             self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
             cache = cache_wf_entity(
                 entity_id=self.id,
@@ -686,7 +689,7 @@ class Node(BaseModel, Runnable, ABC):
             return RunnableResult(
                 status=RunnableStatus.FAILURE,
                 input=input_data,
-                output=format_value(e, recoverable=recoverable),
+                output=format_value(e, recoverable=recoverable)[0],
             )
 
     def execute_with_retry(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs):
@@ -1126,6 +1129,31 @@ class Node(BaseModel, Runnable, ABC):
 
             self.input_mapping[key] = value
         return self
+
+    def deep_merge(self, source: dict, destination: dict) -> dict:
+        """
+        Recursively merge dictionaries with proper override behavior.
+
+        Args:
+            source: Source dictionary with higher priority values
+            destination: Destination dictionary with lower priority values
+
+        Returns:
+            dict: Merged dictionary where source values override destination values,
+                  and lists are concatenated when both source and destination have lists
+        """
+        result = destination.copy()
+        for key, value in source.items():
+            if key in result:
+                if isinstance(value, dict) and isinstance(result[key], dict):
+                    result[key] = self.deep_merge(value, result[key])
+                elif isinstance(value, list) and isinstance(result[key], list):
+                    result[key] = result[key] + value
+                else:
+                    result[key] = value
+            else:
+                result[key] = value
+        return result
 
 
 class ConnectionNode(Node, ABC):

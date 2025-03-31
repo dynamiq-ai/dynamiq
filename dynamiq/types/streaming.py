@@ -32,7 +32,7 @@ class StreamingEventMessage(BaseModel):
 
     run_id: str | None = None
     wf_run_id: str | None = Field(default_factory=generate_uuid)
-    entity_id: str
+    entity_id: str | None = None
     data: Any
     event: str | None = None
 

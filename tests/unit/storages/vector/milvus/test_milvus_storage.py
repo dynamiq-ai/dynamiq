@@ -103,7 +103,7 @@ def test_search_embeddings(milvus_vector_store, mock_milvus_client):
             }
         ]
     ]
-    documents = milvus_vector_store.search_embeddings(query_embeddings, top_k=1)
+    documents = milvus_vector_store._embedding_retrieval(query_embeddings, top_k=1)
     assert len(documents) == 1
     assert documents[0].id == "1"
     assert documents[0].content == "Document 1"
@@ -144,6 +144,25 @@ def test_convert_query_result_to_documents(milvus_vector_store):
         }
     ]
     documents = milvus_vector_store._convert_query_result_to_documents(query_result)
+    assert len(documents) == 1
+    assert documents[0].id == "1"
+    assert documents[0].content == "Document 1"
+    assert documents[0].score == 0.1
+
+
+def test_hybrid_search(milvus_vector_store, mock_milvus_client):
+    query = "example"
+    query_embeddings = [[0.1, 0.2]]
+    mock_milvus_client.hybrid_search.return_value = [
+        [
+            {
+                "id": "1",
+                "entity": {"content": "Document 1", "vector": [0.1, 0.2], "metadata": {"type": "test"}},
+                "distance": 0.1,
+            }
+        ]
+    ]
+    documents = milvus_vector_store._hybrid_retrieval(query=query, query_embeddings=query_embeddings, top_k=3)
     assert len(documents) == 1
     assert documents[0].id == "1"
     assert documents[0].content == "Document 1"

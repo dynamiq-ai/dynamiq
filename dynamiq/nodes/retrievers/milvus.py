@@ -95,13 +95,19 @@ class MilvusDocumentRetriever(Retriever, MilvusVectorStoreParams):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         query_embedding = input_data.embedding
+        query = input_data.query
         content_key = input_data.content_key
         embedding_key = input_data.embedding_key
         filters = input_data.filters or self.filters
         top_k = input_data.top_k or self.top_k
 
         output = self.document_retriever.run(
-            query_embedding, filters=filters, top_k=top_k, content_key=content_key, embedding_key=embedding_key
+            query_embedding,
+            query=query,
+            filters=filters,
+            top_k=top_k,
+            content_key=content_key,
+            embedding_key=embedding_key,
         )
 
         return {

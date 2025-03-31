@@ -247,9 +247,9 @@ class PineconeVectorStore:
             filters = _normalize_filters(filters)
             self._index.delete(filter=filters, namespace=self.namespace)
 
-    def delete_documents_by_file_id(self, file_id: str):
+    def delete_documents_by_file_id(self, file_id: str) -> None:
         """
-        Delete documents from the Pinecone vector store by file ID.
+        Delete documents from the vector store based on the provided file ID.
             file_id should be located in the metadata of the document.
 
         Args:

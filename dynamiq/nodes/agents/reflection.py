@@ -73,6 +73,7 @@ class ReflectionAgent(Agent):
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
+        history_messages: list[Message] | None = None,
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> str:
@@ -82,7 +83,10 @@ class ReflectionAgent(Agent):
                 content=self.generate_prompt(block_names=["introduction", "role", "date", "instructions", "context"]),
             )
 
-            self._prompt.messages = [system_message, input_message]
+            if history_messages:
+                self._prompt.messages = [system_message, *history_messages, input_message]
+            else:
+                self._prompt.messages = [system_message, input_message]
 
             result = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
 

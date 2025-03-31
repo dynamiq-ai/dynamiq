@@ -131,7 +131,7 @@ class PythonInputSchema(BaseModel):
     model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
 
     def to_dict(self, **kwargs) -> dict:
-        return {field: format_value(value, **kwargs) for field, value in self.model_extra.items()}
+        return {field: format_value(value, **kwargs)[0] for field, value in self.model_extra.items()}
 
 
 class Python(Node):
