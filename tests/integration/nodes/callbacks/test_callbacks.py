@@ -53,7 +53,9 @@ def create_orchestrator(
             ),
         ).output["content"]
 
-        context["messages"] += [{"role": MessageRole.ASSISTANT, "content": "mocked_response", "metadata": None}]
+        context["messages"] += [
+            {"role": MessageRole.ASSISTANT, "content": "mocked_response", "metadata": None, "prefix": None}
+        ]
 
         context["iteration"] += 1
 
@@ -93,9 +95,9 @@ def create_orchestrator(
                 "context": {
                     "iteration": 2,
                     "messages": [
-                        {"content": "Answer on question", "metadata": None, "role": MessageRole.USER},
-                        {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
-                        {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
+                        {"content": "Answer on question", "metadata": None, "role": MessageRole.USER, "prefix": None},
+                        {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None, "prefix": None},
+                        {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None, "prefix": None},
                     ],
                 },
             },
@@ -108,8 +110,8 @@ def create_orchestrator(
                 "context": {
                     "iteration": 2,
                     "messages": [
-                        {"content": "Answer on question", "role": MessageRole.USER, "metadata": None},
-                        {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
+                        {"content": "Answer on question", "role": MessageRole.USER, "metadata": None, "prefix": None},
+                        {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None, "prefix": None},
                     ],
                 },
             },
