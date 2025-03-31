@@ -416,10 +416,10 @@ class ReActAgent(Agent):
     def tracing_intermediate(self, loop_num, formatted_prompt, llm_generated_output):
         self._intermediate_steps[loop_num] = AgentIntermediateStep(
             input_data={"prompt": formatted_prompt},
-            agent_model_observation=AgentIntermediateStepModelObservation(
+            model_observation=AgentIntermediateStepModelObservation(
                 initial=llm_generated_output,
             ),
-        ).model_dump()
+        ).model_dump(by_alias=True)
 
     def _run_agent(
         self,

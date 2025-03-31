@@ -32,7 +32,7 @@ Must be a valid, accessible URL including protocol (http/https).
 class JsonOptions(BaseModel):
     """Options for configuring JSON extraction."""
 
-    schema: dict | None = None
+    json_schema: dict | None = Field(default=None, alias="schema")
     system_prompt: str | None = Field(None, alias="systemPrompt")
     prompt: str | None = None
 
