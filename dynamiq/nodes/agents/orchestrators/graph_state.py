@@ -129,7 +129,7 @@ class GraphState(Node):
             bool: Whether input data is correct.
         """
 
-        if task.input_transformer.path or task.input_transformer.selector:
+        if task.input_transformer and (task.input_transformer.path or task.input_transformer.selector):
             try:
                 output = task.transform(input_data, task.input_transformer, task.id)
                 task.validate_input_schema(output, **kwargs)
