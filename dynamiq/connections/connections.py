@@ -1039,7 +1039,8 @@ class Snowflake(BaseConnection):
     account: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_ACCOUNT", "account"))
     warehouse: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_WAREHOUSE", "warehouse"))
     database: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_DATABASE", "db"))
-    schema: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_SCHEMA", "schema"))
+    # Used 'snowflake_schema' instead of 'schema' to avoid conflict with the 'schema' keyword in Pydantic
+    snowflake_schema: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_SCHEMA", alias="schema"))
 
     def connect(self):
         try:
@@ -1051,12 +1052,12 @@ class Snowflake(BaseConnection):
                 account=self.account,
                 warehouse=self.warehouse,
                 database=self.database,
-                schema=self.schema,
+                schema=self.snowflake_schema,
             )
             logger.debug(
                 f"Connected to Snowflake using account={self.account}, "
                 f"warehouse={str(self.warehouse)}, user={self.user}, "
-                f"database={self.database}, schema={self.schema}."
+                f"database={self.database}, schema={self.snowflake_schema}."
             )
             return conn
         except Exception as e:

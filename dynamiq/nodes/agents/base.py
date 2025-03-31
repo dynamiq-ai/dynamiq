@@ -92,7 +92,8 @@ class AgentIntermediateStepModelObservation(BaseModel):
 
 class AgentIntermediateStep(BaseModel):
     input_data: str | dict
-    model_observation: AgentIntermediateStepModelObservation
+    # Used 'agent_model_observation' instead of 'model_observation' to avoid conflict in Pydantic
+    agent_model_observation: AgentIntermediateStepModelObservation = Field(..., alias="model_observation")
     final_answer: str | dict | None = None
 
 
@@ -122,7 +123,7 @@ class AgentInputSchema(BaseModel):
             "'by_name' for tool names, or 'by_id' for tool IDs. "
             "Values are dictionaries merged with tool inputs."
         ),
-        is_accessible_to_agent=False,
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
     @field_validator("tool_params", mode="before")
