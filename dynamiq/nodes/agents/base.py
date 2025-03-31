@@ -864,7 +864,7 @@ class Agent(Node):
                     if call_info["function"]["name"] == "provide_final_answer":
                         final_ans = call_info["function"]["arguments"]["answer"]
                         if self.streaming.enabled:
-                            self.stream_content(final_ans, source=self.name, step="final_answer", config=config)
+                            self.stream_content(final_ans, source=self.name, step="final_answer", config=config, **kwargs)
                         return final_ans
                 raise ValueError("Expected 'provide_final_answer' call not found.")
             raise ValueError("No tool calls in FUNCTION_CALLING mode.")
@@ -875,7 +875,7 @@ class Agent(Node):
                 data = json.loads(content)
                 final_ans = data["answer"]
                 if self.streaming.enabled:
-                    self.stream_content(final_ans, source=self.name, step="final_answer", config=config)
+                    self.stream_content(final_ans, source=self.name, step="final_answer", config=config, **kwargs)
                 return final_ans
             except (json.JSONDecodeError, KeyError) as e:
                 raise ValueError(f"Invalid JSON or missing 'answer' in STRUCTURED_OUTPUT: {e}")
@@ -891,7 +891,7 @@ class Agent(Node):
                 final_text = content.strip()
 
         if self.streaming.enabled:
-            self.stream_content(final_text, source=self.name, step="final_answer", config=config)
+            self.stream_content(final_text, source=self.name, step="final_answer", config=config, **kwargs)
         return final_text
 
     def _run_react(
@@ -940,9 +940,13 @@ class Agent(Node):
                     function_call_text = json.dumps({"function": func_name, "arguments": func_args})
 
                     if func_name == "provide_final_answer":
+                        final_thought = func_args["thought"]
                         final_ans = func_args["answer"]
+                        self.log_final_answer(final_thought, final_ans)
                         self.tracing_final(loop_idx, final_ans, config, kwargs)
                         if self.streaming.enabled:
+                            chunk_content = {"thought": thought}
+                            self.stream_content(chunk_content, source=self.name, step=f"reasoning_{loop_idx}", config=config, **kwargs)
                             self.stream_content(final_ans, source=self.name, step="answer", config=config, **kwargs)
                         return final_ans
 
@@ -953,7 +957,7 @@ class Agent(Node):
                     if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                         chunk_content = {"thought": thought, "action": func_name, "action_input": action_input}
                         self.stream_content(
-                            chunk_content, source=self.name, step=f"reasoning_{loop_idx}", config=config
+                            chunk_content, source=self.name, step=f"reasoning_{loop_idx}", config=config, **kwargs
                         )
 
                     try:
@@ -1019,7 +1023,7 @@ class Agent(Node):
             self.log_reasoning(thought, action, action_input, loop_idx)
             if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                 chunk_content = {"thought": thought, "action": action, "action_input": action_input}
-                self.stream_content(chunk_content, source=self.name, step=f"reasoning_{loop_idx}", config=config)
+                self.stream_content(chunk_content, source=self.name, step=f"reasoning_{loop_idx}", config=config, **kwargs)
 
             if action:
                 try:
@@ -1315,6 +1319,23 @@ class Agent(Node):
             f"Thought: {thought}\n"
             f"Action: {action}\n"
             f"Action Input: {action_input}"
+            "\n------------------------------------------"
+        )
+
+    def log_final_answer(self, thought: str, answer, loop_num: int) -> None:
+        """
+        Logs final answer step of the agent.
+
+        Args:
+            thought (str): Reasoning about final answer.
+            answer (str): Final answer.
+            loop_num (int): Number of reasoning loop.
+        """
+        logger.info(
+            "\n------------------------------------------\n"
+            f"Agent {self.name}: Loop {loop_num}:\n"
+            f"Thought: {thought}\n"
+            f"Final Answer: {answer}\n"
             "\n------------------------------------------"
         )
 
