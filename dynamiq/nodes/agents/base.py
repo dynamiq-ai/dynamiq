@@ -862,7 +862,7 @@ class Agent(Node):
                     if call_info["function"]["name"] == "provide_final_answer":
                         final_ans = call_info["function"]["arguments"]["answer"]
                         if self.streaming.enabled:
-                            self.stream_content(final_ans, source=self.name, step="final_answer", config=config)
+                            self.stream_content(final_ans, source=self.name, step="final_answer", config=config, **kwargs)
                         return final_ans
                 raise ValueError("Expected 'provide_final_answer' call not found.")
             raise ValueError("No tool calls in FUNCTION_CALLING mode.")
@@ -873,7 +873,7 @@ class Agent(Node):
                 data = json.loads(content)
                 final_ans = data["answer"]
                 if self.streaming.enabled:
-                    self.stream_content(final_ans, source=self.name, step="final_answer", config=config)
+                    self.stream_content(final_ans, source=self.name, step="final_answer", config=config, **kwargs)
                 return final_ans
             except (json.JSONDecodeError, KeyError) as e:
                 raise ValueError(f"Invalid JSON or missing 'answer' in STRUCTURED_OUTPUT: {e}")
@@ -889,7 +889,7 @@ class Agent(Node):
                 final_text = content.strip()
 
         if self.streaming.enabled:
-            self.stream_content(final_text, source=self.name, step="final_answer", config=config)
+            self.stream_content(final_text, source=self.name, step="final_answer", config=config, **kwargs)
         return final_text
 
     def _run_react(
@@ -951,7 +951,7 @@ class Agent(Node):
                     if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                         chunk_content = {"thought": thought, "action": func_name, "action_input": action_input}
                         self.stream_content(
-                            chunk_content, source=self.name, step=f"reasoning_{loop_idx}", config=config
+                            chunk_content, source=self.name, step=f"reasoning_{loop_idx}", config=config, **kwargs
                         )
 
                     try:
@@ -1017,7 +1017,7 @@ class Agent(Node):
             self.log_reasoning(thought, action, action_input, loop_idx)
             if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                 chunk_content = {"thought": thought, "action": action, "action_input": action_input}
-                self.stream_content(chunk_content, source=self.name, step=f"reasoning_{loop_idx}", config=config)
+                self.stream_content(chunk_content, source=self.name, step=f"reasoning_{loop_idx}", config=config, **kwargs)
 
             if action:
                 try:
