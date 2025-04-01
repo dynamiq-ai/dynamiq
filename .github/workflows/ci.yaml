@@ -27,6 +27,10 @@ jobs:
           envkey_PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
           envkey_PINECONE_CLOUD: ${{ secrets.PINECONE_CLOUD }}
           envkey_PINECONE_REGION: ${{ secrets.PINECONE_REGION }}
+          envkey_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          envkey_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          envkey_QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          envkey_QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
 
       - name: Create .env file on fork PR
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}

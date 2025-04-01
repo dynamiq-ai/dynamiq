@@ -39,7 +39,7 @@ def openai_node(openai_connection):
     )
 
 
-def test_workflow_with_agent_and_in_memory_memory(openai_node):
+def test_workflow_with_agent_and_in_memory_memory(mock_llm_executor, mock_llm_response_text, openai_node):
     memory = Memory(backend=InMemory())
     agent = SimpleAgent(
         name="Agent",
