@@ -548,12 +548,14 @@ class ReActAgent(Agent):
 
                         thought = llm_generated_output_json["thought"]
                         action_input = llm_generated_output_json["action_input"]
-                        
+
                         if isinstance(action_input, str):
                             try:
                                 action_input = json.loads(action_input)
                             except Exception as e:
-                                raise ActionParsingException(f"Error parsing string action_input. {e}", recoverable=True)
+                                raise ActionParsingException(
+                                    f"Error parsing string action_input. {e}", recoverable=True
+                                )
 
                         self.log_reasoning(thought, action, action_input, loop_num)
 
