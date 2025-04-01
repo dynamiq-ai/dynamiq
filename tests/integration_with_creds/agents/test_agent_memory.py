@@ -19,8 +19,24 @@ MEMORY_TEST_INPUT = "What's my name and where do I work?"
 RUN_CONFIG = RunnableConfig(request_timeout=120)
 
 
-def verify_memory_and_cleanup(memory, memory_response, user_id, session_id):
-    """Helper function to verify memory contents and clean up afterward."""
+def verify_memory(memory, memory_response, user_id, session_id):
+    """
+    Verifies that the memory contains the expected conversation details for a given user and session.
+
+    This helper function performs the following checks:
+      1. Confirms that the agent's memory response includes the user's name ("Alex") and workplace ("TechCorp").
+      2. Retrieves the conversation messages filtered by the provided user_id and session_id.
+      3. Asserts that exactly six messages have been recorded in the conversation.
+
+    Parameters:
+        memory: An instance of the Memory class managing conversation storage.
+        memory_response: The string output from the agent containing recalled information.
+        user_id: A unique identifier for the user, used to filter stored messages.
+        session_id: A unique identifier for the session, used to filter stored messages.
+
+    Raises:
+        AssertionError: If any of the expected conditions are not met.
+    """
     assert "Alex" in memory_response, "Agent failed to remember the user's name"
     assert "TechCorp" in memory_response, "Agent failed to remember the user's workplace"
 
@@ -119,7 +135,7 @@ def test_react_agent_with_pinecone_memory(openai_llm, pinecone_connection, opena
     print(f"Memory test response: {memory_response}")
     sleep(3)
 
-    verify_memory_and_cleanup(memory, memory_response, user_id, session_id)
+    verify_memory(memory, memory_response, user_id, session_id)
 
     print("--- Pinecone Memory Test Passed ---")
 
@@ -182,6 +198,6 @@ def test_react_agent_with_qdrant_memory(openai_llm, qdrant_connection, openai_em
     print(f"Memory test response: {memory_response}")
     sleep(3)
 
-    verify_memory_and_cleanup(memory, memory_response, user_id, session_id)
+    verify_memory(memory, memory_response, user_id, session_id)
 
     print("--- Qdrant Memory Test Passed ---")
