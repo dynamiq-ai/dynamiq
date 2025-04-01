@@ -1039,7 +1039,6 @@ class Snowflake(BaseConnection):
     account: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_ACCOUNT", "account"))
     warehouse: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_WAREHOUSE", "warehouse"))
     database: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_DATABASE", "db"))
-    # Used 'snowflake_schema' instead of 'schema' to avoid conflict with the 'schema' keyword in Pydantic
     snowflake_schema: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_SCHEMA", "schema"), alias="schema")
 
     def connect(self):

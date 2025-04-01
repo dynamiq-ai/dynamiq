@@ -92,7 +92,6 @@ class AgentIntermediateStepModelObservation(BaseModel):
 
 class AgentIntermediateStep(BaseModel):
     input_data: str | dict
-    # Used 'agent_model_observation' instead of 'model_observation' to avoid conflict in Pydantic
     agent_model_observation: AgentIntermediateStepModelObservation = Field(..., alias="model_observation")
     final_answer: str | dict | None = None
 
