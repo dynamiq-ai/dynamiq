@@ -420,7 +420,7 @@ class ReActAgent(Agent):
             model_observation=AgentIntermediateStepModelObservation(
                 initial=llm_generated_output,
             ),
-        ).model_dump()
+        ).model_dump(by_alias=True)
 
     def _extract_final_answer(self, output: str) -> str:
         """Extracts the final thought and answer as a tuple from the output string."""
