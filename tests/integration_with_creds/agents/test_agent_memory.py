@@ -14,24 +14,23 @@ from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.utils.logger import logger
 
 
-@pytest.fixture
-def agent_role():
-    return "helpful assistant, goal is to provide useful information and answer questions"
+USER_NAME = "Alex"
+USER_COMPANY = "TechCorp"
 
 
 @pytest.fixture
 def personal_info_input():
-    return "Hi, my name is Alex and I work as a software engineer at TechCorp."
-
-
-@pytest.fixture
-def general_question_input():
-    return "What's the weather forecast for tomorrow?"
+    return f"Hi, my name is {USER_NAME} and I work as a software engineer at {USER_COMPANY}."
 
 
 @pytest.fixture
 def memory_test_input():
     return "What's my name and where do I work?"
+
+
+@pytest.fixture
+def general_question_input():
+    return "What's the weather forecast for tomorrow?"
 
 
 @pytest.fixture
@@ -57,8 +56,8 @@ def verify_memory(memory, memory_response, user_id, session_id):
     Raises:
         AssertionError: If any of the expected conditions are not met.
     """
-    assert "Alex" in memory_response, "Agent failed to remember the user's name"
-    assert "TechCorp" in memory_response, "Agent failed to remember the user's workplace"
+    assert USER_NAME in memory_response, f"Expected user name '{USER_NAME}' in memory response"
+    assert USER_COMPANY in memory_response, f"Expected user company '{USER_COMPANY}' in memory response"
 
     filters = {"user_id": user_id, "session_id": session_id}
     conversation_messages = memory.get_agent_conversation(filters=filters)

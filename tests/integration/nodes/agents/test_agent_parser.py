@@ -156,8 +156,14 @@ def test_parse_xml_malformed_json(xml_react_agent):
     assert "invalid JSON" in str(exc_info.value).lower() or "Unable to parse" in str(exc_info.value)
 
 
-def test_sanitize_tool_name(default_react_agent):
+@pytest.mark.parametrize(
+    "input_name,expected_output",
+    [
+        ("My Cool Tool!", "My-Cool-Tool"),
+        ("search-api", "search-api"),
+        ("data analysis (2023)", "data-analysis-2023"),
+    ],
+)
+def test_sanitize_tool_name(default_react_agent, input_name, expected_output):
     """Test that tool names are sanitized correctly."""
-    assert default_react_agent.sanitize_tool_name("My Cool Tool!") == "My-Cool-Tool"
-    assert default_react_agent.sanitize_tool_name("search-api") == "search-api"
-    assert default_react_agent.sanitize_tool_name("data analysis (2023)") == "data-analysis-2023"
+    assert default_react_agent.sanitize_tool_name(input_name) == expected_output

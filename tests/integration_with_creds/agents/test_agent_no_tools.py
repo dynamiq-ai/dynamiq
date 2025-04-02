@@ -12,31 +12,6 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
 
-@pytest.fixture
-def base_agent_role():
-    return "is to help user with various tasks, goal is to provide best of possible answers to user queries"
-
-
-@pytest.fixture
-def emoji_agent_role(base_agent_role):
-    return base_agent_role + ", always include emojis in your responses"
-
-
-@pytest.fixture
-def agent_input():
-    return {"input": "What is the capital of the UK?"}
-
-
-@pytest.fixture
-def expected_answer():
-    return "London"
-
-
-@pytest.fixture
-def run_config():
-    return RunnableConfig(request_timeout=120)
-
-
 def create_openai_llm():
     connection = OpenAIConnection()
     return OpenAI(
@@ -65,6 +40,45 @@ def create_gemini_llm():
         max_tokens=1000,
         temperature=0,
     )
+
+
+LLM_PARAMS = [
+    ("openai", create_openai_llm),
+    ("claude", create_claude_llm),
+    ("gemini", create_gemini_llm),
+]
+
+MODE_PARAMS = [
+    (InferenceMode.DEFAULT, "emoji_agent_role"),
+    (InferenceMode.XML, "emoji_agent_role"),
+    (InferenceMode.FUNCTION_CALLING, "emoji_agent_role"),
+    (InferenceMode.STRUCTURED_OUTPUT, "base_agent_role"),
+]
+
+
+@pytest.fixture
+def base_agent_role():
+    return "is to help user with various tasks, goal is to provide best of possible answers to user queries"
+
+
+@pytest.fixture
+def emoji_agent_role(base_agent_role):
+    return base_agent_role + ", always include emojis in your responses"
+
+
+@pytest.fixture
+def agent_input():
+    return {"input": "What is the capital of the UK?"}
+
+
+@pytest.fixture
+def expected_answer():
+    return "London"
+
+
+@pytest.fixture
+def run_config():
+    return RunnableConfig(request_timeout=120)
 
 
 def check_for_emoji(text):
@@ -172,20 +186,6 @@ def _run_and_assert_agent(agent: ReActAgent, agent_input, expected_answer, run_c
     logger.info(f"--- Test Passed for Mode: {agent.inference_mode.value}, LLM: {llm_type} ---")
 
 
-LLM_PARAMS = [
-    ("openai", create_openai_llm),
-    ("claude", create_claude_llm),
-    ("gemini", create_gemini_llm),
-]
-
-MODE_PARAMS = [
-    (InferenceMode.DEFAULT, "emoji_agent_role"),
-    (InferenceMode.XML, "emoji_agent_role"),
-    (InferenceMode.FUNCTION_CALLING, "emoji_agent_role"),
-    (InferenceMode.STRUCTURED_OUTPUT, "base_agent_role"),
-]
-
-
 @pytest.mark.integration
 @pytest.mark.parametrize("llm_name, llm_creator", LLM_PARAMS)
 def test_react_agent_default_mode(llm_name, llm_creator, emoji_agent_role, agent_input, expected_answer, run_config):
@@ -218,7 +218,9 @@ def test_react_agent_xml_mode(llm_name, llm_creator, emoji_agent_role, agent_inp
 
 @pytest.mark.integration
 @pytest.mark.parametrize("llm_name, llm_creator", LLM_PARAMS)
-def test_react_agent_fc_mode(llm_name, llm_creator, emoji_agent_role, agent_input, expected_answer, run_config):
+def test_react_agent_function_calling_mode(
+    llm_name, llm_creator, base_agent_role, agent_input, expected_answer, run_config
+):
     llm_instance = llm_creator()
     agent = ReActAgent(
         name=f"Test Agent FC ({llm_name.upper()})",
@@ -233,7 +235,9 @@ def test_react_agent_fc_mode(llm_name, llm_creator, emoji_agent_role, agent_inpu
 
 @pytest.mark.integration
 @pytest.mark.parametrize("llm_name, llm_creator", LLM_PARAMS)
-def test_react_agent_so_mode(llm_name, llm_creator, base_agent_role, agent_input, expected_answer, run_config):
+def test_react_agent_structured_output_mode(
+    llm_name, llm_creator, base_agent_role, agent_input, expected_answer, run_config
+):
     llm_instance = llm_creator()
     agent = ReActAgent(
         name=f"Test Agent SO ({llm_name.upper()})",
