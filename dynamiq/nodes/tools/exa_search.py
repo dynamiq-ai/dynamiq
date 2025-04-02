@@ -67,42 +67,54 @@ class ExaInputSchema(BaseModel):
     include_full_content: bool | None = Field(
         default=None,
         description="If true, retrieve full content, highlights, and summaries for search results.",
-        is_accessible_to_agent=True,
+        json_schema_extra={"is_accessible_to_agent": True},
     )
     use_autoprompt: bool | None = Field(
         default=None,
         description="If true, query will be converted to a Exa query."
         "Enabled by default for auto search, optional for neural search, and not available for keyword search.",
-        is_accessible_to_agent=False,
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     query_type: QueryType | None = Field(
         default=None,
         description="Type of query to be used. Options are 'keyword', 'neural', or 'auto'."
         "Neural uses an embeddings-based model, keyword is google-like SERP. "
         "Default is auto, which automatically decides between keyword and neural.",
-        is_accessible_to_agent=False,
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     category: str | None = Field(
         default=None,
         description="A data category to focus on."
         "Options are company, research paper, news, pdf,"
         " github, tweet, personal site, linkedin profile, financial report.",
-        is_accessible_to_agent=True,
+        json_schema_extra={"is_accessible_to_agent": True},
     )
     limit: int | None = Field(
-        default=None, ge=1, le=100, description="Number of search results to return.", is_accessible_to_agent=False
+        default=None,
+        ge=1,
+        le=100,
+        description="Number of search results to return.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_domains: list[str] | None = Field(
-        default=None, description="List of domains to include in the search.", is_accessible_to_agent=False
+        default=None,
+        description="List of domains to include in the search.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     exclude_domains: list[str] | None = Field(
-        default=None, description="List of domains to exclude from the search.", is_accessible_to_agent=False
+        default=None,
+        description="List of domains to exclude from the search.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_text: list[str] | None = Field(
-        default=None, description="Strings that must be present in webpage text.", is_accessible_to_agent=False
+        default=None,
+        description="Strings that must be present in webpage text.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     exclude_text: list[str] | None = Field(
-        default=None, description="Strings that must not be present in webpage text.", is_accessible_to_agent=False
+        default=None,
+        description="Strings that must not be present in webpage text.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
 

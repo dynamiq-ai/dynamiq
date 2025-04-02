@@ -57,26 +57,36 @@ class TavilyInputSchema(BaseModel):
     topic: str | None = Field(
         default=None,
         description="The topic to search for; must be either `general` or `news`.",
-        is_accessible_to_agent=False,
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     max_results: int | None = Field(
         default=None, description="The maximum number of search results to return (default: 5, range: 1-20)."
     )
     include_images: bool | None = Field(
-        default=None, description="Include images in search results.", is_accessible_to_agent=False
+        default=None,
+        description="Include images in search results.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_answer: bool | None = Field(
-        default=None, description="Include a summarized answer in search results.", is_accessible_to_agent=False
+        default=None,
+        description="Include a summarized answer in search results.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_raw_content: bool | None = Field(default=None, description="Include full page content in search results.")
     include_domains: list[str] | None = Field(
-        default=None, description="Specific domains to include in search results.", is_accessible_to_agent=False
+        default=None,
+        description="Specific domains to include in search results.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     exclude_domains: list[str] | None = Field(
-        default=None, description="Domains to exclude from search results.", is_accessible_to_agent=False
+        default=None,
+        description="Domains to exclude from search results.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     use_cache: bool | None = Field(
-        default=None, description="Use cached results when available.", is_accessible_to_agent=False
+        default=None,
+        description="Use cached results when available.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
 
