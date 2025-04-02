@@ -11,12 +11,32 @@ from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
+from dynamiq.utils.logger import logger
 
-AGENT_ROLE = "helpful assistant, goal is to provide useful information and answer questions"
-PERSONAL_INFO_INPUT = "Hi, my name is Alex and I work as a software engineer at TechCorp."
-GENERAL_QUESTION_INPUT = "What's the weather forecast for tomorrow?"
-MEMORY_TEST_INPUT = "What's my name and where do I work?"
-RUN_CONFIG = RunnableConfig(request_timeout=120)
+
+@pytest.fixture
+def agent_role():
+    return "helpful assistant, goal is to provide useful information and answer questions"
+
+
+@pytest.fixture
+def personal_info_input():
+    return "Hi, my name is Alex and I work as a software engineer at TechCorp."
+
+
+@pytest.fixture
+def general_question_input():
+    return "What's the weather forecast for tomorrow?"
+
+
+@pytest.fixture
+def memory_test_input():
+    return "What's my name and where do I work?"
+
+
+@pytest.fixture
+def run_config():
+    return RunnableConfig(request_timeout=120)
 
 
 def verify_memory(memory, memory_response, user_id, session_id):
@@ -77,7 +97,17 @@ def openai_embedder(openai_connection):
 
 
 @pytest.mark.integration
-def test_react_agent_with_pinecone_memory(openai_llm, pinecone_connection, openai_embedder, monkeypatch):
+def test_react_agent_with_pinecone_memory(
+    openai_llm,
+    pinecone_connection,
+    openai_embedder,
+    agent_role,
+    personal_info_input,
+    general_question_input,
+    memory_test_input,
+    run_config,
+    monkeypatch,
+):
     """Test ReActAgent with Pinecone memory backend."""
     memory_backend = Pinecone(
         index_name="test-memory-pinecone",
@@ -94,7 +124,7 @@ def test_react_agent_with_pinecone_memory(openai_llm, pinecone_connection, opena
         name="PineconeMemoryAgent",
         llm=openai_llm,
         tools=[],
-        role=AGENT_ROLE,
+        role=agent_role,
         inference_mode=InferenceMode.DEFAULT,
         memory=memory,
         verbose=True,
@@ -104,44 +134,54 @@ def test_react_agent_with_pinecone_memory(openai_llm, pinecone_connection, opena
 
     user_id = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
-    print(f"\nUsing user_id: {user_id} and session_id: {session_id}")
+    logger.info(f"\nUsing user_id: {user_id} and session_id: {session_id}")
 
-    print("\n--- Testing Pinecone Memory: Step 1 - Personal Info ---")
+    logger.info("\n--- Testing Pinecone Memory: Step 1 - Personal Info ---")
     result_1 = wf.run(
-        input_data={"input": PERSONAL_INFO_INPUT, "user_id": user_id, "session_id": session_id},
-        config=RUN_CONFIG,
+        input_data={"input": personal_info_input, "user_id": user_id, "session_id": session_id},
+        config=run_config,
     )
 
     assert result_1.status == RunnableStatus.SUCCESS
-    print(f"Agent response: {result_1.output[agent.id]['output']['content']}")
+    logger.info(f"Agent response: {result_1.output[agent.id]['output']['content']}")
     sleep(3)
-    print("--- Testing Pinecone Memory: Step 2 - General Question ---")
+    logger.info("--- Testing Pinecone Memory: Step 2 - General Question ---")
     result_2 = wf.run(
-        input_data={"input": GENERAL_QUESTION_INPUT, "user_id": user_id, "session_id": session_id},
-        config=RUN_CONFIG,
+        input_data={"input": general_question_input, "user_id": user_id, "session_id": session_id},
+        config=run_config,
     )
 
     assert result_2.status == RunnableStatus.SUCCESS
-    print(f"Agent response: {result_2.output[agent.id]['output']['content']}")
+    logger.info(f"Agent response: {result_2.output[agent.id]['output']['content']}")
     sleep(3)
-    print("--- Testing Pinecone Memory: Step 3 - Memory Test ---")
+    logger.info("--- Testing Pinecone Memory: Step 3 - Memory Test ---")
     result_3 = wf.run(
-        input_data={"input": MEMORY_TEST_INPUT, "user_id": user_id, "session_id": session_id},
-        config=RUN_CONFIG,
+        input_data={"input": memory_test_input, "user_id": user_id, "session_id": session_id},
+        config=run_config,
     )
 
     assert result_3.status == RunnableStatus.SUCCESS
     memory_response = result_3.output[agent.id]["output"]["content"]
-    print(f"Memory test response: {memory_response}")
+    logger.info(f"Memory test response: {memory_response}")
     sleep(3)
 
     verify_memory(memory, memory_response, user_id, session_id)
 
-    print("--- Pinecone Memory Test Passed ---")
+    logger.info("--- Pinecone Memory Test Passed ---")
 
 
 @pytest.mark.integration
-def test_react_agent_with_qdrant_memory(openai_llm, qdrant_connection, openai_embedder, monkeypatch):
+def test_react_agent_with_qdrant_memory(
+    openai_llm,
+    qdrant_connection,
+    openai_embedder,
+    agent_role,
+    personal_info_input,
+    general_question_input,
+    memory_test_input,
+    run_config,
+    monkeypatch,
+):
     """Test ReActAgent with Qdrant memory backend."""
     memory_backend = Qdrant(
         connection=qdrant_connection,
@@ -155,7 +195,7 @@ def test_react_agent_with_qdrant_memory(openai_llm, qdrant_connection, openai_em
         name="QdrantMemoryAgent",
         llm=openai_llm,
         tools=[],
-        role=AGENT_ROLE,
+        role=agent_role,
         inference_mode=InferenceMode.DEFAULT,
         memory=memory,
         verbose=True,
@@ -165,39 +205,39 @@ def test_react_agent_with_qdrant_memory(openai_llm, qdrant_connection, openai_em
 
     user_id = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
-    print(f"\nUsing user_id: {user_id} and session_id: {session_id}")
+    logger.info(f"\nUsing user_id: {user_id} and session_id: {session_id}")
 
-    print("\n--- Testing Qdrant Memory: Step 1 - Personal Info ---")
+    logger.info("\n--- Testing Qdrant Memory: Step 1 - Personal Info ---")
     result_1 = wf.run(
-        input_data={"input": PERSONAL_INFO_INPUT, "user_id": user_id, "session_id": session_id},
-        config=RUN_CONFIG,
+        input_data={"input": personal_info_input, "user_id": user_id, "session_id": session_id},
+        config=run_config,
     )
 
     assert result_1.status == RunnableStatus.SUCCESS
-    print(f"Agent response: {result_1.output[agent.id]['output']['content']}")
+    logger.info(f"Agent response: {result_1.output[agent.id]['output']['content']}")
     sleep(3)
 
-    print("--- Testing Qdrant Memory: Step 2 - General Question ---")
+    logger.info("--- Testing Qdrant Memory: Step 2 - General Question ---")
     result_2 = wf.run(
-        input_data={"input": GENERAL_QUESTION_INPUT, "user_id": user_id, "session_id": session_id},
-        config=RUN_CONFIG,
+        input_data={"input": general_question_input, "user_id": user_id, "session_id": session_id},
+        config=run_config,
     )
 
     assert result_2.status == RunnableStatus.SUCCESS
-    print(f"Agent response: {result_2.output[agent.id]['output']['content']}")
+    logger.info(f"Agent response: {result_2.output[agent.id]['output']['content']}")
     sleep(3)
 
-    print("--- Testing Qdrant Memory: Step 3 - Memory Test ---")
+    logger.info("--- Testing Qdrant Memory: Step 3 - Memory Test ---")
     result_3 = wf.run(
-        input_data={"input": MEMORY_TEST_INPUT, "user_id": user_id, "session_id": session_id},
-        config=RUN_CONFIG,
+        input_data={"input": memory_test_input, "user_id": user_id, "session_id": session_id},
+        config=run_config,
     )
 
     assert result_3.status == RunnableStatus.SUCCESS
     memory_response = result_3.output[agent.id]["output"]["content"]
-    print(f"Memory test response: {memory_response}")
+    logger.info(f"Memory test response: {memory_response}")
     sleep(3)
 
     verify_memory(memory, memory_response, user_id, session_id)
 
-    print("--- Qdrant Memory Test Passed ---")
+    logger.info("--- Qdrant Memory Test Passed ---")

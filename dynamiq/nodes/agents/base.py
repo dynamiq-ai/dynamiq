@@ -315,7 +315,15 @@ class Agent(Node):
         """
         Executes the agent with the given input data.
         """
-        logger.info(f"Agent {self.name} - {self.id}: started with input {dict(input_data)}")
+        log_data = dict(input_data).copy()
+
+        if log_data.get("images"):
+            log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
+
+        if log_data.get("files"):
+            log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
+
+        logger.info(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -766,7 +774,15 @@ class AgentManager(Agent):
         self, input_data: AgentManagerInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Executes the manager agent with the given input data and action."""
-        logger.info(f"Agent {self.name} - {self.id}: started with INPUT DATA:\n{input_data}")
+        log_data = dict(input_data).copy()
+
+        if log_data.get("images"):
+            log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
+
+        if log_data.get("files"):
+            log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
+
+        logger.info(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
         config = config or RunnableConfig()
         self.run_on_node_execute_run(config.callbacks, **kwargs)

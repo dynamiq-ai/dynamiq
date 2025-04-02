@@ -23,7 +23,7 @@ def openai_connection():
 def openai_node(openai_connection):
     return OpenAI(
         name="OpenAI",
-        model="gpt-3.5-turbo",
+        model="gpt-4o-mini",
         connection=openai_connection,
         prompt=prompts.Prompt(
             messages=[

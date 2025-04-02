@@ -1,4 +1,3 @@
-import json
 import re
 
 import pytest
@@ -7,15 +6,35 @@ from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents.utils import extract_thought_from_intermediate_steps
 from dynamiq.nodes.llms import Anthropic, Gemini, OpenAI
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.utils.logger import logger
 
-BASE_AGENT_ROLE = "is to help user with various tasks, goal is to provide best of possible answers to user queries"
-EMOJI_AGENT_ROLE = BASE_AGENT_ROLE + ", always include emojis in your responses"
 
-AGENT_INPUT = {"input": "What is the capital of the UK?"}
-EXPECTED_ANSWER = "London"
-RUN_CONFIG = RunnableConfig(request_timeout=120)
+@pytest.fixture
+def base_agent_role():
+    return "is to help user with various tasks, goal is to provide best of possible answers to user queries"
+
+
+@pytest.fixture
+def emoji_agent_role(base_agent_role):
+    return base_agent_role + ", always include emojis in your responses"
+
+
+@pytest.fixture
+def agent_input():
+    return {"input": "What is the capital of the UK?"}
+
+
+@pytest.fixture
+def expected_answer():
+    return "London"
+
+
+@pytest.fixture
+def run_config():
+    return RunnableConfig(request_timeout=120)
 
 
 def create_openai_llm():
@@ -77,57 +96,24 @@ def check_for_emoji(text):
     return any(emoji in text for emoji in common_emoji)
 
 
-def extract_thought_from_intermediate_steps(intermediate_steps):
-    """Extract thought process from the intermediate steps structure."""
-    if not intermediate_steps:
-        return None
-
-    for step_key, step_value in intermediate_steps.items():
-        if isinstance(step_value, dict) and "model_observation" in step_value:
-            model_obs = step_value["model_observation"]
-
-            if isinstance(model_obs, dict):
-                if "initial" in model_obs:
-                    initial = model_obs["initial"]
-
-                    if initial.startswith("{") and '"thought"' in initial:
-                        try:
-                            json_data = json.loads(initial)
-                            if "thought" in json_data:
-                                return json_data["thought"]
-                        except json.JSONDecodeError:
-                            pass
-
-                    if "<thought>" in initial:
-                        thought_match = re.search(r"<thought>\s*(.*?)\s*</thought>", initial, re.DOTALL)
-                        if thought_match:
-                            return thought_match.group(1)
-
-                    thought_match = re.search(r"Thought:\s*(.*?)(?:\n\n|\nAnswer:)", initial, re.DOTALL)
-                    if thought_match:
-                        return thought_match.group(1)
-
-    return None
-
-
 # --- Test Function for Running Agent ---
-def _run_and_assert_agent(agent: ReActAgent):
+def _run_and_assert_agent(agent: ReActAgent, agent_input, expected_answer, run_config):
     """Helper function to run agent and perform common assertions."""
     llm_type = agent.llm.__class__.__name__
-    print(f"\n--- Running Agent: {agent.name} (Mode: {agent.inference_mode.value}, LLM: {llm_type}) ---")
+    logger.info(f"\n--- Running Agent: {agent.name} (Mode: {agent.inference_mode.value}, LLM: {llm_type}) ---")
 
     agent_output = None
     intermediate_steps = None
 
     try:
-        result = agent.run(input_data=AGENT_INPUT, config=RUN_CONFIG)
-        print(f"Agent run completed with status: {result.status}")
+        result = agent.run(input_data=agent_input, config=run_config)
+        logger.info(f"Agent run completed with status: {result.status}")
 
         if result.status != RunnableStatus.SUCCESS:
             intermediate_steps = (
                 result.output.get("intermediate_steps", "N/A") if isinstance(result.output, dict) else "N/A"
             )
-            print(f"Intermediate Steps on Failure: {intermediate_steps}")
+            logger.info(f"Intermediate Steps on Failure: {intermediate_steps}")
             pytest.fail(f"Agent run failed with status '{result.status}'. Output: {result.output}.")
 
         if isinstance(result.output, dict):
@@ -137,25 +123,25 @@ def _run_and_assert_agent(agent: ReActAgent):
                 intermediate_steps = result.output["intermediate_steps"]
         else:
             agent_output = result.output
-            print(f"Warning: Agent output structure unexpected: {type(result.output)}")
+            logger.info(f"Warning: Agent output structure unexpected: {type(result.output)}")
 
-        print(f"Agent final output content: {agent_output}")
+        logger.info(f"Agent final output content: {agent_output}")
 
         thought = None
         if intermediate_steps:
             thought = extract_thought_from_intermediate_steps(intermediate_steps)
-            print(f"Extracted thought: {thought}")
+            logger.info(f"Extracted thought: {thought}")
 
     except Exception as e:
         pytest.fail(f"Agent run failed with exception: {e}")
 
-    print("Asserting results...")
+    logger.info("Asserting results...")
     assert agent_output is not None, "Agent output content should not be None"
     assert isinstance(agent_output, str), f"Agent output content should be a string, got {type(agent_output)}"
 
     assert (
-        EXPECTED_ANSWER in agent_output
-    ), f"Expected answer '{EXPECTED_ANSWER}' not found in agent output: '{agent_output}'"
+        expected_answer in agent_output
+    ), f"Expected answer '{expected_answer}' not found in agent output: '{agent_output}'"
 
     if "emojis" in agent.role:
         has_emoji = check_for_emoji(agent_output)
@@ -163,9 +149,9 @@ def _run_and_assert_agent(agent: ReActAgent):
     else:
         has_emoji = check_for_emoji(agent_output)
         if has_emoji:
-            print(f"Note: Found emoji in output even though not required: '{agent_output}'")
+            logger.info(f"Note: Found emoji in output even though not required: '{agent_output}'")
         else:
-            print(f"Note: No emoji in output (as expected for this role configuration): '{agent_output}'")
+            logger.info(f"Note: No emoji in output (as expected for this role configuration): '{agent_output}'")
 
     if agent.inference_mode == InferenceMode.DEFAULT:
         thought_found = thought is not None or "Thought:" in str(intermediate_steps)
@@ -183,7 +169,7 @@ def _run_and_assert_agent(agent: ReActAgent):
         thought_found = thought is not None or '"thought"' in str(intermediate_steps)
         assert thought_found, "Expected thought field to be present in STRUCTURED_OUTPUT mode"
 
-    print(f"--- Test Passed for Mode: {agent.inference_mode.value}, LLM: {llm_type} ---")
+    logger.info(f"--- Test Passed for Mode: {agent.inference_mode.value}, LLM: {llm_type} ---")
 
 
 LLM_PARAMS = [
@@ -193,68 +179,68 @@ LLM_PARAMS = [
 ]
 
 MODE_PARAMS = [
-    (InferenceMode.DEFAULT, EMOJI_AGENT_ROLE),
-    (InferenceMode.XML, EMOJI_AGENT_ROLE),
-    (InferenceMode.FUNCTION_CALLING, EMOJI_AGENT_ROLE),
-    (InferenceMode.STRUCTURED_OUTPUT, BASE_AGENT_ROLE),
+    (InferenceMode.DEFAULT, "emoji_agent_role"),
+    (InferenceMode.XML, "emoji_agent_role"),
+    (InferenceMode.FUNCTION_CALLING, "emoji_agent_role"),
+    (InferenceMode.STRUCTURED_OUTPUT, "base_agent_role"),
 ]
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("llm_name, llm_creator", LLM_PARAMS)
-def test_react_agent_default_mode(llm_name, llm_creator):
+def test_react_agent_default_mode(llm_name, llm_creator, emoji_agent_role, agent_input, expected_answer, run_config):
     llm_instance = llm_creator()
     agent = ReActAgent(
         name=f"Test Agent DEFAULT ({llm_name.upper()})",
         llm=llm_instance,
         tools=[],
-        role=EMOJI_AGENT_ROLE,
+        role=emoji_agent_role,
         inference_mode=InferenceMode.DEFAULT,
         verbose=True,
     )
-    _run_and_assert_agent(agent)
+    _run_and_assert_agent(agent, agent_input, expected_answer, run_config)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("llm_name, llm_creator", LLM_PARAMS)
-def test_react_agent_xml_mode(llm_name, llm_creator):
+def test_react_agent_xml_mode(llm_name, llm_creator, emoji_agent_role, agent_input, expected_answer, run_config):
     llm_instance = llm_creator()
     agent = ReActAgent(
         name=f"Test Agent XML ({llm_name.upper()})",
         llm=llm_instance,
         tools=[],
-        role=EMOJI_AGENT_ROLE,
+        role=emoji_agent_role,
         inference_mode=InferenceMode.XML,
         verbose=True,
     )
-    _run_and_assert_agent(agent)
+    _run_and_assert_agent(agent, agent_input, expected_answer, run_config)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("llm_name, llm_creator", LLM_PARAMS)
-def test_react_agent_fc_mode(llm_name, llm_creator):
+def test_react_agent_fc_mode(llm_name, llm_creator, emoji_agent_role, agent_input, expected_answer, run_config):
     llm_instance = llm_creator()
     agent = ReActAgent(
         name=f"Test Agent FC ({llm_name.upper()})",
         llm=llm_instance,
         tools=[],
-        role=BASE_AGENT_ROLE,
+        role=base_agent_role,
         inference_mode=InferenceMode.FUNCTION_CALLING,
         verbose=True,
     )
-    _run_and_assert_agent(agent)
+    _run_and_assert_agent(agent, agent_input, expected_answer, run_config)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("llm_name, llm_creator", LLM_PARAMS)
-def test_react_agent_so_mode(llm_name, llm_creator):
+def test_react_agent_so_mode(llm_name, llm_creator, base_agent_role, agent_input, expected_answer, run_config):
     llm_instance = llm_creator()
     agent = ReActAgent(
         name=f"Test Agent SO ({llm_name.upper()})",
         llm=llm_instance,
         tools=[],
-        role=BASE_AGENT_ROLE,
+        role=base_agent_role,
         inference_mode=InferenceMode.STRUCTURED_OUTPUT,
         verbose=True,
     )
-    _run_and_assert_agent(agent)
+    _run_and_assert_agent(agent, agent_input, expected_answer, run_config)
