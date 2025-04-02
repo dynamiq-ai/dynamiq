@@ -38,6 +38,14 @@ def run_config():
     return RunnableConfig(request_timeout=120)
 
 
+@pytest.fixture
+def agent_role():
+    return (
+        "You are a helpful assistant that answers user queries and "
+        "remembers personal information shared during the conversation."
+    )
+
+
 def verify_memory(memory, memory_response, user_id, session_id):
     """
     Verifies that the memory contains the expected conversation details for a given user and session.
