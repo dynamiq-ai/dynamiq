@@ -198,7 +198,7 @@ class AdaptiveOrchestrator(Orchestrator):
             logger.info(f"Orchestrator {self.name} - {self.id}: Loop {i + 1} - Action: {action.dict()}")
             if action.command == ActionCommand.DELEGATE:
                 self._handle_delegation(action=action, config=config, **kwargs)
-            
+
             elif action.command == ActionCommand.RESPOND:
                 respond_result = self._handle_respond(action=action)
                 respond_final_result = self.parse_xml_final_answer(respond_result)
