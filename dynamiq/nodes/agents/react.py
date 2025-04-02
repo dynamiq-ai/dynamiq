@@ -425,7 +425,7 @@ class ReActAgent(Agent):
             model_observation=AgentIntermediateStepModelObservation(
                 initial=llm_generated_output,
             ),
-        ).model_dump()
+        ).model_dump(by_alias=True)
 
     def _run_agent(
         self,
