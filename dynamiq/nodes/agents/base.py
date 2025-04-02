@@ -104,10 +104,10 @@ class ToolParams(BaseModel):
 
 class AgentInputSchema(BaseModel):
     input: str = Field(default="", description="Text input for the agent.")
-    images: list[str | bytes | io.BytesIO] = Field(
+    images: list[str | bytes | io.BytesIO] | None = Field(
         default=None, description="Image inputs (URLs, bytes, or file objects)."
     )
-    files: list[io.BytesIO | bytes] = Field(default=None, description="Parameter to provide files to the agent.")
+    files: list[io.BytesIO | bytes] | None = Field(default=None, description="Parameter to provide files to the agent.")
 
     user_id: str = Field(default=None, description="Parameter to provide user ID.")
     session_id: str = Field(default=None, description="Parameter to provide session ID.")
