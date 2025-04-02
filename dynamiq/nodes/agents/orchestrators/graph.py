@@ -11,6 +11,7 @@ from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.function_tool import function_tool
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 
@@ -243,6 +244,17 @@ class GraphOrchestrator(Orchestrator):
             next_state = json.loads(
                 manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
             )["state"]
+
+            if self.manager.streaming.enabled and self.manager.streaming.mode == StreamingMode.ALL:
+                self.manager.stream_content(
+                    content={"next_state": next_state},
+                    step="manager_planning",
+                    source=self.name,
+                    config=config,
+                    by_tokens=False,
+                    **kwargs,
+                )
+
         except Exception as e:
             logger.error("GraphOrchestrator: Error when parsing response about next state.")
             raise OrchestratorError(f"Error when parsing response about next state {e}")

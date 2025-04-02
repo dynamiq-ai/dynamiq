@@ -14,6 +14,7 @@ from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Or
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.feedback import PlanApprovalConfig
+from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 
@@ -176,6 +177,15 @@ class LinearOrchestrator(Orchestrator):
             )
             try:
                 tasks = self.parse_tasks_from_output(manager_result_content)
+                if self.manager.streaming.enabled and self.manager.streaming.mode == StreamingMode.ALL:
+                    self.manager.stream_content(
+                        content={"tasks": tasks},
+                        step="manager_planning",
+                        source=self.manager.name,
+                        config=config,
+                        by_tokens=False,
+                        **kwargs,
+                    )
 
             except ActionParseError as e:
                 feedback = str(e)
@@ -266,6 +276,17 @@ class LinearOrchestrator(Orchestrator):
 
                     if 0 <= assigned_agent_index < len(self.agents):
                         assigned_agent = self.agents[assigned_agent_index]
+
+                        if self.manager.streaming.enabled and self.manager.streaming.mode == StreamingMode.ALL:
+                            self.manager.stream_content(
+                                content={"agent": assigned_agent, "task": task},
+                                step="manager_assigning",
+                                source=self.name,
+                                config=config,
+                                by_tokens=False,
+                                **kwargs,
+                            )
+
                         logger.info(
                             f"Orchestrator {self.name} - {self.id}: Loop {count} - "
                             f"Assigned agent: {assigned_agent.name} - {assigned_agent.id}"
@@ -416,7 +437,17 @@ class LinearOrchestrator(Orchestrator):
             logger.error(error_message)
             return DecisionResult(decision=Decision.RESPOND, message="Manager did not return any result.")
 
-        data = self.extract_json_from_output(result_text=raw_text)
+        analysis, data = self.extract_json_from_output(result_text=raw_text)
+        if self.manager.streaming.enabled and self.manager.streaming.mode == StreamingMode.ALL:
+            self.manager.stream_content(
+                content={"analysis": analysis, "data": data},
+                step="manager_input_handling",
+                source=self.name,
+                config=config,
+                by_tokens=False,
+                **kwargs,
+            )
+
         if not data:
             error_message = f"Orchestrator {self.name} - {self.id}: Failed to extract JSON from manager output."
             logger.error(error_message)
@@ -442,10 +473,10 @@ class LinearOrchestrator(Orchestrator):
 
         return DecisionResult(decision=decision, message=message)
 
-    def extract_json_from_output(self, result_text: str) -> dict | None:
+    def extract_json_from_output(self, result_text: str) -> tuple[str, dict] | None:
         """
         Extracts JSON data from the given text by looking for content within
-        <output>...</output> tags. Strips any Markdown code block fences.
+        <output>...</output> and <analysis>...</analysis> tags. Strips any Markdown code block fences.
 
         Args:
             result_text (str): The text from which to extract JSON data.
@@ -453,12 +484,12 @@ class LinearOrchestrator(Orchestrator):
         Returns:
             dict | None: The extracted JSON dictionary if successful, otherwise None.
         """
-        output_content = self._extract_output_content(result_text)
+        analysis, output_content = self._extract_output_content(result_text)
         output_content = self._clean_output(output_content)
 
         try:
             data = json.loads(output_content)
-            return data
+            return analysis, data
         except json.JSONDecodeError as e:
             error_message = f"Orchestrator {self.name} - {self.id}: JSON decoding error: {e}"
             logger.error(error_message)

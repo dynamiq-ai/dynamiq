@@ -12,6 +12,7 @@ from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentMan
 from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Orchestrator, OrchestratorError
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.chat import format_chat_history
 from dynamiq.utils.logger import logger
 
@@ -97,6 +98,28 @@ class AdaptiveOrchestrator(Orchestrator):
         """Get a formatted string of agent descriptions."""
         return "\n".join([f"{i}. {agent.name}" for i, agent in enumerate(self.agents)]) if self.agents else ""
 
+    def _handle_next_action(self, content: str, config: RunnableConfig | None = None, **kwargs) -> Action:
+        """
+        Parse XML content to extract action details. Streams action if streaming is enabled.
+
+        Args:
+            content (str): XML formatted content from LLM response
+
+        Returns:
+            Action: Parsed action object
+        """
+        action = self._parse_xml_content(content)
+        if self.manager.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            self.manager.stream_content(
+                content={"next_action": action},
+                step="manager_planning",
+                source=self.name,
+                config=config,
+                by_tokens=False,
+                **kwargs,
+            )
+        return action
+
     def get_next_action(self, config: RunnableConfig = None, **kwargs) -> Action:
         """
         Determine the next action based on the current state and LLM output.
@@ -146,15 +169,16 @@ class AdaptiveOrchestrator(Orchestrator):
                     f"Agent '{self.manager.name}' failed on reflection: {reflect_result.output.get('content')}"
                 )
                 logger.error(error_message)
-                return self._parse_xml_content(manager_content)
+                return self._handle_next_action(manager_content)
             else:
                 reflect_content = reflect_result.output.get("content").get("result")
                 try:
-                    return self._parse_xml_content(reflect_content)
+                    return self._handle_next_action(reflect_content)
                 except ActionParseError as e:
                     logger.error(f"Agent '{self.manager.name}' failed on reflection parsing: {str(e)}")
-                    return self._parse_xml_content(manager_content)
-        return self._parse_xml_content(manager_content)
+                    return self._handle_next_action(manager_content)
+
+        return self._handle_next_action(manager_content)
 
     def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
