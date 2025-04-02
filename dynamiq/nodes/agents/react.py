@@ -423,7 +423,7 @@ class ReActAgent(Agent):
         ).model_dump()
 
     def _extract_final_answer(self, output: str) -> str:
-        """Extracts the final answer from the output string."""
+        """Extracts the final thought and answer as a tuple from the output string."""
         match = re.search(r"Thought:\s*(.*?)\s*Answer:\s*(.*)", output, re.DOTALL)
         if match:
             thought = match.group(1).strip()

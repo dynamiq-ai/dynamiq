@@ -15,7 +15,7 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from examples.llm_setup import setup_llm
 
 AGENT_RESEARCHER_ROLE = "A helpful Assistant with access to web tools."
-AGENT_WRITER_ROLE = "You are helfull assistant that accumulates key findings into report."
+AGENT_WRITER_ROLE = "You are helpful assistant that accumulates key findings into report."
 
 INPUT_TASK = "Research on Google. Do at least 3 iteratiohns"
 
@@ -93,7 +93,7 @@ async def _send_stream_events_by_ws(send_handler):
             elif step == "manager_assigning":
                 task_name = message.data["choices"][-1]["delta"]["content"]["task"]["name"]
                 content = (
-                    f"Assigned agent: {message.data["choices"][-1]["delta"]["content"]["agent"]["name"]}"
+                    f"Assigned agent: {message.data['choices'][-1]['delta']['content']['agent']['name']}"
                     f"for task {task_name}"
                 )
             elif step == "reasoning":
