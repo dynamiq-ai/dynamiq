@@ -6,7 +6,8 @@ from dynamiq import Workflow
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.connections import Tavily as TavilyConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.orchestrators import LinearAgentManager, LinearOrchestrator
+from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveAgentManager, AdaptiveOrchestrator, ActionCommand
+
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools import TavilyTool
 from dynamiq.nodes.types import InferenceMode
@@ -56,9 +57,9 @@ def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler)
         streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
     )
 
-    agent_manager = LinearAgentManager(llm=llm)
+    agent_manager = AdaptiveAgentManager(llm=llm)
 
-    linear_orchestrator = LinearOrchestrator(
+    linear_orchestrator = AdaptiveOrchestrator(
         manager=agent_manager,
         agents=[research_agent, writer_agent],
         streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
@@ -76,26 +77,12 @@ async def _send_stream_events_by_ws(send_handler):
     async for message in send_handler:
         if "choices" in message.data:
             step = message.data["choices"][-1]["delta"]["step"]
-            if step == "manager_input_handling":
-                content = message.data["choices"][-1]["delta"]["content"]["analysis"]
-            elif step == "manager_planning":
-                content = "#### Task description:  \n"
-                tasks = message.data["choices"][-1]["delta"]["content"]["tasks"]
-                for task in tasks:
-                    content += (
-                        "##### Name:  \n"
-                        + task["name"]
-                        + "  \n"
-                        + "##### Description:  \n"
-                        + task["description"]
-                        + "  \n"
-                    )
-            elif step == "manager_assigning":
-                task_name = message.data["choices"][-1]["delta"]["content"]["task"]["name"]
-                content = (
-                    f"Assigned agent: {message.data["choices"][-1]["delta"]["content"]["agent"]["name"]}"
-                    f"for task {task_name}"
-                )
+            if step == "manager_planning":
+                next_action = message.data["choices"][-1]["delta"]["content"]["next_action"]
+                if next_action["command"] == ActionCommand.DELEGATE:
+                    task = next_action["task"]
+                    agent = next_action["agent"]
+                    content = f"Delegating task: '{task}' for agent: **{agent}**."
             elif step == "reasoning":
                 content = message.data["choices"][-1]["delta"]["content"]["thought"]
             elif step == "answer":
@@ -103,14 +90,15 @@ async def _send_stream_events_by_ws(send_handler):
             elif step == "final":
                 content = message.data["choices"][-1]["delta"]["content"]
             else:
+                print(f"unhandled {step}")
+                content = message.data["choices"][-1]["delta"]["content"]
                 continue
-
             entity = message.data["choices"][-1]["delta"]["source"]
             content = f"**{entity}:**  \n" + str(content)
             streamlit_callback(content)
 
 
-async def run_agent_async(request: str) -> str:
+async def run_wf_async(request: str) -> str:
     send_handler = AsyncStreamingIteratorCallbackHandler()
     current_loop = asyncio.get_running_loop()
     task = current_loop.create_task(_send_stream_events_by_ws(send_handler))
@@ -123,4 +111,4 @@ async def run_agent_async(request: str) -> str:
 
 
 if __name__ == "__main__":
-    print(asyncio.run(run_agent_async("Write report about Google")))
+    print(asyncio.run(run_wf_async("Write report about Google")))

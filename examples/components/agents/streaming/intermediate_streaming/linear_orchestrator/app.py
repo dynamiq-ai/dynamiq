@@ -2,8 +2,8 @@ import asyncio
 
 import streamlit as st
 
-from examples.components.agents.streaming.intermediate_streaming.orchestrators.linear_orchestrator import (
-    run_agent_async,
+from examples.components.agents.streaming.intermediate_streaming.linear_orchestrator.linear_orchestrator import (
+    run_wf_async,
 )
 
 if __name__ == "__main__":
@@ -17,7 +17,7 @@ if __name__ == "__main__":
     if submitted:
         with st.status("🤖 **Agents at work...**", state="running", expanded=True) as status:
             with st.container(height=250, border=False):
-                result = asyncio.run(run_agent_async(request))
+                result = asyncio.run(run_wf_async(request))
             status.update(label="✅ Result is ready!", state="complete", expanded=False)
 
         st.subheader("Generated result", anchor=False, divider="rainbow")

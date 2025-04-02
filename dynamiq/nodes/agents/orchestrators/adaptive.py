@@ -169,16 +169,16 @@ class AdaptiveOrchestrator(Orchestrator):
                     f"Agent '{self.manager.name}' failed on reflection: {reflect_result.output.get('content')}"
                 )
                 logger.error(error_message)
-                return self._handle_next_action(manager_content)
+                return self._handle_next_action(manager_content, config=config, **kwargs)
             else:
                 reflect_content = reflect_result.output.get("content").get("result")
                 try:
-                    return self._handle_next_action(reflect_content)
+                    return self._handle_next_action(reflect_content, config=config, **kwargs)
                 except ActionParseError as e:
                     logger.error(f"Agent '{self.manager.name}' failed on reflection parsing: {str(e)}")
-                    return self._handle_next_action(manager_content)
+                    return self._handle_next_action(manager_content, config=config, **kwargs)
 
-        return self._handle_next_action(manager_content)
+        return self._handle_next_action(manager_content, config=config, **kwargs)
 
     def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
@@ -198,7 +198,7 @@ class AdaptiveOrchestrator(Orchestrator):
             logger.info(f"Orchestrator {self.name} - {self.id}: Loop {i + 1} - Action: {action.dict()}")
             if action.command == ActionCommand.DELEGATE:
                 self._handle_delegation(action=action, config=config, **kwargs)
-
+            
             elif action.command == ActionCommand.RESPOND:
                 respond_result = self._handle_respond(action=action)
                 respond_final_result = self.parse_xml_final_answer(respond_result)
