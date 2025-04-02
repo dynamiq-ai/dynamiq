@@ -145,13 +145,18 @@ IMPORTANT RULES:
 
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
-You have to call appropriate functions.
+You need to use the right functions based on what the user asks.
 
-Use the function provide_final_answer when a conclusive response to the user's
- initial request can be provided, and no further actions or tools are needed.
-Call this function if the user's input doesn't require follow-up or additional processing.
-If tools like [{tools_name}] are necessary to address the request, use the appropriate function
- to invoke them before providing the final answer.
+Use the function `provide_final_answer` when you can give a clear answer to the user's first question,
+ and no extra steps, tools, or work are needed.
+Call this function if the user's input is simple and doesn’t require additional help or tools.
+
+If the user's request requires the use of specific tools, such as [{tools_name}],
+ you must first call the appropriate function to invoke those tools.
+Only after utilizing the necessary tools and gathering the required information should
+ you call `provide_final_answer` to deliver the final response.
+
+Make sure to check each request carefully to see if you can answer it right away or if you need to use tools to help.
 """  # noqa: E501
 
 
@@ -552,9 +557,9 @@ class ReActAgent(Agent):
                         if isinstance(action_input, str):
                             try:
                                 action_input = json.loads(action_input)
-                            except Exception as e:
+                            except json.JSONDecodeError as e:
                                 raise ActionParsingException(
-                                    f"Error parsing string action_input. {e}", recoverable=True
+                                    f"Error parsing action_input string. {e}", recoverable=True
                                 )
 
                         self.log_reasoning(thought, action, action_input, loop_num)
@@ -577,7 +582,7 @@ class ReActAgent(Agent):
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         try:
                             llm_generated_output_json = json.loads(llm_generated_output)
-                        except Exception as e:
+                        except json.JSONDecodeError as e:
                             raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
 
                         thought = llm_generated_output_json["thought"]
@@ -597,7 +602,11 @@ class ReActAgent(Agent):
                                 )
                             return action_input
 
-                        action_input = json.loads(action_input)
+                        try:
+                            action_input = json.loads(action_input)
+                        except json.JSONDecodeError as e:
+                            raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+
                         self.log_reasoning(thought, action, action_input, loop_num)
 
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
