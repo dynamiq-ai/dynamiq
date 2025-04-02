@@ -93,7 +93,7 @@ async def _send_stream_events_by_ws(send_handler):
             elif step == "manager_assigning":
                 task_name = message.data["choices"][-1]["delta"]["content"]["task"]["name"]
                 content = (
-                    f"Assigned agent: {message.data["choices"][-1]["delta"]["content"]["agent"]["name"]}"
+                    f"Assigned agent: {message.data['choices'][-1]['delta']['content']['agent']['name']}"
                     f"for task {task_name}"
                 )
             elif step == "reasoning":
