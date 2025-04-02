@@ -1,4 +1,5 @@
 from typing import Literal, Any
+from pydantic import Field
 
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.operators import Pass
@@ -18,7 +19,7 @@ class Input(Pass):
 
     name: str | None = "Start"
     group: Literal[NodeGroup.UTILS] = NodeGroup.UTILS
-    schema: dict[str, Any] | None = None
+    json_schema: dict[str, Any] | None = Field(default=None, alias="schema")
 
 
 class Output(Pass):
@@ -35,4 +36,4 @@ class Output(Pass):
 
     name: str | None = "End"
     group: Literal[NodeGroup.UTILS] = NodeGroup.UTILS
-    schema: dict[str, Any] | None = None
+    json_schema: dict[str, Any] | None = Field(default=None, alias="schema")
