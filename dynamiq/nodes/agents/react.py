@@ -824,7 +824,7 @@ class ReActAgent(Agent):
             properties = {}
 
             input_params = tool.input_schema.model_fields.items()
-            if input_params:
+            if list(input_params):
                 for name, field in tool.input_schema.model_fields.items():
                     self.generate_property_schema(properties, name, field)
 
