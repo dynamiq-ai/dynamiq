@@ -129,16 +129,16 @@ class GraphState(Node):
             bool: Whether input data is correct.
         """
 
-        if task.input_transformer and (task.input_transformer.path or task.input_transformer.selector):
-            try:
+        try:
+            if task.input_transformer and (task.input_transformer.path or task.input_transformer.selector):
                 output = task.transform(input_data, task.input_transformer, task.id)
                 task.validate_input_schema(output, **kwargs)
-
                 return True
-
-            except Exception:
+            else:
                 return False
-        else:
+
+        except Exception as e:
+            logger.error(f"Error occurred while applying the InputTransformer to the {task.name} Node. {e}")
             return False
 
     def _submit_task(
