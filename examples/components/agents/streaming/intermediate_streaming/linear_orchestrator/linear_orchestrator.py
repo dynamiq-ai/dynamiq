@@ -24,7 +24,7 @@ def streamlit_callback(message):
     st.markdown(f"{message}")
 
 
-def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler) -> str:
+def run_orchestrator(request: str, send_handler: AsyncStreamingIteratorCallbackHandler) -> str:
     """
     Creates and runs agent
     Args:
@@ -108,12 +108,12 @@ async def _send_stream_events_by_ws(send_handler):
             streamlit_callback(content)
 
 
-async def run_wf_async(request: str) -> str:
+async def run_orchestrator_async(request: str) -> str:
     send_handler = AsyncStreamingIteratorCallbackHandler()
     current_loop = asyncio.get_running_loop()
     task = current_loop.create_task(_send_stream_events_by_ws(send_handler))
     await asyncio.sleep(0.01)
-    response = await current_loop.run_in_executor(None, run_agent, request, send_handler)
+    response = await current_loop.run_in_executor(None, run_orchestrator, request, send_handler)
 
     await task
 
@@ -121,4 +121,4 @@ async def run_wf_async(request: str) -> str:
 
 
 if __name__ == "__main__":
-    print(asyncio.run(run_wf_async("Write report about Google")))
+    print(asyncio.run(run_orchestrator_async("Write report about Google")))

@@ -2,15 +2,15 @@ import asyncio
 
 import streamlit as st
 
-from examples.components.agents.streaming.intermediate_streaming.adaptive_orchestrator.adaptive_orchestrator import (
+from examples.components.agents.streaming.intermediate_streaming.graph_orchestrator.graph_orchestrator import (
     run_orchestrator_async,
 )
 
 if __name__ == "__main__":
-    st.markdown("# Research Orchestrator")
+    st.markdown("# Email Write Orchestrator")
 
     with st.form("my_form"):
-        request = st.text_input("What is your request", placeholder="Research on development of AI in New York.")
+        request = st.text_input("What is your request", placeholder="Write email about party invitation.")
 
         submitted = st.form_submit_button("Submit")
 

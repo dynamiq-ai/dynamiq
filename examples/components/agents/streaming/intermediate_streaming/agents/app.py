@@ -7,7 +7,7 @@ if __name__ == "__main__":
     st.markdown("# Research Agent")
 
     with st.form("my_form"):
-        request = st.text_input("What is your request", placeholder="Research on implications of AI in New York.")
+        request = st.text_input("What is your request", placeholder="Research on development of AI in New York.")
 
         submitted = st.form_submit_button("Submit")
 

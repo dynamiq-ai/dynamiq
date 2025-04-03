@@ -53,9 +53,6 @@ def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler)
 
 async def _send_stream_events_by_ws(send_handler):
     async for message in send_handler:
-        print("**************************")
-        print(message)
-        print("**************************")
         if "choices" in message.data:
             step = message.data["choices"][-1]["delta"]["step"]
             if step == "reasoning":

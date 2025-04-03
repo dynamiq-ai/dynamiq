@@ -1,19 +1,17 @@
 import asyncio
+from typing import Any
 
 import streamlit as st
 
-from dynamiq import Workflow
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
-from dynamiq.connections import Tavily as TavilyConnection
-from dynamiq.flows import Flow
-from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveAgentManager, AdaptiveOrchestrator, ActionCommand
-
+from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.nodes.agents.orchestrators.adaptive import ActionCommand
+from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
+from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.tools import TavilyTool
-from dynamiq.nodes.types import InferenceMode
+from dynamiq.nodes.llms import OpenAI
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
-from examples.llm_setup import setup_llm
 
 AGENT_RESEARCHER_ROLE = "A helpful Assistant with access to web tools."
 AGENT_WRITER_ROLE = "You are helfull assistant that accumulates key findings into report."
@@ -33,44 +31,66 @@ def run_orchestrator(request: str, send_handler: AsyncStreamingIteratorCallbackH
     Returns:
         str: Agent final output.
     """
-    connection_tavily = TavilyConnection()
-    tool_search = TavilyTool(connection=connection_tavily)
 
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0)
+    llm = OpenAI(
+        connection=OpenAIConnection(),
+        model="gpt-4o",
+        temperature=0.1,
+    )
 
-    research_agent = ReActAgent(
-        name="Research Agent",
-        id="Research Agent",
+    email_writer = ReActAgent(
+        name="email-writer-agent",
         llm=llm,
-        tools=[tool_search],
-        role=AGENT_RESEARCHER_ROLE,
-        inference_mode=InferenceMode.STRUCTURED_OUTPUT,
+        role="Write personalized emails taking into account feedback.",
+    )
+
+    def gather_feedback(context: dict[str, Any], **kwargs):
+        """Gather feedback about email draft."""
+        feedback = input(
+            f"Email draft:\n"
+            f"{context.get('history', [{}])[-1].get('content', 'No draft')}\n"
+            f"Type in SEND to send email, CANCEL to exit, or provide feedback to refine email: \n"
+        )
+
+        reiterate = True
+
+        result = f"Gathered feedback: {feedback}"
+
+        feedback = feedback.strip().lower()
+        if feedback == "send":
+            print("####### Email was sent! #######")
+            result = "Email was sent!"
+            reiterate = False
+        elif feedback == "cancel":
+            print("####### Email was canceled! #######")
+            result = "Email was canceled!"
+            reiterate = False
+
+        return {"result": result, "reiterate": reiterate}
+
+    def router(context: dict[str, Any], **kwargs):
+        """Determines next state based on provided feedback."""
+        if context.get("reiterate", False):
+            return "generate_sketch"
+
+        return END
+
+    orchestrator = GraphOrchestrator(
+        name="Graph orchestrator",
+        manager=GraphAgentManager(llm=llm),
         streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
     )
 
-    writer_agent = ReActAgent(
-        name="Writer Agent",
-        id="Writer Agent",
-        llm=llm,
-        role=AGENT_WRITER_ROLE,
-        inference_mode=InferenceMode.STRUCTURED_OUTPUT,
-        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
-    )
+    orchestrator.add_state_by_tasks("generate_sketch", [email_writer])
+    orchestrator.add_state_by_tasks("gather_feedback", [gather_feedback])
 
-    agent_manager = AdaptiveAgentManager(llm=llm)
+    orchestrator.add_edge(START, "generate_sketch")
+    orchestrator.add_edge("generate_sketch", "gather_feedback")
 
-    linear_orchestrator = AdaptiveOrchestrator(
-        manager=agent_manager,
-        agents=[research_agent, writer_agent],
-        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
-    )
+    orchestrator.add_conditional_edge("gather_feedback", ["generate_sketch", END], router)
 
-    flow = Workflow(
-        flow=Flow(nodes=[linear_orchestrator]),
-    )
-
-    response = flow.run(input_data={"input": request}, config=RunnableConfig(callbacks=[send_handler]))
-    return response.output[linear_orchestrator.id]["output"]["content"]
+    response = orchestrator.run(input_data={"input": request}, config=RunnableConfig(callbacks=[send_handler]))
+    return response.output["content"]
 
 
 async def _send_stream_events_by_ws(send_handler):
@@ -104,9 +124,7 @@ async def run_orchestrator_async(request: str) -> str:
     task = current_loop.create_task(_send_stream_events_by_ws(send_handler))
     await asyncio.sleep(0.01)
     response = await current_loop.run_in_executor(None, run_orchestrator, request, send_handler)
-
     await task
-
     return response
 
 
