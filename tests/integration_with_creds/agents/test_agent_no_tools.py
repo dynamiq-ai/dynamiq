@@ -111,7 +111,7 @@ def check_for_emoji(text):
 
 
 # --- Test Function for Running Agent ---
-def _run_and_assert_agent(agent: ReActAgent, agent_input, expected_answer, run_config):
+def run_and_assert_agent(agent: ReActAgent, agent_input, expected_answer, run_config):
     """Helper function to run agent and perform common assertions."""
     llm_type = agent.llm.__class__.__name__
     logger.info(f"\n--- Running Agent: {agent.name} (Mode: {agent.inference_mode.value}, LLM: {llm_type}) ---")
@@ -198,7 +198,7 @@ def test_react_agent_default_mode(llm_name, llm_creator, emoji_agent_role, agent
         inference_mode=InferenceMode.DEFAULT,
         verbose=True,
     )
-    _run_and_assert_agent(agent, agent_input, expected_answer, run_config)
+    run_and_assert_agent(agent, agent_input, expected_answer, run_config)
 
 
 @pytest.mark.integration
@@ -213,7 +213,7 @@ def test_react_agent_xml_mode(llm_name, llm_creator, emoji_agent_role, agent_inp
         inference_mode=InferenceMode.XML,
         verbose=True,
     )
-    _run_and_assert_agent(agent, agent_input, expected_answer, run_config)
+    run_and_assert_agent(agent, agent_input, expected_answer, run_config)
 
 
 @pytest.mark.integration
@@ -230,7 +230,7 @@ def test_react_agent_function_calling_mode(
         inference_mode=InferenceMode.FUNCTION_CALLING,
         verbose=True,
     )
-    _run_and_assert_agent(agent, agent_input, expected_answer, run_config)
+    run_and_assert_agent(agent, agent_input, expected_answer, run_config)
 
 
 @pytest.mark.integration
@@ -247,4 +247,4 @@ def test_react_agent_structured_output_mode(
         inference_mode=InferenceMode.STRUCTURED_OUTPUT,
         verbose=True,
     )
-    _run_and_assert_agent(agent, agent_input, expected_answer, run_config)
+    run_and_assert_agent(agent, agent_input, expected_answer, run_config)

@@ -67,7 +67,7 @@ def string_length_tool_instance(python_tool_code):
     return tool
 
 
-def _run_and_assert_agent(agent: ReActAgent, agent_input, expected_length, run_config):
+def run_and_assert_agent(agent: ReActAgent, agent_input, expected_length, run_config):
     """Helper function to run agent and perform common assertions."""
     logger.info(f"\n--- Running Agent: {agent.name} (Mode: {agent.inference_mode.value}) ---")
     agent_output = None
@@ -117,7 +117,7 @@ def test_react_agent_default_mode(
         inference_mode=InferenceMode.DEFAULT,
         verbose=True,
     )
-    _run_and_assert_agent(agent, agent_input, expected_length, run_config)
+    run_and_assert_agent(agent, agent_input, expected_length, run_config)
 
 
 @pytest.mark.integration
@@ -132,7 +132,7 @@ def test_react_agent_xml_mode(
         inference_mode=InferenceMode.XML,
         verbose=True,
     )
-    _run_and_assert_agent(agent, agent_input, expected_length, run_config)
+    run_and_assert_agent(agent, agent_input, expected_length, run_config)
 
 
 @pytest.mark.integration
@@ -147,4 +147,19 @@ def test_react_agent_structured_output_mode(
         inference_mode=InferenceMode.STRUCTURED_OUTPUT,
         verbose=True,
     )
-    _run_and_assert_agent(agent, agent_input, expected_length, run_config)
+    run_and_assert_agent(agent, agent_input, expected_length, run_config)
+
+
+@pytest.mark.integration
+def test_react_agent_function_calling_mode(
+    llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config
+):
+    agent = ReActAgent(
+        name="Test Agent FUNCTION_CALLING",
+        llm=llm_instance,
+        tools=[string_length_tool_instance],
+        role=agent_role,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
+        verbose=True,
+    )
+    run_and_assert_agent(agent, agent_input, expected_length, run_config)

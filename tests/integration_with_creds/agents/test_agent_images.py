@@ -133,6 +133,7 @@ def _run_and_assert_agent(agent, input_data, expected_keywords, run_config):
     [
         InferenceMode.DEFAULT,
         InferenceMode.XML,
+        InferenceMode.FUNCTION_CALLING,
     ],
 )
 def test_react_agent_inference_modes(
