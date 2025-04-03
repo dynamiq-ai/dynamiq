@@ -167,3 +167,48 @@ def test_parse_xml_malformed_json(xml_react_agent):
 def test_sanitize_tool_name(default_react_agent, input_name, expected_output):
     """Test that tool names are sanitized correctly."""
     assert default_react_agent.sanitize_tool_name(input_name) == expected_output
+
+
+def test_generate_prompt_xml_mode(openai_node, mock_llm_executor):
+    """Test prompt generation in XML inference mode."""
+    agent = ReActAgent(name="XMLPromptAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.XML)
+
+    prompt = agent.generate_prompt()
+
+    assert "<output>" in prompt
+    assert "<thought>" in prompt
+    assert "<answer>" in prompt
+    assert "Always use this exact XML format" in prompt
+
+
+def test_set_prompt_block(openai_node, mock_llm_executor):
+    """Test modifying prompt blocks."""
+    agent = ReActAgent(name="PromptBlockTestAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+
+    custom_instructions = "Your goal is to analyze the given text and identify key points."
+    agent.set_block("instructions", custom_instructions)
+
+    prompt = agent.generate_prompt()
+
+    assert custom_instructions in prompt
+
+    custom_context = "You are a helpful scientific research assistant."
+    agent.set_block("context", custom_context)
+
+    prompt = agent.generate_prompt()
+
+    assert custom_instructions in prompt
+    assert custom_context in prompt
+
+
+def test_set_prompt_variable(openai_node, mock_llm_executor):
+    """Test setting prompt variables."""
+    agent = ReActAgent(name="PromptVarTestAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+
+    agent.set_prompt_variable("custom_date", "April 1, 2025")
+
+    agent.set_block("date", "Today's date is {custom_date}")
+
+    prompt = agent.generate_prompt()
+
+    assert "Today's date is April 1, 2025" in prompt
