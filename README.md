@@ -226,8 +226,8 @@ wf.flow.add_nodes(second_agent)
 
 # Run the workflow with an input
 result = wf.run(
-        input_data={"input": "How are sin(x) and cos(x) connected in electrodynamics?"},
-    )
+    input_data={"input": "How are sin(x) and cos(x) connected in electrodynamics?"},
+)
 
 # Print the input and output for both agents
 print('--- Agent 1: Input ---\n', result.output[first_agent.id].get("input").get('input'))
@@ -286,8 +286,8 @@ wf.flow.add_nodes(second_agent)
 
 # Run the workflow with an input
 result = wf.run(
-        input_data={"input": "How are sin(x) and cos(x) connected in electrodynamics?"},
-    )
+    input_data={"input": "How are sin(x) and cos(x) connected in electrodynamics?"},
+)
 
 # Print the input and output for both agents
 print('--- Agent 1: Input ---\n', result.output[first_agent.id].get("input").get('input'))
