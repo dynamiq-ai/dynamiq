@@ -93,51 +93,8 @@ result = llm.run(
 print(result.output)
 ```
 
-### Asynchronous Execution with Dynamiq
 
-Dynamiq supports asynchronous execution using Python's `async`/`await` syntax. Here's how to run a workflow asynchronously:
-
-```python
-import asyncio
-from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.prompts import Prompt, Message
-
-async def run_async_example():
-    # Define the prompt template for translation
-    prompt_template = "Translate the following text into French: {{ text }}"
-
-    # Create a Prompt object with the defined template
-    prompt = Prompt(messages=[Message(content=prompt_template, role="user")])
-
-    # Setup your LLM node
-    llm = OpenAI(
-        id="openai",
-        connection=OpenAIConnection(api_key="OPENAI_API_KEY"),
-        model="gpt-4o",
-        temperature=0.3,
-        max_tokens=1000,
-        prompt=prompt
-    )
-
-    # Run the LLM node asynchronously with the input data
-    result = await llm.run(
-        input_data={
-            "text": "Hello World!"
-        }
-    )
-
-    # Print the result of the translation
-    print(result.output)
-
-    return result
-
-# Execute the async function
-if __name__ == "__main__":
-    asyncio.run(run_async_example())
-```
-
-### Simple ReAct Agent
+### Simple ReAct Agent with asynchronous execution
 An agent that has the access to E2B Code Interpreter and is capable of solving complex coding tasks.
 
 ```python
@@ -169,14 +126,20 @@ agent = ReActAgent(
     max_loops=10, # Limit on the number of processing loops
 )
 
-# Run the agent with an input
-result = agent.run(
-    input_data={
-        "input": "Add the first 10 numbers and tell if the result is prime.",
-    }
-)
+async def run_async_agent():
+    # Run the agent asynchronously with an input
+    result = await agent.run(
+        input_data={
+            "input": "Add the first 10 numbers and tell if the result is prime.",
+        }
+    )
 
-print(result.output.get("content"))
+    print(result.output.get("content"))
+
+
+# Execute the async function
+if __name__ == "__main__":
+    asyncio.run(run_async_agent())
 ```
 
 ### Configuring Two Parallel Agents with WorkFlow
