@@ -103,7 +103,8 @@ def test_extract_final_answer(default_react_agent):
     Answer: The weather in San Francisco is foggy with a high of 65°F.
     """
     answer = default_react_agent._extract_final_answer(output)
-    assert answer == "The weather in San Francisco is foggy with a high of 65°F."
+    assert answer[0] == "I found all the information needed."
+    assert answer[1] == "The weather in San Francisco is foggy with a high of 65°F."
 
 
 def test_parse_xml_content(xml_react_agent):
