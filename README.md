@@ -105,9 +105,7 @@ from dynamiq.prompts import Prompt, Message
 
 async def run_async_example():
     # Define the prompt template for translation
-    prompt_template = """
-    Translate the following text into French: {{ text }}
-    """
+    prompt_template = "Translate the following text into French: {{ text }}"
 
     # Create a Prompt object with the defined template
     prompt = Prompt(messages=[Message(content=prompt_template, role="user")])
