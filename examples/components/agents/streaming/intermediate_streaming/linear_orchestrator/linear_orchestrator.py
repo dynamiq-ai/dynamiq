@@ -62,6 +62,8 @@ def run_orchestrator(request: str, send_handler: AsyncStreamingIteratorCallbackH
         manager=agent_manager,
         agents=[research_agent, writer_agent],
         streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
+        use_summarizer=True,
+        summarize_all_answers=True,
     )
 
     flow = Workflow(
@@ -94,12 +96,10 @@ async def _send_stream_events_by_ws(send_handler):
                 task_name = message.data["choices"][-1]["delta"]["content"]["task"]["name"]
                 content = (
                     f"Assigned agent: {message.data['choices'][-1]['delta']['content']['agent']['name']}"
-                    f"for task {task_name}"
+                    f" for task {task_name}"
                 )
             elif step == "reasoning":
                 content = message.data["choices"][-1]["delta"]["content"]["thought"]
-            elif step == "answer":
-                content = "Finished execution: '" + message.data["choices"][-1]["delta"]["content"] + "'"
             else:
                 continue
 

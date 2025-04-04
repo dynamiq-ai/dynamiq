@@ -85,8 +85,6 @@ async def _send_stream_events_by_ws(send_handler):
                     content = f"Delegating task: '{task}' for agent: **{agent}**."
             elif step == "reasoning":
                 content = message.data["choices"][-1]["delta"]["content"]["thought"]
-            elif step == "answer":
-                content = "Finished execution: '" + message.data["choices"][-1]["delta"]["content"] + "'"
             elif step == "final":
                 content = message.data["choices"][-1]["delta"]["content"]
             else:

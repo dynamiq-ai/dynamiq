@@ -896,11 +896,9 @@ class ReActAgent(Agent):
         self.format_schema.append(final_answer_function_schema)
         for tool in self.tools:
             properties = {}
-            fields = tool.input_schema.model_fields.items()
-            if not list(fields):
-                properties = {"type": "object"}
-            else:
-                for name, field in list(fields):
+            input_params = tool.input_schema.model_fields.items()
+            if list(input_params):
+                for name, field in tool.input_schema.model_fields.items():
                     self.generate_property_schema(properties, name, field)
 
                 schema = {
