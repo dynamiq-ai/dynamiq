@@ -122,7 +122,9 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
         ),
     ],
 )
-def test_workflow_with_map_node(get_orchestrator_workflow, context_input, outputs):
+def test_workflow_with_map_node(
+    mock_llm_executor, mock_llm_response_text, get_orchestrator_workflow, context_input, outputs
+):
     model = "gpt-3.5-turbo"
     connection = connections.OpenAI(
         api_key="api_key",

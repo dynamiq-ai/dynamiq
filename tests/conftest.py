@@ -13,7 +13,6 @@ from dynamiq.types.document import Document
 
 @pytest.fixture(autouse=True)
 def autouse_fixture(
-    mock_llm_executor,
     mock_tracing_client,
     mock_redis_backend,
 ): ...
