@@ -26,7 +26,7 @@ def openai_connection():
 def openai_node(openai_connection):
     return OpenAI(
         name="OpenAI",
-        model="gpt-3.5-turbo",
+        model="gpt-4o-mini",
         connection=openai_connection,
         prompt=prompts.Prompt(
             messages=[
@@ -39,7 +39,7 @@ def openai_node(openai_connection):
     )
 
 
-def test_workflow_with_agent_and_in_memory_memory(openai_node):
+def test_workflow_with_agent_and_in_memory_memory(mock_llm_executor, mock_llm_response_text, openai_node):
     memory = Memory(backend=InMemory())
     agent = SimpleAgent(
         name="Agent",
