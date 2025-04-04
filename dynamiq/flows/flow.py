@@ -228,7 +228,7 @@ class Flow(BaseFlow):
                 run_executor.shutdown()
 
             output = self._get_output()
-            self.run_on_flow_end(self._get_output(), config, **merged_kwargs)
+            self.run_on_flow_end(output, config, **merged_kwargs)
             logger.info(
                 f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}."
             )
@@ -295,7 +295,7 @@ class Flow(BaseFlow):
                         await asyncio.sleep(0)
 
             output = self._get_output()
-            self.run_on_flow_end(self._get_output(), config, **merged_kwargs)
+            self.run_on_flow_end(output, config, **merged_kwargs)
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
         except Exception as e:
