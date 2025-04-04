@@ -143,7 +143,7 @@ def test_react_agent_all_streaming(react_agent_with_all_streaming, streaming_eve
         assert len(agent_output) > 0
         assert all(event == streaming_event for event, _ in agent_output)
 
-        full_content = str(agent_output)
+        full_content = " ".join(str(content) for _, content in agent_output)
         assert "Paris" in full_content
 
 
@@ -171,7 +171,7 @@ def test_react_agent_final_streaming(react_agent_with_final_streaming, streaming
         assert len(agent_output) > 0
         assert all(event == streaming_event for event, _ in agent_output)
 
-        full_content = str(agent_output)
+        full_content = " ".join(str(content) for _, content in agent_output)
         assert "Berlin" in full_content
 
         reasoning_indicators = ["I need to", "Let me think", "First,", "Step 1:"]
@@ -205,5 +205,5 @@ def test_simple_agent_streaming(simple_agent_with_streaming, streaming_event):
         assert len(agent_output) > 0
         assert all(event == streaming_event for event, _ in agent_output)
 
-        full_content = str(agent_output)
+        full_content = " ".join(str(content) for _, content in agent_output)
         assert "Everest" in full_content
