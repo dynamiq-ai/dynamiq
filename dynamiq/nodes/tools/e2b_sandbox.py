@@ -114,7 +114,7 @@ class E2BInterpreterInputSchema(BaseModel):
     files: list[FileData] = Field(
         default=None,
         description="Parameter to provide files for uploading to the sandbox.",
-        is_accessible_to_agent=False,
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
     @model_validator(mode="after")

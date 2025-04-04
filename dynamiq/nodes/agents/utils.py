@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import re
 from typing import Any
 
 import filetype
@@ -196,3 +197,36 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
         content = content[:half_length] + truncation_message + content[-half_length:]
 
     return content
+
+
+def extract_thought_from_intermediate_steps(intermediate_steps):
+    """Extract thought process from the intermediate steps structure."""
+    if not intermediate_steps:
+        return None
+
+    for step_key, step_value in intermediate_steps.items():
+        if isinstance(step_value, dict) and "model_observation" in step_value:
+            model_obs = step_value["model_observation"]
+
+            if isinstance(model_obs, dict):
+                if "initial" in model_obs:
+                    initial = model_obs["initial"]
+
+                    if initial.startswith("{") and '"thought"' in initial:
+                        try:
+                            json_data = json.loads(initial)
+                            if "thought" in json_data:
+                                return json_data["thought"]
+                        except json.JSONDecodeError:
+                            pass
+
+                    if "<thought>" in initial:
+                        thought_match = re.search(r"<thought>\s*(.*?)\s*</thought>", initial, re.DOTALL)
+                        if thought_match:
+                            return thought_match.group(1)
+
+                    thought_match = re.search(r"Thought:\s*(.*?)(?:\n\n|\nAnswer:)", initial, re.DOTALL)
+                    if thought_match:
+                        return thought_match.group(1)
+
+    return None

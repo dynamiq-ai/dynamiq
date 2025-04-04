@@ -303,14 +303,14 @@ class Memory(BaseModel):
         try:
             effective_limit = limit if limit is not None else self.message_limit
 
-            if strategy == MemoryRetrievalStrategy.RELEVANT and query:
-                messages = self.search(query=query, filters=filters, limit=effective_limit)
-            elif strategy == MemoryRetrievalStrategy.BOTH and query:
-                recent_messages = self.search(
-                    query=None, filters=filters, limit=max(effective_limit, self.DEFAULT_LIMIT)
-                )
+            search_limit = effective_limit * 3
 
-                relevant_messages = self.search(query=query, filters=filters, limit=effective_limit)
+            if strategy == MemoryRetrievalStrategy.RELEVANT and query:
+                messages = self.search(query=query, filters=filters, limit=search_limit)
+            elif strategy == MemoryRetrievalStrategy.BOTH and query:
+                recent_messages = self.search(query=None, filters=filters, limit=max(search_limit, self.DEFAULT_LIMIT))
+
+                relevant_messages = self.search(query=query, filters=filters, limit=search_limit)
 
                 message_dict = {msg.metadata.get("timestamp", 0): msg for msg in recent_messages}
                 for msg in relevant_messages:
@@ -318,7 +318,7 @@ class Memory(BaseModel):
 
                 messages = [msg for _, msg in sorted(message_dict.items())]
             else:
-                messages = self.search(query=None, filters=filters, limit=effective_limit)
+                messages = self.search(query=None, filters=filters, limit=search_limit)
 
             final_messages = self._extract_valid_conversation(messages, effective_limit)
             if final_messages and final_messages[-1].role == MessageRole.ASSISTANT:

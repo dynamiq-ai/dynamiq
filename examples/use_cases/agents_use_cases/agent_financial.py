@@ -29,7 +29,7 @@ if __name__ == "__main__":
         inference_mode=InferenceMode.XML,
     )
 
-    result = agent.run(input_data={"input": "What is the current price of Bitcoin?"})
+    result = agent.run(input_data={"input": "What is the current price of Bitcoin?", "files": None})
 
     output_content = result.output.get("content")
     logger.info("RESULT")

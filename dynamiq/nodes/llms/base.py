@@ -336,7 +336,7 @@ class BaseLLM(ConnectionNode):
             "max_tokens": self.max_tokens,
             "tools": tools,
             "tool_choice": self.tool_choice,
-            "stop": self.stop,
+            "stop": self.stop if self.stop else None,
             "top_p": self.top_p,
             "seed": self.seed,
             "presence_penalty": self.presence_penalty,
