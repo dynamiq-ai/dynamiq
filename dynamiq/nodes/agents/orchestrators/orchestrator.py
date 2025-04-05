@@ -156,20 +156,28 @@ class Orchestrator(Node, ABC):
         logger.info(f"Orchestrator {self.name} - {self.id}: finished with RESULT:\n{str(output)[:200]}...")
         return output
 
-    def _extract_output_content(self, text: str) -> str:
+    def parse_xml_content(self, text: str, tag: str) -> str:
+        """Extract content from XML-like tags."""
+        match = re.search(f"<{tag}>(.*?)</{tag}>", text, re.DOTALL)
+        return match.group(1).strip() if match else ""
+
+    def _extract_output_content(self, text: str) -> tuple[str, str]:
         """
-        Extracts the content of the <output> tag. If a properly closed tag is not found,
+        Extracts the content of the <analysis> and <output> tags. If a properly closed tag is not found,
         fall back to extracting everything after the first occurrence of <output>.
         """
-        match = re.search(r"<output>(.*?)</output>", text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
+
+        output = self.parse_xml_content(text, "output")
+        analysis = self.parse_xml_content(text, "analysis")
+
+        if output:
+            return analysis, output
 
         start = text.find("<output>")
         if start != -1:
             fallback_content = text[start + len("<output>") :].strip()
             if fallback_content:
-                return fallback_content
+                return analysis, fallback_content
         raise ActionParseError("No <output> tags found in the response.")
 
     def _clean_content(self, content: str) -> LET.Element:

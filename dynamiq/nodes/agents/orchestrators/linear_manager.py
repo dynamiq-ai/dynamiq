@@ -1,7 +1,6 @@
 from dynamiq.nodes.agents.base import AgentManager
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.runnables import RunnableConfig
-from dynamiq.types.streaming import StreamingMode
 
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_PLAN = """
 You are an advanced AI planning assistant specializing in breaking down
@@ -381,13 +380,4 @@ class LinearAgentManager(AgentManager):
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=_prompt)], config, **kwargs).output[
             "content"
         ]
-        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            return self.stream_content(
-                content=llm_result,
-                step="manager_input_handling",
-                source=self.name,
-                config=config,
-                by_tokens=False,
-                **kwargs
-            )
         return llm_result

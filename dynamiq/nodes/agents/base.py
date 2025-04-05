@@ -16,7 +16,6 @@ from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_inpu
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
 
@@ -569,11 +568,6 @@ class Agent(Node):
         except Exception as e:
             raise e
 
-    def _extract_final_answer(self, output: str) -> str:
-        """Extracts the final answer from the output string."""
-        match = re.search(r"Answer:\s*(.*)", output, re.DOTALL)
-        return match.group(1).strip() if match else ""
-
     def _get_tool(self, action: str) -> Node:
         """Retrieves the tool corresponding to the given action."""
         tool = self.tool_by_names.get(self.sanitize_tool_name(action))
@@ -807,12 +801,7 @@ class AgentManager(Agent):
     def _plan(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'plan' action."""
         prompt = self._prompt_blocks.get("plan").format(**self._prompt_variables, **kwargs)
-
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
-        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            return self.stream_content(
-                content=llm_result, step="manager_planning", source=self.name, config=config, by_tokens=False, **kwargs
-            )
 
         return llm_result
 
@@ -820,10 +809,7 @@ class AgentManager(Agent):
         """Executes the 'assign' action."""
         prompt = self._prompt_blocks.get("assign").format(**self._prompt_variables, **kwargs)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
-        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            return self.stream_content(
-                content=llm_result, step="manager_assigning", source=self.name, config=config, by_tokens=False, **kwargs
-            )
+
         return llm_result
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
