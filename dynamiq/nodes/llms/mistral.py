@@ -25,8 +25,16 @@ class Mistral(BaseLLM):
             kwargs["connection"] = MistralConnection()
         super().__init__(**kwargs)
 
-    def format_messages_for_provider(self, messages: list[dict]) -> list[dict]:
-        """Add Mistral-specific prefix handling"""
+    def get_messages(
+        self,
+        prompt,
+        input_data,
+    ) -> list[dict]:
+        """
+        Format and filter message parameters based on provider requirements.
+        Override this in provider-specific subclasses.
+        """
+        messages = prompt.format_messages(**dict(input_data))
         formatted_messages = []
         for i, msg in enumerate(messages):
             msg_copy = msg.copy()
