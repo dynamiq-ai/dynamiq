@@ -1,5 +1,6 @@
 from dynamiq.connections import Mistral as MistralConnection
 from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.prompts import MessageRole
 
 
 class Mistral(BaseLLM):
@@ -23,3 +24,17 @@ class Mistral(BaseLLM):
         if kwargs.get("client") is None and kwargs.get("connection") is None:
             kwargs["connection"] = MistralConnection()
         super().__init__(**kwargs)
+
+    def format_messages_for_provider(self, messages: list[dict]) -> list[dict]:
+        """Add Mistral-specific prefix handling"""
+        formatted_messages = []
+        for i, msg in enumerate(messages):
+            msg_copy = msg.copy()
+
+            is_last_message = i == len(messages) - 1
+            if is_last_message and msg_copy["role"] == MessageRole.ASSISTANT.value:
+                msg_copy["prefix"] = True
+
+            formatted_messages.append(msg_copy)
+
+        return formatted_messages

@@ -321,8 +321,6 @@ class Memory(BaseModel):
                 messages = self.search(query=None, filters=filters, limit=search_limit)
 
             final_messages = self._extract_valid_conversation(messages, effective_limit)
-            if final_messages and final_messages[-1].role == MessageRole.ASSISTANT:
-                final_messages[-1].prefix = True
             return final_messages
         except Exception as e:
             logger.error(f"Error retrieving agent conversation: {e}")

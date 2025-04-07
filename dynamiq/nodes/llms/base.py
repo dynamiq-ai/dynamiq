@@ -140,6 +140,13 @@ class BaseLLM(ConnectionNode):
         """Provides context for input schema that is required for proper validation."""
         return {"instance_prompt": self.prompt}
 
+    def format_messages_for_provider(self, messages: list[dict]) -> list[dict]:
+        """
+        Format and filter message parameters based on provider requirements.
+        Override this in provider-specific subclasses.
+        """
+        return messages
+
     @classmethod
     def get_usage_data(
         cls,
@@ -311,8 +318,9 @@ class BaseLLM(ConnectionNode):
         config = ensure_config(config)
         prompt = prompt or self.prompt or Prompt(messages=[], tools=None)
         messages = prompt.format_messages(**dict(input_data))
+        formatted_messages = self.format_messages_for_provider(messages)
         base_tools = prompt.format_tools(**dict(input_data))
-        self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
+        self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=formatted_messages, **kwargs)
 
         # Use initialized client if it possible
         params = self.connection.conn_params.copy()
@@ -330,7 +338,7 @@ class BaseLLM(ConnectionNode):
 
         common_params: dict[str, Any] = {
             "model": self.model,
-            "messages": messages,
+            "messages": formatted_messages,
             "stream": self.streaming.enabled,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
@@ -355,5 +363,5 @@ class BaseLLM(ConnectionNode):
         )
 
         return handle_completion(
-            response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
+            response=response, messages=formatted_messages, config=config, input_data=dict(input_data), **kwargs
         )
