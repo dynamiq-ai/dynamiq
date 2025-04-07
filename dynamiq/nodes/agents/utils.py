@@ -82,7 +82,7 @@ class XMLParser:
         for tag in all_tags:
             tag_content = None
             element_found = False
-            elements = root.xpath(f".//self::{tag} | .//descendant::{tag}")
+            elements = root.xpath(f".//{tag}")
             if elements:
                 element_found = True
                 for elem in elements:
