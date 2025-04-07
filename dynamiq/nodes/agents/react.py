@@ -8,7 +8,15 @@ from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
-from dynamiq.nodes.agents.exceptions import ActionParsingException, MaxLoopsExceededException, RecoverableAgentException
+from dynamiq.nodes.agents.exceptions import (
+    ActionParsingException,
+    JSONParsingError,
+    MaxLoopsExceededException,
+    MissingTagError,
+    RecoverableAgentException,
+    XMLParsingError,
+)
+from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
@@ -120,7 +128,7 @@ IMPORTANT RULES:
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
 If you can answer on request:
-{{thought: [Why you can provide final answer],
+{{thought: [Your reasoning for the final answer],
 action: finish
 action_input: [Response for initial request]}}
 
@@ -315,65 +323,6 @@ class ReActAgent(Agent):
 
         return self
 
-    def parse_xml_content(self, text: str, tag: str) -> str:
-        """Extract content from XML-like tags."""
-        match = re.search(f"<{tag}>(.*?)</{tag}>", text, re.DOTALL)
-        return match.group(1).strip() if match else ""
-
-    def parse_xml_and_extract_info(self, text: str) -> dict[str, Any]:
-        """Parse XML-like structure and extract action and action_input."""
-        output_content = self.parse_xml_content(text, "output")
-        thought = self.parse_xml_content(output_content, "thought")
-        action = self.parse_xml_content(output_content, "action")
-        action_input_text = self.parse_xml_content(output_content, "action_input")
-
-        if not thought or not action or not action_input_text:
-            missing = []
-            if not thought:
-                missing.append("thought")
-            if not action:
-                missing.append("action")
-            if not action_input_text:
-                missing.append("action_input")
-
-            error_message = (
-                f"Error: Missing required XML tags: {', '.join(missing)}. "
-                "Your response must include complete <output>, <thought>, <action>, "
-                "and <action_input> tags."
-            )
-            raise ActionParsingException(error_message, recoverable=True)
-
-        try:
-            action_input = json.loads(action_input_text)
-        except json.JSONDecodeError as e:
-            logger.error(f"Error: Unable to parse action and action input due to invalid JSON formatting. {e}")
-            error_message = (
-                "Error: Unable to parse action and action input due to invalid JSON formatting. "
-                "Multiline strings are not allowed in JSON unless properly escaped. "
-                "Ensure all newlines (\\n), quotes, and special characters are escaped. "
-                "For example:\n\n"
-                "Correct:\n"
-                "{\n"
-                '  "key": "Line 1\\nLine 2",\n'
-                '  "code": "print(\\"Hello, World!\\")"\n'
-                "}\n\n"
-                "Incorrect:\n"
-                "{\n"
-                '  "key": "Line 1\nLine 2",\n'
-                '  "code": "print("Hello, World!")"\n'
-                "}\n\n"
-                f"JSON Parsing Error Details: {e}"
-            )
-            raise ActionParsingException(error_message, recoverable=True)
-
-        return thought, action, action_input
-
-    def extract_xml_output(self, text: str) -> tuple[str, Any]:
-        """Extract thought and answer from XML-like structure."""
-        thought = self.parse_xml_content(text, "thought")
-        answer = self.parse_xml_content(text, "answer")
-        return thought, answer
-
     def _parse_thought(self, output: str) -> tuple[str | None, str | None]:
         """Extracts thought from the output string."""
         thought_match = re.search(
@@ -387,33 +336,62 @@ class ReActAgent(Agent):
 
         return ""
 
-    def _parse_action(self, output: str) -> tuple[str | None, str | None]:
-        """Parses the action, its input, and thought from the output string."""
-        try:
-            action_match = re.search(
-                r"Action:\s*(.*?)\nAction Input:\s*(({\n)?.*?)(?:[^}]*$)",
-                output,
-                re.DOTALL,
-            )
-            if action_match:
-                action = action_match.group(1).strip()
-                action_input = action_match.group(2).strip()
-                if "```json" in action_input:
-                    action_input = action_input.replace("```json", "").replace("```", "").strip()
+    def _parse_action(self, output: str) -> tuple[str | None, str | None, dict | None]:
+        """
+        Parses the action, its input, and thought from the output string.
 
-                action_input = json.loads(action_input)
-                return self._parse_thought(output), action, action_input
-            else:
-                raise ActionParsingException()
+        Args:
+            output (str): The input string containing Thought, Action, and Action Input.
+
+        Returns:
+            Tuple[Optional[str], Optional[str], Optional[dict]]: (thought, action, action_input)
+            where thought is the extracted thought, action is the action name,
+            and action_input is the parsed JSON input.
+
+        Raises:
+            ActionParsingException: If the output format is invalid or parsing fails.
+        """
+        try:
+            thought_pattern = r"Thought:\s*(.*?)(?:Action:|$)"
+            action_pattern = r"Action:\s*(.*?)\nAction Input:\s*((?:{\n)?.*?)(?:[^}]*$)"
+
+            thought_match = re.search(thought_pattern, output, re.DOTALL)
+            thought = thought_match.group(1).strip() if thought_match else None
+
+            action_match = re.search(action_pattern, output, re.DOTALL)
+            if not action_match:
+                raise ActionParsingException(
+                    "No valid Action and Action Input found. "
+                    "Ensure the format is 'Thought: ... Action: ... Action Input: ...' "
+                    "with a valid dictionary as input.",
+                    recoverable=True,
+                )
+
+            action = action_match.group(1).strip()
+            raw_input = action_match.group(2).strip()
+
+            json_markers = ["```json", "```JSON", "```"]
+            for marker in json_markers:
+                if marker in raw_input:
+                    raw_input = raw_input.replace(marker, "").strip()
+
+            try:
+                action_input = json.loads(raw_input)
+            except json.JSONDecodeError as e:
+                raise ActionParsingException(
+                    f"Invalid JSON in Action Input: {str(e)}. Ensure the Action Input is a valid JSON dictionary.",
+                    recoverable=True,
+                )
+
+            return thought, action, action_input
+
         except Exception as e:
+            if isinstance(e, ActionParsingException):
+                raise
             raise ActionParsingException(
-                (
-                    f"Error {e}: Unable to parse thought, action and action input or thought and answer."
-                    "Please rewrite using the correct Thought/Action/Action Input format"
-                    "with action input as a valid dictionary."
-                    "Or in case of direct answer or clarification, use Thought/Answer format."
-                    "Ensure all quotes are included."
-                ),
+                f"Error parsing action: {str(e)}. "
+                f"Please ensure the output follows the format 'Thought: <text> "
+                f"Action: <action> Action Input: <valid JSON>'.",
                 recoverable=True,
             )
 
@@ -678,8 +656,12 @@ class ReActAgent(Agent):
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
 
-                        if "<answer>" in llm_generated_output:
-                            thought, final_answer = self.extract_xml_output(llm_generated_output)
+                        try:
+                            parsed_data = XMLParser.parse(
+                                llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
+                            )
+                            thought = parsed_data.get("thought")
+                            final_answer = parsed_data.get("answer")
                             self.log_final_output(thought, final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             if self.streaming.enabled:
@@ -700,23 +682,42 @@ class ReActAgent(Agent):
                                 )
                             return final_answer
 
-                        thought, action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
-                        self.log_reasoning(thought, action, action_input, loop_num)
+                        except MissingTagError:
+                            logger.debug("XMLParser: Not a final answer structure, trying action structure.")
+                            try:
+                                parsed_data = XMLParser.parse(
+                                    llm_generated_output,
+                                    required_tags=["thought", "action", "action_input"],
+                                    optional_tags=["output"],
+                                    json_fields=["action_input"],
+                                )
+                                thought = parsed_data.get("thought")
+                                action = parsed_data.get("action")
+                                action_input = parsed_data.get("action_input")
+                                self.log_reasoning(thought, action, action_input, loop_num)
 
-                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_content(
-                                content={
-                                    "thought": thought,
-                                    "action": action,
-                                    "action_input": action_input,
-                                    "loop_num": loop_num,
-                                },
-                                source=self.name,
-                                step="reasoning",
-                                config=config,
-                                by_tokens=False,
-                                **kwargs,
-                            )
+                                if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                                    self.stream_content(
+                                        content={
+                                            "thought": thought,
+                                            "action": action,
+                                            "action_input": action_input,
+                                            "loop_num": loop_num,
+                                        },
+                                        source=self.name,
+                                        step="reasoning",
+                                        config=config,
+                                        by_tokens=False,
+                                        **kwargs,
+                                    )
+
+                            except (XMLParsingError, MissingTagError, JSONParsingError) as e:
+                                logger.error(f"XMLParser: Failed to parse XML for action or answer: {e}")
+                                raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
+
+                        except (XMLParsingError, JSONParsingError) as e:
+                            logger.error(f"XMLParser: Error parsing potential final answer XML: {e}")
+                            raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
 
                 self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
 
@@ -729,8 +730,8 @@ class ReActAgent(Agent):
 
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
-
                         observation = f"\nObservation: {tool_result}\n"
+
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                             self.stream_content(
                                 content={"name": tool.name, "input": action_input, "result": tool_result},
@@ -757,8 +758,12 @@ class ReActAgent(Agent):
                 )
                 self._prompt.messages.append(
                     Message(
-                        role=MessageRole.ASSISTANT,
-                        content=f"Fix the reasoning error: {type(e).__name__}: {e}",
+                        role=MessageRole.SYSTEM,
+                        content=f"Correction Instruction: The previous response could not be parsed due to "
+                        f"the following error: '{type(e).__name__}: {e}'. "
+                        f"Please regenerate the response strictly following the "
+                        f"required XML format, ensuring all tags are present and "
+                        f"correctly structured, and that any JSON content (like action_input) is valid.",
                     )
                 )
                 continue
@@ -785,18 +790,30 @@ class ReActAgent(Agent):
     def _handle_max_loops_exceeded(self, config: RunnableConfig | None = None, **kwargs) -> str:
         """
         Handle the case where max loops are exceeded by crafting a thoughtful response.
+        Uses XMLParser to extract the final answer from the LLM's last attempt.
         """
         self._prompt.messages.append(Message(role=MessageRole.USER, content=REACT_MAX_LOOPS_PROMPT))
-        llm_final_attempt = self._run_llm(self._prompt.messages, config=config, **kwargs).output["content"]
+        llm_final_attempt_result = self._run_llm(self._prompt.messages, config=config, **kwargs)
+        llm_final_attempt = llm_final_attempt_result.output["content"]
         self._run_depends = [NodeDependency(node=self.llm).to_dict()]
-        final_answer = self.parse_xml_content(llm_final_attempt, "answer")
+
+        try:
+            final_answer = XMLParser.extract_first_tag_lxml(llm_final_attempt, ["answer"])
+            if final_answer is None:
+                logger.warning("Max loops handler: lxml failed to extract <answer>, falling back to regex.")
+                final_answer = XMLParser.extract_first_tag_regex(llm_final_attempt, ["answer"])
+
+            if final_answer is None:
+                logger.error(
+                    "Max loops handler: Failed to extract <answer> tag even with fallbacks. Returning raw output."
+                )
+                final_answer = llm_final_attempt
+
+        except Exception as e:
+            logger.error(f"Max loops handler: Error during final answer extraction: {e}. Returning raw output.")
+            final_answer = llm_final_attempt
 
         return f"{final_answer}"
-
-    def _extract_final_answer_xml(self, llm_output: str) -> str:
-        """Extract the final answer from the LLM output."""
-        final_answer = self.extract_xml_output(llm_output)
-        return (final_answer["answer"],)
 
     def generate_input_formats(self, tools: list[Node]) -> str:
         """Generate formatted input descriptions for each tool."""

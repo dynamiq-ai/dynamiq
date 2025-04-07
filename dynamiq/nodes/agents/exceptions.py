@@ -59,3 +59,27 @@ class MaxLoopsExceededException(RecoverableAgentException):
         self, message: str = "Maximum number of loops reached without finding a final answer.", recoverable: bool = True
     ):
         super().__init__(message, recoverable=recoverable)
+
+
+class ParsingError(RecoverableAgentException):
+    """Base class for parsing errors."""
+
+    pass
+
+
+class XMLParsingError(ParsingError):
+    """Exception raised when XML structure is invalid or cannot be parsed."""
+
+    pass
+
+
+class MissingTagError(ParsingError):
+    """Exception raised when required XML tags are missing."""
+
+    pass
+
+
+class JSONParsingError(ParsingError):
+    """Exception raised when expected JSON content within XML is invalid."""
+
+    pass
