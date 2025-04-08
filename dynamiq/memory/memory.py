@@ -103,8 +103,6 @@ class Memory(BaseModel):
 
             messages = self.backend.get_all(limit=effective_limit)
             retrieved_messages = [Message(**msg.model_dump()) for msg in messages]
-            if retrieved_messages and retrieved_messages[-1].role == MessageRole.ASSISTANT:
-                retrieved_messages[-1].prefix = True
             logger.debug(f"Memory {self.backend.name}: Retrieved {len(retrieved_messages)} messages")
             return retrieved_messages
         except Exception as e:
@@ -154,8 +152,6 @@ class Memory(BaseModel):
             results = self.backend.search(query=query, filters=effective_filters, limit=effective_limit)
 
             retrieved_messages = [Message(**msg.model_dump()) for msg in results]
-            if retrieved_messages and retrieved_messages[-1].role == MessageRole.ASSISTANT:
-                retrieved_messages[-1].prefix = True
             logger.debug(
                 f"Memory {self.backend.name}: Found {len(retrieved_messages)} search results for query: {query}, "
                 f"filters: {effective_filters}"
@@ -322,8 +318,6 @@ class Memory(BaseModel):
                 messages = self.search(query=None, filters=filters, limit=search_limit)
 
             final_messages = self._extract_valid_conversation(messages, effective_limit)
-            if final_messages and final_messages[-1].role == MessageRole.ASSISTANT:
-                final_messages[-1].prefix = True
             return final_messages
         except Exception as e:
             logger.error(f"Error retrieving agent conversation: {e}")
