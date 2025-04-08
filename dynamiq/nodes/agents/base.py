@@ -428,6 +428,11 @@ class Agent(Node):
             filters=filters,
             strategy=strategy,
         )
+        logger.info(
+            f"Retrieving memory with user_id={user_id}, "
+            f"session_id={session_id}, query={user_query}, strategy={self.memory_retrieval_strategy}"
+        )
+        logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(conversation))
 
         if self.verbose:
             logger.debug(
@@ -445,13 +450,14 @@ class Agent(Node):
         session_id = input_data.get("session_id")
 
         user_query = input_data.get("input", "")
-
-        return self.retrieve_conversation_history(
+        history_messages = self.retrieve_conversation_history(
             user_query=user_query,
             user_id=user_id,
             session_id=session_id,
             strategy=self.memory_retrieval_strategy,
         )
+        logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
+        return history_messages
 
     def _run_llm(self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and handles streaming or full responses."""

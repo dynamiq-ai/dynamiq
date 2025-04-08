@@ -151,7 +151,6 @@ def test_react_agent_with_pinecone_memory(
 
     assert result_1.status == RunnableStatus.SUCCESS
     logger.info(f"Agent response: {result_1.output[agent.id]['output']['content']}")
-    sleep(3)
     logger.info("--- Testing Pinecone Memory: Step 2 - General Question ---")
     result_2 = wf.run(
         input_data={"input": general_question_input, "user_id": user_id, "session_id": session_id},
@@ -160,7 +159,6 @@ def test_react_agent_with_pinecone_memory(
 
     assert result_2.status == RunnableStatus.SUCCESS
     logger.info(f"Agent response: {result_2.output[agent.id]['output']['content']}")
-    sleep(3)
     logger.info("--- Testing Pinecone Memory: Step 3 - Memory Test ---")
     result_3 = wf.run(
         input_data={"input": memory_test_input, "user_id": user_id, "session_id": session_id},
@@ -170,7 +168,6 @@ def test_react_agent_with_pinecone_memory(
     assert result_3.status == RunnableStatus.SUCCESS
     memory_response = result_3.output[agent.id]["output"]["content"]
     logger.info(f"Memory test response: {memory_response}")
-    sleep(3)
 
     verify_memory(memory, memory_response, user_id, session_id)
 

@@ -23,6 +23,9 @@ and you are responsible for using them in any order you choose to complete the t
 
 Input formats for tools:
 {input_formats}
+
+Note: For tools not listed in the input formats section,
+refer to their descriptions in the AVAILABLE TOOLS section for usage instructions.
 """
 
 REACT_BLOCK_TOOLS_NO_FORMATS = """
@@ -478,6 +481,9 @@ class ReActAgent(Agent):
         self.llm.stop = stop_sequences
 
         for loop_num in range(1, self.max_loops + 1):
+            logger.info("LOOOP NUM: %s", loop_num)
+            for msg in self._prompt.messages:
+                logger.info(f"Prompt message: {msg.role}: {msg.content}")
             try:
                 llm_result = self._run_llm(
                     self._prompt.messages,
@@ -812,8 +818,8 @@ class ReActAgent(Agent):
 
                     description = field.description or "No description"
                     params.append(f"{name} ({type_str}): {description}")
-
-            input_formats.append(f" - {self.sanitize_tool_name(tool.name)}\n \t* " + "\n\t* ".join(params))
+            if params:
+                input_formats.append(f" - {self.sanitize_tool_name(tool.name)}\n \t* " + "\n\t* ".join(params))
         return "\n".join(input_formats)
 
     def generate_structured_output_schemas(self):
