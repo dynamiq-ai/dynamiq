@@ -481,9 +481,6 @@ class ReActAgent(Agent):
         self.llm.stop = stop_sequences
 
         for loop_num in range(1, self.max_loops + 1):
-            logger.info("LOOOP NUM: %s", loop_num)
-            for msg in self._prompt.messages:
-                logger.info(f"Prompt message: {msg.role}: {msg.content}")
             try:
                 llm_result = self._run_llm(
                     self._prompt.messages,

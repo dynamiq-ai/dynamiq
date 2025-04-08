@@ -423,23 +423,11 @@ class Agent(Node):
             strategy = MemoryRetrievalStrategy.ALL
 
         conversation = self.memory.get_agent_conversation(
-            query=user_query,  # Pass the user query for relevance search
+            query=user_query,
             limit=limit,
             filters=filters,
             strategy=strategy,
         )
-        logger.info(
-            f"Retrieving memory with user_id={user_id}, "
-            f"session_id={session_id}, query={user_query}, strategy={self.memory_retrieval_strategy}"
-        )
-        logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(conversation))
-
-        if self.verbose:
-            logger.debug(
-                f"Agent {self.name} retrieved {len(conversation)} messages using {strategy.value} strategy. "
-                f"First message role: {conversation[0].role.value if conversation else 'None'}"
-            )
-
         return conversation
 
     def _retrieve_memory(self, input_data: dict) -> list[Message]:
