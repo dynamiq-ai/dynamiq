@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 from graphlib import CycleError, TopologicalSorter
 from io import BytesIO
@@ -184,9 +185,9 @@ class Flow(BaseFlow):
         }
         self._ts = self.init_node_topological_sorter(nodes=self.nodes)
 
-    def run(self, input_data: Any, config: RunnableConfig = None, **kwargs):
+    def run_sync(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
         """
-        Runs the flow with the given input data and configuration.
+        Run the flow synchronously with the given input data and configuration.
 
         Args:
             input_data (Any): Input data for the flow.
@@ -227,7 +228,7 @@ class Flow(BaseFlow):
                 run_executor.shutdown()
 
             output = self._get_output()
-            self.run_on_flow_end(self._get_output(), config, **merged_kwargs)
+            self.run_on_flow_end(output, config, **merged_kwargs)
             logger.info(
                 f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}."
             )
@@ -236,10 +237,70 @@ class Flow(BaseFlow):
             )
         except Exception as e:
             self.run_on_flow_error(e, config, **merged_kwargs)
-            logger.error(
-                f"Flow {self.id}: execution failed in "
-                f"{format_duration(time_start, datetime.now())}."
+            logger.error(f"Flow {self.id}: execution failed in " f"{format_duration(time_start, datetime.now())}.")
+            return RunnableResult(
+                status=RunnableStatus.FAILURE,
+                input=input_data,
             )
+
+    async def run_async(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
+        """
+        Run the flow asynchronously with the given input data and configuration.
+
+        Args:
+            input_data (Any): Input data for the flow.
+            config (RunnableConfig, optional): Configuration for the run. Defaults to None.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            RunnableResult: Result of the flow execution.
+        """
+        self.reset_run_state()
+        run_id = uuid4()
+        merged_kwargs = kwargs | {
+            "run_id": run_id,
+            "parent_run_id": kwargs.get("parent_run_id", run_id),
+        }
+
+        logger.info(f"Flow {self.id}: execution started.")
+        self.run_on_flow_start(input_data, config, **merged_kwargs)
+        time_start = datetime.now()
+
+        try:
+            if self.nodes:
+                while self._ts.is_active():
+                    ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
+                    nodes_to_run = [node for node in ready_nodes if node.is_ready]
+
+                    if nodes_to_run:
+                        tasks = [
+                            node.node.run_async(
+                                input_data=node.input_data,
+                                depends_result=node.depends_result,
+                                config=config,
+                                **(merged_kwargs | {"parent_run_id": run_id}),
+                            )
+                            for node in nodes_to_run
+                        ]
+
+                        results_list = await asyncio.gather(*tasks)
+
+                        results = {node.node.id: result for node, result in zip(nodes_to_run, results_list)}
+
+                        self._results.update(results)
+                        self._ts.done(*results.keys())
+                    else:
+                        # If no nodes are ready yet but the sorter is still active,
+                        # yield control to allow other async operations to progress
+                        await asyncio.sleep(0)
+
+            output = self._get_output()
+            self.run_on_flow_end(output, config, **merged_kwargs)
+            logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
+            return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
+        except Exception as e:
+            self.run_on_flow_error(e, config, **merged_kwargs)
+            logger.error(f"Flow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(
                 status=RunnableStatus.FAILURE,
                 input=input_data,

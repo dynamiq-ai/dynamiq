@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import time
 from abc import ABC, abstractmethod
@@ -602,7 +603,7 @@ class Node(BaseModel, Runnable, ABC):
 
         return input_data
 
-    def run(
+    def run_sync(
         self,
         input_data: Any,
         config: RunnableConfig = None,
@@ -610,7 +611,7 @@ class Node(BaseModel, Runnable, ABC):
         **kwargs,
     ) -> RunnableResult:
         """
-        Run the node with given input data and configuration.
+        Run the node synchronously with given input data and configuration.
 
         Args:
             input_data (Any): Input data for the node.
@@ -691,6 +692,30 @@ class Node(BaseModel, Runnable, ABC):
                 input=input_data,
                 output=format_value(e, recoverable=recoverable)[0],
             )
+
+    async def run_async(
+        self,
+        input_data: Any,
+        config: RunnableConfig = None,
+        depends_result: dict = None,
+        **kwargs,
+    ) -> RunnableResult:
+        """
+        Run the node asynchronously with given input data and configuration.
+        This runs the synchronous implementation in a thread pool to avoid blocking the event loop.
+
+        Args:
+            input_data (Any): Input data for the node.
+            config (RunnableConfig, optional): Configuration for the run. Defaults to None.
+            depends_result (dict, optional): Results of dependent nodes. Defaults to None.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            RunnableResult: Result of the node execution.
+        """
+        return await asyncio.to_thread(
+            self.run_sync, input_data=input_data, config=config, depends_result=depends_result, **kwargs
+        )
 
     def execute_with_retry(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs):
         """

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from datetime import date, datetime
 from enum import Enum
@@ -237,3 +238,17 @@ def deep_merge(source: dict, destination: dict) -> dict:
         else:
             result[key] = value
     return result
+
+
+def is_called_from_async_context() -> bool:
+    """
+    Attempt to detect if the function is being called from an async context.
+
+    Returns:
+        bool: True if called from an async context, False otherwise
+    """
+    try:
+        asyncio.get_running_loop()
+        return True
+    except Exception:
+        return False

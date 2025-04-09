@@ -93,7 +93,8 @@ result = llm.run(
 print(result.output)
 ```
 
-### Simple ReAct Agent
+
+### Simple ReAct Agent with asynchronous execution
 An agent that has the access to E2B Code Interpreter and is capable of solving complex coding tasks.
 
 ```python
@@ -125,14 +126,20 @@ agent = ReActAgent(
     max_loops=10, # Limit on the number of processing loops
 )
 
-# Run the agent with an input
-result = agent.run(
-    input_data={
-        "input": "Add the first 10 numbers and tell if the result is prime.",
-    }
-)
+async def run_async_agent():
+    # Run the agent asynchronously with an input
+    result = await agent.run(
+        input_data={
+            "input": "Add the first 10 numbers and tell if the result is prime.",
+        }
+    )
 
-print(result.output.get("content"))
+    print(result.output.get("content"))
+
+
+# Execute the async function
+if __name__ == "__main__":
+    asyncio.run(run_async_agent())
 ```
 
 ### Configuring Two Parallel Agents with WorkFlow
@@ -182,8 +189,8 @@ wf.flow.add_nodes(second_agent)
 
 # Run the workflow with an input
 result = wf.run(
-        input_data={"input": "How are sin(x) and cos(x) connected in electrodynamics?"},
-    )
+    input_data={"input": "How are sin(x) and cos(x) connected in electrodynamics?"},
+)
 
 # Print the input and output for both agents
 print('--- Agent 1: Input ---\n', result.output[first_agent.id].get("input").get('input'))
@@ -242,8 +249,8 @@ wf.flow.add_nodes(second_agent)
 
 # Run the workflow with an input
 result = wf.run(
-        input_data={"input": "How are sin(x) and cos(x) connected in electrodynamics?"},
-    )
+    input_data={"input": "How are sin(x) and cos(x) connected in electrodynamics?"},
+)
 
 # Print the input and output for both agents
 print('--- Agent 1: Input ---\n', result.output[first_agent.id].get("input").get('input'))

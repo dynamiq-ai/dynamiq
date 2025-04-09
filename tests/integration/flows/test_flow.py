@@ -63,6 +63,168 @@ def test_workflow_with_depend_nodes_with_tracing(
         input_data=input_data,
         config=RunnableConfig(callbacks=[tracing]),
     )
+
+    expected_input_openai = input_data
+    expected_tracing_input = {
+        "a": 1,
+        "b": {"files": [file_name, bytes_content.decode()]},
+        "c": encode_bytes(bytes_content),
+        "d": encode_bytes(bytes_content_non_utf8),
+    }
+    expected_output_openai = {"content": mock_llm_response_text}
+    expected_result_openai = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input=expected_input_openai,
+        output=expected_output_openai,
+    )
+    expected_input_anthropic = input_data | {openai_node.id: expected_result_openai.to_tracing_depend_dict()}
+    expected_output_anthropic = {"content": mock_llm_response_text}
+    expected_result_anthropic = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input=expected_input_anthropic,
+        output=expected_output_anthropic,
+    )
+
+    expected_input_output = expected_input_anthropic | {
+        anthropic_node_with_dependency.id: expected_result_anthropic.to_tracing_depend_dict()
+    }
+    expected_result_output = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input=expected_input_output,
+        output=expected_input_output,
+    )
+
+    expected_output = {
+        openai_node.id: expected_result_openai.to_dict(skip_format_types={BytesIO, bytes}),
+        anthropic_node_with_dependency.id: expected_result_anthropic.to_dict(skip_format_types={BytesIO, bytes}),
+        output_node.id: expected_result_output.to_dict(skip_format_types={BytesIO, bytes}),
+    }
+    expected_openai_messages = openai_node.prompt.format_messages(**expected_input_openai)
+    expected_anthropic_messages = anthropic_node_with_dependency.prompt.format_messages(**expected_input_anthropic)
+
+    assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
+    assert mock_llm_executor.call_count == 2
+    assert mock_llm_executor.call_args_list == [
+        mock.call(
+            tools=None,
+            tool_choice=None,
+            model=openai_node.model,
+            messages=expected_openai_messages,
+            stream=False,
+            temperature=openai_node.temperature,
+            max_tokens=1000,
+            stop=None,
+            seed=None,
+            presence_penalty=None,
+            frequency_penalty=None,
+            top_p=None,
+            api_key=openai_node.connection.api_key,
+            client=ANY,
+            response_format=None,
+            drop_params=True,
+            api_base="https://api.openai.com/v1",
+        ),
+        mock.call(
+            tools=None,
+            tool_choice=None,
+            model=anthropic_node_with_dependency.model,
+            messages=expected_anthropic_messages,
+            stream=False,
+            temperature=anthropic_node_with_dependency.temperature,
+            max_tokens=1000,
+            stop=None,
+            seed=None,
+            presence_penalty=None,
+            frequency_penalty=None,
+            top_p=None,
+            api_key=anthropic_node_with_dependency.connection.api_key,
+            response_format=None,
+            drop_params=True,
+        ),
+    ]
+
+    tracing_runs = list(tracing.runs.values())
+    assert len(tracing_runs) == 5
+    wf_run = tracing_runs[0]
+    assert wf_run.metadata["workflow"]["id"] == wf.id
+    assert wf_run.metadata["workflow"]["version"] == wf.version
+    assert wf_run.metadata["host"]
+    assert wf_run.output == format_value(expected_output)[0]
+    assert wf_run.status == RunStatus.SUCCEEDED
+    assert wf_run.tags == tags
+    assert metadata.items() <= wf_run.metadata.items()
+    flow_run = tracing_runs[1]
+    assert flow_run.metadata["flow"]["id"] == wf.flow.id
+    assert flow_run.metadata["host"]
+    assert flow_run.parent_run_id == wf_run.id
+    assert flow_run.output == format_value(expected_output)[0]
+    assert flow_run.status == RunStatus.SUCCEEDED
+    assert flow_run.tags == tags
+    assert metadata.items() <= flow_run.metadata.items()
+    openai_run = tracing_runs[2]
+    openai_node = openai_node.to_dict()
+    openai_node["prompt"]["messages"] = expected_openai_messages
+    assert openai_run.metadata["node"] == openai_node
+    assert openai_run.metadata["host"]
+    assert openai_run.metadata.get("usage")
+    assert openai_run.parent_run_id == flow_run.id
+    assert openai_run.input == expected_tracing_input
+    assert openai_run.output == format_value(expected_output_openai)[0]
+    assert openai_run.status == RunStatus.SUCCEEDED
+    assert openai_run.tags == tags
+    assert metadata.items() <= openai_run.metadata.items()
+    anthropic_run = tracing_runs[3]
+    anthropic_node = anthropic_node_with_dependency.to_dict()
+    anthropic_node["prompt"]["messages"] = expected_anthropic_messages
+    assert anthropic_run.metadata["node"] == anthropic_node
+    assert anthropic_run.metadata["host"]
+    assert anthropic_run.metadata.get("usage")
+    assert anthropic_run.parent_run_id == flow_run.id
+    assert anthropic_run.input == format_value(expected_input_anthropic)[0]
+    assert anthropic_run.output == format_value(expected_output_anthropic)[0]
+    assert anthropic_run.status == RunStatus.SUCCEEDED
+    assert anthropic_run.tags == tags
+    assert metadata.items() <= anthropic_run.metadata.items()
+    output_node_run = tracing_runs[4]
+    assert output_node_run.metadata["node"] == output_node.to_dict()
+    assert output_node_run.metadata["host"]
+    assert output_node_run.metadata.get("usage") is None
+    assert output_node_run.parent_run_id == flow_run.id
+    assert output_node_run.input == format_value(expected_input_output)[0]
+    assert output_node_run.output == format_value(expected_input_output)[0]
+    assert output_node_run.status == RunStatus.SUCCEEDED
+    assert output_node_run.tags == tags
+    assert output_node_run.executions
+    assert metadata.items() <= output_node_run.metadata.items()
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_depend_nodes_with_tracing_async(
+    wf,
+    openai_node,
+    anthropic_node_with_dependency,
+    output_node,
+    mock_llm_response_text,
+    mock_llm_executor,
+):
+    file_name = "file.txt"
+    bytes_content = b"file content"
+    bytes_content_non_utf8 = b"\xff\xfb\x90\xc4\x00\x00\n\xddu\x15\xe1\x84Z\xe1\xb9"
+    file = BytesIO(bytes_content)
+    file.name = file_name
+    file_without_name = BytesIO(bytes_content)
+    files = [file, file_without_name]
+    input_data = {"a": 1, "b": {"files": files}, "c": bytes_content, "d": bytes_content_non_utf8}
+
+    tags = ["test1", "test2"]
+    metadata = {"app_id": "0.0.1", "runtime_id": "0.0.1"}
+    tracing = TracingCallbackHandler(tags=tags, metadata=metadata)
+
+    response = await wf.run(
+        input_data=input_data,
+        config=RunnableConfig(callbacks=[tracing]),
+    )
+
     expected_input_openai = input_data
     expected_tracing_input = {
         "a": 1,

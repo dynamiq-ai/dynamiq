@@ -39,7 +39,7 @@ def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler)
         llm=llm,
         tools=[tool_search],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.STRUCTURED_OUTPUT,
         streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
     )
 
@@ -55,7 +55,7 @@ async def _send_stream_events_by_ws(send_handler):
     async for message in send_handler:
         if "choices" in message.data:
             step = message.data["choices"][-1]["delta"]["step"]
-            if "reasoning_" in step:
+            if step == "reasoning":
                 content = message.data["choices"][-1]["delta"]["content"]["thought"]
                 streamlit_callback(content)
 
