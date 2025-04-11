@@ -535,18 +535,11 @@ class Agent(Node):
             strategy = MemoryRetrievalStrategy.ALL
 
         conversation = self.memory.get_agent_conversation(
-            query=user_query,  # Pass the user query for relevance search
+            query=user_query,
             limit=limit,
             filters=filters,
             strategy=strategy,
         )
-
-        if self.verbose:
-            logger.debug(
-                f"Agent {self.name} retrieved {len(conversation)} messages using {strategy.value} strategy. "
-                f"First message role: {conversation[0].role.value if conversation else 'None'}"
-            )
-
         return conversation
 
     def _retrieve_memory(self, input_data: dict) -> list[Message]:
@@ -557,13 +550,14 @@ class Agent(Node):
         session_id = input_data.get("session_id")
 
         user_query = input_data.get("input", "")
-
-        return self.retrieve_conversation_history(
+        history_messages = self.retrieve_conversation_history(
             user_query=user_query,
             user_id=user_id,
             session_id=session_id,
             strategy=self.memory_retrieval_strategy,
         )
+        logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
+        return history_messages
 
     def _run_llm(self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs) -> str:
         """Runs the LLM with a given prompt and handles streaming or full responses."""

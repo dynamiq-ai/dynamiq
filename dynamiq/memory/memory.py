@@ -296,6 +296,7 @@ class Memory(BaseModel):
         MemoryError
             If there is an error retrieving the conversation history.
         """
+        logger.debug("Retrieving agent conversation...")
         try:
             effective_limit = limit if limit is not None else self.message_limit
 
