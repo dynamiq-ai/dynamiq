@@ -258,7 +258,8 @@ class JinaSearchTool(ConnectionNode):
 
         headers = {
             **self.connection.headers,
-            **({"X-Retain-Images": "none"} if self.include_images is False else {}),
+            **({"X-With-Images-Summary": "true"} if self.include_images else {"X-Retain-Images": "none"}),
+            **({"X-Engine": "direct"} if self.include_full_content else {"X-Respond-With": "no-content"}),
             "Accept": "application/json",
         }
 
@@ -295,11 +296,14 @@ class JinaSearchTool(ConnectionNode):
                 + f"\n<\\Search results for query {query}>"
             )
         else:
+            images = {}
+            for d in search_result.get("data", []):
+                images.update(d.get("images", {}))
             result = {
                 "result": formatted_results,
                 "sources_with_url": sources_with_url,
                 "raw_response": search_result,
-                "images": search_result.get("images", []),
+                "images": images,
                 "query": query,
             }
 
