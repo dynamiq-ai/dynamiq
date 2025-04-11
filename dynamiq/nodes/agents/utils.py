@@ -7,7 +7,7 @@ from typing import Any, Sequence
 import filetype
 from lxml import etree as LET  # nosec: B410
 
-from dynamiq.nodes.agents.exceptions import JSONParsingError, MissingTagError, ParsingError, XMLParsingError
+from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
 from dynamiq.prompts import (
     Message,
     MessageRole,
@@ -114,16 +114,16 @@ class XMLParser:
             if tag_content is not None:
                 data[tag] = tag_content
             elif element_found and tag in required_tags:
-                raise MissingTagError(f"Required tag <{tag}> found but contains no text content.")
+                raise TagNotFoundError(f"Required tag <{tag}> found but contains no text content.")
             elif not element_found and tag in required_tags:
-                raise MissingTagError(
+                raise TagNotFoundError(
                     f"Required tag <{tag}> not found in the XML structure "
                     f"relative to the parsed root element ('{root.tag}') or its parent."
                 )
 
         missing_required_after_all = [tag for tag in required_tags if tag not in data]
         if missing_required_after_all:
-            raise MissingTagError(f"Required tags missing after extraction: {', '.join(missing_required_after_all)}")
+            raise TagNotFoundError(f"Required tags missing after extraction: {', '.join(missing_required_after_all)}")
 
         return data
 
@@ -176,7 +176,7 @@ class XMLParser:
 
         Raises:
             XMLParsingError: If the text cannot be parsed as XML even with recovery/wrapping.
-            MissingTagError: If any of the required_tags are not found or are empty.
+            TagNotFoundError: If any of the required_tags are not found or are empty.
             JSONParsingError: If any field listed in json_fields contains invalid JSON.
             ParsingError: For other generic parsing issues.
         """
@@ -204,7 +204,7 @@ class XMLParser:
 
         try:
             extracted_data = XMLParser._extract_data_lxml(root, required_tags, optional_tags)
-        except MissingTagError as e:
+        except TagNotFoundError as e:
             raise e
         except Exception as e:
             raise ParsingError(f"Error extracting data using XPath: {e}")

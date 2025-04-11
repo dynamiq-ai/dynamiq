@@ -12,8 +12,8 @@ from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     JSONParsingError,
     MaxLoopsExceededException,
-    MissingTagError,
     RecoverableAgentException,
+    TagNotFoundError,
     XMLParsingError,
 )
 from dynamiq.nodes.agents.utils import XMLParser
@@ -375,9 +375,7 @@ class ReActAgent(Agent):
 
             json_markers = ["```json", "```JSON", "```"]
             for marker in json_markers:
-                if marker in raw_input:
-                    raw_input = raw_input.replace(marker, "").strip()
-
+                raw_input = raw_input.replace(marker, "").strip()
             try:
                 action_input = json.loads(raw_input)
             except json.JSONDecodeError as e:
@@ -685,7 +683,7 @@ class ReActAgent(Agent):
                                 )
                             return final_answer
 
-                        except MissingTagError:
+                        except TagNotFoundError:
                             logger.debug("XMLParser: Not a final answer structure, trying action structure.")
                             try:
                                 parsed_data = XMLParser.parse(
@@ -714,7 +712,7 @@ class ReActAgent(Agent):
                                         **kwargs,
                                     )
 
-                            except (XMLParsingError, MissingTagError, JSONParsingError) as e:
+                            except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
                                 logger.error(f"XMLParser: Failed to parse XML for action or answer: {e}")
                                 raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
 

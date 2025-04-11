@@ -73,7 +73,7 @@ class XMLParsingError(ParsingError):
     pass
 
 
-class MissingTagError(ParsingError):
+class TagNotFoundError(ParsingError):
     """Exception raised when required XML tags are missing."""
 
     pass

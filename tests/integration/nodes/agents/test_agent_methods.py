@@ -7,8 +7,8 @@ from dynamiq import connections, prompts
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     JSONParsingError,
-    MissingTagError,
     ParsingError,
+    TagNotFoundError,
     XMLParsingError,
 )
 from dynamiq.nodes.agents.react import ReActAgent
@@ -180,13 +180,13 @@ def test_xmlparser_parse_valid_with_json():
 
 def test_xmlparser_parse_missing_required_tag():
     text = "<output><thought>OK</thought></output>"
-    with pytest.raises(MissingTagError, match="Required tag <action> not found"):
+    with pytest.raises(TagNotFoundError, match="Required tag <action> not found"):
         XMLParser.parse(text, required_tags=["thought", "action"])
 
 
 def test_xmlparser_parse_required_tag_empty():
     text = "<output><thought></thought><action>do</action></output>"
-    with pytest.raises(MissingTagError, match="Required tag <thought> found but contains no text"):
+    with pytest.raises(TagNotFoundError, match="Required tag <thought> found but contains no text"):
         XMLParser.parse(text, required_tags=["thought", "action"])
 
 
@@ -198,7 +198,7 @@ def test_xmlparser_parse_malformed_json():
 
 def test_xmlparser_parse_malformed_xml():
     text = "<output><thought>OK</action>"
-    with pytest.raises((MissingTagError, XMLParsingError)):
+    with pytest.raises((TagNotFoundError, XMLParsingError)):
         XMLParser.parse(text, required_tags=["thought", "action"])
 
 
