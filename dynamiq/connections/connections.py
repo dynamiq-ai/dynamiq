@@ -241,18 +241,18 @@ class AWS(BaseConnection):
         pass
 
     @property
-    def conn_params(self):
+    def conn_params(self) -> dict:
+        params = {}
         if self.profile:
-            return {
-                "aws_profile_name": self.profile,
-                "aws_region_name": self.region,
-            }
-        else:
-            return {
-                "aws_access_key_id": self.access_key_id,
-                "aws_secret_access_key": self.secret_access_key,
-                "aws_region_name": self.region,
-            }
+            params["profile_name"] = self.profile
+        elif self.access_key_id and self.secret_access_key:
+            params["aws_access_key_id"] = self.access_key_id
+            params["aws_secret_access_key"] = self.secret_access_key
+
+        if self.region:
+            params["region_name"] = self.region
+
+        return params
 
 
 class Gemini(BaseApiKeyConnection):
@@ -1214,3 +1214,93 @@ class NvidiaNIM(BaseApiKeyConnection):
             "api_base": self.url,
             "api_key": self.api_key,
         }
+
+
+class Redis(BaseConnection):
+    """
+    Represents a connection to a Redis server.
+
+    Attributes:
+        host (str): The hostname of the Redis server.
+            Defaults to the environment variable 'REDIS_HOST' or 'localhost'.
+        port (int): The port number of the Redis server.
+            Defaults to the environment variable 'REDIS_PORT' or 6379.
+        db (int): The Redis database number.
+            Defaults to the environment variable 'REDIS_DB' or 0.
+        user (str | None): The username for Redis authentication (Redis 6+ ACL).
+            Defaults to the environment variable 'REDIS_USER' or None.
+        password (str | None): The password for Redis authentication.
+            Defaults to the environment variable 'REDIS_PASSWORD' or None.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    host: str = Field(default_factory=partial(get_env_var, "REDIS_HOST", "localhost"))
+    port: int = Field(default_factory=partial(get_env_var, "REDIS_PORT", 6379))
+    db: int = Field(default_factory=partial(get_env_var, "REDIS_DB", 0))
+    user: str | None = Field(default_factory=partial(get_env_var, "REDIS_USER", None), exclude=True)
+    password: str | None = Field(default_factory=partial(get_env_var, "REDIS_PASSWORD", None), exclude=True)
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing host, port, db, username (if set) and password (if set).
+        """
+        params = {
+            "host": self.host,
+            "port": self.port,
+            "db": self.db,
+        }
+        if self.user:
+            params["username"] = self.user
+        if self.password:
+            params["password"] = self.password
+        return params
+
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
+        """Converts the connection instance to a dictionary."""
+        exclude = kwargs.pop("exclude", {})
+        if not include_secure_params:
+            exclude["password"] = True
+            exclude["user"] = True
+        data = self.model_dump(exclude=exclude, **kwargs)
+        if not include_secure_params:
+            data.pop("password", None)
+            data.pop("user", None)
+        return data
+
+    def connect(self):
+        """
+        Establishes a connection to the Redis server.
+
+        Returns:
+            redis.Redis: An instance of the Redis client connected to the server.
+
+        Raises:
+            ConnectionError: If the connection to Redis fails.
+        """
+        # Import moved inside to keep it optional if RedisConnection is defined but not used
+        import redis
+
+        try:
+            redis_client = redis.Redis(
+                host=self.host,
+                port=self.port,
+                db=self.db,
+                username=self.user,
+                password=self.password,
+                decode_responses=True,
+            )
+            logger.debug(f"RedisConnection successful: Connected to {self.host}:{self.port}/{self.db}")
+            return redis_client
+        except redis.exceptions.AuthenticationError as e:
+            logger.error(
+                f"Redis authentication failed for user '{self.user}' at {self.host}:{self.port}/{self.db}: {e}"
+            )
+            raise ConnectionError(f"Redis authentication failed: {e}") from e
+        except redis.RedisError as e:
+            logger.error(f"Failed to connect to Redis at {self.host}:{self.port}/{self.db}: {e}")
+            raise ConnectionError(f"Failed to connect to Redis: {e}") from e
