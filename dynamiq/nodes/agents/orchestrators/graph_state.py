@@ -131,7 +131,7 @@ class GraphState(Node):
 
         try:
             if task.input_transformer and (task.input_transformer.path or task.input_transformer.selector):
-                output = task.transform(input_data, task.input_transformer, task.id)
+                output = task.transform(input_data, task.input_transformer)
                 task.validate_input_schema(output, **kwargs)
                 return True
             else:

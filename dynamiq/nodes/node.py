@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
-from typing import Any, Callable, ClassVar, Union
+from typing import Any, Callable, ClassVar, Self, Union
 from uuid import uuid4
 
 from jinja2 import Template
@@ -23,8 +23,9 @@ from dynamiq.nodes.exceptions import (
     NodeFailedException,
     NodeSkippedException,
 )
-from dynamiq.nodes.types import NodeGroup
+from dynamiq.nodes.types import Behavior, ChoiceCondition, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.runnables.base import RunnableResultError
 from dynamiq.storages.vector.base import BaseVectorStoreParams
 from dynamiq.types.feedback import (
     ApprovalConfig,
@@ -66,11 +67,13 @@ class ErrorHandling(BaseModel):
         retry_interval_seconds (float): Interval between retries in seconds.
         max_retries (int): Maximum number of retries.
         backoff_rate (float): Rate of increase for retry intervals.
+        behavior (Behavior): Behavior for error handling.
     """
     timeout_seconds: float | None = None
     retry_interval_seconds: float = 1
     max_retries: int = 0
     backoff_rate: float = 1
+    behavior: Behavior = Behavior.RAISE
 
 
 class Transformer(BaseModel):
@@ -133,9 +136,10 @@ class NodeDependency(BaseModel):
     """
     node: "Node"
     option: str | None = None
+    condition: ChoiceCondition | None = None
 
-    def __init__(self, node: "Node", option: str | None = None):
-        super().__init__(node=node, option=option)
+    def __init__(self, node: "Node", option: str | None = None, condition: ChoiceCondition | None = None):
+        super().__init__(node=node, option=option, condition=condition)
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary.
@@ -143,7 +147,11 @@ class NodeDependency(BaseModel):
         Returns:
             dict: A dictionary representation of the instance.
         """
-        return {"node": self.node.to_dict(**kwargs), "option": self.option}
+        return {
+            "node": self.node.to_dict(**kwargs),
+            "option": self.option,
+            "condition": self.condition.model_dump() if self.condition else None,
+        }
 
 
 class NodeMetadata(BaseModel):
@@ -260,26 +268,26 @@ class Node(BaseModel, Runnable, ABC):
                 message=f"Dependency {depend.node.id}: result missed",
             )
 
-        if dep_result.status == RunnableStatus.FAILURE:
+        if dep_result.status == RunnableStatus.FAILURE and depend.node.error_handling.behavior == Behavior.RAISE:
             raise NodeFailedException(
                 failed_depend=depend, message=f"Dependency {depend.node.id}: failed"
             )
 
-        if dep_result.status == RunnableStatus.SKIP:
+        if dep_result.status == RunnableStatus.SKIP and depend.node.error_handling.behavior == Behavior.RAISE:
             raise NodeSkippedException(failed_depend=depend, message=f"Dependency {depend.node.id}: skipped")
 
     @staticmethod
-    def _validate_dependency_condition(depend: NodeDependency, depends_result: dict[str, RunnableResult]):
+    def _validate_dependency_option(depend: NodeDependency, depends_result: dict[str, RunnableResult]):
         """
-        Validate the condition of a dependency.
+        Validate the option of a dependency.
 
         Args:
             depend (NodeDependency): The dependency to validate.
             depends_result (dict[str, RunnableResult]): Results of dependent nodes.
 
         Raises:
-            NodeConditionFailedException: If the dependency condition is not met.
-            NodeConditionSkippedException: If the dependency condition is skipped.
+            NodeConditionFailedException: If the dependency option is not met.
+            NodeConditionSkippedException: If the dependency option is skipped.
         """
         if (
             (dep_output_data := depends_result.get(depend.node.id))
@@ -289,12 +297,33 @@ class Node(BaseModel, Runnable, ABC):
             if dep_condition_result.status == RunnableStatus.FAILURE:
                 raise NodeConditionFailedException(
                     failed_depend=depend,
-                    message=f"Dependency {depend.node.id} condition {depend.option}: result is false",
+                    message=f"Dependency {depend.node.id} option {depend.option}: result is false",
                 )
             if dep_condition_result.status == RunnableStatus.SKIP:
                 raise NodeConditionSkippedException(
                     failed_depend=depend,
-                    message=f"Dependency {depend.node.id} condition {depend.option}: skipped",
+                    message=f"Dependency {depend.node.id} option {depend.option}: skipped",
+                )
+
+    @staticmethod
+    def _validate_dependency_condition(depend: NodeDependency, depends_result: dict[str, RunnableResult]):
+        """
+        Validate the result condition of a dependency.
+
+        Args:
+            depend (NodeDependency): The dependency to validate.
+            depends_result (dict[str, RunnableResult]): Results of dependent nodes.
+
+        Raises:
+            NodeConditionFailedException: If the dependency result condition is not met.
+        """
+        if dep_result := depends_result.get(depend.node.id):
+            from dynamiq.nodes.operators.operators import Choice
+
+            if not Choice.evaluate(depend.condition, dep_result.to_dict()):
+                raise NodeConditionFailedException(
+                    failed_depend=depend,
+                    message=f"Dependency {depend.node.id} result condition `{depend.condition}`: result is false",
                 )
 
     @staticmethod
@@ -320,26 +349,27 @@ class Node(BaseModel, Runnable, ABC):
 
         raise ValueError(f"Input function '{func.__name__}' must accept parameters 'inputs' and 'outputs' or **kwargs.")
 
-    def validate_depends(self, depends_result):
+    def validate_depends(self, depends_result: dict[str, RunnableResult]):
         """
         Validate all dependencies of the node.
 
         Args:
             depends_result (dict): Results of dependent nodes.
+            input_data (dict): Input data for the node.
 
         Raises:
             Various exceptions based on dependency validation results.
         """
         for dep in self.depends:
             self._validate_dependency_status(depend=dep, depends_result=depends_result)
+            if dep.condition:
+                self._validate_dependency_condition(depend=dep, depends_result=depends_result)
             if dep.option:
-                self._validate_dependency_condition(
-                    depend=dep, depends_result=depends_result
-                )
+                self._validate_dependency_option(depend=dep, depends_result=depends_result)
 
     def validate_input_schema(self, input_data: dict[str, Any], **kwargs) -> dict[str, Any] | BaseModel:
         """
-        Validate input data against the input schema. Returns instance of input_schema if it is is provided.
+        Validate input data against the input schema. Returns instance of input_schema if it is provided.
 
         Args:
             input_data (Any): Input data to validate.
@@ -381,7 +411,7 @@ class Node(BaseModel, Runnable, ABC):
         # Apply input transformer
         if (self.input_transformer.path or self.input_transformer.selector) and use_input_transformer:
             depends_result_as_dict = {k: result.to_depend_dict() for k, result in depends_result.items()}
-            inputs = self.transform(input_data | depends_result_as_dict, self.input_transformer, self.id)
+            inputs = self.transform(input_data | depends_result_as_dict, self.input_transformer)
         else:
             inputs = input_data | {k: result.to_tracing_depend_dict() for k, result in depends_result.items()}
 
@@ -416,20 +446,19 @@ class Node(BaseModel, Runnable, ABC):
         self.is_postponed_component_init = False
 
     @staticmethod
-    def transform(data: Any, transformer: Transformer, node_id: str) -> Any:
+    def transform(data: Any, transformer: Transformer) -> Any:
         """
         Apply transformation to data.
 
         Args:
             data (Any): Input data to transform.
             transformer (Transformer): Transformer to apply.
-            node_id (str): ID of the node performing the transformation.
 
         Returns:
             Any: Transformed data.
         """
-        output = jsonpath_filter(data, transformer.path, node_id)
-        output = jsonpath_mapper(output, transformer.selector, node_id)
+        output = jsonpath_filter(data, transformer.path)
+        output = jsonpath_mapper(output, transformer.selector)
         return output
 
     def transform_output(self, output_data: Any) -> Any:
@@ -442,7 +471,7 @@ class Node(BaseModel, Runnable, ABC):
         Returns:
             Any: Transformed output data.
         """
-        return self.transform(output_data, self.output_transformer, self.id)
+        return self.transform(output_data, self.output_transformer)
 
     @property
     def to_dict_exclude_params(self):
@@ -605,7 +634,7 @@ class Node(BaseModel, Runnable, ABC):
 
     def run_sync(
         self,
-        input_data: Any,
+        input_data: dict,
         config: RunnableConfig = None,
         depends_result: dict = None,
         **kwargs,
@@ -655,6 +684,7 @@ class Node(BaseModel, Runnable, ABC):
                     status=RunnableStatus.SKIP,
                     input=transformed_input,
                     output=format_value(e, recoverable=e.recoverable)[0],
+                    error=RunnableResultError.from_exception(e, recoverable=e.recoverable),
                 )
 
             transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result, **kwargs)
@@ -691,11 +721,12 @@ class Node(BaseModel, Runnable, ABC):
                 status=RunnableStatus.FAILURE,
                 input=input_data,
                 output=format_value(e, recoverable=recoverable)[0],
+                error=RunnableResultError.from_exception(e, recoverable=recoverable),
             )
 
     async def run_async(
         self,
-        input_data: Any,
+        input_data: dict,
         config: RunnableConfig = None,
         depends_result: dict = None,
         **kwargs,
@@ -1047,12 +1078,13 @@ class Node(BaseModel, Runnable, ABC):
         """
         pass
 
-    def depends_on(self, nodes: Union["Node", list["Node"]]):
+    def depends_on(self, nodes: Union["Node", list["Node"]], condition: ChoiceCondition | None = None) -> Self:
         """
         Add dependencies for this node. Accepts either a single node or a list of nodes.
 
         Args:
             nodes (Node or list[Node]): A single node or list of nodes this node depends on.
+            condition (ChoiceCondition, optional): The condition for the dependency.
 
         Raises:
             TypeError: If the input is neither a Node nor a list of Node instances.
@@ -1065,22 +1097,19 @@ class Node(BaseModel, Runnable, ABC):
         if nodes is None:
             raise ValueError("Nodes cannot be None.")
 
-        # If a single node is provided, convert it to a list
         if isinstance(nodes, Node):
             nodes = [nodes]
 
-        # Ensure the input is a list of Node instances
         if not isinstance(nodes, list) or not all(isinstance(node, Node) for node in nodes):
             raise TypeError(f"Expected a Node or a list of Node instances, but got {type(nodes).__name__}.")
 
         if not nodes:
             raise ValueError("Cannot add an empty list of dependencies.")
 
-        # Add each node as a dependency
         for node in nodes:
-            self.depends.append(NodeDependency(node))
+            self.depends.append(NodeDependency(node=node, condition=condition))
 
-        return self  # enable chaining
+        return self
 
     def enable_streaming(self, event: str = STREAMING_EVENT):
         """

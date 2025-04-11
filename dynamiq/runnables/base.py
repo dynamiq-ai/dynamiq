@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 from io import BytesIO
-from typing import Any, Awaitable
+from typing import Any, Awaitable, Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,6 +51,21 @@ class RunnableStatus(str, Enum):
     SKIP = "skip"
 
 
+class RunnableResultError(BaseModel):
+    error_type: str
+    error_message: str
+    recoverable: bool = False
+
+    @classmethod
+    def from_exception(cls, exception: Exception, recoverable: bool = False) -> Self:
+        return cls(
+            exception=exception,
+            error_type=type(exception).__name__,
+            error_message=str(exception),
+            recoverable=recoverable,
+        )
+
+
 class RunnableResult(BaseModel):
     """
     Dataclass representing the result of a Runnable execution.
@@ -59,11 +74,13 @@ class RunnableResult(BaseModel):
         status (RunnableStatus): The status of the execution.
         input (Any): The input data of the execution.
         output (Any): The output data of the execution.
+        error (RunnableResultError | None): The error of the execution.
     """
 
     status: RunnableStatus
     input: Any = None
     output: Any = None
+    error: RunnableResultError | None = None
 
     def to_depend_dict(
         self,
@@ -83,7 +100,7 @@ class RunnableResult(BaseModel):
 
         if force_format_types is None:
             force_format_types = set()
-        force_format_types.add(RunnableResult)
+        force_format_types.update({RunnableResult, RunnableResultError})
 
         return self.to_dict(skip_format_types, force_format_types, **kwargs)
 
@@ -115,11 +132,15 @@ class RunnableResult(BaseModel):
             dict: A dictionary representation of the RunnableResult.
         """
 
-        return {
+        data = {
             "status": self.status.value,
             "input": format_value(self.input, skip_format_types, force_format_types)[0],
             "output": format_value(self.output, skip_format_types, force_format_types)[0],
         }
+        if self.error:
+            data["error"] = format_value(self.error, skip_format_types, force_format_types)[0]
+
+        return data
 
 
 class Runnable(ABC):
