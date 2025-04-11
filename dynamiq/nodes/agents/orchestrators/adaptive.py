@@ -9,7 +9,7 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Orchestrator, OrchestratorError
+from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Decision, Orchestrator, OrchestratorError
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingMode
@@ -191,31 +191,39 @@ class AdaptiveOrchestrator(Orchestrator):
         Returns:
             dict[str, Any]: The final output generated after processing the task.
         """
-        self._chat_history.append({"role": "user", "content": input_task})
 
-        for i in range(self.max_loops):
-            action = self.get_next_action(config=config, **kwargs)
-            logger.info(f"Orchestrator {self.name} - {self.id}: Loop {i + 1} - Action: {action.dict()}")
-            if action.command == ActionCommand.DELEGATE:
-                self._handle_delegation(action=action, config=config, **kwargs)
+        analysis = self._analyze_user_input(input_task, self.agents_descriptions, config=config, **kwargs)
+        decision = analysis.decision
+        message = analysis.message
 
-            elif action.command == ActionCommand.RESPOND:
-                respond_result = self._handle_respond(action=action)
-                respond_final_result = self.parse_xml_final_answer(respond_result)
-                return {"content": respond_final_result}
+        if decision == Decision.RESPOND:
+            return {"content": message}
+        else:
+            self._chat_history.append({"role": "user", "content": input_task})
 
-            elif action.command == ActionCommand.FINAL_ANSWER:
-                manager_final_result = self.get_final_result(
-                    {
-                        "input_task": input_task,
-                        "chat_history": format_chat_history(self._chat_history),
-                        "preliminary_answer": action.answer,
-                    },
-                    config=config,
-                    **kwargs,
-                )
-                final_result = self.parse_xml_final_answer(manager_final_result)
-                return {"content": final_result}
+            for i in range(self.max_loops):
+                action = self.get_next_action(config=config, **kwargs)
+                logger.info(f"Orchestrator {self.name} - {self.id}: Loop {i + 1} - Action: {action.dict()}")
+                if action.command == ActionCommand.DELEGATE:
+                    self._handle_delegation(action=action, config=config, **kwargs)
+
+                elif action.command == ActionCommand.RESPOND:
+                    respond_result = self._handle_respond(action=action)
+                    respond_final_result = self.parse_xml_final_answer(respond_result)
+                    return {"content": respond_final_result}
+
+                elif action.command == ActionCommand.FINAL_ANSWER:
+                    manager_final_result = self.get_final_result(
+                        {
+                            "input_task": input_task,
+                            "chat_history": format_chat_history(self._chat_history),
+                            "preliminary_answer": action.answer,
+                        },
+                        config=config,
+                        **kwargs,
+                    )
+                    final_result = self.parse_xml_final_answer(manager_final_result)
+                    return {"content": final_result}
 
     def _handle_delegation(self, action: Action, config: RunnableConfig = None, **kwargs) -> None:
         """

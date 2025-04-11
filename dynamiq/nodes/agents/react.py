@@ -529,21 +529,6 @@ class ReActAgent(Agent):
                         thought, action, action_input = self._parse_action(llm_generated_output)
                         self.log_reasoning(thought, action, action_input, loop_num)
 
-                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_content(
-                                content={
-                                    "thought": thought,
-                                    "action": action,
-                                    "action_input": action_input,
-                                    "loop_num": loop_num,
-                                },
-                                source=self.name,
-                                step="reasoning",
-                                config=config,
-                                by_tokens=False,
-                                **kwargs,
-                            )
-
                     case InferenceMode.FUNCTION_CALLING:
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using function calling inference mode")
@@ -597,21 +582,6 @@ class ReActAgent(Agent):
 
                         self.log_reasoning(thought, action, action_input, loop_num)
 
-                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_content(
-                                content={
-                                    "thought": thought,
-                                    "action": action,
-                                    "action_input": action_input,
-                                    "loop_num": loop_num,
-                                },
-                                source=self.name,
-                                step="reasoning",
-                                config=config,
-                                by_tokens=False,
-                                **kwargs,
-                            )
-
                     case InferenceMode.STRUCTURED_OUTPUT:
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
@@ -656,21 +626,6 @@ class ReActAgent(Agent):
 
                         self.log_reasoning(thought, action, action_input, loop_num)
 
-                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_content(
-                                content={
-                                    "thought": thought,
-                                    "action": action,
-                                    "action_input": action_input,
-                                    "loop_num": loop_num,
-                                },
-                                source=self.name,
-                                step="reasoning",
-                                config=config,
-                                by_tokens=False,
-                                **kwargs,
-                            )
-
                     case InferenceMode.XML:
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
@@ -703,21 +658,6 @@ class ReActAgent(Agent):
                         thought, action, action_input = self.parse_xml_and_extract_info(llm_generated_output)
                         self.log_reasoning(thought, action, action_input, loop_num)
 
-                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_content(
-                                content={
-                                    "thought": thought,
-                                    "action": action,
-                                    "action_input": action_input,
-                                    "loop_num": loop_num,
-                                },
-                                source=self.name,
-                                step="reasoning",
-                                config=config,
-                                by_tokens=False,
-                                **kwargs,
-                            )
-
                 self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
 
                 if action:
@@ -725,6 +665,22 @@ class ReActAgent(Agent):
 
                         try:
                             tool = self._get_tool(action)
+                            if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                                self.stream_content(
+                                    content={
+                                        "thought": thought,
+                                        "action": action,
+                                        "tool": tool,
+                                        "action_input": action_input,
+                                        "loop_num": loop_num,
+                                    },
+                                    source=self.name,
+                                    step="reasoning",
+                                    config=config,
+                                    by_tokens=False,
+                                    **kwargs,
+                                )
+
                             tool_result = self._run_tool(tool, action_input, config, **kwargs)
 
                         except RecoverableAgentException as e:

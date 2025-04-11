@@ -1,5 +1,7 @@
+import json
 import re
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Any, ClassVar
 
 from lxml import etree as LET  # nosec B410
@@ -9,6 +11,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.base import AgentManager
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 
@@ -22,6 +25,28 @@ class ActionParseError(OrchestratorError):
 
 class OrchestratorInputSchema(BaseModel):
     input: str = Field(default="", description="The main objective of the orchestration.")
+
+
+class Decision(str, Enum):
+    """
+    Enumeration for possible decisions after analyzing the user input.
+    """
+
+    RESPOND = "respond"
+    PLAN = "plan"
+
+
+class DecisionResult(BaseModel):
+    """
+    Holds the result of analyzing the user input.
+
+    Attributes:
+        decision (Decision): The decision on how to handle the input.
+        message (str): The message or response associated with the decision.
+    """
+
+    decision: Decision
+    message: str
 
 
 class Orchestrator(Node, ABC):
@@ -57,6 +82,112 @@ class Orchestrator(Node, ABC):
         super().__init__(**kwargs)
         self._run_depends = []
         self._chat_history = []
+
+    def _clean_output(self, text: str) -> str:
+        """Remove Markdown code fences and extra whitespace from a text."""
+        cleaned = re.sub(r"^```(?:json)?\s*|```$", "", text).strip()
+        return cleaned
+
+    def extract_json_from_output(self, result_text: str) -> tuple[str, dict] | None:
+        """
+        Extracts JSON data from the given text by looking for content within
+        <output>...</output> and <analysis>...</analysis> tags. Strips any Markdown code block fences.
+
+        Args:
+            result_text (str): The text from which to extract JSON data.
+
+        Returns:
+            dict | None: The extracted JSON dictionary if successful, otherwise None.
+        """
+        analysis, output_content = self._extract_output_content(result_text)
+        output_content = self._clean_output(output_content)
+
+        try:
+            data = json.loads(output_content)
+            return analysis, data
+        except json.JSONDecodeError as e:
+            error_message = f"Orchestrator {self.name} - {self.id}: JSON decoding error: {e}"
+            logger.error(error_message)
+            return None
+
+    def _analyze_user_input(
+        self, input_task: str, description: str, config: RunnableConfig = None, attempt: int = 1, **kwargs
+    ) -> DecisionResult:
+        """
+        Calls the manager's 'handle_input' action to decide if we should respond
+        immediately or proceed with a plan.
+
+        Args:
+            input_task (str): The user's input or task description.
+            description (str): Description of the orchestrator capabilities.
+            config: Optional configuration object passed to the manager's run method.
+            attempt (int): The current attempt number for analyzing user input.
+            **kwargs: Additional keyword arguments passed to the manager's run method.
+
+        Returns:
+            DecisionResult: An object containing the decision (as an Enum) and a message.
+        """
+
+        handle_result = self.manager.run(
+            input_data={
+                "action": "handle_input",
+                "task": input_task,
+                "description": description,
+            },
+            config=config,
+            run_depends=[],
+            **kwargs,
+        )
+
+        if handle_result.status != RunnableStatus.SUCCESS:
+            error_message = (
+                f"Orchestrator {self.name} - {self.id}: Manager failed to analyze input: {handle_result.output}"
+            )
+            logger.error(error_message)
+            return DecisionResult(decision=Decision.RESPOND, message=f"Error analyzing request: {handle_result.output}")
+
+        content = handle_result.output.get("content", {})
+        raw_text = content.get("result", "")
+        if not raw_text:
+            error_message = f"Orchestrator {self.name} - {self.id}: No 'result' field in manager output."
+            logger.error(error_message)
+            return DecisionResult(decision=Decision.RESPOND, message="Manager did not return any result.")
+
+        analysis, data = self.extract_json_from_output(result_text=raw_text)
+        if self.manager.streaming.enabled and self.manager.streaming.mode == StreamingMode.ALL:
+            self.manager.stream_content(
+                content={"analysis": analysis, "data": data},
+                step="manager_input_handling",
+                source=self.name,
+                config=config,
+                by_tokens=False,
+                **kwargs,
+            )
+
+        if not data:
+            error_message = f"Orchestrator {self.name} - {self.id}: Failed to extract JSON from manager output."
+            logger.error(error_message)
+            if attempt >= self.max_user_analyze_retries:
+                return DecisionResult(
+                    decision=Decision.RESPOND,
+                    message="Unable to extract valid JSON from manager output after multiple attempts.",
+                )
+            _json_prompt_fix = " Please provide a valid JSON response, inside <output>...</output> tags."
+            return self._analyze_user_input(input_task + _json_prompt_fix, config=config, attempt=attempt + 1, **kwargs)
+
+        decision_str = data.get("decision", Decision.RESPOND.value)
+        message = data.get("message", "")
+
+        try:
+            decision = Decision(decision_str)
+        except ValueError:
+            warning_message = (
+                f"Orchestrator {self.name} - {self.id}: Unrecognized decision '{decision_str}', defaulting to RESPOND."
+            )
+            logger.warning(warning_message)
+            decision = Decision.RESPOND
+
+        return DecisionResult(decision=decision, message=message)
 
     def get_final_result(
         self,

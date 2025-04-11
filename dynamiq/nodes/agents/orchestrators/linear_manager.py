@@ -1,6 +1,4 @@
-from dynamiq.nodes.agents.base import AgentManager
-from dynamiq.prompts import Message, MessageRole
-from dynamiq.runnables import RunnableConfig
+from dynamiq.nodes.agents.base import PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT, AgentManager
 
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_PLAN = """
 You are an advanced AI planning assistant specializing in breaking down
@@ -190,11 +188,11 @@ You are the Linear Manager. Your goal is to handle the user's request.
 
 User's request:
 <user_request>
-task_placeholder
+{user_request}
 </user_request>
 Here is the list of available agents and their capabilities:
 <available_agents>
-agents_placeholder
+{description}
 </available_agents>
 
 Important guidelines:
@@ -365,19 +363,5 @@ class LinearAgentManager(AgentManager):
 
     @staticmethod
     def _get_linear_handle_input_prompt() -> str:
-        return PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_HANDLE_INPUT
-
-    def _handle_input(self, config: RunnableConfig, **kwargs) -> str:
-        """
-        Executes the single 'handle_input' action to either respond or plan
-        based on user request complexity.
-        """
-        temp_variables = self._prompt_variables.copy()
-        temp_variables.update(kwargs)
-        _prompt = self._get_linear_handle_input_prompt()
-        _prompt = _prompt.replace("task_placeholder", temp_variables.get("task"))
-        _prompt = _prompt.replace("agents_placeholder", temp_variables.get("agents"))
-        llm_result = self._run_llm([Message(role=MessageRole.USER, content=_prompt)], config, **kwargs).output[
-            "content"
-        ]
-        return llm_result
+        """Determines how to handle input, either by continuing the flow or providing a direct response."""
+        return PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT
