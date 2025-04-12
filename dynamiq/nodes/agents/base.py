@@ -947,6 +947,6 @@ class AgentManager(Agent):
         """
         prompt = self._prompt_blocks.get("handle_input").format(**self._prompt_variables, **kwargs)
 
-        print(prompt)
+        logger.debug(prompt)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         return llm_result
