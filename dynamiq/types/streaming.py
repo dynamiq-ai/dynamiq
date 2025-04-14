@@ -86,7 +86,7 @@ class StreamingConfig(BaseModel):
     input_queue_done_event: Event | None = None
     mode: StreamingMode = StreamingMode.FINAL
     by_tokens: bool = True
-    include_usage: bool = True
+    include_usage: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
