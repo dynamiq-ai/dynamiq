@@ -71,6 +71,7 @@ class Orchestrator(Node, ABC):
     input_schema: ClassVar[type[OrchestratorInputSchema]] = OrchestratorInputSchema
     manager: AgentManager
     objective: str = ""
+    enable_handle_input: bool = True
 
     def __init__(self, **kwargs):
         """
@@ -127,6 +128,8 @@ class Orchestrator(Node, ABC):
         Returns:
             DecisionResult: An object containing the decision (as an Enum) and a message.
         """
+        if not self.enable_handle_input:
+            return DecisionResult(decision=Decision.PLAN, message="")
 
         handle_result = self.manager.run(
             input_data={

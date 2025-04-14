@@ -69,7 +69,7 @@ The user's request is a simple greeting. I will respond with a brief acknowledgm
 <output>
 ```json
 {{
-"decision": "respond",
+    "decision": "respond",
     "message": "Hello! How can I assist you today?"
 }}
 </output>
@@ -86,6 +86,8 @@ The user's request is a general query. I will simply respond with a brief acknow
     "decision": "respond",
     "message": "Hello! How can I assist you today?
 }}
+</output>
+
 Scenario 3:
 User request: "How can I solve a linear regression problem?"
 
@@ -946,7 +948,5 @@ class AgentManager(Agent):
         based on user request complexity.
         """
         prompt = self._prompt_blocks.get("handle_input").format(**self._prompt_variables, **kwargs)
-
-        logger.debug(prompt)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         return llm_result
