@@ -214,7 +214,7 @@ class GraphState(Node):
             )
 
             if response.status != RunnableStatus.SUCCESS:
-                error_msg = response.error.error_message
+                error_msg = response.error.message
                 logger.error(f"GraphOrchestrator: Failed to execute Agent {task.name} with Error: {error_msg}")
                 raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {error_msg}")
 
@@ -229,7 +229,7 @@ class GraphState(Node):
         response = task.run(input_data=input_data, config=config, run_depends=run_depends, **kwargs)
 
         if response.status != RunnableStatus.SUCCESS:
-            error_msg = response.error.error_message
+            error_msg = response.error.message
             logger.error(f"GraphOrchestrator: Failed to execute {task.name} with Error: {error_msg}")
             raise OrchestratorError(f"Failed to execute {task.name} with Error: {error_msg}")
 

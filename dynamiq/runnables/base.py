@@ -52,16 +52,15 @@ class RunnableStatus(str, Enum):
 
 
 class RunnableResultError(BaseModel):
-    error_type: str
-    error_message: str
+    type: str
+    message: str
     recoverable: bool = False
 
     @classmethod
     def from_exception(cls, exception: Exception, recoverable: bool = False) -> Self:
         return cls(
-            exception=exception,
-            error_type=type(exception).__name__,
-            error_message=str(exception),
+            type=type(exception).__name__,
+            message=str(exception),
             recoverable=recoverable,
         )
 

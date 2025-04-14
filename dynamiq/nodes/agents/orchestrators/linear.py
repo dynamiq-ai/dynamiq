@@ -167,7 +167,7 @@ class LinearOrchestrator(Orchestrator):
             self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
             if manager_result.status != RunnableStatus.SUCCESS:
-                error_message = f"LLM '{self.manager.name}' failed: {manager_result.error.error_message}"
+                error_message = f"LLM '{self.manager.name}' failed: {manager_result.error.message}"
                 raise ValueError(f"Failed to generate tasks: {error_message}")
 
             manager_result_content = manager_result.output.get("content").get("result")
@@ -302,7 +302,7 @@ class LinearOrchestrator(Orchestrator):
                             raise ValueError(
                                 f"Failed to execute task {task.id}.{task.name} "
                                 f"by agent {assigned_agent_index}.{assigned_agent.name}"
-                                f"due to error: {result.error.error_message}"
+                                f"due to error: {result.error.message}"
                             )
 
                         self._results[task.id] = {

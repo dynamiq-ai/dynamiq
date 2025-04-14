@@ -88,7 +88,7 @@ class Orchestrator(Node, ABC):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            error_message = f"Manager '{self.manager.name}' failed: {manager_result.error.error_message}"
+            error_message = f"Manager '{self.manager.name}' failed: {manager_result.error.message}"
             logger.error(f"Orchestrator {self.name} - {self.id}: Error generating final, due to error: {error_message}")
             raise OrchestratorError(
                 f"Orchestrator {self.name} - {self.id}: Error generating final, due to error: {error_message}"

@@ -459,7 +459,7 @@ class Agent(Node):
             )
             self._run_depends = [NodeDependency(node=self.llm).to_dict()]
             if llm_result.status != RunnableStatus.SUCCESS:
-                error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.error_message}"
+                error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
                 raise ValueError({error_message})
 
             return llm_result
