@@ -84,7 +84,7 @@ The user's request is a general query. I will simply respond with a brief acknow
 ```json
 {{
     "decision": "respond",
-    "message": "Hello! How can I assist you today?
+    "message": "Hello! How can I assist you today?"
 }}
 </output>
 
