@@ -4,8 +4,15 @@ from unittest.mock import MagicMock
 import pytest
 
 from dynamiq import connections, prompts
-from dynamiq.nodes.agents.exceptions import ActionParsingException
+from dynamiq.nodes.agents.exceptions import (
+    ActionParsingException,
+    JSONParsingError,
+    ParsingError,
+    TagNotFoundError,
+    XMLParsingError,
+)
 from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableStatus
@@ -74,18 +81,6 @@ def test_parse_thought(default_react_agent):
     assert thought == "I need to search for information about the weather."
 
 
-def test_parse_action_malformed_json(default_react_agent):
-    """Test parsing with malformed JSON raises an exception."""
-    output = """
-    Thought: I need to search for information about the weather.
-    Action: search
-    Action Input: {"query": "weather in San Francisco}
-    """
-    with pytest.raises(ActionParsingException) as exc_info:
-        default_react_agent._parse_action(output)
-    assert "invalid JSON" in str(exc_info.value).lower() or "Unable to parse" in str(exc_info.value)
-
-
 def test_parse_action_missing_action_input(default_react_agent):
     """Test parsing with missing action input raises an exception."""
     output = """
@@ -105,56 +100,6 @@ def test_extract_final_answer(default_react_agent):
     answer = default_react_agent._extract_final_answer(output)
     assert answer[0] == "I found all the information needed."
     assert answer[1] == "The weather in San Francisco is foggy with a high of 65°F."
-
-
-def test_parse_xml_content(xml_react_agent):
-    """Test extracting content from XML tags."""
-    text = "<output><thought>I need to search for information</thought></output>"
-    content = xml_react_agent.parse_xml_content(text, "thought")
-    assert content == "I need to search for information"
-
-
-def test_parse_xml_and_extract_info_valid(xml_react_agent):
-    """Test extracting thought, action, and action_input from valid XML."""
-    text = """
-    <output>
-        <thought>I need to search for the weather</thought>
-        <action>search</action>
-        <action_input>{"query": "weather in San Francisco"}</action_input>
-    </output>
-    """
-    thought, action, action_input = xml_react_agent.parse_xml_and_extract_info(text)
-    assert thought == "I need to search for the weather"
-    assert action == "search"
-    assert action_input == {"query": "weather in San Francisco"}
-
-
-def test_parse_xml_missing_tags(xml_react_agent):
-    """Test extracting from XML with missing tags raises an exception."""
-    text = """
-    <output>
-        <thought>I need to search for the weather</thought>
-        <action>search</action>
-        <!-- Missing action_input tag -->
-    </output>
-    """
-    with pytest.raises(ActionParsingException) as exc_info:
-        xml_react_agent.parse_xml_and_extract_info(text)
-    assert "Missing required XML tags" in str(exc_info.value) or "missing" in str(exc_info.value).lower()
-
-
-def test_parse_xml_malformed_json(xml_react_agent):
-    """Test extracting from XML with malformed JSON raises an exception."""
-    text = """
-    <output>
-        <thought>I need to search for the weather</thought>
-        <action>search</action>
-        <action_input>{"query": "weather in San Francisco}</action_input>
-    </output>
-    """
-    with pytest.raises(ActionParsingException) as exc_info:
-        xml_react_agent.parse_xml_and_extract_info(text)
-    assert "invalid JSON" in str(exc_info.value).lower() or "Unable to parse" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
@@ -213,3 +158,100 @@ def test_set_prompt_variable(openai_node, mock_llm_executor):
     prompt = agent.generate_prompt()
 
     assert "Today's date is April 1, 2025" in prompt
+
+
+def test_xmlparser_parse_valid_simple():
+    text = "<output><thought>OK</thought><action>do</action></output>"
+    result = XMLParser.parse(text, required_tags=["thought", "action"])
+    assert result == {"thought": "OK", "action": "do"}
+
+
+def test_xmlparser_parse_valid_with_optional():
+    text = "<output><thought>OK</thought><action>do</action><optional>extra</optional></output>"
+    result = XMLParser.parse(text, required_tags=["thought", "action"], optional_tags=["optional"])
+    assert result == {"thought": "OK", "action": "do", "optional": "extra"}
+
+
+def test_xmlparser_parse_valid_with_json():
+    text = '<output><thought>OK</thought><action>do</action><action_input>{"p": 1}</action_input></output>'
+    result = XMLParser.parse(text, required_tags=["thought", "action", "action_input"], json_fields=["action_input"])
+    assert result == {"thought": "OK", "action": "do", "action_input": {"p": 1}}
+
+
+def test_xmlparser_parse_missing_required_tag():
+    text = "<output><thought>OK</thought></output>"
+    with pytest.raises(TagNotFoundError, match="Required tag <action> not found"):
+        XMLParser.parse(text, required_tags=["thought", "action"])
+
+
+def test_xmlparser_parse_required_tag_empty():
+    text = "<output><thought></thought><action>do</action></output>"
+    with pytest.raises(TagNotFoundError, match="Required tag <thought> found but contains no text"):
+        XMLParser.parse(text, required_tags=["thought", "action"])
+
+
+def test_xmlparser_parse_malformed_json():
+    text = '<output><thought>OK</thought><action_input>{"p": 1</action_input></output>'
+    with pytest.raises(JSONParsingError, match="Failed to parse JSON content for field 'action_input'"):
+        XMLParser.parse(text, required_tags=["thought", "action_input"], json_fields=["action_input"])
+
+
+def test_xmlparser_parse_malformed_xml():
+    text = "<output><thought>OK</action>"
+    with pytest.raises((TagNotFoundError, XMLParsingError)):
+        XMLParser.parse(text, required_tags=["thought", "action"])
+
+
+def test_xmlparser_parse_with_markdown_fence():
+    text = "```xml\n<output><thought>OK</thought><action>do</action></output>\n```"
+    result = XMLParser.parse(text, required_tags=["thought", "action"])
+    assert result == {"thought": "OK", "action": "do"}
+
+
+def test_xmlparser_parse_with_extra_text():
+    text = "Here is the plan:\n<output><thought>OK</thought><action>do</action></output>\nLet me know."
+    result = XMLParser.parse(text, required_tags=["thought", "action"])
+    assert result == {"thought": "OK", "action": "do"}
+
+
+def test_xmlparser_parse_empty_input():
+    with pytest.raises(ParsingError, match="Input text is empty"):
+        XMLParser.parse("", required_tags=["thought"])
+    result = XMLParser.parse("", required_tags=[])
+    assert result == {}
+
+
+def test_xmlparser_extract_lxml_found():
+    text = "<root><other>ignore</other><final_answer>The Answer</final_answer></root>"
+    result = XMLParser.extract_first_tag_lxml(text, ["output", "final_answer"])
+    assert result == "The Answer"
+
+
+def test_xmlparser_extract_lxml_first_preference():
+    text = "<root><output>First</output><final_answer>Second</final_answer></root>"
+    result = XMLParser.extract_first_tag_lxml(text, ["output", "final_answer"])
+    assert result == "First"
+
+
+def test_xmlparser_extract_lxml_not_found():
+    text = "<root><other>ignore</other></root>"
+    result = XMLParser.extract_first_tag_lxml(text, ["output", "final_answer"])
+    assert result is None
+
+
+def test_xmlparser_extract_lxml_empty_tag():
+    text = "<root><final_answer></final_answer></root>"
+    result = XMLParser.extract_first_tag_lxml(text, ["output", "final_answer"])
+    assert result is None
+
+
+def test_xmlparser_extract_regex_found():
+    text = "Blah <final_answer> Regex Answer </final_answer> blah"
+    result = XMLParser.extract_first_tag_regex(text, ["output", "final_answer"])
+    assert result == "Regex Answer"
+
+
+def test_xmlparser_extract_regex_not_found():
+    text = "Blah blah"
+    result = XMLParser.extract_first_tag_regex(text, ["output", "final_answer"])
+    assert result is None
