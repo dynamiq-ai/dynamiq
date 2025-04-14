@@ -291,6 +291,9 @@ class BaseLLM(ConnectionNode):
         parameters passed to the completion method.
         By default, it does not modify the params.
         """
+        if self.streaming.enabled and self.streaming.include_usage and params.get("stream", False):
+            params.setdefault("stream_options", {})
+            params["stream_options"]["include_usage"] = True
         return params
 
     def execute(
