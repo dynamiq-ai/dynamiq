@@ -489,7 +489,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     expected_result_openai = RunnableResult(
         status=RunnableStatus.FAILURE,
         input=expected_input_openai,
-        output={"content": "Error", "error_type": type(error).__name__, "recoverable": False},
+        output=expected_output_openai,
         error=RunnableResultError(error_type=type(error).__name__, error_message="Error"),
     )
     expected_input_anthropic = input_data | {openai_node.id: expected_result_openai.to_tracing_depend_dict()}
@@ -498,11 +498,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     expected_result_anthropic = RunnableResult(
         status=RunnableStatus.SKIP,
         input=expected_input_anthropic,
-        output={
-            "content": f"Dependency {openai_node.id}: failed",
-            "error_type": "NodeFailedException",
-            "recoverable": False,
-        },
+        output=expected_output_anthropic,
         error=RunnableResultError(
             error_type="NodeFailedException",
             error_message=f"Dependency {openai_node.id}: failed",
@@ -516,11 +512,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     expected_result_output_node = RunnableResult(
         status=RunnableStatus.SKIP,
         input=expected_input_output_node,
-        output={
-            "content": f"Dependency {openai_node.id}: failed",
-            "error_type": "NodeFailedException",
-            "recoverable": False,
-        },
+        output=expected_output_output_node,
         error=RunnableResultError(
             error_type="NodeFailedException",
             error_message=f"Dependency {openai_node.id}: failed",
@@ -764,11 +756,7 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
         f"Dependency {openai_node_with_return_behavior.id} result condition "
         f"`{mistral_node_with_failed_status_conditional_depend.depends[0].condition}`: result is false"
     )
-    expected_output_mistral = {
-        "content": mistral_error_msg,
-        "error_type": NodeConditionFailedException.__name__,
-        "recoverable": False,
-    }
+    expected_output_mistral = None
     expected_result_mistral = RunnableResult(
         status=RunnableStatus.SKIP,
         input=expected_input_mistral,
@@ -901,7 +889,7 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
     }
     assert mistral_run.parent_run_id == flow_run.id
     assert mistral_run.input == format_value(expected_input_mistral)[0]
-    assert mistral_run.output is None
+    assert mistral_run.output == expected_output_mistral
     assert mistral_run.status == RunStatus.SKIPPED
     assert mistral_run.tags == tags
     assert metadata.items() <= mistral_run.metadata.items()
@@ -979,7 +967,7 @@ def run(input_data):
     expected_result_openai = RunnableResult(
         status=RunnableStatus.FAILURE,
         input=expected_input_openai,
-        output={"content": error_msg, "error_type": error_cls.__name__, "recoverable": False},
+        output=None,
         error=RunnableResultError(error_type=error_cls.__name__, error_message=error_msg),
     )
     expected_input_choice = input_data | {

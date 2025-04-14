@@ -237,7 +237,8 @@ class GraphOrchestrator(Orchestrator):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            logger.error(f"GraphOrchestrator {self.id}: Error generating final answer")
+            error = manager_result.error.model_dump()
+            logger.error(f"GraphOrchestrator {self.id}: Error generating final answer: {error}")
             raise OrchestratorError("Failed to generate final answer")
 
         try:

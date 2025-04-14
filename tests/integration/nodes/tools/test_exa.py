@@ -187,7 +187,8 @@ def test_exa_with_invalid_input_schema(mock_requests, mock_exa_response):
     assert result.input == input_data
     assert result_exa["status"] == RunnableStatus.FAILURE.value
     assert result_exa["input"] == input_data
-    assert result_exa["output"]["error_type"] == ValidationError.__name__
+    assert result_exa["output"] is None
+    assert result_exa["error"]["error_type"] == ValidationError.__name__
 
     tracing_runs = list(tracing.runs.values())
     assert len(tracing_runs) == 3

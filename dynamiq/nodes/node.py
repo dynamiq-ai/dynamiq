@@ -683,7 +683,7 @@ class Node(BaseModel, Runnable, ABC):
                 return RunnableResult(
                     status=RunnableStatus.SKIP,
                     input=transformed_input,
-                    output=format_value(e, recoverable=e.recoverable)[0],
+                    output=None,
                     error=RunnableResultError.from_exception(e, recoverable=e.recoverable),
                 )
 
@@ -720,7 +720,7 @@ class Node(BaseModel, Runnable, ABC):
             return RunnableResult(
                 status=RunnableStatus.FAILURE,
                 input=input_data,
-                output=format_value(e, recoverable=recoverable)[0],
+                output=None,
                 error=RunnableResultError.from_exception(e, recoverable=recoverable),
             )
 
