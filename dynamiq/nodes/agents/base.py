@@ -84,7 +84,7 @@ The user's request is a general query. I will simply respond with a brief acknow
 ```json
 {{
     "decision": "respond",
-    "message": "Hello! How can I assist you today?
+    "message": "Hello! How can I assist you today?"
 }}
 </output>
 
@@ -106,7 +106,7 @@ Scenario 4:
 User request: "How can I get the weather forecast for tomorrow?"
 
 <analysis>
-The user's request is can be answered using planning. I will proceed with the planning process.
+The user's request can be answered using planning. I will proceed with the planning process.
 </analysis>
 <output>
 ```json
