@@ -80,21 +80,6 @@ def chat_loop(agent: SimpleAgent):
             break
 
     print("\n--- Chat Session Ended ---")
-    print("Retrieving chat history for this specific session...")
-
-    session_filters = {"user_id": user_id, "session_id": session_id}
-
-    try:
-        session_messages = agent.memory.search(filters=session_filters, limit=agent.memory.message_limit * 2)
-        if session_messages:
-            print(f"\n--- History for Session: {session_id} (User: {user_id}) ---")
-            formatted_history = agent.memory._format_messages_as_string(session_messages, format_type="plain")
-            print(formatted_history)
-        else:
-            print(f"\nNo messages found in memory for Session ID: {session_id} and User ID: {user_id}")
-
-    except Exception as e:
-        print(f"\nError retrieving chat history: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
@@ -105,5 +90,4 @@ if __name__ == "__main__":
         chat_loop(chat_agent)
     except Exception as e:
         print(f"\nApplication failed during setup or execution: {e}", file=sys.stderr)
-        sys.exit(1)
     print("\nChat application finished.")

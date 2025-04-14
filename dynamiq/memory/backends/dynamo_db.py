@@ -1,12 +1,9 @@
-# dynamiq/memory/backends/dynamodb_scan_only.py
-
 import json
 import time
 import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-import boto3
 from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import ClientError
 from pydantic import ConfigDict, Field, PrivateAttr
@@ -90,7 +87,7 @@ class DynamoDB(MemoryBackend):
 
     def model_post_init(self, __context: Any) -> None:
         try:
-            session = boto3.Session(**self.connection.conn_params)
+            session = self.connection.create_boto3_session()
             self._dynamodb_resource = session.resource("dynamodb")
             self._dynamodb_client = session.client("dynamodb")
             self._dynamodb_table = self._get_or_create_table()
