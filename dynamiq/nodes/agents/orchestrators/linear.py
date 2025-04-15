@@ -312,7 +312,7 @@ class LinearOrchestrator(Orchestrator):
 
                         success_flag = True
                         break
-                task_per_llm += f"Error occurred:{manager_result.error.model_dump()}"
+                task_per_llm += f"Error occurred:{manager_result.error.to_dict()}"
 
             if success_flag:
                 continue
@@ -322,7 +322,7 @@ class LinearOrchestrator(Orchestrator):
                     f"Orchestrator {self.name} - {self.id}: "
                     f"Failed to assign task {task.id}.{task.name} "
                     f"by Manager Agent due to error: "
-                    f"{manager_result.error.model_dump() if manager_result.error else manager_result.output}"
+                    f"{manager_result.error.to_dict() if manager_result.error else manager_result.output}"
                 )
 
     def generate_final_answer(self, task: str, config: RunnableConfig, **kwargs) -> str:
@@ -425,7 +425,7 @@ class LinearOrchestrator(Orchestrator):
         )
 
         if handle_result.status != RunnableStatus.SUCCESS:
-            error = handle_result.error.model_dump()
+            error = handle_result.error.to_dict()
             error_message = f"Orchestrator {self.name} - {self.id}: Manager failed to analyze input: {error}"
             logger.error(error_message)
             return DecisionResult(decision=Decision.RESPOND, message=f"Error analyzing request: {error}")

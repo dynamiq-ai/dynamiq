@@ -633,7 +633,7 @@ class Agent(Node):
         )
         self._run_depends = [NodeDependency(node=tool).to_dict()]
         if tool_result.status != RunnableStatus.SUCCESS:
-            error_message = f"Tool '{tool.name}' failed: {tool_result.error.model_dump()}"
+            error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
             if tool_result.error.recoverable:
                 raise ToolExecutionException({error_message})
             else:

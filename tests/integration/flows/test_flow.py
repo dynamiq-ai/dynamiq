@@ -9,7 +9,7 @@ import pytest
 from dynamiq import Workflow, flows
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.callbacks.tracing import RunStatus
-from dynamiq.nodes.exceptions import NodeConditionFailedException
+from dynamiq.nodes.exceptions import NodeConditionFailedException, NodeFailedException
 from dynamiq.nodes.llms.mistral import Mistral, MistralConnection
 from dynamiq.nodes.node import ErrorHandling, InputTransformer, NodeDependency
 from dynamiq.nodes.operators import Choice, ChoiceOption
@@ -490,7 +490,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
         status=RunnableStatus.FAILURE,
         input=expected_input_openai,
         output=expected_output_openai,
-        error=RunnableResultError(type=type(error).__name__, message="Error"),
+        error=RunnableResultError(type=type(error), message="Error"),
     )
     expected_input_anthropic = input_data | {openai_node.id: expected_result_openai.to_tracing_depend_dict()}
     expected_output_anthropic = None
@@ -500,7 +500,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
         input=expected_input_anthropic,
         output=expected_output_anthropic,
         error=RunnableResultError(
-            type="NodeFailedException",
+            type=NodeFailedException,
             message=f"Dependency {openai_node.id}: failed",
         ),
     )
@@ -514,7 +514,7 @@ def test_workflow_with_depend_nodes_and_depend_fail(
         input=expected_input_output_node,
         output=expected_output_output_node,
         error=RunnableResultError(
-            type="NodeFailedException",
+            type=NodeFailedException,
             message=f"Dependency {openai_node.id}: failed",
         ),
     )
@@ -630,7 +630,7 @@ def test_workflow_with_failed_flow(
         status=RunnableStatus.FAILURE,
         input=input_data,
         error=RunnableResultError(
-            type=type(error).__name__,
+            type=type(error),
             message=str(error),
         ),
     )
@@ -639,11 +639,13 @@ def test_workflow_with_failed_flow(
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf.id
     assert wf_run.output is None
+    assert wf_run.error
     assert wf_run.status == RunStatus.FAILED
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf.flow.id
     assert flow_run.parent_run_id == wf_run.id
     assert flow_run.output is None
+    assert flow_run.error
     assert flow_run.status == RunStatus.FAILED
 
 
@@ -761,7 +763,7 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
         status=RunnableStatus.SKIP,
         input=expected_input_mistral,
         output=expected_output_mistral,
-        error=RunnableResultError(type=NodeConditionFailedException.__name__, message=mistral_error_msg),
+        error=RunnableResultError(type=NodeConditionFailedException, message=mistral_error_msg),
     )
 
     expected_input_output = input_data | {
@@ -968,7 +970,7 @@ def run(input_data):
         status=RunnableStatus.FAILURE,
         input=expected_input_openai,
         output=None,
-        error=RunnableResultError(type=error_cls.__name__, message=error_msg),
+        error=RunnableResultError(type=error_cls, message=error_msg),
     )
     expected_input_choice = input_data | {
         openai_node_with_return_behavior.id: expected_result_openai.to_tracing_depend_dict(),

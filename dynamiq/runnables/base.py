@@ -52,17 +52,28 @@ class RunnableStatus(str, Enum):
 
 
 class RunnableResultError(BaseModel):
-    type: str
+    type: type[Exception]
     message: str
     recoverable: bool = False
 
     @classmethod
     def from_exception(cls, exception: Exception, recoverable: bool = False) -> Self:
         return cls(
-            type=type(exception).__name__,
+            type=type(exception),
             message=str(exception),
             recoverable=recoverable,
         )
+
+    def to_dict(self, **kwargs) -> dict:
+        """
+        Convert the RunnableResultError instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the RunnableResultError.
+        """
+        data = self.model_dump(**kwargs)
+        data["type"] = self.type.__name__
+        return data
 
 
 class RunnableResult(BaseModel):

@@ -717,12 +717,13 @@ class Node(BaseModel, Runnable, ABC):
             )
 
             recoverable = isinstance(e, RecoverableAgentException)
-            return RunnableResult(
+            result = RunnableResult(
                 status=RunnableStatus.FAILURE,
                 input=input_data,
                 output=None,
                 error=RunnableResultError.from_exception(e, recoverable=recoverable),
             )
+            return result
 
     async def run_async(
         self,
