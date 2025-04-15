@@ -731,7 +731,7 @@ class ReActAgent(Agent):
                         self.stream_content(
                             content={"name": tool.name, "input": action_input, "result": tool_result},
                             source=tool.name if tool else action,
-                            step=f"tool_{loop_num}",
+                            step=f"tool",
                             config=config,
                             by_tokens=False,
                             **kwargs,
