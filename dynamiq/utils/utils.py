@@ -201,8 +201,8 @@ def format_value(
     if isinstance(value, Exception):
         recoverable = bool(kwargs.get("recoverable"))
         return {
-            "content": f"{str(value)}",
-            "error_type": type(value).__name__,
+            "message": f"{str(value)}",
+            "type": type(value).__name__,
             "recoverable": recoverable,
         }, truncate_metadata
     if callable(value):

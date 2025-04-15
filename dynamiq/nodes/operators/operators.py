@@ -1,5 +1,4 @@
 from concurrent.futures import ThreadPoolExecutor
-from enum import Enum
 from typing import Any, ClassVar, Literal
 from uuid import uuid4
 
@@ -8,48 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field
 import dynamiq.utils.jsonpath as jsonpath
 from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.node import Transformer, ensure_config
+from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
-
-
-class ConditionOperator(str, Enum):
-    """Enum representing various condition operators for choice nodes."""
-
-    OR = "or"
-    AND = "and"
-    BOOLEAN_EQUALS = "boolean-equals"
-    BOOLEAN_EQUALS_PATH = "boolean-equals-path"
-    NUMERIC_EQUALS = "numeric-equals"
-    NUMERIC_EQUALS_PATH = "numeric-equals-path"
-    NUMERIC_GREATER_THAN = "numeric-greater-than"
-    NUMERIC_GREATER_THAN_PATH = "numeric-greater-than-path"
-    NUMERIC_GREATER_THAN_OR_EQUALS = "numeric-greater-than-or-equals"
-    NUMERIC_GREATER_THAN_OR_EQUALS_PATH = "numeric-greater-than-or-equals-path"
-    NUMERIC_LESS_THAN = "numeric-less-than"
-    NUMERIC_LESS_THAN_PATH = "numeric-less-than-path"
-    NUMERIC_LESS_THAN_OR_EQUALS = "numeric-less-than-or-equals"
-    NUMERIC_LESS_THAN_OR_EQUALS_PATH = "numeric-less-than-or-equals-path"
-    STRING_EQUALS = "string-equals"
-    STRING_EQUALS_PATH = "string-equals-path"
-    STRING_GREATER_THAN = "string-greater-than"
-    STRING_GREATER_THAN_PATH = "string-greater-than-path"
-    STRING_GREATER_THAN_OR_EQUALS = "string-greater-than-or-equals"
-    STRING_GREATER_THAN_OR_EQUALS_PATH = "string-greater-than-or-equals-path"
-    STRING_LESS_THAN = "string-less-than"
-    STRING_LESS_THAN_PATH = "string-less-than-path"
-    STRING_LESS_THAN_OR_EQUALS = "string-less-than-or-equals"
-    STRING_LESS_THAN_OR_EQUALS_PATH = "string-less-than-or-equals-path"
-
-
-class ChoiceCondition(BaseModel):
-    """Represents a condition for a choice node."""
-
-    variable: str | None = None
-    operator: ConditionOperator | None = None
-    value: Any = None
-    is_not: bool = False
-    operands: list["ChoiceCondition"] | None = None
 
 
 class ChoiceOption(BaseModel):
@@ -57,12 +18,6 @@ class ChoiceOption(BaseModel):
 
     id: str = Field(default_factory=generate_uuid)
     name: str | None = None
-    condition: ChoiceCondition | None = None
-
-
-class ChoiceExecute(BaseModel):
-    """Represents the execution of a choice."""
-
     condition: ChoiceCondition | None = None
 
 
@@ -144,13 +99,13 @@ class Choice(Node):
         return results
 
     @staticmethod
-    def evaluate(cond: ChoiceCondition, input: Any) -> bool:
+    def evaluate(cond: ChoiceCondition, input_data: Any) -> bool:
         """
         Evaluates a choice condition.
 
         Args:
             cond: The condition to evaluate.
-            input: The input data to evaluate against.
+            input_data: The input data to evaluate against.
 
         Returns:
             A boolean indicating whether the condition is met.
@@ -158,7 +113,7 @@ class Choice(Node):
         Raises:
             ValueError: If the operator is not supported.
         """
-        value = jsonpath.filter(input, cond.variable, "blah")
+        value = jsonpath.filter(input_data, cond.variable)
 
         if cond.operator == ConditionOperator.OR:
             return (
@@ -299,6 +254,6 @@ class Pass(Node):
 
         output = input_data
         for transformer in self.transformers:
-            output = self.transform(output, transformer, self.id)
+            output = self.transform(output, transformer)
 
         return output

@@ -6,6 +6,7 @@ import jsonpickle
 from dynamiq.executors.base import BaseExecutor
 from dynamiq.nodes.node import Node, NodeReadyToRun
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.runnables.base import RunnableResultError
 from dynamiq.utils.logger import logger
 
 MAX_WORKERS_THREAD_POOL_EXECUTOR = 8
@@ -109,10 +110,8 @@ class PoolExecutor(BaseExecutor):
             try:
                 node_result: RunnableResult = f.result()
             except Exception as e:
-                logger.error(
-                    f"Node {node.name} - {node.id}: execution failed due the unexpected error. Error: {e}"
-                )
-                node_result = RunnableResult(status=RunnableStatus.FAILURE)
+                logger.error(f"Node {node.name} - {node.id}: execution failed due the unexpected error. Error: {e}")
+                node_result = RunnableResult(status=RunnableStatus.FAILURE, error=RunnableResultError.from_exception(e))
 
             results[node.id] = node_result
 
