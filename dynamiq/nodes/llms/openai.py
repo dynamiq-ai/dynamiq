@@ -52,6 +52,8 @@ class OpenAI(BaseLLM):
         Override the base method to update the completion parameters for OpenAI.
         For O-series models, use "max_completion_tokens" instead of "max_tokens".
         """
+        params = super().update_completion_params(params)
+
         new_params = params.copy()
         if self.is_o_series_model:
             new_params["max_completion_tokens"] = self.max_tokens

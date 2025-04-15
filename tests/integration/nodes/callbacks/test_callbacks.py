@@ -66,7 +66,7 @@ def create_orchestrator(
         return END
 
     orchestrator = GraphOrchestrator(
-        name="Graph orchestrator", manager=GraphAgentManager(llm=llm), context=context_input
+        name="Graph orchestrator", manager=GraphAgentManager(llm=llm), context=context_input, enable_handle_input=False
     )
 
     orchestrator.add_state_by_tasks("generate_sketch", [generate_sketch], callbacks=[human_feedback_callback])
