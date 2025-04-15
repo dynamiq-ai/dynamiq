@@ -87,6 +87,6 @@ def filter(json: dict, expression_filter: str):
             if len(filtered_data) == 1:
                 filtered_data = filtered_data[0]
     except Exception as e:
-        raise ValueError(f"Error in path during parsing with `expression_filter` {expression_filter}`: {e}")
+        raise ValueError(f"Error in path during parsing with `expression_filter` {expression_filter}: {e}")
 
     return filtered_data
