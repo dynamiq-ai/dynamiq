@@ -22,7 +22,6 @@ def create_orchestrator() -> GraphOrchestrator:
     Returns:
         GraphOrchestrator: The configured orchestrator.
     """
-    llm = setup_llm()
     connection_e2b = E2B()
 
     tool_code = E2BInterpreterTool(connection=connection_e2b)

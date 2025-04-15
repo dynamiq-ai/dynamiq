@@ -1,4 +1,4 @@
-from dynamiq.nodes.agents.base import AgentManager
+from dynamiq.nodes.agents.base import PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT, AgentManager
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingMode
@@ -378,6 +378,7 @@ class AdaptiveAgentManager(AgentManager):
                 "final": self._get_adaptive_final_prompt(),
                 "respond": self._get_adaptive_respond_prompt(),
                 "reflect": self._get_adaptive_reflect_prompt(),
+                "handle_input": self._get_adaptive_handle_input_prompt(),
             }
         )
 
@@ -385,6 +386,11 @@ class AdaptiveAgentManager(AgentManager):
     def _get_adaptive_plan_prompt() -> str:
         """Return the adaptive plan prompt template."""
         return PROMPT_TEMPLATE_AGENT_MANAGER_PLAN
+
+    @staticmethod
+    def _get_adaptive_handle_input_prompt() -> str:
+        """Determines how to handle input, either by continuing the flow or providing a direct response."""
+        return PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT
 
     @staticmethod
     def _get_adaptive_final_prompt() -> str:

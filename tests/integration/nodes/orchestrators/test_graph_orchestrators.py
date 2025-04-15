@@ -25,7 +25,9 @@ def get_orchestrator_workflow1(model: str, connection: connections.OpenAI, conte
     )
 
     agent_manager = GraphAgentManager(llm=llm)
-    graph_orchestrator = GraphOrchestrator(manager=agent_manager, final_summarizer=True, context=context_input)
+    graph_orchestrator = GraphOrchestrator(
+        manager=agent_manager, final_summarizer=True, context=context_input, enable_handle_input=False
+    )
 
     # Task 1
     def task1(context: dict, **kwargs):
@@ -74,7 +76,11 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
 
     agent_manager = GraphAgentManager(llm=llm)
     graph_orchestrator = GraphOrchestrator(
-        manager=agent_manager, initial_state="task1_task2", final_summarizer=True, context=context_input
+        manager=agent_manager,
+        initial_state="task1_task2",
+        final_summarizer=True,
+        context=context_input,
+        enable_handle_input=False,
     )
 
     # Task 1

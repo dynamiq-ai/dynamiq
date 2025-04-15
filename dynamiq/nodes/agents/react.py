@@ -10,6 +10,7 @@ from pydantic import Field, model_validator
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
+    AgentUnknownToolException,
     JSONParsingError,
     MaxLoopsExceededException,
     RecoverableAgentException,
@@ -417,6 +418,25 @@ class ReActAgent(Agent):
         else:
             return "", ""
 
+    def stream_reasoning(self, content: dict[str, Any], config: RunnableConfig, **kwargs) -> None:
+        """
+        Streams intermediate reasoning of the Agent.
+
+        Args:
+            content (dict[str, Any]): Content that will be sent.
+            config (RunnableConfig | None): Configuration for the agent run.
+            **kwargs: Additional parameters for running the agent.
+        """
+        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            self.stream_content(
+                content=content,
+                source=self.name,
+                step="reasoning",
+                config=config,
+                by_tokens=False,
+                **kwargs,
+            )
+
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
@@ -508,21 +528,6 @@ class ReActAgent(Agent):
                         thought, action, action_input = self._parse_action(llm_generated_output)
                         self.log_reasoning(thought, action, action_input, loop_num)
 
-                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_content(
-                                content={
-                                    "thought": thought,
-                                    "action": action,
-                                    "action_input": action_input,
-                                    "loop_num": loop_num,
-                                },
-                                source=self.name,
-                                step="reasoning",
-                                config=config,
-                                by_tokens=False,
-                                **kwargs,
-                            )
-
                     case InferenceMode.FUNCTION_CALLING:
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using function calling inference mode")
@@ -576,21 +581,6 @@ class ReActAgent(Agent):
 
                         self.log_reasoning(thought, action, action_input, loop_num)
 
-                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_content(
-                                content={
-                                    "thought": thought,
-                                    "action": action,
-                                    "action_input": action_input,
-                                    "loop_num": loop_num,
-                                },
-                                source=self.name,
-                                step="reasoning",
-                                config=config,
-                                by_tokens=False,
-                                **kwargs,
-                            )
-
                     case InferenceMode.STRUCTURED_OUTPUT:
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
@@ -634,21 +624,6 @@ class ReActAgent(Agent):
                             raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
 
                         self.log_reasoning(thought, action, action_input, loop_num)
-
-                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_content(
-                                content={
-                                    "thought": thought,
-                                    "action": action,
-                                    "action_input": action_input,
-                                    "loop_num": loop_num,
-                                },
-                                source=self.name,
-                                step="reasoning",
-                                config=config,
-                                by_tokens=False,
-                                **kwargs,
-                            )
 
                     case InferenceMode.XML:
                         if self.verbose:
@@ -696,22 +671,6 @@ class ReActAgent(Agent):
                                 action = parsed_data.get("action")
                                 action_input = parsed_data.get("action_input")
                                 self.log_reasoning(thought, action, action_input, loop_num)
-
-                                if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                                    self.stream_content(
-                                        content={
-                                            "thought": thought,
-                                            "action": action,
-                                            "action_input": action_input,
-                                            "loop_num": loop_num,
-                                        },
-                                        source=self.name,
-                                        step="reasoning",
-                                        config=config,
-                                        by_tokens=False,
-                                        **kwargs,
-                                    )
-
                             except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
                                 logger.error(f"XMLParser: Failed to parse XML for action or answer: {e}")
                                 raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
@@ -722,36 +681,76 @@ class ReActAgent(Agent):
 
                 self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
 
-                if action:
-                    if self.tools:
-
-                        try:
-                            tool = self._get_tool(action)
-                            tool_result = self._run_tool(tool, action_input, config, **kwargs)
-
-                        except RecoverableAgentException as e:
-                            tool_result = f"{type(e).__name__}: {e}"
-                        observation = f"\nObservation: {tool_result}\n"
-
-                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_content(
-                                content={"name": tool.name, "input": action_input, "result": tool_result},
-                                source=tool.name if tool else action,
-                                step=f"tool_{loop_num}",
-                                config=config,
-                                by_tokens=False,
+                if action and self.tools:
+                    try:
+                        tool = self.tool_by_names.get(self.sanitize_tool_name(action))
+                        if not tool:
+                            self.stream_reasoning(
+                                {
+                                    "thought": thought,
+                                    "action": action,
+                                    "action_input": action_input,
+                                    "loop_num": loop_num,
+                                },
+                                config,
                                 **kwargs,
                             )
 
-                        self._intermediate_steps[loop_num]["model_observation"].update(
-                            AgentIntermediateStepModelObservation(
-                                tool_using=action,
-                                tool_input=action_input,
-                                tool_output=tool_result,
-                                updated=llm_generated_output,
-                            ).model_dump()
+                            raise AgentUnknownToolException(
+                                f"Unknown tool: {action}."
+                                "Use only available tools and provide only the tool's name in the action field. "
+                                "Do not include any additional reasoning. "
+                                "Please correct the action field or state that you cannot answer the question."
+                            )
+
+                        self.stream_reasoning(
+                            {
+                                "thought": thought,
+                                "action": action,
+                                "tool": tool,
+                                "action_input": action_input,
+                                "loop_num": loop_num,
+                            },
+                            config,
+                            **kwargs,
                         )
-                        self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
+
+                        tool_result = self._run_tool(tool, action_input, config, **kwargs)
+
+                    except RecoverableAgentException as e:
+                        tool_result = f"{type(e).__name__}: {e}"
+
+                    observation = f"\nObservation: {tool_result}\n"
+                    if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                        self.stream_content(
+                            content={"name": tool.name, "input": action_input, "result": tool_result},
+                            source=tool.name if tool else action,
+                            step="tool",
+                            config=config,
+                            by_tokens=False,
+                            **kwargs,
+                        )
+
+                    self._intermediate_steps[loop_num]["model_observation"].update(
+                        AgentIntermediateStepModelObservation(
+                            tool_using=action,
+                            tool_input=action_input,
+                            tool_output=tool_result,
+                            updated=llm_generated_output,
+                        ).model_dump()
+                    )
+                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
+                else:
+                    self.stream_reasoning(
+                        {
+                            "thought": thought,
+                            "action": action,
+                            "action_input": action_input,
+                            "loop_num": loop_num,
+                        },
+                        config,
+                        **kwargs,
+                    )
 
             except ActionParsingException as e:
                 self._prompt.messages.append(
