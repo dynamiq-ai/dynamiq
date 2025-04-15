@@ -140,6 +140,18 @@ class BaseLLM(ConnectionNode):
         """Provides context for input schema that is required for proper validation."""
         return {"instance_prompt": self.prompt}
 
+    def get_messages(
+        self,
+        prompt,
+        input_data,
+    ) -> list[dict]:
+        """
+        Format and filter message parameters based on provider requirements.
+        Override this in provider-specific subclasses.
+        """
+        messages = prompt.format_messages(**dict(input_data))
+        return messages
+
     @classmethod
     def get_usage_data(
         cls,
@@ -310,7 +322,7 @@ class BaseLLM(ConnectionNode):
         """
         config = ensure_config(config)
         prompt = prompt or self.prompt or Prompt(messages=[], tools=None)
-        messages = prompt.format_messages(**dict(input_data))
+        messages = self.get_messages(prompt, input_data)
         base_tools = prompt.format_tools(**dict(input_data))
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
 

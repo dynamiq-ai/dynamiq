@@ -13,7 +13,6 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.utils.logger import logger
 
-
 USER_NAME = "Alex"
 USER_COMPANY = "TechCorp"
 
@@ -103,7 +102,12 @@ def openai_embedder(openai_connection):
     return OpenAIDocumentEmbedder(connection=openai_connection)
 
 
-@pytest.mark.integration
+@pytest.mark.skip(
+    reason="Pinecone operates as an eventual consistency database, "
+    "meaning that write operations may not be immediately visible. "
+    "This inherent delay can result in intermittent test failures, "
+    "so the test is being skipped until a more deterministic strategy is implemented."
+)
 def test_react_agent_with_pinecone_memory(
     openai_llm,
     pinecone_connection,

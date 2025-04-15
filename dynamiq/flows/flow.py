@@ -13,6 +13,7 @@ from dynamiq.executors.pool import ThreadExecutor
 from dynamiq.flows.base import BaseFlow
 from dynamiq.nodes.node import Node, NodeReadyToRun
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.runnables.base import RunnableResultError
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.logger import logger
 
@@ -241,6 +242,7 @@ class Flow(BaseFlow):
             return RunnableResult(
                 status=RunnableStatus.FAILURE,
                 input=input_data,
+                error=RunnableResultError.from_exception(e),
             )
 
     async def run_async(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
@@ -304,6 +306,7 @@ class Flow(BaseFlow):
             return RunnableResult(
                 status=RunnableStatus.FAILURE,
                 input=input_data,
+                error=RunnableResultError.from_exception(e),
             )
 
     def get_dependant_nodes(
