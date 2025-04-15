@@ -361,7 +361,7 @@ class GraphOrchestrator(Orchestrator):
                         **kwargs,
                     )
                     if output.status != RunnableStatus.SUCCESS:
-                        raise output.error.type
+                        raise OrchestratorError(output.error.message)
 
                     output = output.output
                     self.context = self.context | output["context"]
