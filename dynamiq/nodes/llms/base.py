@@ -287,10 +287,20 @@ class BaseLLM(ConnectionNode):
 
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """
-        This method can be overridden by subclasses to update or modify the
-        parameters passed to the completion method.
-        By default, it does not modify the params.
+        Updates or modifies the parameters for the completion method.
+
+        This method can be overridden by subclasses to customize the parameters
+        passed to the completion method. By default, it enables usage information
+        in streaming mode if streaming is enabled and include_usage is set.
+        Args:
+            params (dict[str, Any]): The parameters to be updated.
+
+        Returns:
+            dict[str, Any]: The updated parameters.
         """
+        if self.streaming and self.streaming.enabled and self.streaming.include_usage and params.get("stream", False):
+            params.setdefault("stream_options", {})
+            params["stream_options"]["include_usage"] = True
         return params
 
     def execute(
