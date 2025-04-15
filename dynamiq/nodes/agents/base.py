@@ -459,7 +459,7 @@ class Agent(Node):
             )
             self._run_depends = [NodeDependency(node=self.llm).to_dict()]
             if llm_result.status != RunnableStatus.SUCCESS:
-                error_message = f"LLM '{self.llm.name}' failed: {llm_result.output.get('content')}"
+                error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
                 raise ValueError({error_message})
 
             return llm_result
@@ -633,8 +633,8 @@ class Agent(Node):
         )
         self._run_depends = [NodeDependency(node=tool).to_dict()]
         if tool_result.status != RunnableStatus.SUCCESS:
-            error_message = f"Tool '{tool.name}' failed: {tool_result.output}"
-            if tool_result.output["recoverable"]:
+            error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
+            if tool_result.error.recoverable:
                 raise ToolExecutionException({error_message})
             else:
                 raise ValueError({error_message})

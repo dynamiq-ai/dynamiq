@@ -168,10 +168,11 @@ class Workflow(BaseModel, Runnable):
             self.run_on_workflow_end(result.output, config, **merged_kwargs)
             logger.info(f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
         else:
-            self.run_on_workflow_error(result.output, config, **merged_kwargs)
+            error = result.error.type(result.error.message)
+            self.run_on_workflow_error(error, config, **merged_kwargs)
             logger.error(f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
 
-        return RunnableResult(status=result.status, input=input_data, output=result.output)
+        return RunnableResult(status=result.status, input=input_data, output=result.output, error=result.error)
 
     async def run_async(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
         """Run the workflow asynchronously with given input data and configuration.
@@ -199,14 +200,13 @@ class Workflow(BaseModel, Runnable):
                 f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}."
             )
         else:
-            self.run_on_workflow_error(result.output, config, **merged_kwargs)
+            error = result.error.type(result.error.message)
+            self.run_on_workflow_error(error, config, **merged_kwargs)
             logger.error(
                 f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}."
             )
 
-        return RunnableResult(
-            status=result.status, input=input_data, output=result.output
-        )
+        return RunnableResult(status=result.status, input=input_data, output=result.output, error=result.error)
 
     def run_on_workflow_start(self, input_data: Any, config: RunnableConfig = None, **kwargs: Any):
         """Run callbacks on workflow start.
