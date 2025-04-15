@@ -359,8 +359,11 @@ class GraphOrchestrator(Orchestrator):
                         config=config,
                         run_depends=self._run_depends,
                         **kwargs,
-                    ).output
+                    )
+                    if output.status != RunnableStatus.SUCCESS:
+                        raise output.error
 
+                    output = output.output
                     self.context = self.context | output["context"]
                     self._run_depends = [NodeDependency(node=state).to_dict()]
                     self._chat_history = self._chat_history + output["history_messages"]
