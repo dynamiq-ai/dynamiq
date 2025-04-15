@@ -131,7 +131,7 @@ class GraphState(Node):
 
         try:
             if task.input_transformer and (task.input_transformer.path or task.input_transformer.selector):
-                output = task.transform(input_data, task.input_transformer, task.id)
+                output = task.transform(input_data, task.input_transformer)
                 task.validate_input_schema(output, **kwargs)
                 return True
             else:
@@ -187,8 +187,9 @@ class GraphState(Node):
                 run_depends = [NodeDependency(node=self.manager).to_dict()]
 
                 if manager_result.status != RunnableStatus.SUCCESS:
-                    logger.error(f"GraphOrchestrator: Error generating actions for state: {manager_result}")
-                    raise OrchestratorError(f"GraphOrchestrator: Error generating actions for state: {manager_result}")
+                    result = manager_result.to_dict()
+                    logger.error(f"GraphOrchestrator: Error generating actions for state: {result}")
+                    raise OrchestratorError(f"GraphOrchestrator: Error generating actions for state: {result}")
 
                 try:
                     agent_input = {
@@ -212,12 +213,12 @@ class GraphState(Node):
                 **kwargs,
             )
 
-            result = response.output.get("content")
-
             if response.status != RunnableStatus.SUCCESS:
-                logger.error(f"GraphOrchestrator: Failed to execute Agent {task.name} with Error: {result}")
-                raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {result}")
+                error_msg = response.error.message
+                logger.error(f"GraphOrchestrator: Failed to execute Agent {task.name} with Error: {error_msg}")
+                raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {error_msg}")
 
+            result = response.output.get("content")
             return result, {}
 
         elif isinstance(task, FunctionTool):
@@ -227,12 +228,12 @@ class GraphState(Node):
 
         response = task.run(input_data=input_data, config=config, run_depends=run_depends, **kwargs)
 
-        context = response.output.get("content")
-
         if response.status != RunnableStatus.SUCCESS:
-            logger.error(f"GraphOrchestrator: Failed to execute {task.name} with Error: {context}")
-            raise OrchestratorError(f"Failed to execute {task.name} with Error: {context}")
+            error_msg = response.error.message
+            logger.error(f"GraphOrchestrator: Failed to execute {task.name} with Error: {error_msg}")
+            raise OrchestratorError(f"Failed to execute {task.name} with Error: {error_msg}")
 
+        context = response.output.get("content")
         if not isinstance(context, dict):
             raise OrchestratorError(
                 f"Error: Task returned invalid data format. Expected a dictionary got {type(context)}"

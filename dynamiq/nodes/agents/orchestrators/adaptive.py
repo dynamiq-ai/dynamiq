@@ -144,7 +144,7 @@ class AdaptiveOrchestrator(Orchestrator):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            error_message = f"Agent '{self.manager.name}' failed: {manager_result.output.get('content')}"
+            error_message = f"Agent '{self.manager.name}' failed: {manager_result.error.message}"
             raise ActionParseError(f"Unable to retrieve the next action from Agent Manager, Error: {error_message}")
 
         manager_content = manager_result.output.get("content").get("result")
@@ -165,9 +165,7 @@ class AdaptiveOrchestrator(Orchestrator):
             self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
             if reflect_result.status != RunnableStatus.SUCCESS:
-                error_message = (
-                    f"Agent '{self.manager.name}' failed on reflection: {reflect_result.output.get('content')}"
-                )
+                error_message = f"Agent '{self.manager.name}' failed on reflection: {reflect_result.error.message}"
                 logger.error(error_message)
                 return self._handle_next_action(manager_content, config=config, **kwargs)
             else:
@@ -242,7 +240,7 @@ class AdaptiveOrchestrator(Orchestrator):
             )
             self._run_depends = [NodeDependency(node=agent).to_dict()]
             if result.status != RunnableStatus.SUCCESS:
-                error_message = f"Agent '{agent.name}' failed: {result.output.get('content')}"
+                error_message = f"Agent '{agent.name}' failed: {result.error.message}"
                 raise OrchestratorError(f"Failed to execute Agent {agent.name}, due to error: {error_message}")
 
             self._chat_history.append(
@@ -265,16 +263,17 @@ class AdaptiveOrchestrator(Orchestrator):
             )
             self._run_depends = [NodeDependency(node=self.manager).to_dict()]
             if result.status != RunnableStatus.SUCCESS:
+                content = result.error.message
                 logger.error(
-                    f"Orchestrator {self.name} - {self.id}: "
-                    f"Error executing {self.manager.name}:"
-                    f"{result.output.get('content')}"
+                    f"Orchestrator {self.name} - {self.id}: " f"Error executing {self.manager.name}:" f"{content}"
                 )
+            else:
+                content = result.output.get("content")
 
             self._chat_history.append(
                 {
                     "role": "system",
-                    "content": f"LLM result: {result.output.get('content')}",
+                    "content": f"LLM result: {content}",
                 }
             )
 
@@ -307,7 +306,7 @@ class AdaptiveOrchestrator(Orchestrator):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            error_message = f"Manager agent '{self.manager.name}' failed: {manager_result.output.get('content')}"
+            error_message = f"Manager agent '{self.manager.name}' failed: {manager_result.error.message}"
             raise OrchestratorError(f"Failed to execute respond action with manager, due to error: {error_message}")
 
         manager_result_content = manager_result.output.get("content").get("result")

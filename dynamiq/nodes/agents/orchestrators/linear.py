@@ -144,7 +144,7 @@ class LinearOrchestrator(Orchestrator):
             self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
             if manager_result.status != RunnableStatus.SUCCESS:
-                error_message = f"LLM '{self.manager.name}' failed: {manager_result.output.get('content')}"
+                error_message = f"LLM '{self.manager.name}' failed: {manager_result.error.message}"
                 raise ValueError(f"Failed to generate tasks: {error_message}")
 
             manager_result_content = manager_result.output.get("content").get("result")
@@ -279,7 +279,7 @@ class LinearOrchestrator(Orchestrator):
                             raise ValueError(
                                 f"Failed to execute task {task.id}.{task.name} "
                                 f"by agent {assigned_agent_index}.{assigned_agent.name}"
-                                f"due to error: {result.output.get('content')}"
+                                f"due to error: {result.error.message}"
                             )
 
                         self._results[task.id] = {
@@ -289,7 +289,7 @@ class LinearOrchestrator(Orchestrator):
 
                         success_flag = True
                         break
-                task_per_llm += f"Error occurred:{manager_result.output}"
+                task_per_llm += f"Error occurred:{manager_result.error.to_dict()}"
 
             if success_flag:
                 continue
@@ -298,7 +298,8 @@ class LinearOrchestrator(Orchestrator):
                 raise ValueError(
                     f"Orchestrator {self.name} - {self.id}: "
                     f"Failed to assign task {task.id}.{task.name} "
-                    f"by Manager Agent due to error: {manager_result.output}"
+                    f"by Manager Agent due to error: "
+                    f"{manager_result.error.to_dict() if manager_result.error else manager_result.output}"
                 )
 
     def generate_final_answer(self, task: str, config: RunnableConfig, **kwargs) -> str:
