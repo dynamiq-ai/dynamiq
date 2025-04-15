@@ -143,11 +143,10 @@ class Orchestrator(Node, ABC):
         )
 
         if handle_result.status != RunnableStatus.SUCCESS:
-            error_message = (
-                f"Orchestrator {self.name} - {self.id}: Manager failed to analyze input: {handle_result.output}"
-            )
+            error = handle_result.error.to_dict()
+            error_message = f"Orchestrator {self.name} - {self.id}: Manager failed to analyze input: {error}"
             logger.error(error_message)
-            return DecisionResult(decision=Decision.RESPOND, message=f"Error analyzing request: {handle_result.output}")
+            return DecisionResult(decision=Decision.RESPOND, message=f"Error analyzing request: {error}")
 
         content = handle_result.output.get("content", {})
         raw_text = content.get("result", "")

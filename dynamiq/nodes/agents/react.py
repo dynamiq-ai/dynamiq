@@ -10,11 +10,11 @@ from pydantic import Field, model_validator
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
+    AgentUnknownToolException,
     JSONParsingError,
     MaxLoopsExceededException,
     RecoverableAgentException,
     TagNotFoundError,
-    AgentUnknownToolException,
     XMLParsingError,
 )
 from dynamiq.nodes.agents.utils import XMLParser
@@ -671,6 +671,13 @@ class ReActAgent(Agent):
                                 action = parsed_data.get("action")
                                 action_input = parsed_data.get("action_input")
                                 self.log_reasoning(thought, action, action_input, loop_num)
+                            except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
+                                logger.error(f"XMLParser: Failed to parse XML for action or answer: {e}")
+                                raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
+
+                        except (XMLParsingError, JSONParsingError) as e:
+                            logger.error(f"XMLParser: Error parsing potential final answer XML: {e}")
+                            raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
 
                 self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
 
@@ -718,7 +725,7 @@ class ReActAgent(Agent):
                         self.stream_content(
                             content={"name": tool.name, "input": action_input, "result": tool_result},
                             source=tool.name if tool else action,
-                            step=f"tool",
+                            step="tool",
                             config=config,
                             by_tokens=False,
                             **kwargs,
