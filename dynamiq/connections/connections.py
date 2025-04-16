@@ -3,6 +3,7 @@ import json
 from abc import ABC, abstractmethod
 from functools import cached_property, partial
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import quote_plus
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 from pydantic_core.core_schema import ValidationInfo
@@ -241,18 +242,31 @@ class AWS(BaseConnection):
         pass
 
     @property
-    def conn_params(self):
+    def conn_params(self) -> dict:
+        """Return parameters with aws_ prefix for compatibility with other systems"""
+        params = {}
         if self.profile:
-            return {
-                "aws_profile_name": self.profile,
-                "aws_region_name": self.region,
-            }
+            params["aws_profile_name"] = self.profile
+            params["aws_region_name"] = self.region
         else:
-            return {
-                "aws_access_key_id": self.access_key_id,
-                "aws_secret_access_key": self.secret_access_key,
-                "aws_region_name": self.region,
-            }
+            params["aws_access_key_id"] = self.access_key_id
+            params["aws_secret_access_key"] = self.secret_access_key
+            params["aws_region_name"] = self.region
+        return params
+
+    def create_boto3_session(self):
+        import boto3
+
+        """Create and return a boto3.Session with properly formatted parameters"""
+        params = {}
+        if self.profile:
+            params["profile_name"] = self.profile
+        elif self.access_key_id and self.secret_access_key:
+            params["aws_access_key_id"] = self.access_key_id
+            params["aws_secret_access_key"] = self.secret_access_key
+        if self.region:
+            params["region_name"] = self.region
+        return boto3.Session(**params)
 
 
 class Gemini(BaseApiKeyConnection):
@@ -1214,3 +1228,148 @@ class NvidiaNIM(BaseApiKeyConnection):
             "api_base": self.url,
             "api_key": self.api_key,
         }
+
+
+class Redis(BaseConnection):
+    """
+    Represents a connection to a Redis server.
+
+    Attributes:
+        host (str): The hostname of the Redis server.
+            Defaults to the environment variable 'REDIS_HOST' or 'localhost'.
+        port (int): The port number of the Redis server.
+            Defaults to the environment variable 'REDIS_PORT' or 6379.
+        db (int): The Redis database number.
+            Defaults to the environment variable 'REDIS_DB' or 0.
+        user (str | None): The username for Redis authentication (Redis 6+ ACL).
+            Defaults to the environment variable 'REDIS_USER' or None.
+        password (str | None): The password for Redis authentication.
+            Defaults to the environment variable 'REDIS_PASSWORD' or None.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    host: str = Field(default_factory=partial(get_env_var, "REDIS_HOST", "localhost"))
+    port: int = Field(default_factory=partial(get_env_var, "REDIS_PORT", 6379))
+    db: int = Field(default_factory=partial(get_env_var, "REDIS_DB", 0))
+    user: str | None = Field(default_factory=partial(get_env_var, "REDIS_USER", None), exclude=True)
+    password: str | None = Field(default_factory=partial(get_env_var, "REDIS_PASSWORD", None), exclude=True)
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing host, port, db, username (if set) and password (if set).
+        """
+        params = {
+            "host": self.host,
+            "port": self.port,
+            "db": self.db,
+        }
+        if self.user:
+            params["username"] = self.user
+        if self.password:
+            params["password"] = self.password
+        return params
+
+    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
+        """Converts the connection instance to a dictionary."""
+        exclude = kwargs.pop("exclude", {})
+        if not include_secure_params:
+            exclude["password"] = True
+            exclude["user"] = True
+        data = self.model_dump(exclude=exclude, **kwargs)
+        if not include_secure_params:
+            data.pop("password", None)
+            data.pop("user", None)
+        return data
+
+    def connect(self):
+        """
+        Establishes a connection to the Redis server.
+
+        Returns:
+            redis.Redis: An instance of the Redis client connected to the server.
+
+        Raises:
+            ConnectionError: If the connection to Redis fails.
+        """
+        # Import moved inside to keep it optional if RedisConnection is defined but not used
+        import redis
+
+        try:
+            redis_client = redis.Redis(
+                host=self.host,
+                port=self.port,
+                db=self.db,
+                username=self.user,
+                password=self.password,
+                decode_responses=True,
+            )
+            logger.debug(f"RedisConnection successful: Connected to {self.host}:{self.port}/{self.db}")
+            return redis_client
+        except redis.exceptions.AuthenticationError as e:
+            logger.error(
+                f"Redis authentication failed for user '{self.user}' at {self.host}:{self.port}/{self.db}: {e}"
+            )
+            raise ConnectionError(f"Redis authentication failed: {e}") from e
+        except redis.RedisError as e:
+            logger.error(f"Failed to connect to Redis at {self.host}:{self.port}/{self.db}: {e}")
+            raise ConnectionError(f"Failed to connect to Redis: {e}") from e
+
+
+class MongoDB(BaseConnection):
+    """Connection details for MongoDB."""
+
+    connection_string: str | None = Field(
+        default_factory=partial(get_env_var, "MONGODB_CONNECTION_STRING", None),
+        description="Full MongoDB connection string (takes precedence if provided). "
+        "Example: mongodb+srv://user:pass@host/db?options",
+    )
+    host: str = Field(default_factory=partial(get_env_var, "MONGODB_HOST", "localhost"))
+    port: int = Field(default_factory=partial(get_env_var, "MONGODB_PORT", 27017))
+    database: str = Field(default_factory=partial(get_env_var, "MONGODB_DATABASE", "dynamiq_db"))
+    user: str | None = Field(default_factory=partial(get_env_var, "MONGODB_USER", None))
+    password: str | None = Field(default_factory=partial(get_env_var, "MONGODB_PASSWORD", None))
+    options: dict[str, Any] = Field(default_factory=dict, description="Additional connection options for MongoClient")
+
+    def _build_uri(self) -> str:
+        """Builds the MongoDB connection URI from components."""
+        if self.connection_string:
+            return self.connection_string
+
+        protocol = "mongodb://"
+        auth = ""
+        if self.user and self.password:
+            auth = f"{quote_plus(self.user)}:{quote_plus(self.password)}@"
+        elif self.user:
+            auth = f"{quote_plus(self.user)}@"
+
+        options_str = ""
+        if self.options:
+            options_str = "?" + "&".join(f"{k}={v}" for k, v in self.options.items())
+
+        uri = f"{protocol}{auth}{self.host}:{self.port}/{self.database}{options_str}"
+        return uri
+
+    def connect(self):
+        """Establishes a connection to MongoDB."""
+        from pymongo import MongoClient
+
+        uri = self._build_uri()
+        try:
+            client = MongoClient(uri)
+            client.admin.command("ismaster")
+            logger.debug(f"Connected to MongoDB using URI: {'mongodb://*****' if '@' in uri else uri}")
+            return client
+        except Exception as e:
+            safe_uri = uri.split("@")[1] if "@" in uri else uri
+            logger.error(f"Failed to connect to MongoDB at {safe_uri}: {e}")
+            raise ConnectionError(f"Failed to connect to MongoDB: {e}") from e
+
+    @property
+    def conn_params(self) -> str:
+        """Returns the connection URI."""
+        return self._build_uri()
