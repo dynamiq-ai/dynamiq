@@ -33,7 +33,7 @@ class Weaviate(MemoryBackend):
     name: str = "Weaviate"
     connection: WeaviateConnection = Field(default_factory=WeaviateConnection)
     embedder: DocumentEmbedder
-    index_name: str = Field(default="DynamiqMemory")
+    index_name: str = Field(default="conversations")
     tenant_name: str | None = Field(default=None)
     create_if_not_exist: bool = Field(default=True)
     content_key: str = Field(default="message_content")

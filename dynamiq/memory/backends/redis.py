@@ -35,9 +35,7 @@ class Redis(MemoryBackend):
 
     name: str = "Redis"
     connection: RedisConnection = Field(default_factory=RedisConnection)
-    key_prefix: str = Field(
-        default="dynamiq_memory", description="Prefix for all Redis keys used by this memory instance."
-    )
+    index_name: str = Field(default="default", description="Prefix for all Redis keys used by this memory instance.")
 
     _redis_client: redis.Redis | None = PrivateAttr(default=None)
 
@@ -55,7 +53,7 @@ class Redis(MemoryBackend):
         data = self.model_dump(exclude=exclude, **kwargs)
 
         data["connection"] = self.connection.to_dict(include_secure_params=include_secure_params, **kwargs)
-        data["key_prefix"] = self.key_prefix
+        data["index_name"] = self.index_name
 
         if "type" not in data:
             data["type"] = self.type
@@ -81,11 +79,11 @@ class Redis(MemoryBackend):
     def _get_message_hash_key(self, message_id: str) -> str:
         """Generates the Redis key for a message hash."""
         safe_message_id = str(message_id).replace(":", "_")
-        return f"{self.key_prefix}:{self._MESSAGE_HASH_PREFIX}:{safe_message_id}"
+        return f"{self.index_name}:{self._MESSAGE_HASH_PREFIX}:{safe_message_id}"
 
     def _get_timestamp_zset_key(self) -> str:
         """Generates the Redis key for the timestamp sorted set."""
-        return f"{self.key_prefix}:{self._TIMESTAMP_ZSET_KEY}"
+        return f"{self.index_name}:{self._TIMESTAMP_ZSET_KEY}"
 
     def add(self, message: Message) -> None:
         """
@@ -146,7 +144,7 @@ class Redis(MemoryBackend):
                     logger.warning(f"Potential issue adding message {message_id} to Redis. Pipeline results: {results}")
 
             logger.debug(
-                f"Redis Memory ({self.key_prefix}): Added message {message_id} "
+                f"Redis Memory ({self.index_name}): Added message {message_id} "
                 f"(key: {hash_key}) with timestamp {timestamp}"
             )
 
@@ -174,7 +172,7 @@ class Redis(MemoryBackend):
             for key, hash_data in zip(message_keys, hash_data_list):
                 if not hash_data:
                     logger.warning(
-                        f"Redis Memory ({self.key_prefix}): Message key {key} found in ZSET but Hash data missing."
+                        f"Redis Memory ({self.index_name}): Message key {key} found in ZSET but Hash data missing."
                     )
                     continue
 
@@ -187,7 +185,7 @@ class Redis(MemoryBackend):
                         role = MessageRole(role_str) if role_str else MessageRole.USER
                     except ValueError:
                         logger.warning(
-                            f"Redis Memory ({self.key_prefix}): Invalid role '{role_str}'"
+                            f"Redis Memory ({self.index_name}): Invalid role '{role_str}'"
                             f" found for key {key}. Defaulting to USER."
                         )
                         role = MessageRole.USER
@@ -200,13 +198,13 @@ class Redis(MemoryBackend):
                     messages.append(message)
                 except json.JSONDecodeError as e:
                     logger.error(
-                        f"Redis Memory ({self.key_prefix}): Error parsing metadata JSON for key {key}: {e}. "
+                        f"Redis Memory ({self.index_name}): Error parsing metadata JSON for key {key}: {e}. "
                         f"Data: {hash_data.get('metadata')}"
                     )
                     continue
                 except Exception as e:
                     logger.error(
-                        f"Redis Memory ({self.key_prefix}): Unexpected error reconstructing message for key {key}: {e}."
+                        f"Redis Memory ({self.index_name}): Unexpected error reconstructing message for key {key}: {e}."
                         f" Data: {hash_data}"
                     )
                     continue
@@ -246,7 +244,7 @@ class Redis(MemoryBackend):
                 message_keys = self._redis_client.zrange(zset_key, 0, -1)
 
             logger.debug(
-                f"Redis Memory ({self.key_prefix}): Retrieving {len(message_keys)} message keys (limit={limit})."
+                f"Redis Memory ({self.index_name}): Retrieving {len(message_keys)} message keys (limit={limit})."
             )
             return self._fetch_messages_by_keys(message_keys)
 
@@ -322,19 +320,19 @@ class Redis(MemoryBackend):
             zset_key = self._get_timestamp_zset_key()
             all_message_keys = self._redis_client.zrange(zset_key, 0, -1)
             if not all_message_keys:
-                logger.debug(f"Redis Memory ({self.key_prefix}): Search found no messages in ZSET.")
+                logger.debug(f"Redis Memory ({self.index_name}): Search found no messages in ZSET.")
                 return []
 
             all_messages = self._fetch_messages_by_keys(all_message_keys)
             logger.debug(
-                f"Redis Memory ({self.key_prefix}): Search "
+                f"Redis Memory ({self.index_name}): Search "
                 f"fetched {len(all_messages)} total messages for filtering/querying."
             )
 
             if filters:
                 messages_to_search = self._apply_filters_client_side(all_messages, filters)
                 logger.debug(
-                    f"Redis Memory ({self.key_prefix}): Search - {len(messages_to_search)} messages "
+                    f"Redis Memory ({self.index_name}): Search - {len(messages_to_search)} messages "
                     f"after applying filters: {filters}"
                 )
             else:
@@ -344,7 +342,7 @@ class Redis(MemoryBackend):
                 query_lower = query.lower()
                 results = [msg for msg in messages_to_search if query_lower in msg.content.lower()]
                 logger.debug(
-                    f"Redis Memory ({self.key_prefix}): Search - {len(results)} messages "
+                    f"Redis Memory ({self.index_name}): Search - {len(results)} messages "
                     f"after applying query: '{query}'"
                 )
             else:
@@ -356,7 +354,7 @@ class Redis(MemoryBackend):
                 final_results = results
 
             logger.debug(
-                f"Redis Memory ({self.key_prefix}): Search final results count = {len(final_results)} (limit={limit})"
+                f"Redis Memory ({self.index_name}): Search final results count = {len(final_results)} (limit={limit})"
             )
             return final_results
 
@@ -405,7 +403,7 @@ class Redis(MemoryBackend):
                 keys_to_delete.extend(message_keys)
 
             if not keys_to_delete:
-                logger.info(f"Redis Memory ({self.key_prefix}): Clear called, but memory is already empty.")
+                logger.info(f"Redis Memory ({self.index_name}): Clear called, but memory is already empty.")
                 return
 
             with self._redis_client.pipeline(transaction=False) as pipe:
@@ -416,7 +414,7 @@ class Redis(MemoryBackend):
                 pipe.execute()
 
             logger.info(
-                f"Redis Memory ({self.key_prefix}): Cleared memory (attempted to delete {len(message_keys)}"
+                f"Redis Memory ({self.index_name}): Cleared memory (attempted to delete {len(message_keys)}"
                 f" messages and the index set)."
             )
 

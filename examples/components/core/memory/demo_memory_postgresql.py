@@ -11,12 +11,12 @@ from dynamiq.nodes.llms import OpenAI as OpenAI_LLM
 
 PG_HOST = os.getenv("POSTGRESQL_HOST", "localhost")
 PG_PORT = int(os.getenv("POSTGRESQL_PORT", 5439))
-PG_DB = os.getenv("POSTGRESQL_DATABASE", "chat_memory_db")
-PG_USER = os.getenv("POSTGRESQL_USER", "oleksiibabych")
+PG_DB = os.getenv("POSTGRESQL_DATABASE", "default")
+PG_USER = os.getenv("POSTGRESQL_USER", "default")
 
 OPENAI_MODEL = "gpt-4o-mini"
 
-POSTGRES_TABLE_NAME = "chat_history_pg"
+POSTGRES_TABLE_NAME = "default"
 MEMORY_MESSAGE_LIMIT = 50
 
 

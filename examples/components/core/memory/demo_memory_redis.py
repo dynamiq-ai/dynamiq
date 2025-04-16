@@ -10,7 +10,7 @@ from examples.llm_setup import setup_llm
 REDIS_HOST = "localhost"
 REDIS_PORT = 6380
 REDIS_DB = 0
-REDIS_KEY_PREFIX = "chat_app_sessions"
+REDIS_INDEX_NAME = "default"
 
 
 def setup_agent():
@@ -25,7 +25,7 @@ def setup_agent():
             db=REDIS_DB,
         )
 
-        redis_backend = Redis(connection=redis_connection, key_prefix=REDIS_KEY_PREFIX)
+        redis_backend = Redis(connection=redis_connection, index_name=REDIS_INDEX_NAME)
         print("Redis backend initialized. Connection test performed during init.")
 
     except Exception as e:

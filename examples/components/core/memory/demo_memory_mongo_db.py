@@ -12,13 +12,13 @@ from dynamiq.nodes.llms import OpenAI as OpenAI_LLM
 MONGO_CONN_STR = os.getenv("MONGODB_CONNECTION_STRING", None)
 MONGO_HOST = os.getenv("MONGODB_HOST", "localhost")
 MONGO_PORT = int(os.getenv("MONGODB_PORT", 27017))
-MONGO_DB = os.getenv("MONGODB_DATABASE", "chat_memory_mongo_db")
+MONGO_DB = os.getenv("MONGODB_DATABASE", "default")
 MONGO_USER = os.getenv("MONGODB_USER", None)
 MONGO_PASSWORD = os.getenv("MONGODB_PASSWORD", None)
 
 OPENAI_MODEL = "gpt-4o-mini"
 
-MONGO_COLLECTION_NAME = "chat_history_mongo"
+MONGO_COLLECTION_NAME = "default"
 MEMORY_MESSAGE_LIMIT = 50
 
 
@@ -56,7 +56,7 @@ def setup_agent():
 
         mongo_backend = MongoDBMemoryBackend(
             connection=mongo_connection,
-            collection_name=MONGO_COLLECTION_NAME,
+            index_name=MONGO_COLLECTION_NAME,
             create_indices_if_not_exists=True,
         )
         print(f"MongoDB memory backend initialized for collection '{MONGO_COLLECTION_NAME}'.")

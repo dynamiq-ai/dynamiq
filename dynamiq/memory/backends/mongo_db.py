@@ -36,7 +36,7 @@ class MongoDB(MemoryBackend):
     database_name: str | None = Field(
         default=None, description="MongoDB database name (overrides connection default if set)"
     )
-    collection_name: str = Field(default="dynamiq_memory_messages")
+    index_name: str = Field(default="conversations")
     create_indices_if_not_exists: bool = Field(default=True)
 
     role_field: str = Field(default="role")
@@ -74,14 +74,14 @@ class MongoDB(MemoryBackend):
             if not db_name:
                 raise ValueError("MongoDB database name must be configured either in backend or connection.")
             self._db = self._client[db_name]
-            self._collection = self._db[self.collection_name]
-            logger.debug(f"MongoDB backend connected to db='{db_name}', collection='{self.collection_name}'.")
+            self._collection = self._db[self.index_name]
+            logger.debug(f"MongoDB backend connected to db='{db_name}', collection='{self.index_name}'.")
 
             if self.create_indices_if_not_exists:
                 self._create_indices()
 
         except PyMongoError as e:
-            logger.error(f"Failed to initialize MongoDB connection or collection '{self.collection_name}': {e}")
+            logger.error(f"Failed to initialize MongoDB connection or collection '{self.index_name}': {e}")
             raise MongoDBMemoryError(f"Failed to initialize MongoDB connection or collection: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected error initializing MongoDB backend: {e}")
@@ -108,11 +108,11 @@ class MongoDB(MemoryBackend):
                 sparse=True,
             )
 
-            logger.debug(f"Ensured indices exist for MongoDB collection '{self.collection_name}'.")
+            logger.debug(f"Ensured indices exist for MongoDB collection '{self.index_name}'.")
         except PyMongoError as e:
             logger.warning(
                 f"Could not ensure all indices for MongoDB "
-                f"collection '{self.collection_name}': {e}. Existing indices might be used."
+                f"collection '{self.index_name}': {e}. Existing indices might be used."
             )
         except Exception as e:
             logger.error(f"Unexpected error creating " f"indices for MongoDB: {e}")
@@ -163,7 +163,7 @@ class MongoDB(MemoryBackend):
         try:
             doc = self._message_to_doc(message)
             result = self._collection.insert_one(doc)
-            logger.debug(f"MongoDB Memory ({self.collection_name}): Added message with doc_id {result.inserted_id}")
+            logger.debug(f"MongoDB Memory ({self.index_name}): Added message with doc_id {result.inserted_id}")
         except PyMongoError as e:
             logger.error(f"Error adding message to MongoDB: {e}")
             raise MongoDBMemoryError(f"Error adding message to MongoDB: {e}") from e
@@ -180,7 +180,7 @@ class MongoDB(MemoryBackend):
 
             docs = list(cursor)
             messages = [self._doc_to_message(doc) for doc in docs]
-            logger.debug(f"MongoDB Memory ({self.collection_name}): Retrieved {len(messages)} messages.")
+            logger.debug(f"MongoDB Memory ({self.index_name}): Retrieved {len(messages)} messages.")
             return messages
         except PyMongoError as e:
             logger.error(f"Error retrieving messages from MongoDB: {e}")
@@ -226,7 +226,7 @@ class MongoDB(MemoryBackend):
             messages = [self._doc_to_message(doc) for doc in docs]
 
             logger.debug(
-                f"MongoDB Memory ({self.collection_name}): Found {len(messages)} search results "
+                f"MongoDB Memory ({self.index_name}): Found {len(messages)} search results "
                 f"(Query: {'Yes' if query else 'No'}, Filters: {'Yes' if filters else 'No'}, Limit: {limit})"
             )
 
@@ -237,7 +237,7 @@ class MongoDB(MemoryBackend):
                 logger.error(
                     f"Text search failed: Text index on "
                     f"field '{self.content_field}' is required in"
-                    f" collection '{self.collection_name}'. "
+                    f" collection '{self.index_name}'. "
                     f"Create it via `create_indices_if_not_exists=True` or manually."
                 )
                 raise MongoDBMemoryError(f"Text search requires a text index on '{self.content_field}'.") from e
@@ -255,9 +255,9 @@ class MongoDB(MemoryBackend):
     def clear(self) -> None:
         """Clears the MongoDB collection by deleting all documents."""
         try:
-            logger.warning(f"Clearing all documents from MongoDB collection '{self.collection_name}'.")
+            logger.warning(f"Clearing all documents from MongoDB collection '{self.index_name}'.")
             result = self._collection.delete_many({})
-            logger.info(f"MongoDB Memory ({self.collection_name}): Cleared {result.deleted_count} documents.")
+            logger.info(f"MongoDB Memory ({self.index_name}): Cleared {result.deleted_count} documents.")
         except PyMongoError as e:
             logger.error(f"Error clearing MongoDB collection: {e}")
             raise MongoDBMemoryError(f"Error clearing MongoDB collection: {e}") from e

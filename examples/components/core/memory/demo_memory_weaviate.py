@@ -12,7 +12,7 @@ from dynamiq.nodes.llms import OpenAI as OpenAI_LLM
 OPENAI_MODEL = "gpt-4o-mini"
 OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 
-WEAVIATE_INDEX_NAME = "ChatHistoryWeaviate"
+WEAVIATE_INDEX_NAME = "default"
 MEMORY_MESSAGE_LIMIT = 50
 
 
