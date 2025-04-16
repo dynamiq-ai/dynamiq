@@ -189,6 +189,8 @@ def get_entity_id(entity_name: str, kwargs: dict) -> UUID:
         ValueError: If entity ID is not found or invalid.
     """
     entity_id = kwargs.get(entity_name)
+    if entity_name == "parent_run_id" and not entity_id:
+        return entity_id
     if not entity_id:
         raise ValueError(f"{entity_name} not found")
 
