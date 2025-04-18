@@ -19,14 +19,13 @@ def is_jsonpath(path: str) -> bool:
         return False
 
 
-def mapper(json: dict | list, map: dict, node_id: str) -> dict:
+def mapper(json: dict | list, expression_map: dict) -> dict:
     """
     Map values from a JSON object or list to a new dictionary based on a mapping configuration.
 
     Args:
         json (dict | list): The input JSON object or list to be mapped.
-        map (dict): A dictionary defining the mapping configuration.
-        node_id (str): An identifier for the current node being processed.
+        expression_map (dict): A dictionary defining the mapping configuration.
 
     Returns:
         dict: A new dictionary with mapped values according to the provided configuration.
@@ -35,17 +34,15 @@ def mapper(json: dict | list, map: dict, node_id: str) -> dict:
         TypeError: If the map is not a dictionary or if the json is neither a dictionary nor a list.
         ValueError: If there's an error in JSONPath parsing.
     """
-    if not map:
+    if not expression_map:
         return json
-    if not isinstance(map, dict):
-        raise TypeError(f"Invalid map of node {node_id}: map must be a dictionary")
+    if not isinstance(expression_map, dict):
+        raise TypeError("Invalid `expression_map`: must be a dictionary")
     if not isinstance(json, dict) and not isinstance(json, list):
-        raise TypeError(
-            f"Invalid json of node {node_id}: json must be a dictionary or a list"
-        )
+        raise TypeError("Invalid `json`: must be a dictionary or a list")
 
     new_json = {}
-    for key, path in map.items():
+    for key, path in expression_map.items():
         if not is_jsonpath(path):
             new_json[key] = path
             continue
@@ -58,19 +55,18 @@ def mapper(json: dict | list, map: dict, node_id: str) -> dict:
             else:
                 new_json[key] = [v.value for v in found]
         except Exception as e:
-            raise ValueError(f"Error in jsonpath parsing of node {node_id}: {e}")
+            raise ValueError(f"Error in jsonpath during parsing: {e}")
 
     return new_json
 
 
-def filter(json: dict, filter: str, node_id: str):
+def filter(json: dict, expression_filter: str):
     """
     Filter a JSON object based on a JSONPath expression.
 
     Args:
         json (dict): The input JSON object to be filtered.
-        filter (str): A JSONPath expression used to filter the JSON object.
-        node_id (str): An identifier for the current node being processed.
+        expression_filter (str): A JSONPath expression used to filter the JSON object.
 
     Returns:
         The filtered data, which can be a single value, a list of values, or None if no match is found.
@@ -78,21 +74,19 @@ def filter(json: dict, filter: str, node_id: str):
     Raises:
         ValueError: If the filter is not a valid JSONPath expression or if there's an error in parsing.
     """
-    if not filter:
+    if not expression_filter:
         return json
-    if not is_jsonpath(filter):
-        raise ValueError(f"Invalid filter of node {node_id}: filter must be a jsonpath")
+    if not is_jsonpath(expression_filter):
+        raise ValueError(f"Invalid `expression_filter` {expression_filter}: must be a jsonpath")
 
     filtered_data = None
     try:
-        value = parse(filter).find(json)
+        value = parse(expression_filter).find(json)
         if value:
             filtered_data = [v.value for v in value]
             if len(filtered_data) == 1:
                 filtered_data = filtered_data[0]
-        else:
-            filtered_data = None
     except Exception as e:
-        raise ValueError(f"Error in path parsing of node {node_id}: {e}")
+        raise ValueError(f"Error in path during parsing with `expression_filter` {expression_filter}: {e}")
 
     return filtered_data
