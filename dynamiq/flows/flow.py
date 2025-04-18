@@ -1,11 +1,12 @@
 import asyncio
 from datetime import datetime
+from functools import cached_property
 from graphlib import CycleError, TopologicalSorter
 from io import BytesIO
 from typing import Any
 from uuid import uuid4
 
-from pydantic import Field, field_validator
+from pydantic import Field, computed_field, field_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.executors.base import BaseExecutor
@@ -29,6 +30,7 @@ class Flow(BaseFlow):
         connection_manager (ConnectionManager): Manager for handling connections. Defaults to ConnectionManager().
     """
 
+    name: str = "Flow"
     nodes: list[Node] = []
     executor: type[BaseExecutor] = ThreadExecutor
     max_node_workers: int | None = None
@@ -47,6 +49,11 @@ class Flow(BaseFlow):
 
         self._init_components()
         self.reset_run_state()
+
+    @computed_field
+    @cached_property
+    def type(self) -> str:
+        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     @property
     def to_dict_exclude_params(self):

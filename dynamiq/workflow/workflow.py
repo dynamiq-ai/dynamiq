@@ -1,9 +1,10 @@
 from datetime import datetime
+from functools import cached_property
 from os import PathLike
 from typing import IO, TYPE_CHECKING, Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import BaseFlow, Flow
@@ -21,13 +22,21 @@ class Workflow(BaseModel, Runnable):
     versioning, metadata, callbacks, and configuration.
 
     Attributes:
+        name (str): Name of workflow.
         id (str): Unique identifier for the workflow.
         flow (BaseFlow): The flow associated with the workflow.
         version (str | None): Version of the workflow.
     """
+
+    name: str = "Workflow"
     id: str = Field(default_factory=generate_uuid)
     flow: BaseFlow = Field(default_factory=Flow)
     version: str | None = None
+
+    @computed_field
+    @cached_property
+    def type(self) -> str:
+        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     def __enter__(self):
         return self
