@@ -136,6 +136,7 @@ def run_simple_agent_message_workflow() -> tuple[str, dict[UUID, Run]]:
         llm=llm,
         id="agent",
         verbose=True,
+        input_message=Message(content="User request: {{request}}"),
     )
 
     # Set up tracing and create the workflow
@@ -146,7 +147,7 @@ def run_simple_agent_message_workflow() -> tuple[str, dict[UUID, Run]]:
     try:
         result = wf.run(
             input_data={
-                "input": GENERAL_INPUT_QUESTION,
+                "request": GENERAL_INPUT_QUESTION,
                 "context": "Keep answer short and simple",
             },
             config=RunnableConfig(callbacks=[tracing]),
@@ -181,7 +182,13 @@ def run_reflection_agent_vision_message_workflow() -> tuple[str, dict[UUID, Run]
         verbose=True,
         context_template="You are helpful assistant that answers on question about art."
         "Take into account style of response: {{context}}",
-        input_message=Message(content="User request: {{request}}")
+        input_message=VisionMessage(
+            content=[
+                VisionMessageImageContent(image_url=VisionMessageImageURL(url="{{ url }}")),
+                VisionMessageTextContent(text="{{ request }}"),
+            ],
+            role=MessageRole.USER,
+        ),
     )
 
     # Set up tracing and create the workflow
@@ -193,6 +200,7 @@ def run_reflection_agent_vision_message_workflow() -> tuple[str, dict[UUID, Run]
         result = wf.run(
             input_data={
                 "request": INPUT_QUESTION,
+                "url": IMAGE_URL,
                 "context": "Keep answer short and simple",
             },
             config=RunnableConfig(callbacks=[tracing]),
