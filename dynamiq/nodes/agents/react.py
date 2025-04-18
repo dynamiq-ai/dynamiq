@@ -15,6 +15,8 @@ from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
+from dynamiq.nodes.llms.gemini import Gemini
+
 
 REACT_BLOCK_TOOLS = """
 You have access to a variety of tools,
@@ -120,22 +122,20 @@ IMPORTANT RULES:
 - If you can answer directly, use only Thought followed by Answer
 """  # noqa: E501
 
-
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
-If you can answer on request:
-{{thought: [Why you can provide final answer],
-action: finish
-action_input: [Response for initial request]}}
+Always structure your responses in this JSON format:
 
-If you can't answer on request:
-{{thought: [Why you can not answer on request],
-action: finish
-action_input: [Response for initial request]}}
-
-Structure you responses in JSON format.
 {{thought: [Your reasoning about the next step],
 action: [The tool you choose to use, if any from ONLY [{tools_name}]],
 action_input: [JSON input in correct format you provide to the tool]}}
+
+After each action, you'll receive:
+Observation: [Result from the tool]
+
+If you can answer on initial request:
+{{thought: [Your reasoning for the final answer],
+action: finish
+action_input: [Response for initial request]}}
 
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
@@ -900,7 +900,7 @@ class ReActAgent(Agent):
         for tool in self.tools:
             properties = {}
             input_params = tool.input_schema.model_fields.items()
-            if list(input_params):
+            if list(input_params) and not isinstance(self.llm, Gemini):
                 for name, field in tool.input_schema.model_fields.items():
                     self.generate_property_schema(properties, name, field)
 
