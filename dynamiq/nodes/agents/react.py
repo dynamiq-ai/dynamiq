@@ -151,7 +151,6 @@ For questions that don't require tools:
 action: finish
 action_input: [Your direct response]}}
 
-
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
 - Each tool has a specific input format you must strictly follow
