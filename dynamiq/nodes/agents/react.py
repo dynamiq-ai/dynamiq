@@ -141,10 +141,16 @@ action_input: [JSON input in correct format you provide to the tool]}}
 After each action, you'll receive:
 Observation: [Result from the tool]
 
-If you can answer on initial request:
+When you have enough information to provide a final answer:
 {{thought: [Your reasoning for the final answer],
 action: finish
 action_input: [Response for initial request]}}
+
+For questions that don't require tools:
+{{thought: [Your reasoning for the final answer],
+action: finish
+action_input: [Your direct response]}}
+
 
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
