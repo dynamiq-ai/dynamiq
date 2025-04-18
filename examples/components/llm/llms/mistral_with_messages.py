@@ -17,7 +17,7 @@ prompt_with_assistant_last = Prompt(
     messages=[
         Message(role="system", content="Be friendly"),
         Message(role="user", content="Hello"),
-        Message(role="assistant", content="Can I help you?", prefix=True),
+        Message(role="assistant", content="Can I help you?"),
     ]
 )
 
