@@ -47,7 +47,6 @@ def get_sambanova_workflow(
     ],
 )
 def test_workflow_with_sambanova_llm(mock_llm_response_text, mock_llm_executor, model, expected_model):
-    model = model
     connection = connections.SambaNova(
         id=str(uuid.uuid4()),
         api_key="api_key",
