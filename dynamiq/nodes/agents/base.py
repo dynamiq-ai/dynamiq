@@ -222,8 +222,8 @@ class AgentInputSchema(BaseModel):
     )
     files: list[io.BytesIO | bytes] | None = Field(default=None, description="Parameter to provide files to the agent.")
 
-    user_id: str = Field(default=None, description="Parameter to provide user ID.")
-    session_id: str = Field(default=None, description="Parameter to provide session ID.")
+    user_id: str | None = Field(default=None, description="Parameter to provide user ID.")
+    session_id: str | None = Field(default=None, description="Parameter to provide session ID.")
     metadata: dict | list = Field(default={}, description="Parameter to provide metadata.")
 
     model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
