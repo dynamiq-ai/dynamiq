@@ -1,5 +1,6 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import field
 from typing import Any, Literal
 
 from mcp import ClientSession, StdioServerParameters
@@ -15,7 +16,7 @@ from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
 
 
-class SseServerParameters(BaseModel):
+class SSEServerParameters(BaseModel):
     """
     Parameters for configuring a Server-Sent Events client connection.
     """
@@ -28,7 +29,7 @@ class SseServerParameters(BaseModel):
     )
 
 
-ServerParameters = StdioServerParameters | SseServerParameters
+ServerParameters = StdioServerParameters | SSEServerParameters
 
 
 async def get_client(server_params: ServerParameters):
@@ -43,7 +44,7 @@ async def get_client(server_params: ServerParameters):
     """
     if isinstance(server_params, StdioServerParameters):
         return stdio_client(server_params)
-    elif isinstance(server_params, SseServerParameters):
+    elif isinstance(server_params, SSEServerParameters):
         return sse_client(
             url=server_params.url,
             headers=server_params.headers,
@@ -184,13 +185,13 @@ class MCPAdapterTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Mcp Adapter Tool"
+    name: str = "MCP Adapter Tool"
     description: str = "The tool used to initialize available MCP tools based on provided server parameters."
 
-    mcp_tools: list = []
+    mcp_tools: list[MCPTool] = field(default_factory=list)
     server_params: ServerParameters
 
-    async def initialise_tools(self):
+    async def initialize_tools(self):
         """
         Initializes the MCP tool list from the client session.
 
@@ -234,7 +235,7 @@ class MCPAdapterTool(Node):
             list[MCPTool]: A list of initialized MCPTool instances.
         """
         if not self.mcp_tools:
-            await self.initialise_tools()
+            await self.initialize_tools()
         return self.mcp_tools
 
     def execute(self, **kwargs):

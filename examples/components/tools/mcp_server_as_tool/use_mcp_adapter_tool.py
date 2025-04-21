@@ -2,7 +2,7 @@ import os
 
 from dynamiq import Workflow
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.tools.mcp_adapter import MCPAdapterTool, SseServerParameters, StdioServerParameters
+from dynamiq.nodes.tools.mcp_adapter import MCPAdapterTool, SSEServerParameters, StdioServerParameters
 from examples.llm_setup import setup_llm
 
 llm = setup_llm()
@@ -54,7 +54,7 @@ def use_sse_connection():
     Returns:
         result (str): The result of executing the workflow.
     """
-    server_params_sse = SseServerParameters(url="http://localhost:8000/sse")
+    server_params_sse = SSEServerParameters(url="http://localhost:8000/sse")
 
     mcp_tool_adapter = MCPAdapterTool(server_params=server_params_sse)
 

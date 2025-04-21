@@ -311,9 +311,7 @@ class Agent(Node):
         self._init_prompt_blocks()
 
         self.tools = [
-            t
-            for tool in self.tools
-            for t in (tool.get_mcp_tools() if type(tool).__name__ == MCPAdapterTool.__name__ else [tool])
+            t for tool in self.tools for t in (tool.get_mcp_tools() if isinstance(tool, MCPAdapterTool) else [tool])
         ]
 
     @model_validator(mode="after")

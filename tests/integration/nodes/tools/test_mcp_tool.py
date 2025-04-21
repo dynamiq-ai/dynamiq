@@ -6,7 +6,7 @@ import pytest
 from dynamiq import connections
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.mcp_adapter import MCPAdapterTool, MCPTool, SseServerParameters
+from dynamiq.nodes.tools.mcp_adapter import MCPAdapterTool, MCPTool, SSEServerParameters
 
 
 def assert_tool_matches(tool, expected, server_params):
@@ -24,7 +24,7 @@ def model():
 
 @pytest.fixture
 def sse_server_params():
-    return SseServerParameters(url="mock_url.py")
+    return SSEServerParameters(url="mock_url.py")
 
 
 @pytest.fixture
@@ -64,7 +64,7 @@ def mcp_adapter_tool(sse_server_params, mock_mcp_tools):
 
 @pytest.mark.asyncio
 async def test_get_mcp_tools(mcp_adapter_tool, sse_server_params):
-    with patch.object(MCPAdapterTool, "initialise_tools", new=AsyncMock()) as mock_init:
+    with patch.object(MCPAdapterTool, "initialize_tools", new=AsyncMock()) as mock_init:
         tools = mcp_adapter_tool.get_mcp_tools()
         mock_init.assert_not_awaited()
 

@@ -11,7 +11,7 @@ def add(a: int, b: int) -> int:
 
 
 @mcp.tool()
-def multiply(a: float, b: float) -> int:
+def multiply(a: float, b: float) -> float:
     """Multiply two numbers"""
     return a * b
 
