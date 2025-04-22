@@ -51,7 +51,7 @@ def test_node_streaming(
         ).to_dict()
     }
 
-    expected_final_output_source = StreamingEntitySource(name="Workflow", group=None, type="dynamiq.workflow.Workflow")
+    expected_final_output_source = StreamingEntitySource(name="Workflow", group=None, type="dynamiq.workflows.Workflow")
 
     assert response == RunnableResult(
         status=RunnableStatus.SUCCESS, input=input_data, output=expected_output
