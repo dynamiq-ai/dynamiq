@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
+from dynamiq.connections import Milvus
 from dynamiq.nodes.writers.base import WriterInputSchema
 from dynamiq.nodes.writers.milvus import MilvusDocumentWriter
 from dynamiq.runnables import RunnableConfig
@@ -41,6 +42,35 @@ def test_vector_store_params(milvus_document_writer):
         params = milvus_document_writer.vector_store_params
         for store_param in expected_store_params:
             assert store_param in params
+
+
+@pytest.mark.parametrize("dimension", [384, 768])
+def test_writer_passes_dimension_to_params(dimension):
+    mock_connection = MagicMock(spec=Milvus)
+    mock_client = MagicMock()
+    mock_connection.connect.return_value = mock_client
+
+    writer = MilvusDocumentWriter(connection=mock_connection, dimension=dimension, create_if_not_exist=True)
+
+    with patch.object(writer, "client", new_callable=MagicMock):
+        params = writer.vector_store_params
+        assert params["dimension"] == dimension
+        assert params["create_if_not_exist"] is True
+
+
+@pytest.mark.parametrize("dimension", [512, 1024])
+def test_writer_initializes_store_with_dimension(dimension):
+    mock_connection = MagicMock(spec=Milvus)
+    mock_client = MagicMock()
+    mock_connection.connect.return_value = mock_client
+
+    with patch("dynamiq.storages.vector.milvus.milvus.MilvusVectorStore") as mock_vector_store_class:
+        writer = MilvusDocumentWriter(connection=mock_connection, dimension=dimension, create_if_not_exist=True)
+
+        _ = writer.vector_store
+
+        mock_vector_store_class.assert_called_once()
+        assert mock_vector_store_class.call_args.kwargs["dimension"] == dimension
 
 
 def test_execute(milvus_document_writer, mock_milvus_vector_store):
