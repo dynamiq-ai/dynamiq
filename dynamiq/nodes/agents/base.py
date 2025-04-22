@@ -248,10 +248,10 @@ class AgentInputSchema(BaseModel):
     @model_validator(mode="after")
     def validate_input_fields(self, context):
         ctx_msg = context.context.get("role") or ""
-        messages = [
-            context.context.get("input_message"),
-            Message(role=MessageRole.USER, content=ctx_msg),
-        ]
+        messages = [Message(role=MessageRole.USER, content=ctx_msg)]
+        if message := context.context.get("input_message"):
+            messages.append(message)
+
         required_parameters = Prompt(messages=messages).get_required_parameters()
 
         parameters = self.model_dump()
@@ -294,7 +294,7 @@ class Agent(Node):
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
 
-    input_message: Message | VisionMessage = Message(role=MessageRole.USER, content="{{input}}")
+    input_message: Message | VisionMessage | None = None
     role: str | None = ""
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -443,9 +443,7 @@ class Agent(Node):
 
         custom_metadata = self._prepare_metadata(dict(input_data))
 
-        input_message = create_message_from_input(dict(input_data))
-
-        input_message = input_message or self.input_message
+        input_message = input_message or self.input_message or create_message_from_input(dict(input_data))
         input_message = input_message.format_message(**dict(input_data))
 
         use_memory = self.memory and (dict(input_data).get("user_id") or dict(input_data).get("session_id"))
