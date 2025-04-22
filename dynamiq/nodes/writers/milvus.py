@@ -1,13 +1,15 @@
+from pydantic import model_validator
+
 from dynamiq.connections import Milvus
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.writers.base import Writer, WriterInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import MilvusVectorStore
-from dynamiq.storages.vector.milvus.milvus import MilvusVectorStoreParams
+from dynamiq.storages.vector.milvus.milvus import MilvusWriterVectorStoreParams
 from dynamiq.utils.logger import logger
 
 
-class MilvusDocumentWriter(Writer, MilvusVectorStoreParams):
+class MilvusDocumentWriter(Writer, MilvusWriterVectorStoreParams):
     """
     Document Writer Node using Milvus Vector Store.
 
@@ -16,8 +18,8 @@ class MilvusDocumentWriter(Writer, MilvusVectorStoreParams):
     Attributes:
         group (Literal[NodeGroup.WRITERS]): The group the node belongs to.
         name (str): The name of the node.
-        connection (Chroma | None): The connection to the Chroma Vector Store.
-        vector_store (ChromaVectorStore | None): The Chroma Vector Store instance.
+        connection (Milvus | None): The connection to the Milvus Vector Store.
+        vector_store (MilvusVectorStore | None): The Milvus Vector Store instance.
     """
 
     name: str = "MilvusDocumentWriter"
@@ -37,13 +39,26 @@ class MilvusDocumentWriter(Writer, MilvusVectorStoreParams):
             kwargs["connection"] = Milvus()
         super().__init__(**kwargs)
 
+    @model_validator(mode="after")
+    def check_required_params(self) -> "MilvusDocumentWriter":
+        """
+        Validate required parameters
+
+        Returns:
+            self: The updated instance.
+        """
+        if self.vector_store is None and self.create_if_not_exist and self.dimension <= 0:
+            raise ValueError("'dimension' must be a positive integer when creating a new collection")
+
+        return self
+
     @property
     def vector_store_cls(self):
         return MilvusVectorStore
 
     @property
     def vector_store_params(self):
-        return self.model_dump(include=set(MilvusVectorStoreParams.model_fields)) | {
+        return self.model_dump(include=set(MilvusWriterVectorStoreParams.model_fields)) | {
             "connection": self.connection,
             "client": self.client,
         }
