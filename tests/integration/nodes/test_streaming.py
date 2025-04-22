@@ -5,7 +5,7 @@ import pytest
 from dynamiq import Workflow, flows
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEntity
+from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEntitySource
 
 
 @pytest.fixture()
@@ -51,7 +51,7 @@ def test_node_streaming(
         ).to_dict()
     }
 
-    expected_final_output_source = StreamingEntity(name="Workflow", group=None, type="dynamiq.workflow.Workflow")
+    expected_final_output_source = StreamingEntitySource(name="Workflow", group=None, type="dynamiq.workflow.Workflow")
 
     assert response == RunnableResult(
         status=RunnableStatus.SUCCESS, input=input_data, output=expected_output
@@ -64,5 +64,5 @@ def test_node_streaming(
     node_output = events_output[node_with_streaming.id]
     assert "".join([content for _, content, _ in node_output]) == mock_llm_response_text
     assert all(event == streaming_custom_event for event, _, _ in node_output)
-    expected_streaming_node_source = StreamingEntity(name="OpenAI", group="llms", type="dynamiq.nodes.llms.OpenAI")
+    expected_streaming_node_source = StreamingEntitySource(name="OpenAI", group="llms", type="dynamiq.nodes.llms.OpenAI")
     assert all(source == expected_streaming_node_source for _, _, source in node_output)

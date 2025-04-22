@@ -18,7 +18,7 @@ class StreamingMode(str, Enum):
 STREAMING_EVENT = "streaming"
 
 
-class StreamingEntity(BaseModel):
+class StreamingEntitySource(BaseModel):
     name: str | None = None
     group: str | None = None
     type: str | None = None
@@ -33,7 +33,7 @@ class StreamingEventMessage(BaseModel):
         entity_id (str): Entity ID.
         data (Any): Data associated with the event.
         event (str | None): Event name. Defaults to "streaming".
-        source (StreamingEntity | None): Entity details.
+        source (StreamingEntitySource | None): Entity details.
     """
 
     run_id: str | None = None
@@ -41,7 +41,7 @@ class StreamingEventMessage(BaseModel):
     entity_id: str | None = None
     data: Any
     event: str | None = None
-    source: StreamingEntity | None = None
+    source: StreamingEntitySource | None = None
 
     @field_validator("event")
     @classmethod

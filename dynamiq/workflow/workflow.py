@@ -36,7 +36,7 @@ class Workflow(BaseModel, Runnable):
     @computed_field
     @cached_property
     def type(self) -> str:
-        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
+        return "dynamiq.workflows.Workflow"
 
     def __enter__(self):
         return self
