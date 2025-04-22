@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Any, Optional
 
+from pydantic.types import PositiveInt
 from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker
 
 from dynamiq.connections import Milvus
@@ -18,7 +19,7 @@ class MilvusVectorStoreParams(BaseVectorStoreParams):
 
 
 class MilvusWriterVectorStoreParams(MilvusVectorStoreParams, BaseWriterVectorStoreParams):
-    dimension: int = 1536
+    dimension: PositiveInt = 1536
 
 
 class MilvusVectorStore:

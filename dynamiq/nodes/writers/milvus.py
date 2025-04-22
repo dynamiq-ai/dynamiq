@@ -1,5 +1,3 @@
-from pydantic import model_validator
-
 from dynamiq.connections import Milvus
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.writers.base import Writer, WriterInputSchema
@@ -38,19 +36,6 @@ class MilvusDocumentWriter(Writer, MilvusWriterVectorStoreParams):
         if kwargs.get("vector_store") is None and kwargs.get("connection") is None:
             kwargs["connection"] = Milvus()
         super().__init__(**kwargs)
-
-    @model_validator(mode="after")
-    def check_required_params(self) -> "MilvusDocumentWriter":
-        """
-        Validate required parameters
-
-        Returns:
-            self: The updated instance.
-        """
-        if self.vector_store is None and self.create_if_not_exist and self.dimension <= 0:
-            raise ValueError("'dimension' must be a positive integer when creating a new collection")
-
-        return self
 
     @property
     def vector_store_cls(self):
