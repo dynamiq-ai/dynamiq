@@ -1,9 +1,10 @@
 from typing import TYPE_CHECKING, Any, Optional
 
+from pydantic.types import PositiveInt
 from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker
 
 from dynamiq.connections import Milvus
-from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.milvus.filter import Filter
 from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
@@ -13,8 +14,12 @@ if TYPE_CHECKING:
     from pymilvus import MilvusClient
 
 
-class MilvusVectorStoreParams(BaseWriterVectorStoreParams):
+class MilvusVectorStoreParams(BaseVectorStoreParams):
     embedding_key: str = "embedding"
+
+
+class MilvusWriterVectorStoreParams(MilvusVectorStoreParams, BaseWriterVectorStoreParams):
+    dimension: PositiveInt = 1536
 
 
 class MilvusVectorStore:
