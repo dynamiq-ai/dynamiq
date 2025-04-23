@@ -105,6 +105,13 @@ class BaseLLM(ConnectionNode):
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
     input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
+    _schema_fields: ClassVar[list[str]] = ["model", "temperature", "max_tokens", "prompt"]
+
+    @classmethod
+    def _generate_schema(cls, models: list[str], **kwargs):
+        schema = cls._generate_schema_base(**kwargs)
+        schema["properties"]["model"]["enum"] = models
+        return schema
 
     @field_validator("model")
     @classmethod

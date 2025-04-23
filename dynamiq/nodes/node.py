@@ -10,7 +10,7 @@ from typing import Any, Callable, ClassVar, Self, Union
 from uuid import uuid4
 
 from jinja2 import Template
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, create_model, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler
@@ -40,6 +40,7 @@ from dynamiq.utils.duration import format_duration
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import clear_annotation
 
 
 def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
@@ -235,6 +236,7 @@ class Node(BaseModel, Runnable, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[BaseModel] | None] = None
     callbacks: list[NodeCallbackHandler] = []
+    _schema_fields: ClassVar[list[str]] = []
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -242,6 +244,33 @@ class Node(BaseModel, Runnable, ABC):
             self.init_components()
 
         self._output_references = NodeOutputReferences(node=self)
+
+    @classmethod
+    def _generate_schema_base(cls, fields=[], **kwargs):
+        fields_to_include = {}
+        generated_schemas = {}
+        for name in fields or cls._schema_fields:
+            field = cls.__fields__[name]
+            annotation = clear_annotation(field.annotation)
+            parameter_name = name
+            if field.alias:
+                parameter_name = field.alias
+            if hasattr(annotation, "_generate_schema"):
+                generated_schemas[name] = annotation._generate_schema()
+            else:
+                fields_to_include[parameter_name] = (annotation, ...)
+
+        model = create_model(cls.__name__, **fields_to_include)
+        schema = model.schema()
+        schema["additionalProperties"] = False
+        for param, param_schema in generated_schemas.items():
+            schema["properties"][param] = param_schema
+
+        return schema
+
+    @classmethod
+    def _generate_schema(cls, **kwargs):
+        return cls._generate_schema_base(kwargs)
 
     @computed_field
     @cached_property

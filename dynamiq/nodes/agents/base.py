@@ -13,6 +13,7 @@ from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_input, process_tool_output_for_agent
+from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -301,6 +302,24 @@ class Agent(Node):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
+    _schema_fields: ClassVar[list[str]] = ["role"]
+
+    @classmethod
+    def _generate_schema(cls, llms: list[(BaseLLM, list[str])] = [], **kwargs):
+        schema = cls._generate_schema_base(**kwargs)
+
+        llm_schemas = []
+        for llm, models in llms:
+            llm_schema = llm._generate_schema(models=models, fields=["model"])
+            llm_schema["properties"]["type"] = {"type": "string", "enum": [llm.type]}
+            llm_schemas.append(llm_schema)
+
+        schema["properties"]["llm"] = {
+            "anyOf": llm_schemas,
+            "additionalProperties": False,
+        }
+
+        return schema
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
