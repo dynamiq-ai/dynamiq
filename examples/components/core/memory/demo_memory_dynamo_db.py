@@ -15,7 +15,7 @@ def setup_agent():
     try:
         aws_connection = AWS()
 
-        dynamod_db = DynamoDB(
+        dynamo_db = DynamoDB(
             connection=aws_connection,
             index_name="default",
             create_table_if_not_exists=True,
@@ -27,7 +27,7 @@ def setup_agent():
         print("Please ensure DynamoDB is running and accessible with correct credentials.", file=sys.stderr)
         raise
 
-    memory = Memory(backend=dynamod_db, message_limit=50)
+    memory = Memory(backend=dynamo_db, message_limit=50)
 
     AGENT_ROLE = "Helpful assistant focusing on the current conversation."
     agent = SimpleAgent(

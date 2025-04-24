@@ -193,7 +193,7 @@ class DynamoDB(MemoryBackend):
             message_id = message.metadata.get(self.partition_key_name, str(uuid.uuid4()))
             timestamp_input = message.metadata.get(self.sort_key_name, time.time())
             timestamp_decimal = self._serialize_timestamp(timestamp_input)
-            metadata_to_store = message.metadata or {}
+            metadata_to_store = message.metadata.copy() if message.metadata else {}
             metadata_to_store[self.sort_key_name] = timestamp_decimal
             metadata_to_store[self.partition_key_name] = message_id
             processed_metadata = _convert_floats_to_decimals(metadata_to_store)

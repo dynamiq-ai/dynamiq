@@ -254,9 +254,8 @@ class AWS(BaseConnection):
         return params
 
     def create_boto3_session(self):
-        import boto3
-
         """Create and return a boto3.Session with properly formatted parameters"""
+        import boto3
         params = {}
         if self.profile:
             params["profile_name"] = self.profile
