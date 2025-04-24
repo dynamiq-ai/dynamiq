@@ -763,7 +763,7 @@ class ReActAgent(Agent):
                 )
                 self._prompt.messages.append(
                     Message(
-                        role=MessageRole.SYSTEM,
+                        role=MessageRole.ASSISTANT,
                         content=f"Correction Instruction: The previous response could not be parsed due to "
                         f"the following error: '{type(e).__name__}: {e}'. "
                         f"Please regenerate the response strictly following the "
