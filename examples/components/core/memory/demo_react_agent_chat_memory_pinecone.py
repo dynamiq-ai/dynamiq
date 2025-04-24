@@ -21,7 +21,7 @@ def setup_agent():
     embedder = OpenAIDocumentEmbedder(connection=openai_connection)
 
     backend = Pinecone(
-        index_name="oleks",
+        index_name="default",
         connection=pinecone_connection,
         embedder=embedder,
         index_type=PineconeIndexType.SERVERLESS,

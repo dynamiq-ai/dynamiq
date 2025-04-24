@@ -11,7 +11,7 @@ openai_connection = OpenAIConnection()
 embedder = OpenAIDocumentEmbedder(connection=openai_connection)
 
 backend = Pinecone(
-    index_name="test-conv",
+    index_name="default",
     connection=pinecone_connection,
     embedder=embedder,
     index_type=PineconeIndexType.SERVERLESS,
