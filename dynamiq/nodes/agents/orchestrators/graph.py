@@ -38,6 +38,7 @@ class GraphOrchestrator(Orchestrator):
         initial_state (str): State to start from.
         objective (Optional[str]): The main objective of the orchestration.
         max_loops (Optional[int]): Maximum number of transition between states.
+        summarize_execution (Optional[bool]): Determines whether to call Manager to generate final output.
     """
 
     name: str | None = "GraphOrchestrator"
@@ -46,6 +47,7 @@ class GraphOrchestrator(Orchestrator):
     context: dict[str, Any] = {}
     states: list[GraphState] = []
     max_loops: int = 15
+    summarize_execution: bool = True
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
@@ -342,15 +344,20 @@ class GraphOrchestrator(Orchestrator):
                 logger.info(f"GraphOrchestrator {self.id}: Next state: {state.id}")
 
                 if state.id == END:
-                    final_output = self.get_final_result(
-                        {
-                            "input_task": input_task,
-                            "chat_history": self._chat_history,
-                        },
-                        config=config,
-                        **kwargs,
+                    final_output = (
+                        self.get_final_result(
+                            {
+                                "input_task": input_task,
+                                "chat_history": self._chat_history,
+                            },
+                            config=config,
+                            **kwargs,
+                        )
+                        if self.summarize_execution
+                        else ""
                     )
-                    return {"content": final_output, "context": self.context}
+
+                    return {"content": final_output, "context": self.context | {"history": self._chat_history}}
 
                 elif state.id != START:
 
