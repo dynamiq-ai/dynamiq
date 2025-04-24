@@ -268,6 +268,295 @@ class XMLParser:
                     return content
         return None
 
+    @staticmethod
+    def parse_multiple_tool_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
+        """
+        Parse XML with multiple tool calls within an <actions> block.
+
+        Args:
+            text (str): XML text containing thought and tool calls
+
+        Returns:
+            tuple: (thought_text, list_of_tool_calls) where each tool call is a dict with:
+                - 'tool_name': The name of the tool
+                - 'tool_input': The parsed JSON input for the tool
+
+        Raises:
+            XMLParsingError: If XML parsing fails
+            TagNotFoundError: If required tags are missing
+            JSONParsingError: If tool_input JSON parsing fails
+        """
+        try:
+            parsed_data = XMLParser.parse(text, required_tags=["thought", "actions"], optional_tags=["o", "output"])
+        except TagNotFoundError:
+            try:
+                parsed_data = XMLParser.parse(text, required_tags=["thought", "actions"], optional_tags=["output"])
+            except Exception as e:
+                raise XMLParsingError(f"Failed to extract thought and actions: {e}")
+
+        thought = parsed_data.get("thought", "").strip()
+        actions_xml = parsed_data.get("actions", "").strip()
+
+        if not actions_xml:
+            raise XMLParsingError("Actions block is empty")
+
+        try:
+            wrapped_actions = f"<root>{actions_xml}</root>"
+            root = XMLParser._parse_with_lxml(wrapped_actions)
+
+            if root is None:
+                raise XMLParsingError("Failed to parse actions XML")
+
+            tool_calls = []
+            for tool_call_elem in root.xpath(".//tool_call"):
+                tool_name_elem = tool_call_elem.find(".//tool_name")
+                tool_input_elem = tool_call_elem.find(".//tool_input")
+
+                if tool_name_elem is None or tool_input_elem is None:
+                    logger.warning("XMLParser: Missing tool_name or tool_input in tool_call")
+                    continue
+
+                tool_name = "".join(tool_name_elem.itertext()).strip()
+                tool_input_raw = "".join(tool_input_elem.itertext()).strip()
+
+                if not tool_name:
+                    logger.warning("XMLParser: Empty tool_name in tool_call")
+                    continue
+
+                try:
+                    tool_input_raw = re.sub(r"^```(?:json)?\s*|```$", "", tool_input_raw.strip())
+                    tool_input = json.loads(tool_input_raw)
+                except json.JSONDecodeError as e:
+                    error_message = f"Failed to parse JSON in tool_input for {tool_name}: {e}"
+                    raise JSONParsingError(error_message)
+
+                tool_calls.append({"tool_name": tool_name, "tool_input": tool_input})
+
+            if not tool_calls:
+                raise TagNotFoundError("No valid tool_call elements found in actions")
+
+            return thought, tool_calls
+
+        except Exception as e:
+            if isinstance(e, (XMLParsingError, TagNotFoundError, JSONParsingError)):
+                raise
+            raise XMLParsingError(f"Error parsing multiple tool calls: {e}")
+
+        tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
+        tool_call_matches = re.findall(tool_call_pattern, actions_xml, re.DOTALL)
+
+        if not tool_call_matches:
+            raise XMLParsingError("No tool_call elements found in actions with regex fallback")
+
+        tool_calls = []
+        for tool_call in tool_call_matches:
+            tool_name_match = re.search(r"<tool_name>\s*(.*?)\s*</tool_name>", tool_call, re.DOTALL)
+            tool_input_match = re.search(r"<tool_input>\s*(.*?)\s*</tool_input>", tool_call, re.DOTALL)
+
+            if not tool_name_match or not tool_input_match:
+                continue
+
+            tool_name = tool_name_match.group(1).strip()
+            tool_input_raw = tool_input_match.group(1).strip()
+
+            if not tool_name:
+                continue
+
+            try:
+                tool_input_raw = re.sub(r"^```(?:json)?\s*|```$", "", tool_input_raw.strip())
+                tool_input = json.loads(tool_input_raw)
+            except json.JSONDecodeError as e:
+                error_message = f"Failed to parse JSON in tool_input for {tool_name}: {e}"
+                raise JSONParsingError(error_message)
+
+            tool_calls.append({"tool_name": tool_name, "tool_input": tool_input})
+
+        if not tool_calls:
+            raise TagNotFoundError("No valid tool_call elements found in actions with regex")
+
+        return thought, tool_calls
+
+    @staticmethod
+    def parse_react_xml(text: str) -> dict[str, Any]:
+        """
+        Parse XML content detecting all three formats:
+        - Final answer with thought and answer
+        - Single tool with thought, action, and action_input
+        - Multiple tools with thought and actions containing tool_calls
+        """
+        try:
+            parsed_data = XMLParser.parse(text, required_tags=["thought", "answer"], optional_tags=["o", "output"])
+            return {
+                "format_type": "final_answer",
+                "thought": parsed_data.get("thought"),
+                "answer": parsed_data.get("answer"),
+            }
+        except TagNotFoundError:
+            pass
+
+        if "<actions>" in text:
+            try:
+                parsed_data = XMLParser.parse(text, required_tags=["thought", "actions"], optional_tags=["o", "output"])
+
+                actions_content = parsed_data.get("actions", "")
+                tool_calls = []
+
+                tool_call_pattern = r"<tool_call>(.*?)</tool_call>"
+                tool_call_matches = re.findall(tool_call_pattern, actions_content, re.DOTALL)
+
+                for tool_call in tool_call_matches:
+                    tool_name_match = re.search(r"<tool_name>(.*?)</tool_name>", tool_call, re.DOTALL)
+                    tool_input_match = re.search(r"<tool_input>(.*?)</tool_input>", tool_call, re.DOTALL)
+
+                    if tool_name_match and tool_input_match:
+                        tool_name = tool_name_match.group(1).strip()
+                        tool_input_raw = tool_input_match.group(1).strip()
+
+                        try:
+                            tool_input = json.loads(tool_input_raw)
+                        except json.JSONDecodeError:
+                            continue
+
+                        tool_calls.append({"tool_name": tool_name, "tool_input": tool_input})
+
+                return {
+                    "format_type": "multiple_tools",
+                    "thought": parsed_data.get("thought"),
+                    "tools": tool_calls,
+                }
+            except Exception:
+                raise
+
+        try:
+            parsed_data = XMLParser.parse(
+                text,
+                required_tags=["thought", "action", "action_input"],
+                optional_tags=["o", "output"],
+                json_fields=["action_input"],
+            )
+            return {
+                "format_type": "single_tool",
+                "thought": parsed_data.get("thought"),
+                "action": parsed_data.get("action"),
+                "action_input": parsed_data.get("action_input"),
+            }
+        except Exception as e:
+            raise XMLParsingError(f"Failed to parse as any valid format: {e}")
+
+    @staticmethod
+    def parse_unified_xml_format(text: str) -> dict[str, Any]:
+        """
+        Parse XML content using a unified structure for both tool calls and final answers.
+
+        Args:
+            text (str): The XML content to parse
+
+        Returns:
+            dict: A dictionary containing parsed data with the following structure:
+                For tool calls:
+                {
+                    "is_final": False,
+                    "thought": "extracted thought text",
+                    "tools": [
+                        {"name": "tool name", "input": parsed_json_input},
+                        {"name": "tool name", "input": parsed_json_input},
+                        ...
+                    ]
+                }
+
+                For final answer:
+                {
+                    "is_final": True,
+                    "thought": "extracted thought text",
+                    "answer": "final answer text"
+                }
+
+        Raises:
+            XMLParsingError: If the XML cannot be parsed
+            TagNotFoundError: If required tags are missing
+        """
+        try:
+            cleaned_text = XMLParser._clean_content(text)
+            if not cleaned_text:
+                raise XMLParsingError("Empty or invalid XML content")
+
+            try:
+                parsed_data = XMLParser.parse(cleaned_text, required_tags=["thought", "answer"], optional_tags=["o"])
+                return {"is_final": True, "thought": parsed_data.get("thought"), "answer": parsed_data.get("answer")}
+            except TagNotFoundError:
+                pass
+
+            root = XMLParser._parse_with_lxml(cleaned_text)
+            if root is None:
+
+                wrapped_text = f"<root>{cleaned_text}</root>"
+                root = XMLParser._parse_with_lxml(wrapped_text)
+
+            if root is None:
+                raise XMLParsingError("Failed to parse XML content with lxml")
+
+            thought_elems = root.xpath(".//thought")
+            if not thought_elems:
+                raise TagNotFoundError("Required tag <thought> not found")
+
+            thought = "".join(thought_elems[0].itertext()).strip()
+
+            tool_calls_elem = None
+            for tag_name in ["tool_calls", "tools"]:
+                elems = root.xpath(f".//{tag_name}")
+                if elems:
+                    tool_calls_elem = elems[0]
+                    break
+
+            if tool_calls_elem is None:
+                raise TagNotFoundError("Required tag <tool_calls> or <tools> not found")
+
+            tools = []
+            for tool_elem in tool_calls_elem.xpath(".//tool"):
+
+                name_elem = None
+                for name_tag in ["n", "name", "tool_name"]:
+                    name_elems = tool_elem.xpath(f".//{name_tag}")
+                    if name_elems:
+                        name_elem = name_elems[0]
+                        break
+
+                if name_elem is None:
+                    continue
+
+                input_elem = None
+                for input_tag in ["input", "tool_input"]:
+                    input_elems = tool_elem.xpath(f".//{input_tag}")
+                    if input_elems:
+                        input_elem = input_elems[0]
+                        break
+
+                if input_elem is None:
+                    continue
+
+                tool_name = "".join(name_elem.itertext()).strip()
+                input_json_str = "".join(input_elem.itertext()).strip()
+
+                try:
+
+                    input_json_str = re.sub(r"^```(?:json)?\s*|```$", "", input_json_str.strip())
+                    tool_input = json.loads(input_json_str)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse JSON for tool {tool_name}: {e}")
+                    continue
+
+                tools.append({"name": tool_name, "input": tool_input})
+
+            if not tools:
+                raise TagNotFoundError("No valid tool elements found with both name and input tags")
+
+            return {"is_final": False, "thought": thought, "tools": tools}
+
+        except (XMLParsingError, TagNotFoundError):
+            raise
+        except Exception as e:
+            raise XMLParsingError(f"Error parsing XML: {str(e)}")
+
 
 def create_message_from_input(input_data: dict) -> Message | VisionMessage:
     """

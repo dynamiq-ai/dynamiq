@@ -56,21 +56,25 @@ IMPORTANT RULES:
 - Do not mention tools or actions since you don't have access to any
 """
 
-REACT_BLOCK_XML_INSTRUCTIONS = """Always use this exact XML format in your responses:
+REACT_BLOCK_XML_INSTRUCTIONS = """Always use one of these exact XML formats in your responses:
+
+**Format for Tool Usage (Single or Multiple):**
 <output>
     <thought>
         [Your detailed reasoning about what to do next]
     </thought>
-    <action>
-        [Tool name from ONLY [{tools_name}]]
-    </action>
-    <action_input>
-        [JSON input for the tool]
-    </action_input>
+    <tool_calls>
+        <tool>
+            <name>[Tool name from ONLY [{tools_name}]]</name>
+            <input>[JSON input for the tool]</input>
+        </tool>
+        <!-- Add more tool elements for multiple tools -->
+        <tool>
+            <name>[Tool name from ONLY [{tools_name}]]</name>
+            <input>[JSON input for tool]</input>
+        </tool>
+    </tool_calls>
 </output>
-
-After each action, you'll receive:
-Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
 <output>
@@ -92,14 +96,16 @@ For questions that don't require tools:
     </answer>
 </output>
 
-IMPORTANT RULES:
-- ALWAYS include <thought> tags with detailed reasoning
-- For tool use, include action and action_input tags
-- For direct answers, only include thought and answer tags
-- Ensure action_input contains valid JSON with double quotes
+After each tool usage, you'll receive:
+Observation: [Result(s) from the tool(s)]
+
+IMPORTANT GUIDELINES:
+- Use multiple tools in parallel when beneficial for research
+- Include detailed reasoning in the <thought> tags
+- Always provide properly formatted JSON within <input> tags
+- For a single tool, still use the <tool_calls> structure with just one <tool> element
 - Properly close all XML tags
-- Do not use markdown formatting inside XML
-"""  # noqa: E501
+"""
 
 
 REACT_BLOCK_INSTRUCTIONS = """Always follow this exact format in your responses:
@@ -477,6 +483,8 @@ class ReActAgent(Agent):
         self.llm.stop = stop_sequences
 
         for loop_num in range(1, self.max_loops + 1):
+            for msg in self._prompt.messages:
+                print(msg.content)
             try:
                 llm_result = self._run_llm(
                     self._prompt.messages,
@@ -485,6 +493,7 @@ class ReActAgent(Agent):
                     inference_mode=self.inference_mode,
                     **kwargs,
                 )
+                print(llm_result)
                 action, action_input = None, None
                 llm_generated_output = ""
                 llm_reasoning = (
@@ -631,53 +640,71 @@ class ReActAgent(Agent):
 
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
-
                         try:
-                            parsed_data = XMLParser.parse(
-                                llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
-                            )
-                            thought = parsed_data.get("thought")
-                            final_answer = parsed_data.get("answer")
-                            self.log_final_output(thought, final_answer, loop_num)
-                            self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled:
-                                if self.streaming.mode == StreamingMode.ALL:
+                            parsed_result = XMLParser.parse_unified_xml_format(llm_generated_output)
+
+                            thought = parsed_result.get("thought", "")
+
+                            if parsed_result.get("is_final", False):
+                                final_answer = parsed_result.get("answer", "")
+                                self.log_final_output(thought, final_answer, loop_num)
+                                self.tracing_final(loop_num, final_answer, config, kwargs)
+
+                                if self.streaming.enabled:
+                                    if self.streaming.mode == StreamingMode.ALL:
+                                        self.stream_content(
+                                            content={"thought": thought, "loop_num": loop_num},
+                                            source=self.name,
+                                            step="reasoning",
+                                            config=config,
+                                            **kwargs,
+                                        )
                                     self.stream_content(
-                                        content={"thought": thought, "loop_num": loop_num},
+                                        content=final_answer,
                                         source=self.name,
-                                        step="reasoning",
+                                        step="answer",
                                         config=config,
                                         **kwargs,
                                     )
-                                self.stream_content(
-                                    content=final_answer,
-                                    source=self.name,
-                                    step="answer",
-                                    config=config,
-                                    **kwargs,
-                                )
-                            return final_answer
+                                return final_answer
 
-                        except TagNotFoundError:
-                            logger.debug("XMLParser: Not a final answer structure, trying action structure.")
-                            try:
-                                parsed_data = XMLParser.parse(
-                                    llm_generated_output,
-                                    required_tags=["thought", "action", "action_input"],
-                                    optional_tags=["output"],
-                                    json_fields=["action_input"],
-                                )
-                                thought = parsed_data.get("thought")
-                                action = parsed_data.get("action")
-                                action_input = parsed_data.get("action_input")
-                                self.log_reasoning(thought, action, action_input, loop_num)
-                            except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
-                                logger.error(f"XMLParser: Failed to parse XML for action or answer: {e}")
-                                raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
+                            tools_data = parsed_result.get("tools", [])
 
-                        except (XMLParsingError, JSONParsingError) as e:
-                            logger.error(f"XMLParser: Error parsing potential final answer XML: {e}")
-                            raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
+                            if len(tools_data) == 1:
+                                self.log_reasoning(
+                                    thought,
+                                    tools_data[0].get("name", "unknown_tool"),
+                                    tools_data[0].get("input", {}),
+                                    loop_num,
+                                )
+                            else:
+                                self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
+
+                            self.stream_reasoning(
+                                {
+                                    "thought": thought,
+                                    "tools": tools_data,
+                                    "loop_num": loop_num,
+                                },
+                                config,
+                                **kwargs,
+                            )
+
+                        except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
+                            self._prompt.messages.append(
+                                Message(role=MessageRole.ASSISTANT, content=llm_generated_output)
+                            )
+                            self._prompt.messages.append(
+                                Message(
+                                    role=MessageRole.SYSTEM,
+                                    content=f"Correction Instruction: The previous response could not be parsed due to "
+                                    f"the following error: '{type(e).__name__}: {e}'. "
+                                    f"Please regenerate the response strictly following the "
+                                    f"required XML format, ensuring all tags are present and "
+                                    f"correctly structured, and that any JSON content is valid.",
+                                )
+                            )
+                            continue
 
                 self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
 
@@ -714,8 +741,9 @@ class ReActAgent(Agent):
                             config,
                             **kwargs,
                         )
+                        tool_result = self._execute_tools(tools_data, config, **kwargs)
 
-                        tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                        # tool_result = self._run_tool(tool, action_input, config, **kwargs)
 
                     except RecoverableAgentException as e:
                         tool_result = f"{type(e).__name__}: {e}"
@@ -1001,3 +1029,79 @@ class ReActAgent(Agent):
                 )
 
         self._prompt_blocks.update(prompt_blocks)
+
+    def _execute_tools(self, tools_data: list[dict], config: RunnableConfig, **kwargs) -> str:
+        """
+        Execute one or more tools and gather their results.
+
+        Args:
+            tools_data (list): List of dictionaries containing name and input for each tool
+            config (RunnableConfig): Configuration for the runnable
+            **kwargs: Additional arguments for tool execution
+
+        Returns:
+            str: Combined observation string with all tool results
+        """
+        all_results = []
+        tools_summary = []
+
+        for tool_data in tools_data:
+            try:
+                tool_name = tool_data["name"]
+                tool_input = tool_data["input"]
+
+                tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
+                if not tool:
+                    error_message = f"Unknown tool: {tool_name}. Please use only available tools."
+                    all_results.append({"tool_name": tool_name, "success": False, "result": error_message})
+                    tools_summary.append({"name": tool_name, "input": tool_input, "error": error_message})
+                    continue
+
+                tool_result = self._run_tool(tool, tool_input, config, **kwargs)
+
+                all_results.append({"tool_name": tool_name, "success": True, "result": tool_result})
+
+                tools_summary.append(
+                    {
+                        "name": tool.name,
+                        "input": tool_input,
+                        "result": (
+                            tool_result[:200] + "..."
+                            if isinstance(tool_result, str) and len(tool_result) > 200
+                            else tool_result
+                        ),
+                    }
+                )
+
+                if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                    self.stream_content(
+                        content={"name": tool.name, "input": tool_input, "result": tool_result},
+                        source=tool.name,
+                        step="tool",
+                        config=config,
+                        by_tokens=False,
+                        **kwargs,
+                    )
+
+            except Exception as e:
+                error_message = f"Error executing tool {tool_data['name']}: {str(e)}"
+                logger.error(error_message)
+                all_results.append({"tool_name": tool_data["name"], "success": False, "result": error_message})
+                tools_summary.append(
+                    {"name": tool_data["name"], "input": tool_data.get("input", "Unknown input"), "error": str(e)}
+                )
+
+        if hasattr(self, "_intermediate_steps") and self._intermediate_steps:
+            current_step = max(self._intermediate_steps.keys())
+            if current_step in self._intermediate_steps:
+                self._intermediate_steps[current_step]["tools"] = tools_summary
+
+        observation_parts = []
+        for result in all_results:
+            tool_name = result["tool_name"]
+            result_content = result["result"]
+            success_status = "SUCCESS" if result["success"] else "ERROR"
+            observation_parts.append(f"--- {tool_name} ({success_status}) ---\n{result_content}")
+
+        combined_observation = "\n\n".join(observation_parts)
+        return combined_observation
