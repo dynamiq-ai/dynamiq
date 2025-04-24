@@ -241,18 +241,31 @@ class AWS(BaseConnection):
         pass
 
     @property
-    def conn_params(self):
+    def conn_params(self) -> dict:
+        """Return parameters with aws_ prefix for compatibility with other systems"""
+        params = {}
         if self.profile:
-            return {
-                "aws_profile_name": self.profile,
-                "aws_region_name": self.region,
-            }
+            params["aws_profile_name"] = self.profile
+            params["aws_region_name"] = self.region
         else:
-            return {
-                "aws_access_key_id": self.access_key_id,
-                "aws_secret_access_key": self.secret_access_key,
-                "aws_region_name": self.region,
-            }
+            params["aws_access_key_id"] = self.access_key_id
+            params["aws_secret_access_key"] = self.secret_access_key
+            params["aws_region_name"] = self.region
+        return params
+
+    def create_boto3_session(self):
+        import boto3
+
+        """Create and return a boto3.Session with properly formatted parameters"""
+        params = {}
+        if self.profile:
+            params["profile_name"] = self.profile
+        elif self.access_key_id and self.secret_access_key:
+            params["aws_access_key_id"] = self.access_key_id
+            params["aws_secret_access_key"] = self.secret_access_key
+        if self.region:
+            params["region_name"] = self.region
+        return boto3.Session(**params)
 
 
 class Gemini(BaseApiKeyConnection):
