@@ -99,12 +99,43 @@ For questions that don't require tools:
 After each tool usage, you'll receive:
 Observation: [Result(s) from the tool(s)]
 
-IMPORTANT GUIDELINES:
-- Use multiple tools in parallel when beneficial for research
-- Include detailed reasoning in the <thought> tags
-- Always provide properly formatted JSON within <input> tags
-- For a single tool, still use the <tool_calls> structure with just one <tool> element
-- Properly close all XML tags
+MANDATORY MULTI-TOOL REQUIREMENTS:
+Efficiency in Tool Calls: For research tasks, prioritize making multiple independent
+tool calls in parallel within a single `<tool_calls>` block whenever possible,
+to gather all required information efficiently.
+Use sequential tool calls across multiple iterations only when later queries depend
+on the results of earlier ones (e.g., refining a query based on initial findings).
+
+1. Research Tasks (MINIMUM 3 tool calls required):
+   - FIRST CALL: Use a broad query to get general information on the topic
+   - SECOND CALL: Use a more specific query focused on benefits, advantages, or key features
+   - THIRD CALL: Use a query focused on limitations, challenges, requirements, or comparison
+   ... go deeper if needed
+   - Structure queries to cover complementary aspects of the same topic
+   - Use different parameters (e.g., category filters) when appropriate
+   - Plan your tool calls to cover all required aspects in a single `<tool_calls>`
+     block when the queries are independent. Include reasoning in `<thought>`
+     about how each call contributes to a complete answer.
+
+2. Data Collection/Scraping
+   - When scraping websites, ALWAYS gather data from different sources in parallel
+   - Use the same tool multiple times with different targets (URLs, parameters)
+   - Break down large scraping tasks into parallel subtasks for efficiency
+
+3. Complex Analysis
+   - ALWAYS decompose problems into smaller independent subproblems if applicable
+   - Use specialized parameters for different aspects of the same problem
+   - Collect preliminary data across multiple dimensions before final analysis
+
+IMPLEMENTATION REQUIREMENTS:
+- For research tasks, NEVER provide a final answer after just one tool call
+- For any question seeking detailed information, ALWAYS use multiple tool calls
+- Structure multiple tools in a single `<tool_calls>` block
+- Include detailed reasoning in the <thought> tags explaining your multi-tool strategy
+- Ensure diversity in your queries when using the same tool multiple times
+- If a tool call fails or provides insufficient data, note this in `<thought>` and include additional
+  tool calls in the same or a subsequent `<tool_calls>` block to compensate,
+  targeting alternative sources or adjusted parameters.
 """
 
 
@@ -483,8 +514,6 @@ class ReActAgent(Agent):
         self.llm.stop = stop_sequences
 
         for loop_num in range(1, self.max_loops + 1):
-            for msg in self._prompt.messages:
-                print(msg.content)
             try:
                 llm_result = self._run_llm(
                     self._prompt.messages,
@@ -493,7 +522,6 @@ class ReActAgent(Agent):
                     inference_mode=self.inference_mode,
                     **kwargs,
                 )
-                print(llm_result)
                 action, action_input = None, None
                 llm_generated_output = ""
                 llm_reasoning = (
@@ -669,6 +697,7 @@ class ReActAgent(Agent):
                                 return final_answer
 
                             tools_data = parsed_result.get("tools", [])
+                            action = tools_data
 
                             if len(tools_data) == 1:
                                 self.log_reasoning(
@@ -709,13 +738,35 @@ class ReActAgent(Agent):
                 self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
 
                 if action and self.tools:
-                    try:
-                        tool = self.tool_by_names.get(self.sanitize_tool_name(action))
-                        if not tool:
+                    if self.inference_mode == InferenceMode.XML:
+                        tool_result = self._execute_tools(tools_data, config, **kwargs)
+                    else:
+                        try:
+                            tool = self.tool_by_names.get(self.sanitize_tool_name(action))
+                            if not tool:
+                                self.stream_reasoning(
+                                    {
+                                        "thought": thought,
+                                        "action": action,
+                                        "action_input": action_input,
+                                        "loop_num": loop_num,
+                                    },
+                                    config,
+                                    **kwargs,
+                                )
+
+                                raise AgentUnknownToolException(
+                                    f"Unknown tool: {action}."
+                                    "Use only available tools and provide only the tool's name in the action field. "
+                                    "Do not include any additional reasoning. "
+                                    "Please correct the action field or state that you cannot answer the question."
+                                )
+
                             self.stream_reasoning(
                                 {
                                     "thought": thought,
                                     "action": action,
+                                    "tool": tool,
                                     "action_input": action_input,
                                     "loop_num": loop_num,
                                 },
@@ -723,50 +774,33 @@ class ReActAgent(Agent):
                                 **kwargs,
                             )
 
-                            raise AgentUnknownToolException(
-                                f"Unknown tool: {action}."
-                                "Use only available tools and provide only the tool's name in the action field. "
-                                "Do not include any additional reasoning. "
-                                "Please correct the action field or state that you cannot answer the question."
-                            )
+                            tool_result = self._run_tool(tool, action_input, config, **kwargs)
 
-                        self.stream_reasoning(
-                            {
-                                "thought": thought,
-                                "action": action,
-                                "tool": tool,
-                                "action_input": action_input,
-                                "loop_num": loop_num,
-                            },
-                            config,
-                            **kwargs,
-                        )
-                        tool_result = self._execute_tools(tools_data, config, **kwargs)
-
-                        # tool_result = self._run_tool(tool, action_input, config, **kwargs)
-
-                    except RecoverableAgentException as e:
-                        tool_result = f"{type(e).__name__}: {e}"
+                        except RecoverableAgentException as e:
+                            tool_result = f"{type(e).__name__}: {e}"
 
                     observation = f"\nObservation: {tool_result}\n"
-                    if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                        self.stream_content(
-                            content={"name": tool.name, "input": action_input, "result": tool_result},
-                            source=tool.name if tool else action,
-                            step="tool",
-                            config=config,
-                            by_tokens=False,
-                            **kwargs,
+
+                    if self.inference_mode != InferenceMode.XML:
+                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                            self.stream_content(
+                                content={"name": tool.name, "input": action_input, "result": tool_result},
+                                source=tool.name if tool else action,
+                                step="tool",
+                                config=config,
+                                by_tokens=False,
+                                **kwargs,
+                            )
+
+                        self._intermediate_steps[loop_num]["model_observation"].update(
+                            AgentIntermediateStepModelObservation(
+                                tool_using=action,
+                                tool_input=action_input,
+                                tool_output=tool_result,
+                                updated=llm_generated_output,
+                            ).model_dump()
                         )
 
-                    self._intermediate_steps[loop_num]["model_observation"].update(
-                        AgentIntermediateStepModelObservation(
-                            tool_using=action,
-                            tool_input=action_input,
-                            tool_output=tool_result,
-                            updated=llm_generated_output,
-                        ).model_dump()
-                    )
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
                 else:
                     self.stream_reasoning(
@@ -1043,7 +1077,6 @@ class ReActAgent(Agent):
             str: Combined observation string with all tool results
         """
         all_results = []
-        tools_summary = []
 
         for tool_data in tools_data:
             try:
@@ -1054,23 +1087,12 @@ class ReActAgent(Agent):
                 if not tool:
                     error_message = f"Unknown tool: {tool_name}. Please use only available tools."
                     all_results.append({"tool_name": tool_name, "success": False, "result": error_message})
-                    tools_summary.append({"name": tool_name, "input": tool_input, "error": error_message})
                     continue
 
                 tool_result = self._run_tool(tool, tool_input, config, **kwargs)
 
-                all_results.append({"tool_name": tool_name, "success": True, "result": tool_result})
-
-                tools_summary.append(
-                    {
-                        "name": tool.name,
-                        "input": tool_input,
-                        "result": (
-                            tool_result[:200] + "..."
-                            if isinstance(tool_result, str) and len(tool_result) > 200
-                            else tool_result
-                        ),
-                    }
+                all_results.append(
+                    {"tool_name": tool_name, "success": True, "tool_input": tool_input, "result": tool_result}
                 )
 
                 if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
@@ -1086,22 +1108,24 @@ class ReActAgent(Agent):
             except Exception as e:
                 error_message = f"Error executing tool {tool_data['name']}: {str(e)}"
                 logger.error(error_message)
-                all_results.append({"tool_name": tool_data["name"], "success": False, "result": error_message})
-                tools_summary.append(
-                    {"name": tool_data["name"], "input": tool_data.get("input", "Unknown input"), "error": str(e)}
+                all_results.append(
+                    {
+                        "tool_name": tool_data["name"],
+                        "success": False,
+                        "tool_input": tool_input,
+                        "result": error_message,
+                    }
                 )
-
-        if hasattr(self, "_intermediate_steps") and self._intermediate_steps:
-            current_step = max(self._intermediate_steps.keys())
-            if current_step in self._intermediate_steps:
-                self._intermediate_steps[current_step]["tools"] = tools_summary
 
         observation_parts = []
         for result in all_results:
             tool_name = result["tool_name"]
             result_content = result["result"]
+            tool_input = result["tool_input"]
             success_status = "SUCCESS" if result["success"] else "ERROR"
-            observation_parts.append(f"--- {tool_name} ({success_status}) ---\n{result_content}")
+            observation_parts.append(
+                f"--- {tool_name} with input {tool_input} has resulted in {success_status} ---\n{result_content}"
+            )
 
         combined_observation = "\n\n".join(observation_parts)
         return combined_observation
