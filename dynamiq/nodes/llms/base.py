@@ -79,6 +79,11 @@ class BaseLLM(ConnectionNode):
         - InferenceMode.STRUCTURED_OUTPUT: Produces structured JSON output.
         - InferenceMode.FUNCTION_CALLING: Structured output for tools (functions) to be called.
         dict[str, Any] | type[BaseModel] | None: schema_ for structured output. Defaults to empty dict.
+        response_transformer (ResponseTransformer): Specifies the format of the response returned by the node.
+        - ResponseTransformer.DEFAULT: Returns only the generated content (default), as a plain text string.
+        - ResponseTransformer.CHAT_COMPLETION: Returns the full response object in chat completion format, including
+            metadata such as token usage, role, and message structure.
+
     """
 
     MODEL_PREFIX: ClassVar[str | None] = None
