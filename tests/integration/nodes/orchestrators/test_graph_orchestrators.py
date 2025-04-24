@@ -111,20 +111,52 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
         (
             get_orchestrator_workflow1,
             {},
-            {"content": "mocked_response", "context": {"task1": "task 1 result", "task2": "task 2 result"}},
+            {
+                "content": "mocked_response",
+                "context": {
+                    "task1": "task 1 result",
+                    "task2": "task 2 result",
+                    "history": [
+                        {"role": "user", "content": ""},
+                        {"role": "assistant", "content": "task 1 completed"},
+                        {"role": "assistant", "content": "task 2 completed"},
+                    ],
+                },
+            },
         ),
         (
             get_orchestrator_workflow1,
             {"task3": True},
             {
                 "content": "mocked_response",
-                "context": {"task1": "task 1 result", "task2": "task 2 result", "task3": "task 3 result"},
+                "context": {
+                    "task1": "task 1 result",
+                    "task2": "task 2 result",
+                    "task3": "task 3 result",
+                    "history": [
+                        {"role": "user", "content": ""},
+                        {"role": "assistant", "content": "task 1 completed"},
+                        {"role": "assistant", "content": "task 2 completed"},
+                        {"role": "assistant", "content": "task 3 completed"},
+                    ],
+                },
             },
         ),
         (
             get_orchestrator_workflow2,
             {},
-            {"content": "mocked_response", "context": {"task1": "task 1 result", "task2": "task 2 result"}},
+            {
+                "content": "mocked_response",
+                "context": {
+                    "task1": "task 1 result",
+                    "task2": "task 2 result",
+                    "history": [
+                        {"role": "user", "content": ""},
+                        {"role": "assistant", "content": "task 1 completed"},
+                        {"role": "assistant", "content": "task 2 completed"},
+                    ],
+                },
+            },
         ),
     ],
 )
