@@ -15,7 +15,7 @@ from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidAc
 from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_input, process_tool_output_for_agent
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
-from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
 
@@ -559,8 +559,19 @@ class Agent(Node):
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
 
-    def _run_llm(self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs) -> str:
-        """Runs the LLM with a given prompt and handles streaming or full responses."""
+    def _run_llm(
+        self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs
+    ) -> RunnableResult:
+        """Runs the LLM with a given prompt and handles streaming or full responses.
+
+        Args:
+            messages (list[Message | VisionMessage]): Input messages for llm.
+            config (Optional[RunnableConfig]): Configuration for the runnable.
+            kwargs: Additional keyword arguments.
+
+        Returns:
+            RunnableResult: Generated response.
+        """
         try:
             llm_result = self.llm.run(
                 input_data={},

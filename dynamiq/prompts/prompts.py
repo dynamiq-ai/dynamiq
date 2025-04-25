@@ -8,7 +8,7 @@ from typing import Any
 import filetype
 from jinja2 import Environment, meta
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-
+from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
 
 
@@ -233,23 +233,6 @@ class VisionMessage(BaseModel):
         return self.model_dump(**kwargs)
 
 
-class ToolFunctionParameters(BaseModel):
-    type: str
-    properties: dict[str, dict]
-    required: list[str]
-
-
-class ToolFunction(BaseModel):
-    name: str
-    description: str
-    parameters: ToolFunctionParameters
-
-
-class Tool(BaseModel):
-    type: str = "function"
-    function: ToolFunction
-
-
 class BasePrompt(ABC, BaseModel):
     """
     Abstract base class for prompts.
@@ -296,11 +279,13 @@ class Prompt(BasePrompt):
     Attributes:
         messages (list[Message | VisionMessage]): List of Message or VisionMessage objects
         representing the prompt.
-        tools (list[dict[str, Any]]): List of functions for which the model may generate JSON inputs.
+        tools (list[Tool]): List of functions for which the model may generate JSON inputs.
+        response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output.
     """
 
     messages: list[Message | VisionMessage]
     tools: list[Tool] | None = None
+    response_format: dict[str, Any] | None = None
     _Template: Any = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")

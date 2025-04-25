@@ -6,9 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.llm_tool import Tool
 
 if TYPE_CHECKING:
     from litellm import CustomStreamWrapper, ModelResponse
@@ -74,11 +74,8 @@ class BaseLLM(ConnectionNode):
         tool_choice (str | None): Value to control which function is called by the model.
         thinking_enabled (bool): Enables advanced reasoning if set to True.
         budget_tokens (int): Maximum number of tokens allocated for thinking.
-        inference_mode (InferenceMode): Determines how the model handles inference tasks and formats outputs.
-        - InferenceMode.DEFAULT: Generates unstructured, free-form natural language text.
-        - InferenceMode.STRUCTURED_OUTPUT: Produces structured JSON output.
-        - InferenceMode.FUNCTION_CALLING: Structured output for tools (functions) to be called.
-        dict[str, Any] | type[BaseModel] | None: schema_ for structured output. Defaults to empty dict.
+        response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output
+        tools list[Tool]: List of tools that llm can call.
     """
 
     MODEL_PREFIX: ClassVar[str | None] = None
@@ -98,10 +95,8 @@ class BaseLLM(ConnectionNode):
     tool_choice: str | None = None
     thinking_enabled: bool | None = None
     budget_tokens: int = 1024
-    inference_mode: InferenceMode = InferenceMode.DEFAULT
-    schema_: dict[str, Any] | type[BaseModel] | None = Field(
-        None, description="Schema for structured output or function calling.", alias="schema"
-    )
+    response_format: dict[str, Any] | None = None
+    tools: list[Tool] | None = None
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
     input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
@@ -255,36 +250,6 @@ class BaseLLM(ConnectionNode):
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
 
-    def _get_response_format_and_tools(
-        self, inference_mode: InferenceMode, schema: dict[str, Any] | type[BaseModel] | None
-    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        """Get response format and tools based on inference mode and schema.
-
-        Args:
-            inference_mode (InferenceMode): The inference mode to use.
-            schema (dict[str, Any] | type[BaseModel] | None): The schema to use.
-
-        Returns:
-            tuple[dict[str, Any] | None, dict[str, Any] | None]: Response format and tools.
-
-        Raises:
-            ValueError: If schema is None when using STRUCTURED_OUTPUT or FUNCTION_CALLING modes.
-        """
-        response_format = None
-        tools = None
-
-        match inference_mode:
-            case InferenceMode.STRUCTURED_OUTPUT:
-                if schema is None:
-                    raise ValueError("Schema must be provided when using STRUCTURED_OUTPUT inference mode")
-                response_format = schema
-            case InferenceMode.FUNCTION_CALLING:
-                if schema is None:
-                    raise ValueError("Schema must be provided when using FUNCTION_CALLING inference mode")
-                tools = schema
-
-        return response_format, tools
-
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """
         Updates or modifies the parameters for the completion method.
@@ -308,8 +273,8 @@ class BaseLLM(ConnectionNode):
         input_data: BaseLLMInputSchema,
         config: RunnableConfig = None,
         prompt: Prompt | None = None,
-        schema: dict | None = None,
-        inference_mode: InferenceMode | None = None,
+        tools: list[Tool] | None = None,
+        response_format: dict[str, Any] | None = None,
         **kwargs,
     ):
         """Execute the LLM node.
@@ -321,34 +286,27 @@ class BaseLLM(ConnectionNode):
             input_data (BaseLLMInputSchema): The input data for the LLM.
             config (RunnableConfig, optional): The configuration for the execution. Defaults to None.
             prompt (Prompt, optional): The prompt to use for this execution. Defaults to None.
-            schema (Dict[str, Any], optional): schema_ for structured output or function calling.
-                Overrides instance schema_ if provided.
-            inference_mode (InferenceMode, optional): Mode of inference.
-                Overrides instance inference_mode if provided.
+            tools list[Tool]: List of tools that llm can call.
+            response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output
             **kwargs: Additional keyword arguments.
 
         Returns:
             dict: A dictionary containing the generated content and tool calls.
         """
         config = ensure_config(config)
-        prompt = prompt or self.prompt or Prompt(messages=[], tools=None)
+        prompt = prompt or self.prompt or Prompt(messages=[], tools=None, response_format=None)
         messages = self.get_messages(prompt, input_data)
         base_tools = prompt.format_tools(**dict(input_data))
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
 
-        # Use initialized client if it possible
         params = self.connection.conn_params.copy()
         if self.client and not isinstance(self.connection, HttpApiKey):
             params.update({"client": self.client})
         if self.thinking_enabled:
             params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
 
-        current_inference_mode = inference_mode or self.inference_mode
-        current_schema = schema or self.schema_
-        response_format, tools = self._get_response_format_and_tools(
-            inference_mode=current_inference_mode, schema=current_schema
-        )
-        tools = tools or base_tools
+        response_format = self.response_format or response_format or prompt.response_format
+        tools = self.tools or tools or base_tools
 
         common_params: dict[str, Any] = {
             "model": self.model,
