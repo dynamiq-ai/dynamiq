@@ -47,7 +47,6 @@ class GraphOrchestrator(Orchestrator):
     context: dict[str, Any] = {}
     states: list[GraphState] = []
     max_loops: int = 15
-    summarize_execution: bool = True
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
@@ -344,19 +343,7 @@ class GraphOrchestrator(Orchestrator):
                 logger.info(f"GraphOrchestrator {self.id}: Next state: {state.id}")
 
                 if state.id == END:
-                    final_output = (
-                        self.get_final_result(
-                            {
-                                "input_task": input_task,
-                                "chat_history": self._chat_history,
-                            },
-                            config=config,
-                            **kwargs,
-                        )
-                        if self.summarize_execution
-                        else ""
-                    )
-
+                    final_output = self._chat_history[-1]["content"] if self._chat_history else ""
                     return {"content": final_output, "context": self.context | {"history": self._chat_history}}
 
                 elif state.id != START:
