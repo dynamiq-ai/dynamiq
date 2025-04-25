@@ -14,7 +14,7 @@ from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_input, process_tool_output_for_agent
 from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.nodes.tools.mcp_adapter import MCPAdapterTool
+from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
@@ -311,7 +311,9 @@ class Agent(Node):
         self._init_prompt_blocks()
 
         self.tools = [
-            t for tool in self.tools for t in (tool.get_mcp_tools() if isinstance(tool, MCPAdapterTool) else [tool])
+            t
+            for tool in self.tools
+            for t in (tool.get_mcp_tools() if type(tool).__name__ == MCPServerAdapter.__name__ else [tool])
         ]
 
     @model_validator(mode="after")

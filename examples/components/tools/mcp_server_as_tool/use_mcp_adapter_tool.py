@@ -2,7 +2,7 @@ import os
 
 from dynamiq import Workflow
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.tools.mcp_adapter import MCPAdapterTool, SSEServerParameters, StdioServerParameters
+from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter, MPCConnection
 from examples.llm_setup import setup_llm
 
 llm = setup_llm()
@@ -18,12 +18,12 @@ def use_stdio_connection():
     Returns:
         result (str): The result of executing the workflow.
     """
-    server_params_stdio = StdioServerParameters(
+    stdio_connection = MPCConnection(
         command="python",
         args=[os.path.join("mcp_servers", "math_servers.py")],
     )
 
-    mcp_tool_adapter = MCPAdapterTool(server_params=server_params_stdio)
+    mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
 
     agent = ReActAgent(
         name="react-agent",
@@ -54,9 +54,9 @@ def use_sse_connection():
     Returns:
         result (str): The result of executing the workflow.
     """
-    server_params_sse = SSEServerParameters(url="http://localhost:8000/sse")
+    sse_connection = MPCConnection(url="http://localhost:8000/sse")
 
-    mcp_tool_adapter = MCPAdapterTool(server_params=server_params_sse)
+    mcp_tool_adapter = MCPServerAdapter(connection=sse_connection)
 
     agent = ReActAgent(
         name="react-agent",

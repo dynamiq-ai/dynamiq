@@ -2,6 +2,7 @@ import enum
 import json
 from abc import ABC, abstractmethod
 from functools import cached_property, partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
@@ -1214,3 +1215,65 @@ class NvidiaNIM(BaseApiKeyConnection):
             "api_base": self.url,
             "api_key": self.api_key,
         }
+
+
+class MPC(BaseConnection):
+    # SSE
+    url: str | None = Field(None, description="The SSE endpoint URL to connect to.")
+    headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the SSE request.")
+    timeout: float = Field(default=5.0, description="Timeout in seconds for establishing the initial connection.")
+    sse_read_timeout: float = Field(
+        default=60 * 5, description="Timeout in seconds for reading SSE messages. Defaults to 5 minutes."
+    )
+
+    # STDIO
+    command: str | None = Field(None, description="The executable to run to start the server.")
+    args: list[str] = Field(default_factory=list, description="Command line arguments to pass to the executable.")
+    env: dict[str, str] | None = Field(None, description=" The environment to use when spawning the process.")
+    cwd: str | Path | None = Field(None, description="The working directory to use when spawning the process.")
+    encoding: str = Field(
+        default="utf-8", description="The text encoding used when sending/receiving messages to the server."
+    )
+    encoding_error_handler: Literal["strict", "ignore", "replace"] = Field(
+        default="strict", description="The text encoding error handler."
+    )
+
+    def connect(self):
+        """
+        Returns the requests module for making HTTP requests.
+        """
+        pass
+
+    async def get_client(self):
+        """
+        Creates an asynchronous client context manager based on server parameters.
+
+        Args:
+            server_params (ServerParameters): Parameters specifying the connection type and settings.
+
+        Returns:
+            Async context manager for a client connection (either stdio or SSE).
+        """
+        from mcp import StdioServerParameters
+        from mcp.client.sse import sse_client
+        from mcp.client.stdio import stdio_client
+
+        if self.url is not None:
+            return sse_client(
+                url=self.url,
+                headers=self.headers,
+                timeout=self.timeout,
+                sse_read_timeout=self.sse_read_timeout,
+            )
+        elif self.command is not None:
+            return stdio_client(
+                StdioServerParameters(
+                    command=self.command,
+                    args=self.args,
+                    env=self.env,
+                    cwd=self.cwd,
+                    encoding=self.encoding,
+                    encoding_error_handler=self.encoding_error_handler,
+                )
+            )
+        raise TypeError("Unsupported server parameter type.")

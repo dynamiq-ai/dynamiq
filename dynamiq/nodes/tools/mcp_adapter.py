@@ -1,60 +1,27 @@
 import asyncio
+import importlib.util
+import inspect
+import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import field
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Literal
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.sse import sse_client
-from mcp.client.stdio import stdio_client
-from pydantic import BaseModel, Field, create_model
+from datamodel_code_generator import InputFileType, generate
+from mcp import ClientSession
+from pydantic import BaseModel
 
-from dynamiq.nodes import Node, NodeGroup
+from dynamiq.connections import MPC as MPCConnection
+from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
-from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
 
 
-class SSEServerParameters(BaseModel):
-    """
-    Parameters for configuring a Server-Sent Events client connection.
-    """
-
-    url: str = Field(..., description="The SSE endpoint URL to connect to.")
-    headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the SSE request.")
-    timeout: float = Field(default=5.0, description="Timeout in seconds for establishing the initial connection.")
-    sse_read_timeout: float = Field(
-        default=60 * 5, description="Timeout in seconds for reading SSE messages. Defaults to 5 minutes."
-    )
-
-
-ServerParameters = StdioServerParameters | SSEServerParameters
-
-
-async def get_client(server_params: ServerParameters):
-    """
-    Creates an asynchronous client context manager based on server parameters.
-
-    Args:
-        server_params (ServerParameters): Parameters specifying the connection type and settings.
-
-    Returns:
-        Async context manager for a client connection (either stdio or SSE).
-    """
-    if isinstance(server_params, StdioServerParameters):
-        return stdio_client(server_params)
-    elif isinstance(server_params, SSEServerParameters):
-        return sse_client(
-            url=server_params.url,
-            headers=server_params.headers,
-            timeout=server_params.timeout,
-            sse_read_timeout=server_params.sse_read_timeout,
-        )
-    raise TypeError("Unsupported server parameter type.")
-
-
-class MCPTool(Node):
+class MCPTool(ConnectionNode):
     """
     A tool that interacts with the MCP server, enabling execution of specific server-side functions.
 
@@ -63,14 +30,14 @@ class MCPTool(Node):
       name (str): Node name.
       description (str): Node description.
       input_schema (ClassVar[type[BaseModel]]): The schema that defines the expected structure of tool's input.
-      server_params (ServerParameters): The parameters for connecting to the MCP server.
+      connection (MPCConnection): The connection module with parameters needed to the MCP server.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str
     description: str
     input_schema: type[BaseModel]
-    server_params: ServerParameters
+    connection: MPCConnection
 
     def __init__(self, input_schema: dict[str, Any], **kwargs):
         """
@@ -104,24 +71,33 @@ class MCPTool(Node):
         }.get(json_type, str)
 
     @staticmethod
-    def create_input_schema(schema_dict: dict[str, Any]):
+    def create_input_schema(schema_dict: dict[str, Any]) -> type[BaseModel]:
         """
         Creates an input schema based on provided MCP schema.
 
         Args:
             schema_dict (dict[str, Any]): A JSON schema dictionary describing the tool's expected input.
         """
-        fields = {}
-        props = schema_dict.get("properties", {})
-        required = set(schema_dict.get("required", []))
+        with TemporaryDirectory() as tmpdir:
+            schema_path = Path(tmpdir) / "schema.json"
+            out_path = Path(tmpdir) / "model.py"
+            schema_path.write_text(json.dumps(schema_dict))
 
-        for field_name, field_spec in props.items():
-            field_type = MCPTool._map_json_type(field_spec.get("type", "string"))
-            default = ... if field_name in required else None
-            description = field_spec.get("description", None)
-            fields[field_name] = (field_type, Field(default, description=description))
+            generate(
+                input_=schema_path,
+                input_file_type=InputFileType.JsonSchema,
+                output=out_path,
+            )
 
-        return create_model(schema_dict.get("title", "MCPAdapterSchema"), **fields)
+            spec = importlib.util.spec_from_file_location("generated_model", out_path)
+            generated_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(generated_module)
+            generated_classes = [
+                cls
+                for name, cls in inspect.getmembers(generated_module, inspect.isclass)
+                if cls.__module__ == generated_module.__name__
+            ]
+            return generated_classes[0]
 
     def execute(self, input_data: BaseModel, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
@@ -156,7 +132,7 @@ class MCPTool(Node):
         input_dict = input_data.model_dump()
 
         try:
-            async with await get_client(self.server_params) as (read, write):
+            async with await self.connection.get_client() as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     result = await session.call_tool(self.name, input_dict)
@@ -172,7 +148,7 @@ class MCPTool(Node):
         return {"content": result}
 
 
-class MCPAdapterTool(Node):
+class MCPServerAdapter(ConnectionNode):
     """
     A tool that manages connections to MCP servers and initializes MCP tools.
 
@@ -180,16 +156,16 @@ class MCPAdapterTool(Node):
       group (Literal[NodeGroup.TOOLS]): Node group.
       name (str): Node name.
       description (str): Node description.
-      mcp_tools (list): A list of initialized MCP tools.
-      server_params (ServerParameters): The parameters for connecting to the MCP server.
+      mcp_tools (dict): A dict of initialized MCP tools under their names.
+      connection (MPCConnection): The connection module with parameters needed to the MCP server.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "MCP Adapter Tool"
     description: str = "The tool used to initialize available MCP tools based on provided server parameters."
 
-    mcp_tools: list[MCPTool] = field(default_factory=list)
-    server_params: ServerParameters
+    mcp_tools: dict[str, MCPTool] = field(default_factory=dict)
+    connection: MPCConnection
 
     async def initialize_tools(self):
         """
@@ -198,19 +174,17 @@ class MCPAdapterTool(Node):
         Returns:
             None
         """
-        async with await get_client(self.server_params) as (read, write):
+        async with await self.connection.get_client() as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()
-                self.mcp_tools = [
-                    MCPTool(
+                for tool in tools.tools:
+                    self.mcp_tools[tool.name] = MCPTool(
                         name=tool.name,
                         description=tool.description,
                         input_schema=tool.inputSchema,
-                        server_params=self.server_params,
+                        connection=self.connection,
                     )
-                    for tool in tools.tools
-                ]
 
         logger.info(f"Tool {self.name}: {len(self.mcp_tools)} MCP tools initialized from a server.")
 
@@ -236,7 +210,7 @@ class MCPAdapterTool(Node):
         """
         if not self.mcp_tools:
             await self.initialize_tools()
-        return self.mcp_tools
+        return list(self.mcp_tools.values())
 
     def execute(self, **kwargs):
         """
