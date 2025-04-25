@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "dynamiq"
-version = "0.14.0"
+version = "0.15.0"
 description = "Dynamiq is an orchestration framework for agentic AI and LLM applications"
 authors = ["Dynamiq Team <hello@getdynamiq.ai>"]
 license = "Apache License 2.0"
@@ -58,8 +58,6 @@ rouge-score = "~0.1.2"
 lxml = "^5.3.1"
 elasticsearch = "~8.12.0"
 numpy = "~1.26.0"
-mcp = "1.6.0"
-datamodel-code-generator = "0.30.0"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~70.0.0"
@@ -103,6 +101,8 @@ pygraphviz = "~1.13"
 agentops = "~0.3.12"
 langfuse = "^2.51.2"
 peft = "^0.13.0"
+mcp = "1.6.0"
+datamodel-code-generator = "0.30.0"
 
 [tool.bandit]
 exclude_dirs = ["tests"]
