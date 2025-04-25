@@ -112,7 +112,7 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
             get_orchestrator_workflow1,
             {},
             {
-                "content": "mocked_response",
+                "content": "task 2 completed",
                 "context": {
                     "task1": "task 1 result",
                     "task2": "task 2 result",
@@ -128,7 +128,7 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
             get_orchestrator_workflow1,
             {"task3": True},
             {
-                "content": "mocked_response",
+                "content": "task 3 completed",
                 "context": {
                     "task1": "task 1 result",
                     "task2": "task 2 result",
@@ -146,7 +146,7 @@ def get_orchestrator_workflow2(model: str, connection: connections.OpenAI, conte
             get_orchestrator_workflow2,
             {},
             {
-                "content": "mocked_response",
+                "content": "task 2 completed",
                 "context": {
                     "task1": "task 1 result",
                     "task2": "task 2 result",
