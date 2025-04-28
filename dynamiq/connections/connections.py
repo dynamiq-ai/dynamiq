@@ -253,7 +253,7 @@ class AWS(BaseConnection):
             params["aws_region_name"] = self.region
         return params
 
-    def create_boto3_session(self):
+    def get_boto3_session(self):
         """Create and return a boto3.Session with properly formatted parameters"""
         import boto3
         params = {}

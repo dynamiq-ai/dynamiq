@@ -1,3 +1,4 @@
+import os
 import uuid
 from time import sleep
 
@@ -5,7 +6,7 @@ import pytest
 
 from dynamiq import Workflow, connections, flows
 from dynamiq.memory import Memory
-from dynamiq.memory.backends import Pinecone, Qdrant
+from dynamiq.memory.backends import DynamoDB, Pinecone, Qdrant
 from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.llms import OpenAI
@@ -252,3 +253,106 @@ def test_react_agent_with_qdrant_memory(
     verify_memory(memory, memory_response, user_id, session_id)
 
     logger.info("--- Qdrant Memory Test Passed ---")
+
+
+@pytest.fixture(scope="module")
+def aws_connection():
+    """Provides an AWS connection, reading credentials from environment."""
+    try:
+        aws_access_key_id = os.environ.get("AWS_ACCESS_KEY_ID")
+        aws_secret_access_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        aws_region = os.environ.get("AWS_REGION", "us-east-1")
+
+        if not aws_access_key_id or not aws_secret_access_key:
+            pytest.skip("AWS credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) not found in environment.")
+
+        return connections.AWS(
+            access_key_id=aws_access_key_id,
+            secret_access_key=aws_secret_access_key,
+            region_name=aws_region,
+        )
+    except ImportError:
+        pytest.skip("boto3 is not installed. Skipping AWS tests.")
+    except Exception as e:
+        pytest.fail(f"Failed to create AWS connection: {e}")
+
+
+@pytest.mark.skip(reason="AWS DynamoDB test is skipped due to missing credentials. ")
+def test_react_agent_with_dynamodb_memory(
+    aws_connection,
+    openai_llm,
+    agent_role,
+    personal_info_input,
+    general_question_input,
+    memory_test_input,
+    run_config,
+):
+    """Test ReActAgent with DynamoDB memory backend."""
+
+    try:
+        memory_backend = DynamoDB(
+            connection=aws_connection,
+            index_name="messages",
+            create_table_if_not_exists=True,
+        )
+        logger.info("DynamoDB backend initialized.")
+    except Exception as e:
+        pytest.fail(f"FATAL: Failed to initialize DynamoDB backend: {e}")
+
+    memory = Memory(backend=memory_backend, message_limit=20)
+
+    agent = ReActAgent(
+        name="DynamoDBMemoryAgent",
+        llm=openai_llm,
+        tools=[],
+        role=agent_role,
+        inference_mode=InferenceMode.DEFAULT,
+        memory=memory,
+    )
+
+    wf = Workflow(flow=flows.Flow(nodes=[agent]))
+
+    user_id = f"user_{uuid.uuid4().hex[:6]}"
+    session_id = f"session_{uuid.uuid4().hex[:8]}"
+    logger.info(f"\nUsing user_id: {user_id} and session_id: {session_id}")
+
+    logger.info("\n--- Testing DynamoDB Memory: Step 1 - Personal Info ---")
+    result_1 = wf.run(
+        input_data={"input": personal_info_input, "user_id": user_id, "session_id": session_id},
+        config=run_config,
+    )
+
+    assert result_1.status == RunnableStatus.SUCCESS, f"Run 1 failed: {result_1.error}"
+    logger.info(f"Agent response 1: {result_1.output.get(agent.id, {}).get('output', {}).get('content', 'N/A')}")
+
+    logger.info("--- Testing DynamoDB Memory: Step 2 - General Question ---")
+    result_2 = wf.run(
+        input_data={"input": general_question_input, "user_id": user_id, "session_id": session_id},
+        config=run_config,
+    )
+
+    assert result_2.status == RunnableStatus.SUCCESS, f"Run 2 failed: {result_2.error}"
+    logger.info(f"Agent response 2: {result_2.output.get(agent.id, {}).get('output', {}).get('content', 'N/A')}")
+
+    logger.info("--- Testing DynamoDB Memory: Step 3 - Memory Test ---")
+    result_3 = wf.run(
+        input_data={"input": memory_test_input, "user_id": user_id, "session_id": session_id},
+        config=run_config,
+    )
+
+    assert result_3.status == RunnableStatus.SUCCESS, f"Run 3 failed: {result_3.error}"
+    memory_response_data = result_3.output.get(agent.id, {}).get("output", {})
+    memory_response = memory_response_data.get("content", "N/A")
+    logger.info(f"Memory test response: {memory_response}")
+
+    logger.info("Verifying memory contents...")
+    try:
+        verify_memory(memory, memory_response, user_id, session_id)
+    except AssertionError as e:
+        filters = {"user_id": user_id, "session_id": session_id}
+        messages = memory.get_agent_conversation(filters=filters)
+        logger.error(f"Memory verification failed: {e}")
+        logger.error(f"Messages found ({len(messages)}): {messages}")
+        pytest.fail(f"Memory verification failed: {e}")
+
+    logger.info("--- DynamoDB Memory Test Passed ---")

@@ -2,6 +2,7 @@ import json
 import time
 import uuid
 from decimal import Decimal, InvalidOperation
+from enum import Enum
 from typing import Any
 
 from boto3.dynamodb.conditions import Attr
@@ -14,13 +15,22 @@ from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
 
 
+class BillingMode(str, Enum):
+    PAY_PER_REQUEST = "PAY_PER_REQUEST"
+    PROVISIONED = "PROVISIONED"
+
+
 class DynamoDBMemoryError(Exception):
     """Base exception class for DynamoDB Memory Backend errors."""
 
     pass
 
 
-def _convert_floats_to_decimals(obj):
+def _convert_floats_to_decimals(obj: Any) -> Any:
+    """
+    Recursively walk through obj and convert any finite float to a Decimal.
+    Raises ValueError on NaN or infinity, or if conversion fails.
+    """
     if isinstance(obj, float):
         if obj != obj or obj == float("inf") or obj == float("-inf"):
             raise ValueError(f"Cannot convert non-finite float {obj} to Decimal for DynamoDB")
@@ -49,13 +59,19 @@ class DynamoDB(MemoryBackend):
     - Attributes: `role` (String), `content` (String), `metadata` (Map)
     """
 
+    _MAX_SCAN_PAGE_LIMIT: int = 1000
+    _DEFAULT_SCAN_SIZE: int = 5000
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str = "DynamoDB"
     connection: AWS = Field(default_factory=AWS)
     index_name: str = Field("conversations", description="Name of the DynamoDB table.")
     create_table_if_not_exists: bool = Field(default=False)
-    billing_mode: str = Field(default="PAY_PER_REQUEST", pattern="^(PAY_PER_REQUEST|PROVISIONED)$")
+    billing_mode: BillingMode = Field(
+        default=BillingMode.PAY_PER_REQUEST,
+        description="DynamoDB billing mode",
+    )
     read_capacity_units: int = Field(default=1, gt=0)
     write_capacity_units: int = Field(default=1, gt=0)
 
@@ -64,18 +80,28 @@ class DynamoDB(MemoryBackend):
     role_attribute_name: str = Field(default="role")
     content_attribute_name: str = Field(default="content")
     metadata_attribute_name: str = Field(default="metadata")
+    scan_fetch_target_multiplier: int = Field(
+        default=10,
+        gt=0,
+        description=(
+            "When a limit is provided, multiply the limit by this factor "
+            "to determine the initial target number of items to fetch via scan, "
+            "before client-side filtering/sorting/limiting."
+        ),
+    )
+    default_scan_fetch_target: int = Field(
+        default=_DEFAULT_SCAN_SIZE,
+        gt=0,
+        description=(
+            "Default target number of items to fetch during a scan operation "
+            "when no specific limit is provided but client-side filtering might occur. "
+            "Helps balance fetching enough data vs. excessive scanning."
+        ),
+    )
 
     _dynamodb_resource: Any = PrivateAttr(default=None)
     _dynamodb_table: Any = PrivateAttr(default=None)
     _dynamodb_client: Any = PrivateAttr(default=None)
-
-    @property
-    def to_dict_exclude_params(self) -> dict[str, bool]:
-        return super().to_dict_exclude_params | {
-            "_dynamodb_resource": True,
-            "_dynamodb_table": True,
-            "_dynamodb_client": True,
-        }
 
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict[str, Any]:
         exclude = kwargs.pop("exclude", self.to_dict_exclude_params.copy())
@@ -87,7 +113,7 @@ class DynamoDB(MemoryBackend):
 
     def model_post_init(self, __context: Any) -> None:
         try:
-            session = self.connection.create_boto3_session()
+            session = self.connection.get_boto3_session()
             self._dynamodb_resource = session.resource("dynamodb")
             self._dynamodb_client = session.client("dynamodb")
             self._dynamodb_table = self._get_or_create_table()
@@ -139,7 +165,7 @@ class DynamoDB(MemoryBackend):
             "KeySchema": key_schema,
             "BillingMode": self.billing_mode,
         }
-        if self.billing_mode == "PROVISIONED":
+        if self.billing_mode == BillingMode.PROVISIONED:
             create_params["ProvisionedThroughput"] = {
                 "ReadCapacityUnits": self.read_capacity_units,
                 "WriteCapacityUnits": self.write_capacity_units,
@@ -163,11 +189,13 @@ class DynamoDB(MemoryBackend):
             except InvalidOperation:
                 raise ValueError(f"Could not convert numeric value {ts} to Decimal")
         elif isinstance(ts, Decimal):
-            if not ts.is_finite():
-                raise ValueError(f"Cannot serialize non-finite Decimal {ts} as timestamp")
+            if ts.is_infinite():
+                raise ValueError(f"Cannot serialize infinite Decimal {ts} as timestamp")
+            elif ts.is_nan():
+                raise ValueError("Cannot serialize NaN Decimal as timestamp")
             return ts
         else:
-            raise TypeError(f"Timestamp must be float, int, or Decimal, not {type(ts)}")
+            raise TypeError("Timestamp must be float, int, or Decimal, not {type(ts)}")
 
     def _deserialize_item(self, item: dict[str, Any]) -> Message | None:
         try:
@@ -242,15 +270,17 @@ class DynamoDB(MemoryBackend):
         all_items = []
         last_evaluated_key = None
         items_processed = 0
-        fetch_multiplier = 10
-        scan_fetch_target = (limit * fetch_multiplier) if limit else 5000
-
+        scan_fetch_target = (limit * self.scan_fetch_target_multiplier) if limit else self.default_scan_fetch_target
         try:
             while True:
                 if last_evaluated_key:
                     scan_params["ExclusiveStartKey"] = last_evaluated_key
 
-                scan_params["Limit"] = min(1000, scan_fetch_target - items_processed) if limit else 1000
+                scan_params["Limit"] = (
+                    min(self._MAX_SCAN_PAGE_LIMIT, scan_fetch_target - items_processed)
+                    if limit
+                    else self._MAX_SCAN_PAGE_LIMIT
+                )
                 if scan_params["Limit"] <= 0 and limit:
                     break
 
