@@ -47,31 +47,11 @@ class MCPTool(ConnectionNode):
             input_schema (dict[str, Any]): JSON schema to define input fields.
             **kwargs
         """
-        input_schema = MCPTool.create_input_schema(input_schema)
+        input_schema = MCPTool.get_input_schema(input_schema)
         super().__init__(input_schema=input_schema, **kwargs)
 
     @staticmethod
-    def _map_json_type(json_type: str) -> type:
-        """
-        Maps MCP schema types to a corresponding Python type.
-
-        Args:
-            json_type (str): The JSON type as a string.
-
-        Returns:
-            type: The corresponding Python type.
-        """
-        return {
-            "string": str,
-            "integer": int,
-            "number": float,
-            "boolean": bool,
-            "object": dict,
-            "array": list,
-        }.get(json_type, str)
-
-    @staticmethod
-    def create_input_schema(schema_dict: dict[str, Any]) -> type[BaseModel]:
+    def get_input_schema(schema_dict) -> type[BaseModel]:
         """
         Creates an input schema based on provided MCP schema.
 
@@ -89,7 +69,7 @@ class MCPTool(ConnectionNode):
                 output=out_path,
             )
 
-            spec = importlib.util.spec_from_file_location("generated_model", out_path)
+            spec = importlib.util.spec_from_file_location("dynamiq.nodes.tools.MCPTool", out_path)
             generated_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(generated_module)
             generated_classes = [

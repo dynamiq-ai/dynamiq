@@ -1239,9 +1239,6 @@ class MPC(BaseConnection):
     )
 
     def connect(self):
-        """
-        Returns the requests module for making HTTP requests.
-        """
         pass
 
     async def get_client(self):
