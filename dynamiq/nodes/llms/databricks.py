@@ -11,6 +11,8 @@ class Databricks(BaseLLM):
     Attributes:
         connection (DatabricksConnection): The connection to use for the Databricks LLM.
         MODEL_PREFIX (str): The prefix for the Databricks model name.
+        reasoning_effort (ReasoningEffort | None): Controls the depth and complexity of reasoning
+        performed by the model.
     """
 
     connection: DatabricksConnection
