@@ -195,7 +195,7 @@ class DynamoDB(MemoryBackend):
                 raise ValueError("Cannot serialize NaN Decimal as timestamp")
             return ts
         else:
-            raise TypeError("Timestamp must be float, int, or Decimal, not {type(ts)}")
+            raise TypeError(f"Timestamp must be float, int, or Decimal, not {type(ts)}")
 
     def _deserialize_item(self, item: dict[str, Any]) -> Message | None:
         try:
