@@ -7,6 +7,7 @@ from .bedrock import Bedrock
 from .cerebras import Cerebras
 from .cohere import Cohere
 from .custom_llm import CustomLLM
+from .databricks import Databricks
 from .deepinfra import DeepInfra
 from .deepseek import DeepSeek
 from .fireworksai import FireworksAI

@@ -1226,3 +1226,21 @@ class NvidiaNIM(BaseApiKeyConnection):
             "api_base": self.url,
             "api_key": self.api_key,
         }
+
+
+class Databricks(BaseApiKeyConnection):
+    url: str = Field(default_factory=partial(get_env_var, "DATABRICKS_API_BASE"))
+    api_key: str = Field(default_factory=partial(get_env_var, "DATABRICKS_API_KEY"))
+
+    def connect(self):
+        pass
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+        """
+        return {
+            "api_base": self.url,
+            "api_key": self.api_key,
+        }
