@@ -23,7 +23,7 @@ class Input(Pass):
     json_schema: dict[str, Any] | None = Field(
         default=None,
         alias="schema",
-        description="""Determines input parameters to workflow.
+        description="""Determines input parameters of workflow.
         Provide it in the properties field format. Example:
         "properties": {
             "query": {
@@ -52,7 +52,7 @@ class Output(Pass):
     json_schema: dict[str, Any] | None = Field(
         default=None,
         alias="schema",
-        description="""Determines input parameters to workflow.
+        description="""Determines output parameters of workflow.
         Provide it in the properties field format. Example:
         "properties": {
             "query": {

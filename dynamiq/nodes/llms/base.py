@@ -108,7 +108,17 @@ class BaseLLM(ConnectionNode):
     _schema_fields: ClassVar[list[str]] = ["model", "temperature", "max_tokens", "prompt"]
 
     @classmethod
-    def _generate_schema(cls, models: list[str], **kwargs):
+    def _generate_schema(cls, models: list[str], **kwargs) -> dict[str, Any]:
+        """
+        Generates full json schema of BaseLLM Node.
+
+        Args:
+            models (list[str]): List of available models.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict[str, Any]: Generated json schema.
+        """
         schema = cls._generate_schema_base(**kwargs)
         schema["properties"]["model"]["enum"] = models
         return schema

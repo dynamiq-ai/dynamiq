@@ -34,4 +34,4 @@ def test_vision_prompt_with_regular_url(node, params):
     try:
         generate_node(node, data, [])
     except Exception as e:
-        pytest.fail(f"Failed to create User instance: {str(e)}")
+        pytest.fail(f"Failed to create Node {node.__name__} instance: {str(e)}")

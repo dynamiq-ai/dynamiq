@@ -246,7 +246,17 @@ class Node(BaseModel, Runnable, ABC):
         self._output_references = NodeOutputReferences(node=self)
 
     @classmethod
-    def _generate_schema_base(cls, fields=[], **kwargs):
+    def _generate_schema_base(cls, fields:list[str]=None, **kwargs) -> dict[str, Any]:
+        """
+        Generates base json schema of Node for specified parameters.
+
+        Args:
+            fields (list[str]): List of parameters to include in schema.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict[str, Any]: Generated json schema.
+        """
         fields_to_include = {}
         generated_schemas = {}
         for name in fields or cls._schema_fields:
@@ -277,8 +287,17 @@ class Node(BaseModel, Runnable, ABC):
         return schema
 
     @classmethod
-    def _generate_schema(cls, **kwargs):
-        return cls._generate_schema_base(kwargs)
+    def _generate_schema(cls, **kwargs) -> dict[str, Any]:
+        """
+        Generates full json schema of Node.
+
+        Args:
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict[str, Any]: Generated json schema.
+        """
+        return cls._generate_schema_base(**kwargs)
 
     @computed_field
     @cached_property

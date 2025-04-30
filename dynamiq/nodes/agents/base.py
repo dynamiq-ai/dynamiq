@@ -305,7 +305,17 @@ class Agent(Node):
     _schema_fields: ClassVar[list[str]] = ["role"]
 
     @classmethod
-    def _generate_schema(cls, llms: dict[BaseLLM, list[str]] = {}, tools=list[Node], **kwargs):
+    def _generate_schema(cls, llms: dict[type[BaseLLM], list[str]] = {}, tools=list[type[Node]], **kwargs) -> dict[str, Any]:
+        """
+        Generates full json schema for Agent with provided llms and tools.
+
+        Args:
+            llms (dict[type[BaseLLM], list[str]]): Available llm providers and models.
+            tools (list[type[Node]]): List of tools.
+
+        Returns:
+            dict[str, Any]: Generated json schema.
+        """
         schema = cls._generate_schema_base(**kwargs)
         schema["properties"]["llm"] = {
             "anyOf": [

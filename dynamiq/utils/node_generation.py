@@ -73,7 +73,7 @@ def generate_boolean() -> bool:
 
 def generate_data_from_schema(schema: dict[str, Any]) -> Any:
     """
-    Recursive fuction that generates mock data based on provided schema.
+    Recursive function that generates mock data based on provided schema.
 
     Args:
         schema (dict[str, Any]): Schema for data generation
