@@ -246,7 +246,7 @@ class Node(BaseModel, Runnable, ABC):
         self._output_references = NodeOutputReferences(node=self)
 
     @classmethod
-    def _generate_schema_base(cls, fields:list[str]=None, **kwargs) -> dict[str, Any]:
+    def _generate_schema_base(cls, fields: list[str] = None, **kwargs) -> dict[str, Any]:
         """
         Generates base json schema of Node for specified parameters.
 
