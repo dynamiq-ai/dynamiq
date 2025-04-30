@@ -1,7 +1,9 @@
 import uuid
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pydantic import Field, create_model
 
 from dynamiq import connections
 from dynamiq.nodes.agents.react import ReActAgent
@@ -14,6 +16,32 @@ def assert_tool_matches(tool, expected, connection):
     assert tool.description == expected["description"]
     assert tool.connection == connection
     assert set(tool.input_schema.__annotations__.items()) == expected["schema"]
+
+
+def mock_get_input_schema(schema_dict: dict[str, Any]):
+    """
+    Creates an BaseClass based on provided JSON schema.
+
+    Args:
+        schema_dict (dict[str, Any]): A JSON schema dictionary describing the tool's expected input.
+    """
+    fields = {}
+    props = schema_dict.get("properties", {})
+    required = set(schema_dict.get("required", []))
+    json_mapping = {
+        "string": "str",
+        "integer": "int",
+        "number": "float",
+        "boolean": "bool",
+        "object": "dict",
+        "array": "list",
+    }
+    for field_name, field_spec in props.items():
+        field_type = json_mapping.get(field_spec.get("type", "string"))
+        default = ... if field_name in required else None
+        description = field_spec.get("description", None)
+        fields[field_name] = (field_type, Field(default, description=description))
+    return create_model(schema_dict.get("title", "MCPToolSchema"), **fields)
 
 
 @pytest.fixture
@@ -29,41 +57,42 @@ def sse_server_connection():
 
 @pytest.fixture
 def mock_mcp_tools(sse_server_connection):
-    return {
-        "add": MCPTool(
-            name="add",
-            description="Add two numbers",
-            json_input_schema={
-                "title": "AddSchema",
-                "type": "object",
-                "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
-                "required": ["a", "b"],
-            },
-            connection=sse_server_connection,
-        ),
-        "multiply": MCPTool(
-            name="multiply",
-            description="Multiply two numbers",
-            json_input_schema={
-                "title": "MultiplySchema",
-                "type": "object",
-                "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
-                "required": ["a", "b"],
-            },
-            connection=sse_server_connection,
-        ),
-        "subtract": MCPTool(
-            name="subtract",
-            description="Subtract two numbers",
-            json_input_schema={
-                "title": "SubtractSchema",
-                "type": "object",
-                "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
-                "required": ["a", "b"],
-            },
-            connection=sse_server_connection,
-        ),
-    }
+    with patch.object(MCPTool, "get_input_schema", side_effect=mock_get_input_schema):
+        return {
+            "add": MCPTool(
+                name="add",
+                description="Add two numbers",
+                json_input_schema={
+                    "title": "AddSchema",
+                    "type": "object",
+                    "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+                    "required": ["a", "b"],
+                },
+                connection=sse_server_connection,
+            ),
+            "multiply": MCPTool(
+                name="multiply",
+                description="Multiply two numbers",
+                json_input_schema={
+                    "title": "MultiplySchema",
+                    "type": "object",
+                    "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+                    "required": ["a", "b"],
+                },
+                connection=sse_server_connection,
+            ),
+            "subtract": MCPTool(
+                name="subtract",
+                description="Subtract two numbers",
+                json_input_schema={
+                    "title": "SubtractSchema",
+                    "type": "object",
+                    "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+                    "required": ["a", "b"],
+                },
+                connection=sse_server_connection,
+            ),
+        }
 
 
 @pytest.fixture
