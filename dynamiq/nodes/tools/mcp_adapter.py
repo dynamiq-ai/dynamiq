@@ -23,8 +23,19 @@ from dynamiq.utils.logger import logger
 
 
 class ToolSelectionMode(Enum):
-    SELECT = "SELECT"
-    DESELECT = "DESELECT"
+    SELECT = "select"
+    EXCLUDE = "exclude"
+
+
+def rename_keys_recursive(data: dict[str, Any] | list[str], key_map: dict[str, str]) -> Any:
+    """
+    Recursively renames keys in a nested dictionary based on a provided key mapping.
+    """
+    if isinstance(data, dict):
+        return {key_map.get(key, key): rename_keys_recursive(value, key_map) for key, value in data.items()}
+    elif isinstance(data, list):
+        return [rename_keys_recursive(item, key_map) for item in data]
+    return data
 
 
 class MCPTool(ConnectionNode):
@@ -43,9 +54,10 @@ class MCPTool(ConnectionNode):
     name: str
     description: str
     input_schema: type[BaseModel]
+    json_input_schema: dict[str, Any]
     connection: MPCConnection
 
-    def __init__(self, input_schema: dict[str, Any], **kwargs):
+    def __init__(self, json_input_schema: dict[str, Any], **kwargs):
         """
         Initializes the MCP tool with a given input schema and additional parameters.
 
@@ -53,8 +65,19 @@ class MCPTool(ConnectionNode):
             input_schema (dict[str, Any]): JSON schema to define input fields.
             **kwargs
         """
-        input_schema = MCPTool.get_input_schema(input_schema)
-        super().__init__(input_schema=input_schema, **kwargs)
+        input_schema = MCPTool.get_input_schema(json_input_schema)
+        json_input_schema = rename_keys_recursive(json_input_schema, {"type": "type_"})
+        super().__init__(input_schema=input_schema, json_input_schema=json_input_schema, **kwargs)
+
+    @property
+    def to_dict_exclude_params(self):
+        parent_dict = super().to_dict_exclude_params.copy()
+        parent_dict.update(
+            {
+                "input_schema": True,
+            }
+        )
+        return parent_dict
 
     @staticmethod
     def get_input_schema(schema_dict) -> type[BaseModel]:
@@ -64,6 +87,7 @@ class MCPTool(ConnectionNode):
         Args:
             schema_dict (dict[str, Any]): A JSON schema dictionary describing the tool's expected input.
         """
+        schema_dict = rename_keys_recursive(schema_dict, {"type_": "type"})
         with TemporaryDirectory() as tmpdir:
             schema_path = Path(tmpdir) / "schema.json"
             out_path = Path(tmpdir) / "model.py"
@@ -172,7 +196,7 @@ class MCPServerAdapter(ConnectionNode):
                     self._mcp_tools[tool.name] = MCPTool(
                         name=tool.name,
                         description=tool.description,
-                        input_schema=tool.inputSchema,
+                        json_input_schema=tool.inputSchema,
                         connection=self.connection,
                     )
 
@@ -212,7 +236,7 @@ class MCPServerAdapter(ConnectionNode):
 
         if self.selection_mode == ToolSelectionMode.SELECT:
             return [v for k, v in self._mcp_tools.items() if k in self.tool_filter_names]
-        elif self.selection_mode == ToolSelectionMode.DESELECT:
+        elif self.selection_mode == ToolSelectionMode.EXCLUDE:
             return [v for k, v in self._mcp_tools.items() if k not in self.tool_filter_names]
         else:
             raise ValueError(f"Invalid selection mode: {self.selection_mode}")

@@ -6,7 +6,7 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections.connections import MPC as MPCConnection
 from dynamiq.connections.managers import get_connection_manager
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter
+from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter, ToolSelectionMode
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
@@ -23,9 +23,11 @@ def setup_agent_with_server():
 
     stdio_connection = MPCConnection(
         command="python",
-        args=[os.path.join("../../tools/mcp_server_as_tool", "mcp_servers", "math_servers.py")],
+        args=[os.path.join("..", "..", "tools", "mcp_server_as_tool", "mcp_servers", "math_servers.py")],
     )
-    mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection, selection_mode="SELECT", tool_filter_names=["add"])
+    mcp_tool_adapter = MCPServerAdapter(
+        connection=stdio_connection, selection_mode=ToolSelectionMode.SELECT, tool_filter_names=["add"]
+    )
 
     agent = ReActAgent(
         name="react-agent",
@@ -57,11 +59,13 @@ def setup_agent_with_tool():
         connection=stdio_connection,
     )
 
+    tools = mcp_tool_adapter.get_mcp_tools()
+
     agent = ReActAgent(
         name="react-agent",
         id="react-agent",
         llm=llm,
-        tools=mcp_tool_adapter.get_mcp_tools(),
+        tools=tools,
         max_loops=5,
     )
 
@@ -80,7 +84,7 @@ def run_wf(wf):
     tracing_retrieval_wf = TracingCallbackHandler()
     result = wf.run(
         input_data={
-            "input": "add 12 by 3.",
+            "input": "add 12 by 3 by using tools.",
         },
         config=runnables.RunnableConfig(callbacks=[tracing_retrieval_wf]),
     )
@@ -121,8 +125,12 @@ def load_wf_from_yaml(yaml_file_path="dag_mcp_server.yaml"):
 
 if __name__ == "__main__":
     wf = setup_agent_with_server()
-    load_wf_to_yaml(wf)
-    wf = load_wf_from_yaml()
+    load_wf_to_yaml(wf, yaml_file_path="dag_mcp_server.yaml")
+    wf = load_wf_from_yaml(yaml_file_path="dag_mcp_server.yaml")
+
+    result, traces = run_wf(wf)
+    print(result)
+    print(traces)
 
     wf = setup_agent_with_tool()
     load_wf_to_yaml(wf, yaml_file_path="dag_mcp_tool.yaml")

@@ -17,7 +17,7 @@ def assert_tool_matches(tool, expected, connection):
 
 
 @pytest.fixture
-def model():
+def llm_model():
     connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="api-key")
     return OpenAI(name="OpenAI", model="gpt-4o-mini", connection=connection)
 
@@ -33,7 +33,7 @@ def mock_mcp_tools(sse_server_connection):
         "add": MCPTool(
             name="add",
             description="Add two numbers",
-            input_schema={
+            json_input_schema={
                 "title": "AddSchema",
                 "type": "object",
                 "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
@@ -44,7 +44,7 @@ def mock_mcp_tools(sse_server_connection):
         "multiply": MCPTool(
             name="multiply",
             description="Multiply two numbers",
-            input_schema={
+            json_input_schema={
                 "title": "MultiplySchema",
                 "type": "object",
                 "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
@@ -55,7 +55,7 @@ def mock_mcp_tools(sse_server_connection):
         "subtract": MCPTool(
             name="subtract",
             description="Subtract two numbers",
-            input_schema={
+            json_input_schema={
                 "title": "SubtractSchema",
                 "type": "object",
                 "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
@@ -92,29 +92,6 @@ async def test_get_mcp_tools(mcp_adapter_tool, sse_server_connection):
 
 
 @pytest.mark.asyncio
-async def test_agent_with_mcp_tool(mcp_adapter_tool, model, sse_server_connection):
-    agent = ReActAgent(
-        name="react-agent",
-        id="react-agent",
-        llm=model,
-        tools=[mcp_adapter_tool],
-        max_loops=10,
-    )
-
-    tools = agent.tools
-    expected_tools = [
-        {"name": "add", "description": "Add two numbers", "schema": {("a", "int"), ("b", "int")}},
-        {"name": "multiply", "description": "Multiply two numbers", "schema": {("a", "float"), ("b", "float")}},
-        {"name": "subtract", "description": "Subtract two numbers", "schema": {("a", "float"), ("b", "float")}},
-    ]
-
-    assert len(tools) == len(expected_tools)
-
-    for tool, expected in zip(tools, expected_tools):
-        assert_tool_matches(tool, expected, sse_server_connection)
-
-
-@pytest.mark.asyncio
 async def test_mock_tool_execute(mcp_adapter_tool):
     tool = mcp_adapter_tool._mcp_tools["add"]  # "add"
 
@@ -140,7 +117,7 @@ def test_mcp_tool_filter_names(mcp_adapter_tool, mock_mcp_tools):
     assert len(tools) == 2
     assert tools[0].name == "add" and tools[1].name == "multiply"
 
-    mcp_adapter_tool.selection_mode = ToolSelectionMode.DESELECT
+    mcp_adapter_tool.selection_mode = ToolSelectionMode.EXCLUDE
     tools = mcp_adapter_tool.get_mcp_tools()
     assert len(tools) == 1
     assert tools[0].name == "subtract"
@@ -151,10 +128,36 @@ def test_mcp_tool_filter_names(mcp_adapter_tool, mock_mcp_tools):
     assert len(tools) == 1
     assert tools[0].name == "multiply"
 
-    mcp_adapter_tool.selection_mode = ToolSelectionMode.DESELECT
+    mcp_adapter_tool.selection_mode = ToolSelectionMode.EXCLUDE
     tools = mcp_adapter_tool.get_mcp_tools()
     assert len(tools) == 2
     assert tools[0].name == "add" and tools[1].name == "subtract"
 
     tools = mcp_adapter_tool.get_mcp_tools(select_all=True)
     assert len(tools) == 3
+
+
+def test_agent_integration_with_mcp_tools(sse_server_connection, mock_mcp_tools, llm_model):
+    mcp_server = MCPServerAdapter(connection=sse_server_connection)
+    mcp_server._mcp_tools = {"add": mock_mcp_tools["add"], "multiply": mock_mcp_tools["multiply"]}
+    mcp_tool = mock_mcp_tools["subtract"]
+
+    agent = ReActAgent(llm=llm_model, tools=[mcp_server, mcp_tool])
+
+    agent_tools = agent.tools
+    expected_tools = [
+        {"name": "add", "description": "Add two numbers", "schema": {("a", "int"), ("b", "int")}},
+        {"name": "multiply", "description": "Multiply two numbers", "schema": {("a", "float"), ("b", "float")}},
+        {"name": "subtract", "description": "Subtract two numbers", "schema": {("a", "float"), ("b", "float")}},
+    ]
+
+    assert len(agent_tools) == 3
+    assert all(isinstance(tool, MCPTool) for tool in agent_tools)
+    for tool, expected in zip(agent_tools, expected_tools):
+        assert_tool_matches(tool, expected, sse_server_connection)
+
+    dict_tools = agent.to_dict()["tools"]
+    assert len(dict_tools) == 2
+    assert dict_tools[0]["name"] == "subtract"
+    assert dict_tools[0]["type"] == "dynamiq.nodes.tools.MCPTool"
+    assert dict_tools[1]["type"] == "dynamiq.nodes.tools.MCPServerAdapter"
