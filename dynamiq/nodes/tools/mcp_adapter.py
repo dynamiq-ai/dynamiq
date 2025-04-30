@@ -4,13 +4,14 @@ import inspect
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import field
+from enum import Enum
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Literal
 
 from datamodel_code_generator import InputFileType, generate
 from mcp import ClientSession
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 
 from dynamiq.connections import MPC as MPCConnection
 from dynamiq.nodes import NodeGroup
@@ -19,6 +20,11 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
+
+
+class ToolSelectionMode(Enum):
+    SELECT = "SELECT"
+    DESELECT = "DESELECT"
 
 
 class MCPTool(ConnectionNode):
@@ -136,16 +142,20 @@ class MCPServerAdapter(ConnectionNode):
       group (Literal[NodeGroup.TOOLS]): Node group.
       name (str): Node name.
       description (str): Node description.
-      mcp_tools (dict): A dict of initialized MCP tools under their names.
       connection (MPCConnection): The connection module with parameters needed to the MCP server.
+      tool_filter_names (list[str]): Names of tools to include or exclude.
+      selection_mode (ToolSelectionMode): Strategy for tool filtering (SELECT or DESELECT).
+      _mcp_tools (dict[str, MCPTool]): Internal dict of initialized MCP tools.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "MCP Adapter Tool"
     description: str = "The tool used to initialize available MCP tools based on provided server parameters."
-
-    mcp_tools: dict[str, MCPTool] = field(default_factory=dict)
     connection: MPCConnection
+
+    tool_filter_names: list[str] = field(default_factory=list)
+    selection_mode: ToolSelectionMode = ToolSelectionMode.SELECT
+    _mcp_tools: dict[str, MCPTool] = PrivateAttr(default_factory=dict)
 
     async def initialize_tools(self):
         """
@@ -159,18 +169,21 @@ class MCPServerAdapter(ConnectionNode):
                 await session.initialize()
                 tools = await session.list_tools()
                 for tool in tools.tools:
-                    self.mcp_tools[tool.name] = MCPTool(
+                    self._mcp_tools[tool.name] = MCPTool(
                         name=tool.name,
                         description=tool.description,
                         input_schema=tool.inputSchema,
                         connection=self.connection,
                     )
 
-        logger.info(f"Tool {self.name}: {len(self.mcp_tools)} MCP tools initialized from a server.")
+        logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
 
-    def get_mcp_tools(self) -> list[MCPTool]:
+    def get_mcp_tools(self, select_all: bool = False) -> list[MCPTool]:
         """
         Synchronously fetches and initializes MCP tools if not already available.
+
+        Args:
+            select_all (bool): If True, returns all tools regardless of filtering.
 
         Returns:
             list[MCPTool]: A list of initialized MCPTool instances.
@@ -179,18 +192,30 @@ class MCPServerAdapter(ConnectionNode):
             with ThreadPoolExecutor() as executor:
                 future = executor.submit(lambda: asyncio.run(self.get_mcp_tools_async()))
                 return future.result()
-        return asyncio.run(self.get_mcp_tools_async())
+        return asyncio.run(self.get_mcp_tools_async(select_all=select_all))
 
-    async def get_mcp_tools_async(self) -> list[MCPTool]:
+    async def get_mcp_tools_async(self, select_all: bool = False) -> list[MCPTool]:
         """
         Asynchronously fetches and initializes MCP tools if not already available.
+
+        Args:
+            select_all (bool): If True, returns all tools regardless of filtering.
 
         Returns:
             list[MCPTool]: A list of initialized MCPTool instances.
         """
-        if not self.mcp_tools:
+        if not self._mcp_tools:
             await self.initialize_tools()
-        return list(self.mcp_tools.values())
+
+        if not self.tool_filter_names or select_all:
+            return list(self._mcp_tools.values())
+
+        if self.selection_mode == ToolSelectionMode.SELECT:
+            return [v for k, v in self._mcp_tools.items() if k in self.tool_filter_names]
+        elif self.selection_mode == ToolSelectionMode.DESELECT:
+            return [v for k, v in self._mcp_tools.items() if k not in self.tool_filter_names]
+        else:
+            raise ValueError(f"Invalid selection mode: {self.selection_mode}")
 
     def execute(self, **kwargs):
         """
