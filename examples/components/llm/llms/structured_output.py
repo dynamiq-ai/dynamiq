@@ -23,8 +23,8 @@ def validate_json_response(response: str) -> Document:
         return None
 
 
-def run_openai_node(prompt: Prompt, reponse_format: dict):
-    openai_node = OpenAI(model="gpt-4o-mini", reponse_format=reponse_format)
+def run_openai_node(prompt: Prompt, response_format: dict):
+    openai_node = OpenAI(model="gpt-4o-mini", response_format=response_format)
     response = openai_node.run(input_data={}, prompt=prompt)
     return response
 
