@@ -258,7 +258,7 @@ class Node(BaseModel, Runnable, ABC):
             if hasattr(annotation, "_generate_schema"):
                 generated_schemas[name] = annotation._generate_schema()
             else:
-                fields_to_include[parameter_name] = (annotation, ...)
+                fields_to_include[parameter_name] = (annotation, Field(..., description=field.description))
 
         model = create_model(cls.__name__, **fields_to_include)
         schema = model.schema()
@@ -266,6 +266,14 @@ class Node(BaseModel, Runnable, ABC):
         for param, param_schema in generated_schemas.items():
             schema["properties"][param] = param_schema
 
+        class_type = f"{cls.__module__.rsplit('.', 1)[0]}.{cls.__name__}"
+        schema["properties"]["type"] = {"type": "string", "enum": [class_type]}
+
+        if "required" not in schema:
+            schema["required"] = []
+        schema["required"].append("type")
+
+        schema["type"] = "object"
         return schema
 
     @classmethod

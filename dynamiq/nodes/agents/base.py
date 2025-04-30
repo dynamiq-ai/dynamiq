@@ -280,7 +280,7 @@ class Agent(Node):
 
     AGENT_PROMPT_TEMPLATE: ClassVar[str] = AGENT_PROMPT_TEMPLATE
 
-    llm: Node = Field(..., description="LLM used by the agent.")
+    llm: BaseLLM = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     tools: list[Node] = []
@@ -305,20 +305,22 @@ class Agent(Node):
     _schema_fields: ClassVar[list[str]] = ["role"]
 
     @classmethod
-    def _generate_schema(cls, llms: list[(BaseLLM, list[str])] = [], **kwargs):
+    def _generate_schema(cls, llms: dict[BaseLLM, list[str]] = {}, tools=list[Node], **kwargs):
         schema = cls._generate_schema_base(**kwargs)
-
-        llm_schemas = []
-        for llm, models in llms:
-            llm_schema = llm._generate_schema(models=models, fields=["model"])
-            llm_schema["properties"]["type"] = {"type": "string", "enum": [llm.type]}
-            llm_schemas.append(llm_schema)
-
         schema["properties"]["llm"] = {
-            "anyOf": llm_schemas,
+            "anyOf": [
+                {"type": "object", **llm._generate_schema(models=models, fields=["model", "temperature", "max_tokens"])}
+                for llm, models in llms.items()
+            ],
             "additionalProperties": False,
         }
 
+        schema["properties"]["tools"] = {
+            "type": "array",
+            "items": {"anyOf": [{"type": "object", **tool._generate_schema()} for tool in tools]},
+        }
+
+        schema["required"] += ["tools", "llm"]
         return schema
 
     def __init__(self, **kwargs):
