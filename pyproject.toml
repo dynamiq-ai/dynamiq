@@ -58,6 +58,8 @@ rouge-score = "~0.1.2"
 lxml = "^5.3.1"
 elasticsearch = "~8.12.0"
 numpy = "~1.26.0"
+mcp = "1.6.0"
+datamodel-code-generator = "0.30.0"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~70.0.0"
@@ -101,8 +103,6 @@ pygraphviz = "~1.13"
 agentops = "~0.3.12"
 langfuse = "^2.51.2"
 peft = "^0.13.0"
-mcp = "1.6.0"
-datamodel-code-generator = "0.30.0"
 
 [tool.bandit]
 exclude_dirs = ["tests"]
