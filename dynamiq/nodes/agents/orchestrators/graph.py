@@ -38,7 +38,6 @@ class GraphOrchestrator(Orchestrator):
         initial_state (str): State to start from.
         objective (Optional[str]): The main objective of the orchestration.
         max_loops (Optional[int]): Maximum number of transition between states.
-        summarize_execution (Optional[bool]): Determines whether to call Manager to generate final output.
     """
 
     name: str | None = "GraphOrchestrator"
