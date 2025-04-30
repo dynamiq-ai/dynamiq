@@ -1,11 +1,14 @@
+import json
 import os
 
-from dynamiq import Workflow
+from dynamiq import Workflow, runnables
+from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections.connections import MPC as MPCConnection
 from dynamiq.connections.managers import get_connection_manager
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
+from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
 
 
@@ -74,12 +77,18 @@ def run_wf(wf):
     Args:
         wf (Workflow): The workflow to execute.
     """
+    tracing_retrieval_wf = TracingCallbackHandler()
     result = wf.run(
         input_data={
             "input": "add 12 by 3.",
-        }
+        },
+        config=runnables.RunnableConfig(callbacks=[tracing_retrieval_wf]),
     )
-    print(result)
+    dumped_traces_wf = json.dumps(
+        {"runs": [run.to_dict() for run in tracing_retrieval_wf.runs.values()]},
+        cls=JsonWorkflowEncoder,
+    )
+    return result, dumped_traces_wf
 
 
 def load_wf_to_yaml(wf, yaml_file_path="dag_mcp_server.yaml"):
@@ -119,4 +128,6 @@ if __name__ == "__main__":
     load_wf_to_yaml(wf, yaml_file_path="dag_mcp_tool.yaml")
     wf = load_wf_from_yaml(yaml_file_path="dag_mcp_tool.yaml")
 
-    run_wf(wf)
+    result, traces = run_wf(wf)
+    print(result)
+    print(traces)
