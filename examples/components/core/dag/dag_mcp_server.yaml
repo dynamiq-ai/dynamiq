@@ -1,0 +1,82 @@
+connections:
+  fcec75ce-d672-42a9-93a9-c31712c5e7b4:
+    id: fcec75ce-d672-42a9-93a9-c31712c5e7b4
+    api_key: ${oc.env:OPENAI_API_KEY}
+    url: https://api.openai.com/v1
+    type: dynamiq.connections.OpenAI
+  c5e0ae02-9f04-4c96-a953-371151d2cb0e:
+    id: c5e0ae02-9f04-4c96-a953-371151d2cb0e
+    timeout: 5.0
+    sse_read_timeout: 300
+    command: python
+    args:
+    - ../../tools/mcp_server_as_tool/mcp_servers/math_servers.py
+    encoding: utf-8
+    encoding_error_handler: strict
+    type: dynamiq.connections.MPC
+nodes:
+  react-agent:
+    id: react-agent
+    name: react-agent
+    description: null
+    group: agents
+    input_message:
+      content: '{{input}}'
+      role: user
+      metadata: null
+    role: ''
+    inference_mode: DEFAULT
+    behaviour_on_max_loops: raise
+    format_schema: []
+    type: dynamiq.nodes.agents.ReActAgent
+    depends: []
+    input_mapping: {}
+    llm:
+      id: 9792cee0-2901-4d4b-af7a-ae07a4570a33
+      name: OpenAI LLM
+      description: null
+      group: llms
+      metadata: null
+      is_postponed_component_init: false
+      is_optimized_for_agents: false
+      is_files_allowed: false
+      callbacks: []
+      connection: fcec75ce-d672-42a9-93a9-c31712c5e7b4
+      model: gpt-4o
+      prompt: null
+      temperature: 0.1
+      max_tokens: 4000
+      budget_tokens: 1024
+      inference_mode: DEFAULT
+      reasoning_effort: medium
+      type: dynamiq.nodes.llms.OpenAI
+      depends: []
+      input_mapping: {}
+    tools:
+    - id: 772eb091-37cb-4039-990b-4eb7c4868d98
+      name: MCP Adapter Tool
+      description: The tool used to initialize available MCP tools based on provided
+        server parameters.
+      group: tools
+      callbacks: []
+      connection: c5e0ae02-9f04-4c96-a953-371151d2cb0e
+      tool_filter_names:
+      - add
+      selection_mode: SELECT
+      type: dynamiq.nodes.tools.MCPServerAdapter
+      depends: []
+      input_mapping: {}
+flows:
+  f95a6bde-7d92-4c97-85d5-3f620fa8868a:
+    id: f95a6bde-7d92-4c97-85d5-3f620fa8868a
+    name: Flow
+    max_node_workers: null
+    type: dynamiq.flows.Flow
+    nodes:
+    - react-agent
+workflows:
+  736f8f62-3d2b-442c-8b97-88a302aef890:
+    name: Workflow
+    id: 736f8f62-3d2b-442c-8b97-88a302aef890
+    type: dynamiq.workflows.Workflow
+    flow: f95a6bde-7d92-4c97-85d5-3f620fa8868a

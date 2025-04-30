@@ -98,7 +98,6 @@ def load_wf_from_yaml(yaml_file_path="dag_mcp_server.yaml"):
     Deserializes a workflow from a YAML file.
 
     Args:
-        wf (Workflow): The workflow to save.
         yaml_file_path (str): Path to the YAML representation of the workflow.
     """
     with get_connection_manager() as cm:
