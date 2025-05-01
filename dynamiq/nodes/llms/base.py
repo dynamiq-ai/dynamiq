@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.llm_tool import Tool
@@ -77,7 +78,6 @@ class BaseLLM(ConnectionNode):
         response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output
         tools list[Tool]: List of tools that llm can call.
     """
-
     MODEL_PREFIX: ClassVar[str | None] = None
     name: str | None = "LLM"
     model: str
@@ -100,6 +100,37 @@ class BaseLLM(ConnectionNode):
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
     input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
+    inference_mode: InferenceMode = InferenceMode.DEFAULT
+    schema_: dict[str, Any] | type[BaseModel] | None = Field(
+        None, description="Schema for structured output or function calling.", alias="schema"
+    )
+
+    def _get_response_format_and_tools(
+        self, inference_mode: InferenceMode, schema: dict[str, Any] | type[BaseModel] | None
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Get response format and tools based on inference mode and schema.
+        Args:
+            inference_mode (InferenceMode): The inference mode to use.
+            schema (dict[str, Any] | type[BaseModel] | None): The schema to use.
+        Returns:
+            tuple[dict[str, Any] | None, dict[str, Any] | None]: Response format and tools.
+        Raises:
+            ValueError: If schema is None when using STRUCTURED_OUTPUT or FUNCTION_CALLING modes.
+        """
+        response_format = None
+        tools = None
+
+        match inference_mode:
+            case InferenceMode.STRUCTURED_OUTPUT:
+                if schema is None:
+                    raise ValueError("Schema must be provided when using STRUCTURED_OUTPUT inference mode")
+                response_format = schema
+            case InferenceMode.FUNCTION_CALLING:
+                if schema is None:
+                    raise ValueError("Schema must be provided when using FUNCTION_CALLING inference mode")
+                tools = schema
+
+        return response_format, tools
 
     @field_validator("model")
     @classmethod
@@ -305,8 +336,13 @@ class BaseLLM(ConnectionNode):
         if self.thinking_enabled:
             params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
 
-        response_format = self.response_format or response_format or prompt.response_format
-        tools = self.tools or tools or base_tools
+        print(self.schema_)
+        schema_response_format, schema_tools = self._get_response_format_and_tools(
+            inference_mode=self.inference_mode, schema=self.schema_
+        )
+
+        response_format = self.response_format or response_format or prompt.response_format or schema_response_format
+        tools = self.tools or tools or base_tools or schema_tools
 
         common_params: dict[str, Any] = {
             "model": self.model,
