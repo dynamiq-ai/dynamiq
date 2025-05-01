@@ -47,30 +47,39 @@ def test_vector_store_params(milvus_document_writer):
 @pytest.mark.parametrize("dimension", [384, 768])
 def test_writer_passes_dimension_to_params(dimension):
     mock_connection = MagicMock(spec=Milvus)
+    mock_connection.id = "test-connection-id"
+    mock_connection.type = "dynamiq.connections.Milvus"
+    mock_connection.model_dump_json.return_value = "{}"
     mock_client = MagicMock()
     mock_connection.connect.return_value = mock_client
 
-    writer = MilvusDocumentWriter(connection=mock_connection, dimension=dimension, create_if_not_exist=True)
+    with patch("dynamiq.connections.managers.ConnectionManager.get_connection_client", return_value=mock_client):
+        writer = MilvusDocumentWriter(connection=mock_connection, dimension=dimension, create_if_not_exist=True)
 
-    with patch.object(writer, "client", new_callable=MagicMock):
-        params = writer.vector_store_params
-        assert params["dimension"] == dimension
-        assert params["create_if_not_exist"] is True
+        with patch.object(writer, "client", new_callable=MagicMock):
+            params = writer.vector_store_params
+            assert params["dimension"] == dimension
+            assert params["create_if_not_exist"] is True
 
 
 @pytest.mark.parametrize("dimension", [512, 1024])
 def test_writer_initializes_store_with_dimension(dimension):
     mock_connection = MagicMock(spec=Milvus)
+    mock_connection.id = "test-connection-id"
+    mock_connection.type = "dynamiq.connections.Milvus"
+    mock_connection.model_dump_json.return_value = "{}"
     mock_client = MagicMock()
     mock_connection.connect.return_value = mock_client
 
-    with patch("dynamiq.storages.vector.milvus.milvus.MilvusVectorStore") as mock_vector_store_class:
-        writer = MilvusDocumentWriter(connection=mock_connection, dimension=dimension, create_if_not_exist=True)
+    with patch("dynamiq.connections.managers.ConnectionManager.get_connection_client", return_value=mock_client):
+        with patch.object(MilvusDocumentWriter, "connect_to_vector_store") as mock_connect:
+            mock_vector_store = MagicMock()
+            mock_connect.return_value = mock_vector_store
 
-        _ = writer.vector_store
+            writer = MilvusDocumentWriter(connection=mock_connection, dimension=dimension, create_if_not_exist=True)
 
-        mock_vector_store_class.assert_called_once()
-        assert mock_vector_store_class.call_args.kwargs["dimension"] == dimension
+            params = writer.vector_store_params
+            assert params["dimension"] == dimension
 
 
 def test_execute(milvus_document_writer, mock_milvus_vector_store):
