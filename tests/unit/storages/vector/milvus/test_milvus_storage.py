@@ -188,7 +188,6 @@ def test_dimension_used_in_schema(dimension):
 
     vector_store = MilvusVectorStore(client=mock_client, dimension=dimension, create_if_not_exist=True)
 
-    # Find the add_field call for the embedding field
     for call in mock_schema.add_field.call_args_list:
         args, kwargs = call
         if kwargs.get("field_name") == vector_store.embedding_key:

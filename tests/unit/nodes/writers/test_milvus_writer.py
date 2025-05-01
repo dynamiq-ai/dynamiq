@@ -62,10 +62,9 @@ def test_writer_passes_dimension_to_params(dimension, mock_milvus_connection):
     with patch("dynamiq.connections.managers.ConnectionManager.get_connection_client", return_value=mock_client):
         writer = MilvusDocumentWriter(connection=mock_connection, dimension=dimension, create_if_not_exist=True)
 
-        with patch.object(writer, "client", new_callable=MagicMock):
-            params = writer.vector_store_params
-            assert params["dimension"] == dimension
-            assert params["create_if_not_exist"] is True
+        params = writer.vector_store_params
+        assert params["dimension"] == dimension
+        assert params["create_if_not_exist"] is True
 
 
 @pytest.mark.parametrize("dimension", [512, 1024])
