@@ -336,7 +336,6 @@ class BaseLLM(ConnectionNode):
         if self.thinking_enabled:
             params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
 
-        print(self.schema_)
         schema_response_format, schema_tools = self._get_response_format_and_tools(
             inference_mode=self.inference_mode, schema=self.schema_
         )
