@@ -798,7 +798,7 @@ class ReActAgent(Agent):
         Handle the case where max loops are exceeded by crafting a thoughtful response.
         Uses XMLParser to extract the final answer from the LLM's last attempt.
         """
-        self._prompt.messages.append(Message(role=MessageRole.USER, content=REACT_MAX_LOOPS_PROMPT))
+        self._prompt.messages.append(Message(role=MessageRole.SYSTEM, content=REACT_MAX_LOOPS_PROMPT))
         llm_final_attempt_result = self._run_llm(self._prompt.messages, config=config, **kwargs)
         llm_final_attempt = llm_final_attempt_result.output["content"]
         self._run_depends = [NodeDependency(node=self.llm).to_dict()]
