@@ -12,6 +12,7 @@ from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.function_tool import FunctionTool
 from dynamiq.nodes.types import NodeGroup
+from dynamiq.prompts import MessageRole
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
@@ -281,8 +282,8 @@ class GraphState(Node):
 
             history_messages.append(
                 {
-                    "role": "system",
-                    "content": f"Result: {result}",
+                    "role": MessageRole.ASSISTANT,
+                    "content": result,
                 }
             )
 
@@ -300,8 +301,8 @@ class GraphState(Node):
 
                 history_messages.append(
                     {
-                        "role": "system",
-                        "content": f"Result: {result}",
+                        "role": MessageRole.ASSISTANT,
+                        "content": result,
                     }
                 )
 
