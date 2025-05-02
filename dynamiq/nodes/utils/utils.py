@@ -32,7 +32,7 @@ class Input(Pass):
         }
     """,
     )
-    _schema_fields: ClassVar[list[str]] = ["json_schema"]
+    _json_schema_fields: ClassVar[list[str]] = ["json_schema"]
 
 
 class Output(Pass):
@@ -61,4 +61,4 @@ class Output(Pass):
         }
     """,
     )
-    _schema_fields: ClassVar[list[str]] = ["json_schema"]
+    _json_schema_fields: ClassVar[list[str]] = ["json_schema"]

@@ -302,14 +302,20 @@ class Agent(Node):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
-    _schema_fields: ClassVar[list[str]] = ["role"]
+    _json_schema_fields: ClassVar[list[str]] = ["role"]
 
     @classmethod
-    def _generate_schema(
+    def _generate_json_schema(
         cls, llms: dict[type[BaseLLM], list[str]] = {}, tools=list[type[Node]], **kwargs
     ) -> dict[str, Any]:
         """
         Generates full json schema for Agent with provided llms and tools.
+        This schema is designed for compatibility with the WorkflowYamlParser,
+        containing enough partial information to instantiate an Agent.
+        Parameters name to be included in the schema are either defined in the _json_schema_fields class variable or
+        passed via the fields parameter.
+
+        It generates a schema using the provided LLMs and tools.
 
         Args:
             llms (dict[type[BaseLLM], list[str]]): Available llm providers and models.
@@ -318,10 +324,13 @@ class Agent(Node):
         Returns:
             dict[str, Any]: Generated json schema.
         """
-        schema = cls._generate_schema_base(**kwargs)
+        schema = super()._generate_json_schema(**kwargs)
         schema["properties"]["llm"] = {
             "anyOf": [
-                {"type": "object", **llm._generate_schema(models=models, fields=["model", "temperature", "max_tokens"])}
+                {
+                    "type": "object",
+                    **llm._generate_json_schema(models=models, fields=["model", "temperature", "max_tokens"]),
+                }
                 for llm, models in llms.items()
             ],
             "additionalProperties": False,
@@ -329,7 +338,7 @@ class Agent(Node):
 
         schema["properties"]["tools"] = {
             "type": "array",
-            "items": {"anyOf": [{"type": "object", **tool._generate_schema()} for tool in tools]},
+            "items": {"anyOf": [{"type": "object", **tool._generate_json_schema()} for tool in tools]},
         }
 
         schema["required"] += ["tools", "llm"]

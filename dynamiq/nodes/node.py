@@ -211,6 +211,8 @@ class Node(BaseModel, Runnable, ABC):
         is_postponed_component_init (bool): Whether component initialization is postponed.
         is_optimized_for_agents (bool): Whether to optimize output for agents. By default is set to False.
         supports_files (bool): Whether the node has access to files. By default is set to False.
+        _json_schema_fields (list[str]): List of parameter names that will be used when generating json schema
+          with _generate_json_schema.
     """
     id: str = Field(default_factory=generate_uuid)
     name: str | None = None
@@ -236,7 +238,7 @@ class Node(BaseModel, Runnable, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[BaseModel] | None] = None
     callbacks: list[NodeCallbackHandler] = []
-    _schema_fields: ClassVar[list[str]] = []
+    _json_schema_fields: ClassVar[list[str]] = []
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -246,9 +248,13 @@ class Node(BaseModel, Runnable, ABC):
         self._output_references = NodeOutputReferences(node=self)
 
     @classmethod
-    def _generate_schema_base(cls, fields: list[str] = None, **kwargs) -> dict[str, Any]:
+    def _generate_json_schema(cls, fields: list[str] = None, **kwargs) -> dict[str, Any]:
         """
         Generates base json schema of Node for specified parameters.
+        This schema is designed for compatibility with the WorkflowYamlParser,
+        containing enough partial information to instantiate an Node.
+        Parameters name to be included in the schema are either defined in the _json_schema_fields class variable or
+        passed via the fields parameter.
 
         Args:
             fields (list[str]): List of parameters to include in schema.
@@ -259,14 +265,14 @@ class Node(BaseModel, Runnable, ABC):
         """
         fields_to_include = {}
         generated_schemas = {}
-        for name in fields or cls._schema_fields:
+        for name in fields or cls._json_schema_fields:
             field = cls.__fields__[name]
             annotation = clear_annotation(field.annotation)
             parameter_name = name
             if field.alias:
                 parameter_name = field.alias
-            if hasattr(annotation, "_generate_schema"):
-                generated_schemas[name] = annotation._generate_schema()
+            if hasattr(annotation, "_generate_json_schema"):
+                generated_schemas[name] = annotation._generate_json_schema()
             else:
                 fields_to_include[parameter_name] = (annotation, Field(..., description=field.description))
 
@@ -285,19 +291,6 @@ class Node(BaseModel, Runnable, ABC):
 
         schema["type"] = "object"
         return schema
-
-    @classmethod
-    def _generate_schema(cls, **kwargs) -> dict[str, Any]:
-        """
-        Generates full json schema of Node.
-
-        Args:
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            dict[str, Any]: Generated json schema.
-        """
-        return cls._generate_schema_base(**kwargs)
 
     @computed_field
     @cached_property

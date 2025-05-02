@@ -24,14 +24,15 @@ from dynamiq.utils.node_generation import generate_data_from_schema, generate_no
         (TavilyTool, {}),
     ],
 )
-def test_vision_prompt_with_regular_url(node, params):
+def test_nodes_schema_generation(node, params):
     """
-    Tests if nodes can be generated from defined schemas
+    Tests if nodes can be generated from defined schemas.
     """
-    schema = node._generate_schema(**params)
+    schema = node._generate_json_schema(**params)
     data = generate_data_from_schema(schema)
 
     try:
-        generate_node(node, data, [])
-    except Exception as e:
+        _, node_instance = generate_node(node, data, [])
+        assert isinstance(node_instance, node)
+    except ValueError as e:
         pytest.fail(f"Failed to create Node {node.__name__} instance: {str(e)}")

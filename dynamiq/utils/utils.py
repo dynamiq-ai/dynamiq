@@ -255,7 +255,17 @@ def is_called_from_async_context() -> bool:
         return False
 
 
-def clear_annotation(annotation):
+def clear_annotation(annotation: Any) -> Any:
+    """
+    Returns the first non-None type if the annotation allows multiple types;
+    otherwise, returns the annotation itself.
+
+    Args:
+        annotation (Any): Provided annotation.
+
+    Returns:
+        Any: Cleared annotation.
+    """
     if get_origin(annotation) in (Union, UnionType):
         first_non_none = next((t for t in get_args(annotation) if t is not NoneType), None)
         return first_non_none

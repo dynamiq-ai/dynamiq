@@ -105,12 +105,19 @@ class BaseLLM(ConnectionNode):
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
     input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
-    _schema_fields: ClassVar[list[str]] = ["model", "temperature", "max_tokens", "prompt"]
+    _json_schema_fields: ClassVar[list[str]] = ["model", "temperature", "max_tokens", "prompt"]
 
     @classmethod
-    def _generate_schema(cls, models: list[str], **kwargs) -> dict[str, Any]:
+    def _generate_json_schema(cls, models: list[str], **kwargs) -> dict[str, Any]:
         """
         Generates full json schema of BaseLLM Node.
+
+        This schema is designed for compatibility with the WorkflowYamlParser,
+        containing enough partial information to instantiate an BaseLLM.
+        Parameters name to be included in the schema are either defined in the _json_schema_fields class variable or
+        passed via the fields parameter.
+
+        It generates a schema using provided models.
 
         Args:
             models (list[str]): List of available models.
@@ -119,7 +126,7 @@ class BaseLLM(ConnectionNode):
         Returns:
             dict[str, Any]: Generated json schema.
         """
-        schema = cls._generate_schema_base(**kwargs)
+        schema = super()._generate_json_schema(**kwargs)
         schema["properties"]["model"]["enum"] = models
         return schema
 
