@@ -216,20 +216,25 @@ class UnstructuredFileConverter(BaseConverter):
 
         Returns:
             List[Dict[str, Any]]: A list of elements extracted from the file.
+
+        Raises:
+            FileNotFoundError: If the file doesn't exist
+            ValueError: If the file is empty or cannot be processed
+            Exception: Any other exception that occurs during processing
         """
-        try:
-            return partition_via_api(
-                filename=str(filepath),
-                api_url=self.connection.url,
-                api_key=self.connection.api_key,
-                strategy=self.strategy,
-                **self.unstructured_kwargs or {},
-            )
-        except Exception as e:
-            logger.warning(
-                f"Unstructured could not process file {filepath}. Error: {e}"
-            )
-            return []
+        if not filepath.exists():
+            raise FileNotFoundError(f"File not found: {filepath}")
+
+        if filepath.stat().st_size == 0:
+            raise ValueError(f"Empty file cannot be processed: {filepath}")
+
+        return partition_via_api(
+            filename=str(filepath),
+            api_url=self.connection.url,
+            api_key=self.connection.api_key,
+            strategy=self.strategy,
+            **self.unstructured_kwargs or {},
+        )
 
     def _partition_file_into_elements_by_file(
         self,
@@ -245,22 +250,20 @@ class UnstructuredFileConverter(BaseConverter):
 
         Returns:
             List[Dict[str, Any]]: A list of elements extracted from the file.
+
+        Raises:
+            ValueError: If the file is empty or cannot be processed
+            Exception: Any other exception that occurs during processing
         """
-        try:
-            return partition_via_api(
-                filename=None,
-                file=file,
-                metadata_filename=metadata_filename,
-                api_url=self.connection.url,
-                api_key=self.connection.api_key,
-                strategy=self.strategy,
-                **self.unstructured_kwargs or {},
-            )
-        except Exception as e:
-            logger.warning(
-                f"Unstructured could not process file {metadata_filename}. Error: {e}"
-            )
-            return []
+        return partition_via_api(
+            filename=None,
+            file=file,
+            metadata_filename=metadata_filename,
+            api_url=self.connection.url,
+            api_key=self.connection.api_key,
+            strategy=self.strategy,
+            **self.unstructured_kwargs or {},
+        )
 
     def _create_documents(
         self,
