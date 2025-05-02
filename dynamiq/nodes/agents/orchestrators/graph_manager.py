@@ -34,25 +34,6 @@ Chat history:
 """  # noqa: E501
 
 
-PROMPT_TEMPLATE_AGENT_MANAGER_FINAL_ANSWER = """
-Original Task: {input_task}
-
-You have completed the task using various specialized agents. Here's a summary of the work done:
-
-{chat_history}
-
-Your task now is to provide a comprehensive and coherent final answer to the original task.
-This answer should:
-1. Directly address the original task
-2. Synthesize the information gathered by all agents
-3. Present a clear, well-structured response
-4. Include relevant details and insights
-5. Be written in a professional tone suitable for a final report
-
-Please generate the final answer:
-"""  # noqa: E501
-
-
 PROMPT_TEMPLATE_GRAPH_AGENT_MANAGER_HANDLE_INPUT = """
 You are the Graph Agent Manager. Your goal is to handle the user's request.
 
@@ -184,7 +165,6 @@ class GraphAgentManager(AgentManager):
             {
                 "plan": self._get_next_state_prompt(),
                 "assign": self._get_actions_prompt(),
-                "final": self._get_adaptive_final_prompt(),
                 "handle_input": self._get_graph_handle_input_prompt(),
             }
         )
@@ -203,8 +183,3 @@ class GraphAgentManager(AgentManager):
     def _get_actions_prompt() -> str:
         """Return actions prompt template."""
         return PROMPT_TEMPLATE_AGENT_MANAGER_ACTIONS
-
-    @staticmethod
-    def _get_adaptive_final_prompt() -> str:
-        """Return the adaptive final answer prompt template."""
-        return PROMPT_TEMPLATE_AGENT_MANAGER_FINAL_ANSWER
