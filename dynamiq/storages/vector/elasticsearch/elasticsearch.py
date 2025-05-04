@@ -6,11 +6,10 @@ from elasticsearch import NotFoundError
 from elasticsearch.helpers import bulk
 
 from dynamiq.connections import Elasticsearch
-from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.elasticsearch.filters import _normalize_filters
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
-from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -49,7 +48,7 @@ class ElasticsearchVectorStoreWriterParams(ElasticsearchVectorStoreParams, BaseW
     pass
 
 
-class ElasticsearchVectorStore:
+class ElasticsearchVectorStore(BaseVectorStore):
     """Vector store using Elasticsearch for dense vector search."""
 
     def __init__(
@@ -415,17 +414,6 @@ class ElasticsearchVectorStore:
         bool_query = {"bool": filters}
 
         self.client.delete_by_query(index=self.index_name, query=bool_query, refresh=True)
-
-    def delete_documents_by_file_id(self, file_id: str) -> None:
-        """
-        Delete documents from the vector store based on the provided file ID.
-            file_id should be located in the metadata of the document.
-
-        Args:
-            file_id (str): The file ID to filter by.
-        """
-        filters = create_file_id_filter(file_id)
-        self.delete_documents_by_filters(filters)
 
     def list_documents(
         self,
