@@ -173,14 +173,12 @@ class UnstructuredFileConverter(BaseConverter):
         None
         """
 
-    def _process_file(
-        self, file: Path | BytesIO, metadata: dict[str, Any]
-    ) -> list[Any]:
+    def _process_file(self, file: Path | str | BytesIO, metadata: dict[str, Any]) -> list[Any]:
         """
         Process a single file and create documents.
 
         Args:
-            file (Union[Path, BytesIO]): The file to process.
+            file (Union[Path, str, BytesIO]): The file to process.
             metadata (Dict[str, Any]): Metadata to attach to the documents.
 
         Returns:
@@ -188,16 +186,16 @@ class UnstructuredFileConverter(BaseConverter):
 
         Raises:
             ValueError: If the file object doesn't have a name and its extension can't be guessed.
-            TypeError: If the file argument is neither a Path nor a BytesIO object.
+            TypeError: If the file argument is neither a Path, string, nor a BytesIO object.
         """
-        if isinstance(file, Path):
+        if isinstance(file, (Path, str)):
             file_name = str(file)
             elements = self._partition_file_into_elements_by_filepath(file_name)
         elif isinstance(file, BytesIO):
             file_name = get_filename_for_bytesio(file)
             elements = self._partition_file_into_elements_by_file(file, file_name)
         else:
-            raise TypeError("Expected a Path object or a BytesIO object.")
+            raise TypeError("Expected a Path object, a string path, or a BytesIO object.")
         return self._create_documents(
             filepath=file_name,
             elements=elements,
@@ -205,14 +203,12 @@ class UnstructuredFileConverter(BaseConverter):
             metadata=metadata,
         )
 
-    def _partition_file_into_elements_by_filepath(
-        self, filepath: Path
-    ) -> list[dict[str, Any]]:
+    def _partition_file_into_elements_by_filepath(self, filepath: Path | str) -> list[dict[str, Any]]:
         """
         Partition a file into elements using the Unstructured API.
 
         Args:
-            filepath (Path): The path to the file to partition.
+            filepath (Path | str): The path to the file to partition.
 
         Returns:
             List[Dict[str, Any]]: A list of elements extracted from the file.
@@ -222,6 +218,9 @@ class UnstructuredFileConverter(BaseConverter):
             ValueError: If the file is empty or cannot be processed
             Exception: Any other exception that occurs during processing
         """
+        if isinstance(filepath, str):
+            filepath = Path(filepath)
+
         if not filepath.exists():
             raise FileNotFoundError(f"File not found: {filepath}")
 
