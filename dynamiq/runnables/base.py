@@ -23,8 +23,6 @@ class RunnableConfig(BaseModel):
         callbacks (list[BaseCallbackHandler]): List of callback handlers.
         cache (CacheConfig | None): Cache configuration.
         max_node_workers (int | None): Maximum number of node workers.
-        fail_workflow_on_node_error (bool): If True, a node failure will cause the workflow to fail.
-                                          If False, node failures are captured but don't affect workflow status.
     """
 
     run_id: str | None = Field(default_factory=generate_uuid)
@@ -32,7 +30,6 @@ class RunnableConfig(BaseModel):
     cache: CacheConfig | None = None
     max_node_workers: int | None = None
     nodes_override: dict[str, NodeRunnableConfig] = {}
-    fail_workflow_on_node_error: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
