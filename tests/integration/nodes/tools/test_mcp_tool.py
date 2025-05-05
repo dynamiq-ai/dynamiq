@@ -141,23 +141,23 @@ def test_mcp_tool_filter_names(mcp_adapter_tool, mock_mcp_tools):
     mcp_adapter_tool._mcp_tools = mock_mcp_tools
 
     mcp_adapter_tool.tool_filter_names = ["add", "multiply"]
-    mcp_adapter_tool.selection_mode = ToolSelectionMode.SELECT
+    mcp_adapter_tool.tool_filter_mode = ToolSelectionMode.INCLUDE
     tools = mcp_adapter_tool.get_mcp_tools()
     assert len(tools) == 2
     assert tools[0].name == "add" and tools[1].name == "multiply"
 
-    mcp_adapter_tool.selection_mode = ToolSelectionMode.EXCLUDE
+    mcp_adapter_tool.tool_filter_mode = ToolSelectionMode.EXCLUDE
     tools = mcp_adapter_tool.get_mcp_tools()
     assert len(tools) == 1
     assert tools[0].name == "subtract"
 
     mcp_adapter_tool.tool_filter_names = ["multiply"]
-    mcp_adapter_tool.selection_mode = ToolSelectionMode.SELECT
+    mcp_adapter_tool.tool_filter_mode = ToolSelectionMode.INCLUDE
     tools = mcp_adapter_tool.get_mcp_tools()
     assert len(tools) == 1
     assert tools[0].name == "multiply"
 
-    mcp_adapter_tool.selection_mode = ToolSelectionMode.EXCLUDE
+    mcp_adapter_tool.tool_filter_mode = ToolSelectionMode.EXCLUDE
     tools = mcp_adapter_tool.get_mcp_tools()
     assert len(tools) == 2
     assert tools[0].name == "add" and tools[1].name == "subtract"

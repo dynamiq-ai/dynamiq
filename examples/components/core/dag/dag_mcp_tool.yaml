@@ -13,7 +13,7 @@ connections:
     - ../../tools/mcp_server_as_tool/mcp_servers/math_servers.py
     encoding: utf-8
     encoding_error_handler: strict
-    type: dynamiq.connections.MPC
+    type: dynamiq.connections.MCP
 nodes:
   react-agent:
     id: react-agent

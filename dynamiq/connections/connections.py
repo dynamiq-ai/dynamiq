@@ -1235,7 +1235,7 @@ class Databricks(BaseApiKeyConnection):
         }
 
 
-class MPC(BaseConnection):
+class MCP(BaseConnection):
     # SSE
     url: str | None = Field(None, description="The SSE endpoint URL to connect to.")
     headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the SSE request.")
@@ -1256,10 +1256,7 @@ class MPC(BaseConnection):
         default="strict", description="The text encoding error handler."
     )
 
-    def connect(self):
-        pass
-
-    async def get_client(self):
+    async def connect(self):
         """
         Creates an asynchronous client context manager based on server parameters.
 

@@ -114,9 +114,7 @@ def use_remote_server_open():
     Returns:
         result (str): The result of executing the workflow.
     """
-    stdio_connection = MPCConnection(
-        command="npx", args=["mcp-remote@latest", "https://remote.mcpservers.org/fetch/mcp"]
-    )
+    stdio_connection = MPCConnection(command="npx", args=["mcp-remote", "https://remote.mcpservers.org/fetch/mcp"])
 
     mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
 
@@ -131,7 +129,7 @@ def use_remote_server_open():
     wf = Workflow()
     wf.flow.add_nodes(agent)
 
-    result = wf.run(input_data={"input": "Retrieve latest news from Apple Inc."})
+    result = wf.run(input_data={"input": "Retrieve the information displayed on https://www.apple.com/ page"})
 
     print("Agent result:")
     print(result.output.get("react-agent", {}).get("output", {}).get("content"))

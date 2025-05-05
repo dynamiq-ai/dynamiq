@@ -3,7 +3,7 @@ import os
 
 from dynamiq import Workflow, runnables
 from dynamiq.callbacks import TracingCallbackHandler
-from dynamiq.connections.connections import MPC as MPCConnection
+from dynamiq.connections.connections import MCP as MPCConnection
 from dynamiq.connections.managers import get_connection_manager
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter, ToolSelectionMode
@@ -26,7 +26,7 @@ def setup_agent_with_server():
         args=[os.path.join("..", "..", "tools", "mcp_server_as_tool", "mcp_servers", "math_servers.py")],
     )
     mcp_tool_adapter = MCPServerAdapter(
-        connection=stdio_connection, selection_mode=ToolSelectionMode.SELECT, tool_filter_names=["add"]
+        connection=stdio_connection, tool_filter_mode=ToolSelectionMode.INCLUDE, tool_filter_names=["add"]
     )
 
     agent = ReActAgent(

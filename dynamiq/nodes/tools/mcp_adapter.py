@@ -13,7 +13,7 @@ from datamodel_code_generator import InputFileType, generate
 from mcp import ClientSession
 from pydantic import BaseModel, PrivateAttr
 
-from dynamiq.connections import MPC as MPCConnection
+from dynamiq.connections import MCP as MPCConnection
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
@@ -23,7 +23,7 @@ from dynamiq.utils.logger import logger
 
 
 class ToolSelectionMode(Enum):
-    SELECT = "select"
+    INCLUDE = "include"
     EXCLUDE = "exclude"
 
 
@@ -149,7 +149,7 @@ class MCPTool(ConnectionNode):
         input_dict = input_data.model_dump()
 
         try:
-            async with await self.connection.get_client() as (read, write):
+            async with await self.connection.connect() as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     result = await session.call_tool(self.name, input_dict)
@@ -175,7 +175,7 @@ class MCPServerAdapter(ConnectionNode):
       description (str): Node description.
       connection (MPCConnection): The connection module with parameters needed to the MCP server.
       tool_filter_names (list[str]): Names of tools to include or exclude.
-      selection_mode (ToolSelectionMode): Strategy for tool filtering (SELECT or DESELECT).
+      tool_filter_mode (ToolSelectionMode): Strategy for tool filtering (INCLUDE or EXCLUDE).
       _mcp_tools (dict[str, MCPTool]): Internal dict of initialized MCP tools.
     """
 
@@ -185,7 +185,7 @@ class MCPServerAdapter(ConnectionNode):
     connection: MPCConnection
 
     tool_filter_names: list[str] = field(default_factory=list)
-    selection_mode: ToolSelectionMode = ToolSelectionMode.SELECT
+    tool_filter_mode: ToolSelectionMode = ToolSelectionMode.INCLUDE
     _mcp_tools: dict[str, MCPTool] = PrivateAttr(default_factory=dict)
 
     async def initialize_tools(self):
@@ -195,7 +195,7 @@ class MCPServerAdapter(ConnectionNode):
         Returns:
             None
         """
-        async with await self.connection.get_client() as (read, write):
+        async with await self.connection.connect() as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()
@@ -241,12 +241,12 @@ class MCPServerAdapter(ConnectionNode):
         if not self.tool_filter_names or select_all:
             return list(self._mcp_tools.values())
 
-        if self.selection_mode == ToolSelectionMode.SELECT:
+        if self.tool_filter_mode == ToolSelectionMode.INCLUDE:
             return [v for k, v in self._mcp_tools.items() if k in self.tool_filter_names]
-        elif self.selection_mode == ToolSelectionMode.EXCLUDE:
+        elif self.tool_filter_mode == ToolSelectionMode.EXCLUDE:
             return [v for k, v in self._mcp_tools.items() if k not in self.tool_filter_names]
         else:
-            raise ValueError(f"Invalid selection mode: {self.selection_mode}")
+            raise ValueError(f"Invalid selection mode: {self.tool_filter_mode}")
 
     def execute(self, **kwargs):
         """

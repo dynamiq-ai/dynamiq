@@ -299,7 +299,7 @@ class Agent(Node):
     role: str | None = ""
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _mcp_servers: list[Node] = PrivateAttr(default_factory=list)
+    _mcp_server_tools: list[MCPServerAdapter] = PrivateAttr(default_factory=list)
     _exclude_tools_ids: list[str] = PrivateAttr(default_factory=list)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -314,7 +314,7 @@ class Agent(Node):
         expanded_tools = []
         for tool in self.tools:
             if isinstance(tool, MCPServerAdapter):
-                self._mcp_servers.append(tool)
+                self._mcp_server_tools.append(tool)
                 subtools = tool.get_mcp_tools()
                 expanded_tools.extend(subtools)
                 self._exclude_tools_ids.extend([subtool.id for subtool in subtools])
@@ -351,7 +351,7 @@ class Agent(Node):
         data["llm"] = self.llm.to_dict(**kwargs)
 
         data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools if tool.id not in self._exclude_tools_ids]
-        data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_servers]
+        data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_server_tools]
 
         data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
         if self.files:
