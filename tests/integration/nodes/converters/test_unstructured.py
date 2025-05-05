@@ -65,7 +65,7 @@ def test_workflow_with_unstructured_converter_success(unstructured_node, tmp_pat
         assert response.status == RunnableStatus.SUCCESS
         node_id = unstructured_node.id
 
-        assert response.output[node_id]["status"] == "success"
+        assert response.output[node_id]["status"] == RunnableStatus.SUCCESS.value
         assert "documents" in response.output[node_id]["output"]
         assert len(response.output[node_id]["output"]["documents"]) == 1
 
@@ -91,7 +91,7 @@ def test_workflow_with_bytesio_success(unstructured_node):
         assert response.status == RunnableStatus.SUCCESS
         node_id = unstructured_node.id
 
-        assert response.output[node_id]["status"] == "success"
+        assert response.output[node_id]["status"] == RunnableStatus.SUCCESS.value
         assert "documents" in response.output[node_id]["output"]
         document = response.output[node_id]["output"]["documents"][0]
         assert "This is a document from BytesIO" in document["content"]
@@ -113,12 +113,12 @@ def test_workflow_with_unstructured_node_failure(workflow, unstructured_node, ou
         assert result.status == RunnableStatus.SUCCESS
 
         unstructured_result = result.output[unstructured_node.id]
-        assert unstructured_result["status"] == "failure"
+        assert unstructured_result["status"] == RunnableStatus.FAILURE.value
         assert unstructured_result["error"]["type"] == "ValueError"
         assert unstructured_result["error"]["message"] == error_msg
 
         output_result = result.output[output_node.id]
-        assert output_result["status"] == "skip"
+        assert output_result["status"] == RunnableStatus.SKIP.value
 
 
 def test_workflow_with_unstructured_node_file_not_found(workflow, unstructured_node, output_node):
@@ -130,11 +130,11 @@ def test_workflow_with_unstructured_node_file_not_found(workflow, unstructured_n
     assert result.status == RunnableStatus.SUCCESS
 
     unstructured_result = result.output[unstructured_node.id]
-    assert unstructured_result["status"] == "failure"
+    assert unstructured_result["status"] == RunnableStatus.FAILURE.value
     assert "No files found in the provided paths" in unstructured_result["error"]["message"]
 
     output_result = result.output[output_node.id]
-    assert output_result["status"] == "skip"
+    assert output_result["status"] == RunnableStatus.SKIP.value
 
 
 def test_workflow_with_unstructured_node_empty_file(workflow, unstructured_node, output_node, tmp_path):
@@ -148,9 +148,9 @@ def test_workflow_with_unstructured_node_empty_file(workflow, unstructured_node,
     assert result.status == RunnableStatus.SUCCESS
 
     unstructured_result = result.output[unstructured_node.id]
-    assert unstructured_result["status"] == "failure"
+    assert unstructured_result["status"] == RunnableStatus.FAILURE.value
     assert "ValueError" in unstructured_result["error"]["type"]
     assert "Empty file cannot be processed" in unstructured_result["error"]["message"]
 
     output_result = result.output[output_node.id]
-    assert output_result["status"] == "skip"
+    assert output_result["status"] == RunnableStatus.SKIP.value
