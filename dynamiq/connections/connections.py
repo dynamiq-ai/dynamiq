@@ -5,7 +5,7 @@ from functools import cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -1247,7 +1247,7 @@ class MCP(BaseConnection):
     # STDIO
     command: str | None = Field(None, description="The executable to run to start the server.")
     args: list[str] = Field(default_factory=list, description="Command line arguments to pass to the executable.")
-    env: dict[str, str] | None = Field(None, description=" The environment to use when spawning the process.")
+    env: dict[str, str] | None = Field(None, description="The environment to use when spawning the process.")
     cwd: str | Path | None = Field(None, description="The working directory to use when spawning the process.")
     encoding: str = Field(
         default="utf-8", description="The text encoding used when sending/receiving messages to the server."
@@ -1256,12 +1256,77 @@ class MCP(BaseConnection):
         default="strict", description="The text encoding error handler."
     )
 
+    @model_validator(mode="after")
+    def check_connection_config(cls, values):
+        url = values.url
+        command = values.command
+
+        if url and command:
+            raise ValueError("Only one connection type can be used: either 'url' (SSE) or 'command' (STDIO), not both.")
+        if not url and not command:
+            raise ValueError("One of 'url' (SSE) or 'command' (STDIO) must be provided.")
+
+        if url:
+            if not isinstance(url, str) or not url.startswith("http"):
+                raise ValueError("'url' must be a valid HTTP(S) URL.")
+        if command:
+            if not isinstance(command, str) or not command:
+                raise ValueError("'command' must be a non-empty string.")
+
+        return values
+
+    @classmethod
+    def from_sse(cls, url: str, headers: dict[str, Any] = None, timeout: float = 5.0, sse_read_timeout: float = 60 * 5):
+        """
+        Creates an MCP instance configured for SSE.
+
+        Args:
+            url (str): The SSE endpoint URL.
+            headers (dict, optional): Optional HTTP headers.
+            timeout (float): Connection timeout.
+            sse_read_timeout (float): Read timeout for SSE.
+
+        Returns:
+            MCP: Configured instance.
+        """
+        return cls(url=url, headers=headers, timeout=timeout, sse_read_timeout=sse_read_timeout)
+
+    @classmethod
+    def from_stdio(
+        cls,
+        command: str,
+        args: list[str] = [],
+        env: dict[str, str] = None,
+        cwd: str | Path = None,
+        encoding: str = "utf-8",
+        encoding_error_handler: Literal["strict", "ignore", "replace"] = "strict",
+    ):
+        """
+        Creates an MCP instance configured for STDIO.
+
+        Args:
+            command (str): Executable command to run.
+            args (list[str], optional): Arguments to the command.
+            env (dict[str, str], optional): Environment variables.
+            cwd (str | Path, optional): Working directory.
+            encoding (str): Encoding for communication.
+            encoding_error_handler (str): Encoding error handler.
+
+        Returns:
+            MCP: Configured instance.
+        """
+        return cls(
+            command=command,
+            args=args,
+            env=env,
+            cwd=cwd,
+            encoding=encoding,
+            encoding_error_handler=encoding_error_handler,
+        )
+
     async def connect(self):
         """
         Creates an asynchronous client context manager based on server parameters.
-
-        Args:
-            server_params (ServerParameters): Parameters specifying the connection type and settings.
 
         Returns:
             Async context manager for a client connection (either stdio or SSE).

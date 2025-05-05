@@ -52,7 +52,7 @@ def llm_model():
 
 @pytest.fixture
 def sse_server_connection():
-    return MPCConnection(url="mock_url.py")
+    return MPCConnection(url="https://example.com/")
 
 
 @pytest.fixture

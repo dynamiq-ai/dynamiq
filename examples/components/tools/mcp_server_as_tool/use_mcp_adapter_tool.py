@@ -18,7 +18,7 @@ def use_stdio_connection():
     Returns:
         result (str): The result of executing the workflow.
     """
-    stdio_connection = MPCConnection(
+    stdio_connection = MPCConnection.from_stdio(
         command="python",
         args=[os.path.join("mcp_servers", "math_servers.py")],
     )
@@ -53,7 +53,7 @@ def use_sse_connection():
     Returns:
         result (str): The result of executing the workflow.
     """
-    sse_connection = MPCConnection(url="http://localhost:8000/sse")
+    sse_connection = MPCConnection.from_sse(url="http://localhost:8000/sse")
 
     mcp_tool_adapter = MCPServerAdapter(connection=sse_connection)
 
@@ -82,7 +82,7 @@ def use_remote_server_oauth():
     Returns:
         result (str): The result of executing the workflow.
     """
-    stdio_connection = MPCConnection(
+    stdio_connection = MPCConnection.from_stdio(
         command="npx",
         args=["-y", "mcp-remote", "https://mcp.linear.app/sse"],
     )
@@ -114,7 +114,9 @@ def use_remote_server_open():
     Returns:
         result (str): The result of executing the workflow.
     """
-    stdio_connection = MPCConnection(command="npx", args=["mcp-remote", "https://remote.mcpservers.org/fetch/mcp"])
+    stdio_connection = MPCConnection.from_stdio(
+        command="npx", args=["mcp-remote", "https://remote.mcpservers.org/fetch/mcp"]
+    )
 
     mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
 
@@ -143,7 +145,7 @@ def use_local_server_with_token():
     Returns:
         result (str): The result of executing the workflow.
     """
-    stdio_connection = MPCConnection(
+    stdio_connection = MPCConnection.from_stdio(
         command="npx", args=["-y", "tavily-mcp@0.1.4"], env={"TAVILY_API_KEY": "tvly-token"}
     )
 
