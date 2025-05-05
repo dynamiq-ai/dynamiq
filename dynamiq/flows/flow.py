@@ -259,7 +259,7 @@ class Flow(BaseFlow):
 
                 run_executor.shutdown()
 
-            fail_on_error = config.fail_workflow_on_node_error if config else True
+            fail_on_error = config.fail_workflow_on_node_error if config else False
             self._check_for_node_failures(fail_on_node_error=fail_on_error)
             output = self._get_output()
             self.run_on_flow_end(output, config, **merged_kwargs)
@@ -329,7 +329,7 @@ class Flow(BaseFlow):
                         # yield control to allow other async operations to progress
                         await asyncio.sleep(0)
 
-            fail_on_error = config.fail_workflow_on_node_error if config else True
+            fail_on_error = config.fail_workflow_on_node_error if config else False
             self._check_for_node_failures(fail_on_node_error=fail_on_error)
             output = self._get_output()
             self.run_on_flow_end(output, config, **merged_kwargs)
