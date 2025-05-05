@@ -202,7 +202,7 @@ class MCPServerAdapter(ConnectionNode):
                 for tool in tools.tools:
                     self._mcp_tools[tool.name] = MCPTool(
                         name=tool.name,
-                        description=tool.description,
+                        description=tool.description if tool.description else "MCP Tool",
                         json_input_schema=tool.inputSchema,
                         connection=self.connection,
                     )
