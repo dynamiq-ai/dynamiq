@@ -148,6 +148,23 @@ class Flow(BaseFlow):
 
         return ready_nodes
 
+    def _check_for_node_failures(self):
+        """
+        Checks if any nodes in the flow have failed and raises an exception if so.
+
+        Raises:
+            RuntimeError: If any node in the flow failed.
+        """
+        failed_nodes = []
+        for node_id, result in self._results.items():
+            if result.status == RunnableStatus.FAILURE:
+                failed_nodes.append((node_id, result.error))
+
+        if failed_nodes:
+            error_msgs = [f"Node '{node_id}' failed: {error}" for node_id, error in failed_nodes]
+            error_message = "Flow failed due to node failures: " + "; ".join(error_msgs)
+            raise RuntimeError(error_message)
+
     def _get_output(self) -> dict[str, dict]:
         """
         Gets the output of the flow.
@@ -235,6 +252,7 @@ class Flow(BaseFlow):
 
                 run_executor.shutdown()
 
+            self._check_for_node_failures()
             output = self._get_output()
             self.run_on_flow_end(output, config, **merged_kwargs)
             logger.info(
@@ -303,6 +321,7 @@ class Flow(BaseFlow):
                         # yield control to allow other async operations to progress
                         await asyncio.sleep(0)
 
+            self._check_for_node_failures()
             output = self._get_output()
             self.run_on_flow_end(output, config, **merged_kwargs)
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
