@@ -91,8 +91,15 @@ class MCPTool(ConnectionNode):
         with TemporaryDirectory() as tmpdir:
             schema_path = Path(tmpdir) / "schema.json"
             out_path = Path(tmpdir) / "model.py"
-            schema_path.write_text(json.dumps(schema_dict))
 
+            for _, props in schema_dict.get("properties", {}).items():
+                enum_values = props.pop("enum", None)
+                if enum_values:
+                    description = props.get("description", "")
+                    enum_description = f" Allowed values: {', '.join(map(str, enum_values))}."
+                    props["description"] = description.rstrip() + enum_description
+
+            schema_path.write_text(json.dumps(schema_dict))
             generate(
                 input_=schema_path,
                 input_file_type=InputFileType.JsonSchema,
