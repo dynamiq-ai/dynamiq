@@ -50,7 +50,6 @@ def use_sse_connection():
     The MCPAdapterTool retrieves all available tools from the server and makes them accessible to a ReActAgent,
     which can then use these tools to reason and respond to user queries.
 
-
     Returns:
         result (str): The result of executing the workflow.
     """
@@ -76,6 +75,100 @@ def use_sse_connection():
     return result
 
 
+def use_remote_server_oauth():
+    """
+    Connects to a remote MCP server using OAuth via a subprocess with stdio.
+
+    Returns:
+        result (str): The result of executing the workflow.
+    """
+    stdio_connection = MPCConnection(
+        command="npx",
+        args=["-y", "mcp-remote", "https://mcp.linear.app/sse"],
+    )
+
+    mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
+
+    agent = ReActAgent(
+        name="react-agent",
+        id="react-agent",
+        llm=llm,
+        tools=[mcp_tool_adapter],
+        max_loops=10,
+    )
+
+    wf = Workflow()
+    wf.flow.add_nodes(agent)
+
+    result = wf.run(input_data={"input": "List all users"})
+
+    print("Agent result:")
+    print(result.output.get("react-agent", {}).get("output", {}).get("content"))
+    return result
+
+
+def use_remote_server_open():
+    """
+    Connects to an open remote MCP server using a subprocess with stdio, without requiring authentication.
+
+    Returns:
+        result (str): The result of executing the workflow.
+    """
+    stdio_connection = MPCConnection(
+        command="npx", args=["mcp-remote@latest", "https://remote.mcpservers.org/fetch/mcp"]
+    )
+
+    mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
+
+    agent = ReActAgent(
+        name="react-agent",
+        id="react-agent",
+        llm=llm,
+        tools=[mcp_tool_adapter],
+        max_loops=10,
+    )
+
+    wf = Workflow()
+    wf.flow.add_nodes(agent)
+
+    result = wf.run(input_data={"input": "Retrieve latest news from Apple Inc."})
+
+    print("Agent result:")
+    print(result.output.get("react-agent", {}).get("output", {}).get("content"))
+    return result
+
+
+def use_local_server_with_token():
+    """
+    Runs a local MCP server using an access token via NPX subprocess.
+
+    Returns:
+        result (str): The result of executing the workflow.
+    """
+    stdio_connection = MPCConnection(
+        command="npx", args=["-y", "tavily-mcp@0.1.4"], env={"TAVILY_API_KEY": "tvly-token"}
+    )
+
+    mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
+
+    agent = ReActAgent(
+        name="react-agent",
+        id="react-agent",
+        llm=llm,
+        tools=[mcp_tool_adapter],
+        max_loops=10,
+    )
+
+    wf = Workflow()
+    wf.flow.add_nodes(agent)
+
+    result = wf.run(input_data={"input": "Retrieve latest news from Apple Inc."})
+
+    print("Agent result:")
+    print(result.output.get("react-agent", {}).get("output", {}).get("content"))
+    return result
+
+
 if __name__ == "__main__":
     # Example of using stdio connection for local servers
     use_stdio_connection()
@@ -85,3 +178,12 @@ if __name__ == "__main__":
     # You can run it with: `python ./mcp_servers/weather_server.py`
     # It should be available at: http://localhost:8000/sse
     use_sse_connection()
+
+    # Connecting to remote server using oauth
+    use_remote_server_oauth()
+
+    # Connecting to remote open server
+    use_remote_server_open()
+
+    # Running local server using npx and access token
+    use_local_server_with_token()
