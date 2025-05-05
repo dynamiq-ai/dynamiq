@@ -23,12 +23,12 @@ class BaseConverter(BaseModel):
         metadata: dict[str, Any] | list[dict[str, Any]] | None = None,
     ) -> dict[str, list[Any]]:
         """
-        Converts files to Documents using the PyPDF.
+        Converts files to Documents.
 
         Processes file paths or BytesIO objects into Documents. Handles directories and files.
 
         Args:
-            paths: List of file or directory paths to convert.
+            file_paths: List of file or directory paths to convert.
             files: List of BytesIO objects to convert.
             metadata: Metadata for documents. Can be a dict for all or a list of dicts for each.
 
@@ -37,8 +37,13 @@ class BaseConverter(BaseModel):
 
         Raises:
             ValueError: If neither paths nor files provided, or if metadata is a list with
-                directory paths.
+                directory paths, or if files cannot be processed properly.
+            FileNotFoundError: If any file path does not exist.
+            IOError: If any file cannot be read.
+            Exception: Any other exception that may occur during processing.
         """
+        if file_paths is None and files is None:
+            raise ValueError("No input provided. Please provide either file_paths or files.")
 
         documents = []
 
@@ -57,6 +62,10 @@ class BaseConverter(BaseModel):
                 )
 
             all_filepaths = set(filepaths + filepaths_in_directories)
+
+            if not all_filepaths:
+                raise FileNotFoundError(f"No files found in the provided paths: {file_paths}")
+
             meta_list = self._normalize_metadata(metadata, len(all_filepaths))
 
             for filepath, meta in zip(all_filepaths, meta_list):
@@ -66,6 +75,11 @@ class BaseConverter(BaseModel):
             meta_list = self._normalize_metadata(metadata, len(files))
             for file, meta in zip(files, meta_list):
                 documents.extend(self._process_file(file, meta))
+
+        if len(documents) == 0 and (file_paths is not None or files is not None):
+            raise ValueError(
+                "No documents were created from the provided inputs. Please check your files and try again."
+            )
 
         return {"documents": documents}
 
