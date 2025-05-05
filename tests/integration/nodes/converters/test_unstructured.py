@@ -55,7 +55,6 @@ def test_workflow_with_unstructured_converter_success(unstructured_node, tmp_pat
         {"text": "This is paragraph 2", "category": "Text"},
     ]
 
-    # Create a temporary file that will exist
     test_file = tmp_path / "test_file.txt"
     test_file.write_text("test content")
 
