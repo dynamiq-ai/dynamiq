@@ -9,10 +9,9 @@ from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateQueryError
 from weaviate.util import generate_uuid5
 
 from dynamiq.connections import Weaviate
-from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
-from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -37,7 +36,7 @@ class WeaviateRetrieverVectorStoreParams(BaseVectorStoreParams):
     tenant_name: str | None = None
 
 
-class WeaviateVectorStore:
+class WeaviateVectorStore(BaseVectorStore):
     """
     A Document Store for Weaviate.
 
@@ -714,16 +713,6 @@ class WeaviateVectorStore:
             self._collection.data.delete_many(where=convert_filters(filters))
         else:
             raise ValueError("No filters provided to delete documents.")
-
-    def delete_documents_by_file_id(self, file_id: str) -> None:
-        """
-        Delete documents from the DocumentStore based on the provided file_id.
-
-        Args:
-            file_id (str): The file ID to filter by.
-        """
-        filters = create_file_id_filter(file_id)
-        self.delete_documents_by_filters(filters)
 
     def _keyword_retrieval(
         self,
