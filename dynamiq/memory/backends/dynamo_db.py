@@ -67,7 +67,7 @@ class DynamoDB(MemoryBackend):
     name: str = "DynamoDB"
     connection: AWS = Field(default_factory=AWS)
     index_name: str = Field("conversations", description="Name of the DynamoDB table.")
-    create_table_if_not_exists: bool = Field(default=False)
+    create_if_not_exist: bool = Field(default=False)
     billing_mode: BillingMode = Field(
         default=BillingMode.PAY_PER_REQUEST,
         description="DynamoDB billing mode",
@@ -136,13 +136,11 @@ class DynamoDB(MemoryBackend):
             return table
         except ClientError as e:
             if e.response["Error"]["Code"] == "ResourceNotFoundException":
-                if self.create_table_if_not_exists:
+                if self.create_if_not_exist:
                     logger.info(f"DynamoDB table '{self.index_name}' not found. Attempting creation (Scan Only)...")
                     return self._create_table()
                 else:
-                    logger.error(
-                        f"DynamoDB table '{self.index_name}' not found and create_table_if_not_exists is False."
-                    )
+                    logger.error(f"DynamoDB table '{self.index_name}' not found and create_if_not_exist is False.")
                     raise DynamoDBMemoryError(f"DynamoDB table '{self.index_name}' not found.") from e
             else:
                 raise

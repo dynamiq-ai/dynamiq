@@ -18,7 +18,7 @@ def setup_agent():
         dynamo_db = DynamoDB(
             connection=aws_connection,
             index_name="default",
-            create_table_if_not_exists=True,
+            create_if_not_exist=True,
         )
         print("DynamoDB backend initialized. Connection test performed during init.")
 
