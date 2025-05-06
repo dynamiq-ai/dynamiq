@@ -812,8 +812,8 @@ class ReActAgent(Agent):
                                 ).model_dump()
                             )
 
-                            observation = f"\nObservation: {tool_result}\n"
-                            self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
+                            # observation = f"\nObservation: {tool_result}\n"
+                            # self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
                         else:
                             try:
                                 tool = self.tool_by_names.get(self.sanitize_tool_name(action))
@@ -841,41 +841,8 @@ class ReActAgent(Agent):
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
 
-                            observation = f"\nObservation: {tool_result}\n"
-
-                    if self.inference_mode != InferenceMode.XML:
-                        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                            self.stream_content(
-                                content={"name": tool.name, "input": action_input, "result": tool_result},
-                                source=tool.name if tool else action,
-                                step="tool",
-                                config=config,
-                                by_tokens=False,
-                                **kwargs,
-                            )
-
-                        self._intermediate_steps[loop_num]["model_observation"].update(
-                            AgentIntermediateStepModelObservation(
-                                tool_using=action,
-                                tool_input=action_input,
-                                tool_output=tool_result,
-                                updated=llm_generated_output,
-                            ).model_dump()
-                        )
-
+                    observation = f"\nObservation: {tool_result}\n"
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
-                else:
-                    self.stream_reasoning(
-                        {
-                            "thought": thought,
-                            "action": action,
-                            "action_input": action_input,
-                            "loop_num": loop_num,
-                        },
-                        config,
-                        **kwargs,
-                    )
-
             except ActionParsingException as e:
                 self._prompt.messages.append(
                     Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output)
