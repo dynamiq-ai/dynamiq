@@ -97,40 +97,17 @@ class BaseLLM(ConnectionNode):
     budget_tokens: int = 1024
     response_format: dict[str, Any] | None = None
     tools: list[Tool] | None = None
-    _completion: Callable = PrivateAttr()
-    _stream_chunk_builder: Callable = PrivateAttr()
     input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
-    inference_mode: InferenceMode = InferenceMode.DEFAULT
+    inference_mode: InferenceMode = Field(
+        default=InferenceMode.DEFAULT,
+        deprecated="Please use `tools` and `response_format` parameters"
+        "for function calling and structured output respectively",
+    )
     schema_: dict[str, Any] | type[BaseModel] | None = Field(
         None, description="Schema for structured output or function calling.", alias="schema"
     )
-
-    def _get_response_format_and_tools(
-        self, inference_mode: InferenceMode, schema: dict[str, Any] | type[BaseModel] | None
-    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        """Get response format and tools based on inference mode and schema.
-        Args:
-            inference_mode (InferenceMode): The inference mode to use.
-            schema (dict[str, Any] | type[BaseModel] | None): The schema to use.
-        Returns:
-            tuple[dict[str, Any] | None, dict[str, Any] | None]: Response format and tools.
-        Raises:
-            ValueError: If schema is None when using STRUCTURED_OUTPUT or FUNCTION_CALLING modes.
-        """
-        response_format = None
-        tools = None
-
-        match inference_mode:
-            case InferenceMode.STRUCTURED_OUTPUT:
-                if schema is None:
-                    raise ValueError("Schema must be provided when using STRUCTURED_OUTPUT inference mode")
-                response_format = schema
-            case InferenceMode.FUNCTION_CALLING:
-                if schema is None:
-                    raise ValueError("Schema must be provided when using FUNCTION_CALLING inference mode")
-                tools = schema
-
-        return response_format, tools
+    _completion: Callable = PrivateAttr()
+    _stream_chunk_builder: Callable = PrivateAttr()
 
     @field_validator("model")
     @classmethod
@@ -281,6 +258,33 @@ class BaseLLM(ConnectionNode):
         full_response = self._stream_chunk_builder(chunks=chunks, messages=messages)
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
 
+    def _get_response_format_and_tools(
+        self, inference_mode: InferenceMode, schema: dict[str, Any] | type[BaseModel] | None
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Get response format and tools based on inference mode and schema.
+        Args:
+            inference_mode (InferenceMode): The inference mode to use.
+            schema (dict[str, Any] | type[BaseModel] | None): The schema to use.
+        Returns:
+            tuple[dict[str, Any] | None, dict[str, Any] | None]: Response format and tools.
+        Raises:
+            ValueError: If schema is None when using STRUCTURED_OUTPUT or FUNCTION_CALLING modes.
+        """
+        response_format = None
+        tools = None
+
+        match inference_mode:
+            case InferenceMode.STRUCTURED_OUTPUT:
+                if schema is None:
+                    raise ValueError("Schema must be provided when using STRUCTURED_OUTPUT inference mode")
+                response_format = schema
+            case InferenceMode.FUNCTION_CALLING:
+                if schema is None:
+                    raise ValueError("Schema must be provided when using FUNCTION_CALLING inference mode")
+                tools = schema
+
+        return response_format, tools
+
     def update_completion_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """
         Updates or modifies the parameters for the completion method.
@@ -340,8 +344,8 @@ class BaseLLM(ConnectionNode):
             inference_mode=self.inference_mode, schema=self.schema_
         )
 
-        response_format = self.response_format or response_format or prompt.response_format or schema_response_format
-        tools = self.tools or tools or base_tools or schema_tools
+        response_format = response_format or self.response_format or prompt.response_format or schema_response_format
+        tools = tools or self.tools or base_tools or schema_tools
 
         common_params: dict[str, Any] = {
             "model": self.model,
