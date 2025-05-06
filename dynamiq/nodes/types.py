@@ -80,3 +80,10 @@ class ChoiceCondition(BaseModel):
     value: Any = None
     is_not: bool = False
     operands: list["ChoiceCondition"] | None = None
+
+
+class ResponseTransformer(str, Enum):
+    """Represents an output transformer for LLM."""
+
+    DEFAULT = "default"
+    CHAT_COMPLETION = "chat_completion"

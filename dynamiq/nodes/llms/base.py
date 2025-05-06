@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
-from dynamiq.nodes.types import InferenceMode
+from dynamiq.nodes.types import InferenceMode, ResponseTransformer
 from dynamiq.prompts import Prompt
 from dynamiq.runnables import RunnableConfig
 
@@ -79,6 +79,11 @@ class BaseLLM(ConnectionNode):
         - InferenceMode.STRUCTURED_OUTPUT: Produces structured JSON output.
         - InferenceMode.FUNCTION_CALLING: Structured output for tools (functions) to be called.
         dict[str, Any] | type[BaseModel] | None: schema_ for structured output. Defaults to empty dict.
+        response_transformer (ResponseTransformer): Specifies the format of the response returned by the node.
+        - ResponseTransformer.DEFAULT: Returns only the generated content (default), as a plain text string.
+        - ResponseTransformer.CHAT_COMPLETION: Returns the full response object in chat completion format, including
+            metadata such as token usage, role, and message structure.
+
     """
 
     MODEL_PREFIX: ClassVar[str | None] = None
@@ -102,6 +107,7 @@ class BaseLLM(ConnectionNode):
     schema_: dict[str, Any] | type[BaseModel] | None = Field(
         None, description="Schema for structured output or function calling.", alias="schema"
     )
+    response_transformer: ResponseTransformer = ResponseTransformer.DEFAULT
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
     input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
@@ -209,16 +215,18 @@ class BaseLLM(ConnectionNode):
         Returns:
             dict: A dictionary containing the generated content and tool calls if present.
         """
-        content = response.choices[0].message.content
-        result = {"content": content}
-        if tool_calls := response.choices[0].message.tool_calls:
-            tool_calls_parsed = {}
-            for tc in tool_calls:
-                call = tc.model_dump()
-                call["function"]["arguments"] = json.loads(call["function"]["arguments"])
-                tool_calls_parsed[call["function"]["name"]] = call
-            result["tool_calls"] = tool_calls_parsed
-
+        if self.response_transformer == ResponseTransformer.DEFAULT:
+            content = response.choices[0].message.content
+            result = {"content": content}
+            if tool_calls := response.choices[0].message.tool_calls:
+                tool_calls_parsed = {}
+                for tc in tool_calls:
+                    call = tc.model_dump()
+                    call["function"]["arguments"] = json.loads(call["function"]["arguments"])
+                    tool_calls_parsed[call["function"]["name"]] = call
+                result["tool_calls"] = tool_calls_parsed
+        else:
+            result = {"content": response.model_dump()}
         usage_data = self.get_usage_data(model=self.model, completion=response).model_dump()
         self.run_on_node_execute_run(callbacks=config.callbacks, usage_data=usage_data, **kwargs)
 
