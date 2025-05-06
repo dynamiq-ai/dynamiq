@@ -3,7 +3,6 @@ from functools import cached_property
 from queue import Queue
 from threading import Event
 from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dynamiq.utils import generate_uuid
@@ -19,6 +18,12 @@ class StreamingMode(str, Enum):
 STREAMING_EVENT = "streaming"
 
 
+class StreamingEntitySource(BaseModel):
+    name: str | None = None
+    group: str | None = None
+    type: str | None = None
+
+
 class StreamingEventMessage(BaseModel):
     """Message for streaming events.
 
@@ -28,6 +33,7 @@ class StreamingEventMessage(BaseModel):
         entity_id (str): Entity ID.
         data (Any): Data associated with the event.
         event (str | None): Event name. Defaults to "streaming".
+        source (StreamingEntitySource | None): Entity details.
     """
 
     run_id: str | None = None
@@ -35,6 +41,7 @@ class StreamingEventMessage(BaseModel):
     entity_id: str | None = None
     data: Any
     event: str | None = None
+    source: StreamingEntitySource | None = None
 
     @field_validator("event")
     @classmethod

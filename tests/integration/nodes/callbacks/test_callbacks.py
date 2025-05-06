@@ -97,6 +97,11 @@ def create_orchestrator(
                         {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
                         {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
                     ],
+                    "history": [
+                        {"role": "user", "content": ""},
+                        {"role": "assistant", "content": "mocked_response"},
+                        {"role": "assistant", "content": "mocked_response"},
+                    ],
                 },
             },
         ),
@@ -110,6 +115,10 @@ def create_orchestrator(
                     "messages": [
                         {"content": "Answer on question", "role": MessageRole.USER, "metadata": None},
                         {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
+                    ],
+                    "history": [
+                        {"role": "user", "content": ""},
+                        {"role": "assistant", "content": "mocked_response"},
                     ],
                 },
             },
