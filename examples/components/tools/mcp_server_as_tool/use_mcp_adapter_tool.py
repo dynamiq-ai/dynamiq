@@ -8,19 +8,22 @@ from examples.llm_setup import setup_llm
 llm = setup_llm()
 
 
-def use_stdio_connection():
+def use_stdio_connection(path_to_server: str):
     """
     Initializes a Dynamiq workflow using an MCP server over stdio.
 
     The MCPAdapterTool retrieves all available tools from the server and makes them accessible to a ReActAgent,
     which can then use these tools to reason and respond to user queries.
 
+    Args:
+        path_to_server (str): Path to the MCP server.
+
     Returns:
         result (str): The result of executing the workflow.
     """
     stdio_connection = MPCConnection.from_stdio(
         command="python",
-        args=[os.path.join("mcp_servers", "math_servers.py")],
+        args=[path_to_server],
     )
 
     mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
@@ -171,7 +174,8 @@ def use_local_server_with_token():
 
 if __name__ == "__main__":
     # Example of using stdio connection for local servers
-    use_stdio_connection()
+    path_to_server = os.path.join("mcp_servers", "math_server.py")
+    use_stdio_connection(path_to_server)
 
     # Example of using sse connection
     # Make sure to start the weather server before running this.

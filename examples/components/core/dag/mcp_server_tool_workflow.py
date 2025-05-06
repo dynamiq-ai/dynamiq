@@ -3,30 +3,46 @@ import os
 
 from dynamiq import Workflow, runnables
 from dynamiq.callbacks import TracingCallbackHandler
-from dynamiq.connections.connections import MCP as MPCConnection
+from dynamiq.connections import MCP as MPCConnection
+from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections.managers import get_connection_manager
+from dynamiq.flows import Flow
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter, ToolSelectionMode
+from dynamiq.nodes.llms.openai import OpenAI
+from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 from dynamiq.utils import JsonWorkflowEncoder
-from examples.llm_setup import setup_llm
 
 
-def setup_agent_with_server():
+def setup_agent_with_server(path_to_server: str):
     """
     Sets up a ReAct agent using an MCPServerAdapter.
+
+    Args:
+        path_to_server (str): Path to the MCP server.
 
     Returns:
         Workflow: A workflow object containing the configured agent.
     """
-    llm = setup_llm()
+    llm = OpenAI(
+        name="OpenAI LLM",
+        id="openai-llm",
+        connection=OpenAIConnection(id="openai-connection"),
+        model="gpt-4o-mini",
+        temperature=0.3,
+        max_tokens=1000,
+    )
 
     stdio_connection = MPCConnection(
+        id="mcp-connection",
         command="python",
-        args=[os.path.join("..", "..", "tools", "mcp_server_as_tool", "mcp_servers", "math_servers.py")],
+        args=[path_to_server],
     )
+
     mcp_tool_adapter = MCPServerAdapter(
-        connection=stdio_connection, tool_filter_mode=ToolSelectionMode.INCLUDE, tool_filter_names=["add"]
+        id="mcp-adapter",
+        name="mcp-adapter",
+        connection=stdio_connection,
     )
 
     agent = ReActAgent(
@@ -37,25 +53,38 @@ def setup_agent_with_server():
         max_loops=5,
     )
 
-    wf = Workflow()
-    wf.flow.add_nodes(agent)
+    wf = Workflow(id="workflow-id", name="workflow", flow=Flow(id="flow-id", name="flow", nodes=[agent]))
     return wf
 
 
-def setup_agent_with_tool():
+def setup_agent_with_tool(path_to_server: str):
     """
     Sets up a ReAct agent using an MCPTool.
+
+    Args:
+        path_to_server (str): Path to the MCP server.
 
     Returns:
         Workflow: A workflow object containing the configured agent.
     """
-    llm = setup_llm()
+    llm = OpenAI(
+        name="OpenAI LLM",
+        id="openai-llm",
+        connection=OpenAIConnection(id="openai-conn"),
+        model="gpt-4o-mini",
+        temperature=0.3,
+        max_tokens=1000,
+    )
 
     stdio_connection = MPCConnection(
+        id="mcp-conn",
         command="python",
-        args=[os.path.join("../../tools/mcp_server_as_tool", "mcp_servers", "math_servers.py")],
+        args=[path_to_server],
     )
+
     mcp_tool_adapter = MCPServerAdapter(
+        id="mcp-adapter",
+        name="mcp-adapter",
         connection=stdio_connection,
     )
 
@@ -69,8 +98,7 @@ def setup_agent_with_tool():
         max_loops=5,
     )
 
-    wf = Workflow()
-    wf.flow.add_nodes(agent)
+    wf = Workflow(id="workflow-id", name="workflow", flow=Flow(id="flow-id", name="flow", nodes=[agent]))
     return wf
 
 
@@ -84,7 +112,7 @@ def run_wf(wf):
     tracing_retrieval_wf = TracingCallbackHandler()
     result = wf.run(
         input_data={
-            "input": "add 12 by 3 by using tools.",
+            "input": "add 1 to 3 and mutiply by 2 using tools.",
         },
         config=runnables.RunnableConfig(callbacks=[tracing_retrieval_wf]),
     )
@@ -124,7 +152,9 @@ def load_wf_from_yaml(yaml_file_path="dag_mcp_server.yaml"):
 
 
 if __name__ == "__main__":
-    wf = setup_agent_with_server()
+    path_to_server = os.path.join("..", "..", "tools", "mcp_server_as_tool", "mcp_servers", "math_server.py")
+
+    wf = setup_agent_with_server(path_to_server)
     load_wf_to_yaml(wf, yaml_file_path="dag_mcp_server.yaml")
     wf = load_wf_from_yaml(yaml_file_path="dag_mcp_server.yaml")
 
@@ -132,7 +162,7 @@ if __name__ == "__main__":
     print(result)
     print(traces)
 
-    wf = setup_agent_with_tool()
+    wf = setup_agent_with_tool(path_to_server)
     load_wf_to_yaml(wf, yaml_file_path="dag_mcp_tool.yaml")
     wf = load_wf_from_yaml(yaml_file_path="dag_mcp_tool.yaml")
 

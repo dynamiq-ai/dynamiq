@@ -22,7 +22,7 @@ from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
 
 
-class ToolSelectionMode(Enum):
+class ToolFilterMode(Enum):
     INCLUDE = "include"
     EXCLUDE = "exclude"
 
@@ -149,7 +149,7 @@ class MCPTool(ConnectionNode):
         input_dict = input_data.model_dump()
 
         try:
-            async with await self.connection.connect() as (read, write):
+            async with self.connection.connect() as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     result = await session.call_tool(self.name, input_dict)
@@ -175,7 +175,7 @@ class MCPServerAdapter(ConnectionNode):
       description (str): Node description.
       connection (MPCConnection): The connection module with parameters needed to the MCP server.
       tool_filter_names (list[str]): Names of tools to include or exclude.
-      tool_filter_mode (ToolSelectionMode): Strategy for tool filtering (INCLUDE or EXCLUDE).
+      tool_filter_mode (ToolFilterMode): Strategy for tool filtering (INCLUDE or EXCLUDE).
       _mcp_tools (dict[str, MCPTool]): Internal dict of initialized MCP tools.
     """
 
@@ -185,7 +185,7 @@ class MCPServerAdapter(ConnectionNode):
     connection: MPCConnection
 
     tool_filter_names: list[str] = field(default_factory=list)
-    tool_filter_mode: ToolSelectionMode = ToolSelectionMode.INCLUDE
+    tool_filter_mode: ToolFilterMode = ToolFilterMode.INCLUDE
     _mcp_tools: dict[str, MCPTool] = PrivateAttr(default_factory=dict)
 
     async def initialize_tools(self):
@@ -195,7 +195,7 @@ class MCPServerAdapter(ConnectionNode):
         Returns:
             None
         """
-        async with await self.connection.connect() as (read, write):
+        async with self.connection.connect() as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()
@@ -241,9 +241,9 @@ class MCPServerAdapter(ConnectionNode):
         if not self.tool_filter_names or select_all:
             return list(self._mcp_tools.values())
 
-        if self.tool_filter_mode == ToolSelectionMode.INCLUDE:
+        if self.tool_filter_mode == ToolFilterMode.INCLUDE:
             return [v for k, v in self._mcp_tools.items() if k in self.tool_filter_names]
-        elif self.tool_filter_mode == ToolSelectionMode.EXCLUDE:
+        elif self.tool_filter_mode == ToolFilterMode.EXCLUDE:
             return [v for k, v in self._mcp_tools.items() if k not in self.tool_filter_names]
         else:
             raise ValueError(f"Invalid selection mode: {self.tool_filter_mode}")

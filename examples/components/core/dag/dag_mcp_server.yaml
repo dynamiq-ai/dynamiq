@@ -1,16 +1,16 @@
 connections:
-  2195a94d-981c-46d5-b453-3759e3c25b1e:
-    id: 2195a94d-981c-46d5-b453-3759e3c25b1e
+  openai-conn:
+    id: openai-conn
     api_key: ${oc.env:OPENAI_API_KEY}
     url: https://api.openai.com/v1
     type: dynamiq.connections.OpenAI
-  ed62cb3f-8ae4-4ab6-971e-6f925693dc02:
-    id: ed62cb3f-8ae4-4ab6-971e-6f925693dc02
+  mcp-conn:
+    id: mcp-conn
     timeout: 5.0
     sse_read_timeout: 300
     command: python
     args:
-    - ../../tools/mcp_server_as_tool/mcp_servers/math_servers.py
+    - ../../tools/mcp_server_as_tool/mcp_servers/math_server.py
     encoding: utf-8
     encoding_error_handler: strict
     type: dynamiq.connections.MCP
@@ -20,10 +20,7 @@ nodes:
     name: react-agent
     description: null
     group: agents
-    input_message:
-      content: '{{input}}'
-      role: user
-      metadata: null
+    metadata: null
     role: ''
     inference_mode: DEFAULT
     behaviour_on_max_loops: raise
@@ -32,7 +29,7 @@ nodes:
     depends: []
     input_mapping: {}
     llm:
-      id: 7fa8d08b-5fe8-4bbd-b5de-dc47a28cbac7
+      id: openai-llm
       name: OpenAI LLM
       description: null
       group: llms
@@ -41,38 +38,37 @@ nodes:
       is_optimized_for_agents: false
       is_files_allowed: false
       callbacks: []
-      connection: 2195a94d-981c-46d5-b453-3759e3c25b1e
+      connection: openai-conn
       model: gpt-4o-mini
       prompt: null
       type: dynamiq.nodes.llms.OpenAI
       depends: []
       input_mapping: {}
     tools:
-    - id: ebb6d688-6e00-40cb-8730-2986651cb644
-      name: MCP Adapter Tool
+    - id: mcp-adapter
+      name: mcp-adapter
       description: The tool used to initialize available MCP tools based on provided
         server parameters.
       group: tools
       callbacks: []
-      connection: ed62cb3f-8ae4-4ab6-971e-6f925693dc02
-      tool_filter_names:
-      - add
+      connection: mcp-conn
+      tool_filter_names: []
       tool_filter_mode: include
       type: dynamiq.nodes.tools.MCPServerAdapter
       depends: []
       input_mapping: {}
 flows:
-  ab8be414-8096-44cf-8ea4-213f68265182:
-    id: ab8be414-8096-44cf-8ea4-213f68265182
-    name: Flow
+  flow-id:
+    id: flow-id
+    name: flow
     max_node_workers: null
     type: dynamiq.flows.Flow
     nodes:
     - react-agent
 workflows:
-  b7db2962-c629-4a81-8422-2f532bb9d454:
-    name: Workflow
-    id: b7db2962-c629-4a81-8422-2f532bb9d454
+  workflow-id:
+    name: workflow
+    id: workflow-id
     version: null
     type: dynamiq.workflows.Workflow
-    flow: ab8be414-8096-44cf-8ea4-213f68265182
+    flow: flow-id

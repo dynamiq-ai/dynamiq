@@ -1,16 +1,16 @@
 connections:
-  1a978ab9-30a9-4a96-8e64-bf7b2d2ccbd3:
-    id: 1a978ab9-30a9-4a96-8e64-bf7b2d2ccbd3
+  openai-conn:
+    id: openai-conn
     api_key: ${oc.env:OPENAI_API_KEY}
     url: https://api.openai.com/v1
     type: dynamiq.connections.OpenAI
-  bd952d69-7c39-4626-932b-adf3315b31ca:
-    id: bd952d69-7c39-4626-932b-adf3315b31ca
+  mcp-conn:
+    id: mcp-conn
     timeout: 5.0
     sse_read_timeout: 300
     command: python
     args:
-    - ../../tools/mcp_server_as_tool/mcp_servers/math_servers.py
+    - ../../tools/mcp_server_as_tool/mcp_servers/math_server.py
     encoding: utf-8
     encoding_error_handler: strict
     type: dynamiq.connections.MCP
@@ -28,7 +28,7 @@ nodes:
     depends: []
     input_mapping: {}
     llm:
-      id: 260df439-7b9d-49ea-bccf-8f44b68ce5ec
+      id: openai-llm
       name: OpenAI LLM
       description: null
       group: llms
@@ -37,14 +37,14 @@ nodes:
       is_optimized_for_agents: false
       is_files_allowed: false
       callbacks: []
-      connection: 1a978ab9-30a9-4a96-8e64-bf7b2d2ccbd3
+      connection: openai-conn
       model: gpt-4o-mini
       prompt: null
       type: dynamiq.nodes.llms.OpenAI
       depends: []
       input_mapping: {}
     tools:
-    - id: 1392f11e-0e4e-41b1-9341-cd9349536b26
+    - id: mcp-tool-add
       name: add
       description: Add two numbers
       group: tools
@@ -53,7 +53,7 @@ nodes:
       is_optimized_for_agents: true
       is_files_allowed: false
       callbacks: []
-      connection: bd952d69-7c39-4626-932b-adf3315b31ca
+      connection: mcp-conn
       json_input_schema:
         properties:
           a:
@@ -70,7 +70,7 @@ nodes:
       type: dynamiq.nodes.tools.MCPTool
       depends: []
       input_mapping: {}
-    - id: 30a3f887-592b-4b29-8d2c-94a42b1318d2
+    - id: mcp-tool-multiply
       name: multiply
       description: Multiply two numbers
       group: tools
@@ -79,7 +79,7 @@ nodes:
       is_optimized_for_agents: true
       is_files_allowed: false
       callbacks: []
-      connection: bd952d69-7c39-4626-932b-adf3315b31ca
+      connection: mcp-conn
       json_input_schema:
         properties:
           a:
@@ -98,17 +98,17 @@ nodes:
       input_mapping: {}
     memory: null
 flows:
-  7d0f41c2-e344-4d13-8190-a5b09aa8ddd4:
-    id: 7d0f41c2-e344-4d13-8190-a5b09aa8ddd4
-    name: Flow
+  flow-id:
+    id: flow-id
+    name: flow
     max_node_workers: null
     type: dynamiq.flows.Flow
     nodes:
     - react-agent
 workflows:
-  7e0d3e80-67a4-4b71-94a4-4224fe9c21ba:
-    name: Workflow
-    id: 7e0d3e80-67a4-4b71-94a4-4224fe9c21ba
+  workflow-id:
+    name: workflow
+    id: workflow-id
     version: null
     type: dynamiq.workflows.Workflow
-    flow: 7d0f41c2-e344-4d13-8190-a5b09aa8ddd4
+    flow: flow-id

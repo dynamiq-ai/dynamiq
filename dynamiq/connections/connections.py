@@ -1324,7 +1324,7 @@ class MCP(BaseConnection):
             encoding_error_handler=encoding_error_handler,
         )
 
-    async def connect(self):
+    def connect(self):
         """
         Creates an asynchronous client context manager based on server parameters.
 
