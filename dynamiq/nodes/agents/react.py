@@ -148,6 +148,14 @@ Action Input: [JSON input for the tool]
 After each action, you'll receive:
 Observation: [Result from the tool]
 
+When you need to use multiple tools in parallel, list them sequentially:
+Thought: [Your detailed reasoning about why multiple tools are needed]
+Action: [Tool name from ONLY [{tools_name}]]
+Action Input: [JSON input for the tool]
+Action: [Another tool name from ONLY [{tools_name}]]
+Action Input: [JSON input for another tool]
+... (repeat for each tool)
+
 When you have enough information to provide a final answer:
 Thought: [Your reasoning for the final answer]
 Answer: [Your complete answer to the user's question]
@@ -164,7 +172,10 @@ IMPORTANT RULES:
 - JSON must be properly formatted with correct commas and brackets
 - Only use tools from the provided list
 - If you can answer directly, use only Thought followed by Answer
-"""  # noqa: E501
+- For multi-tool calls, list each Action and Action Input separately, one after another
+- For research tasks, always use at least 3 different tool calls to gather comprehensive information
+- When researching a topic, use complementary queries across your tools to cover different aspects
+"""
 
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
@@ -377,60 +388,74 @@ class ReActAgent(Agent):
 
         return ""
 
-    def _parse_action(self, output: str) -> tuple[str | None, str | None, dict | None]:
+    def _parse_action(self, output: str) -> tuple[str | None, str | None, dict | list | None]:
         """
-        Parses the action, its input, and thought from the output string.
+        Parses the action(s), input(s), and thought from the output string.
+        Supports both single tool actions and multiple sequential tool calls.
 
         Args:
-            output (str): The input string containing Thought, Action, and Action Input.
+            output (str): The output string from the LLM containing Thought, Action, and Action Input.
 
         Returns:
-            Tuple[Optional[str], Optional[str], Optional[dict]]: (thought, action, action_input)
-            where thought is the extracted thought, action is the action name,
-            and action_input is the parsed JSON input.
-
-        Raises:
-            ActionParsingException: If the output format is invalid or parsing fails.
+            tuple: (thought, action_type, actions_data) where:
+                - thought is the extracted reasoning
+                - action_type is either a tool name (for single tool) or "multiple_tools" (for multiple tools)
+                - actions_data is either a dict (for single tool) or a list of dicts (for multiple tools)
         """
         try:
             thought_pattern = r"Thought:\s*(.*?)(?:Action:|$)"
-            action_pattern = r"Action:\s*(.*?)\nAction Input:\s*((?:{\n)?.*?)(?:[^}]*$)"
-
             thought_match = re.search(thought_pattern, output, re.DOTALL)
             thought = thought_match.group(1).strip() if thought_match else None
 
-            action_match = re.search(action_pattern, output, re.DOTALL)
-            if not action_match:
+            action_pattern = r"Action:\s*(.*?)\nAction Input:\s*((?:[\[{][\s\S]*?[\]}]))"
+
+            remaining_text = output
+            actions = []
+
+            while "Action:" in remaining_text:
+                action_match = re.search(action_pattern, remaining_text, re.DOTALL)
+                if not action_match:
+                    break
+
+                action_name = action_match.group(1).strip()
+                raw_input = action_match.group(2).strip()
+
+                for marker in ["```json", "```JSON", "```"]:
+                    raw_input = raw_input.replace(marker, "").strip()
+
+                try:
+                    action_input = json.loads(raw_input)
+                    actions.append({"tool_name": action_name, "tool_input": action_input})
+                except json.JSONDecodeError as e:
+                    raise ActionParsingException(
+                        f"Invalid JSON in Action Input for {action_name}: {str(e)}",
+                        recoverable=True,
+                    )
+
+                end_pos = action_match.end()
+                remaining_text = remaining_text[end_pos:]
+
+            if not actions:
                 raise ActionParsingException(
-                    "No valid Action and Action Input found. "
-                    "Ensure the format is 'Thought: ... Action: ... Action Input: ...' "
-                    "with a valid dictionary as input.",
+                    "No valid Action and Action Input pairs found in the output.",
                     recoverable=True,
                 )
 
-            action = action_match.group(1).strip()
-            raw_input = action_match.group(2).strip()
-
-            json_markers = ["```json", "```JSON", "```"]
-            for marker in json_markers:
-                raw_input = raw_input.replace(marker, "").strip()
-            try:
-                action_input = json.loads(raw_input)
-            except json.JSONDecodeError as e:
-                raise ActionParsingException(
-                    f"Invalid JSON in Action Input: {str(e)}. Ensure the Action Input is a valid JSON dictionary.",
-                    recoverable=True,
-                )
-
-            return thought, action, action_input
+            if len(actions) == 1:
+                action = actions[0]["tool_name"]
+                action_input = actions[0]["tool_input"]
+                return thought, action, action_input
+            else:
+                return thought, "multiple_tools", actions
 
         except Exception as e:
             if isinstance(e, ActionParsingException):
                 raise
             raise ActionParsingException(
-                f"Error parsing action: {str(e)}. "
+                f"Error parsing action(s): {str(e)}. "
                 f"Please ensure the output follows the format 'Thought: <text> "
-                f"Action: <action> Action Input: <valid JSON>'.",
+                f"Action: <action> Action Input: <valid JSON>' "
+                f"with possible multiple Action/Action Input pairs.",
                 recoverable=True,
             )
 
@@ -740,6 +765,50 @@ class ReActAgent(Agent):
                 if action and self.tools:
                     if self.inference_mode == InferenceMode.XML:
                         tool_result = self._execute_tools(tools_data, config, **kwargs)
+                    if self.inference_mode == InferenceMode.DEFAULT:
+                        if action == "multiple_tools":
+                            tools_data = []
+                            for tool_call in action_input:
+                                if (
+                                    not isinstance(tool_call, dict)
+                                    or "tool_name" not in tool_call
+                                    or "tool_input" not in tool_call
+                                ):
+                                    raise ActionParsingException(
+                                        "Invalid tool call format. "
+                                        "Each tool call must have 'tool_name' and 'tool_input'.",
+                                        recoverable=True,
+                                    )
+
+                                tools_data.append({"name": tool_call["tool_name"], "input": tool_call["tool_input"]})
+
+                            self.stream_reasoning(
+                                {
+                                    "thought": thought,
+                                    "action": "multiple_tools",
+                                    "tools": tools_data,
+                                    "loop_num": loop_num,
+                                },
+                                config,
+                                **kwargs,
+                            )
+
+                            tool_result = self._execute_tools(tools_data, config, **kwargs)
+
+                            action_input_json = json.dumps(action_input)
+
+                            self._intermediate_steps[loop_num]["model_observation"].update(
+                                AgentIntermediateStepModelObservation(
+                                    tool_using="multiple_tools",
+                                    tool_input=str(action_input_json),
+                                    tool_output=str(tool_result),
+                                    updated=llm_generated_output,
+                                ).model_dump()
+                            )
+
+                            observation = f"\nObservation: {tool_result}\n"
+                            self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
+
                     else:
                         try:
                             tool = self.tool_by_names.get(self.sanitize_tool_name(action))

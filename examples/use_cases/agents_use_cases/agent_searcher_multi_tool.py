@@ -16,7 +16,7 @@ if __name__ == "__main__":
         id="Agent",
         llm=llm,
         tools=[tool_search, tool_tavily],
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.DEFAULT,
         role="",
     )
     result = agent.run(
@@ -24,6 +24,7 @@ if __name__ == "__main__":
             "input": "Please research Dynamiq AI and provide well-structured information"
             "along with a summary in markdown format. "
             "Include use cases, competitors, potential, future outlook, and recent news"
+            # "USE parallel multi tool calling"
         }
     )
     output_content = result.output.get("content")
