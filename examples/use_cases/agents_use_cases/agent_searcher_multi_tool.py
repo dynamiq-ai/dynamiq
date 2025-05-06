@@ -21,9 +21,9 @@ if __name__ == "__main__":
     )
     result = agent.run(
         input_data={
-            "input": "Please research Dynamiq AI and provide well-structured information"
+            "input": "Please research Dynamiq AI and provide well-structured information "
             "along with a summary in markdown format. "
-            "Include use cases, competitors, potential, future outlook, and recent news"
+            "Include use cases, competitors, potential, future outlook, and recent news "
             # "USE parallel multi tool calling"
         }
     )

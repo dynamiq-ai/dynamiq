@@ -765,7 +765,8 @@ class ReActAgent(Agent):
                 if action and self.tools:
                     if self.inference_mode == InferenceMode.XML:
                         tool_result = self._execute_tools(tools_data, config, **kwargs)
-                    if self.inference_mode == InferenceMode.DEFAULT:
+
+                    elif self.inference_mode == InferenceMode.DEFAULT:
                         if action == "multiple_tools":
                             tools_data = []
                             for tool_call in action_input:
@@ -782,16 +783,16 @@ class ReActAgent(Agent):
 
                                 tools_data.append({"name": tool_call["tool_name"], "input": tool_call["tool_input"]})
 
-                            self.stream_reasoning(
-                                {
-                                    "thought": thought,
-                                    "action": "multiple_tools",
-                                    "tools": tools_data,
-                                    "loop_num": loop_num,
-                                },
-                                config,
-                                **kwargs,
-                            )
+                                self.stream_reasoning(
+                                    {
+                                        "thought": thought,
+                                        "action": "multiple_tools",
+                                        "tools": tools_data,
+                                        "loop_num": loop_num,
+                                    },
+                                    config,
+                                    **kwargs,
+                                )
 
                             tool_result = self._execute_tools(tools_data, config, **kwargs)
 
@@ -808,15 +809,22 @@ class ReActAgent(Agent):
 
                             observation = f"\nObservation: {tool_result}\n"
                             self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
-
-                    else:
-                        try:
-                            tool = self.tool_by_names.get(self.sanitize_tool_name(action))
-                            if not tool:
+                        else:
+                            try:
+                                tool = self.tool_by_names.get(self.sanitize_tool_name(action))
+                                if not tool:
+                                    raise AgentUnknownToolException(
+                                        f"Unknown tool: {action}."
+                                        "Use only available tools and provide "
+                                        "only the tool's name in the action field. "
+                                        "Do not include any additional reasoning. "
+                                        "Please correct the action field or state that you cannot answer the question. "
+                                    )
                                 self.stream_reasoning(
                                     {
                                         "thought": thought,
                                         "action": action,
+                                        "tool": tool,
                                         "action_input": action_input,
                                         "loop_num": loop_num,
                                     },
@@ -824,31 +832,11 @@ class ReActAgent(Agent):
                                     **kwargs,
                                 )
 
-                                raise AgentUnknownToolException(
-                                    f"Unknown tool: {action}."
-                                    "Use only available tools and provide only the tool's name in the action field. "
-                                    "Do not include any additional reasoning. "
-                                    "Please correct the action field or state that you cannot answer the question."
-                                )
+                                tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                            except RecoverableAgentException as e:
+                                tool_result = f"{type(e).__name__}: {e}"
 
-                            self.stream_reasoning(
-                                {
-                                    "thought": thought,
-                                    "action": action,
-                                    "tool": tool,
-                                    "action_input": action_input,
-                                    "loop_num": loop_num,
-                                },
-                                config,
-                                **kwargs,
-                            )
-
-                            tool_result = self._run_tool(tool, action_input, config, **kwargs)
-
-                        except RecoverableAgentException as e:
-                            tool_result = f"{type(e).__name__}: {e}"
-
-                    observation = f"\nObservation: {tool_result}\n"
+                            observation = f"\nObservation: {tool_result}\n"
 
                     if self.inference_mode != InferenceMode.XML:
                         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
@@ -1190,11 +1178,9 @@ class ReActAgent(Agent):
         for result in all_results:
             tool_name = result["tool_name"]
             result_content = result["result"]
-            tool_input = result["tool_input"]
             success_status = "SUCCESS" if result["success"] else "ERROR"
-            observation_parts.append(
-                f"--- {tool_name} with input {tool_input} has resulted in {success_status} ---\n{result_content}"
-            )
+            observation_parts.append(f"--- {tool_name} has resulted in {success_status} ---\n{result_content}")
 
         combined_observation = "\n\n".join(observation_parts)
+
         return combined_observation
