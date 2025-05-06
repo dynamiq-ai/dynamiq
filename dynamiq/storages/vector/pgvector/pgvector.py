@@ -12,10 +12,9 @@ from psycopg.sql import Literal as SQLLiteral
 from psycopg.types.json import Jsonb
 
 from dynamiq.connections import PostgreSQL
-from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
-from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -70,7 +69,7 @@ class PGVectorStoreWriterParams(PGVectorStoreParams, BaseWriterVectorStoreParams
     create_if_not_exist: bool = False
 
 
-class PGVectorStore:
+class PGVectorStore(BaseVectorStore):
     """Vector store using pgvector."""
 
     def __init__(
@@ -603,17 +602,6 @@ class PGVectorStore:
                         )
                         self._execute_sql_query(query, (document_ids,), cursor=cur)
                         conn.commit()
-
-    def delete_documents_by_file_id(self, file_id: str) -> None:
-        """
-        Delete documents from the vector store based on the provided file ID.
-            file_id should be located in the metadata of the document.
-
-        Args:
-            file_id (str): The file ID to filter by.
-        """
-        filters = create_file_id_filter(file_id)
-        self.delete_documents_by_filters(filters)
 
     def list_documents(
         self, include_embeddings: bool = False, content_key: str | None = None, embedding_key: str | None = None

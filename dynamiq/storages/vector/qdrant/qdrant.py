@@ -10,7 +10,7 @@ from qdrant_client.http import models as rest
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from dynamiq.connections import Qdrant as QdrantConnection
-from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException as DuplicateDocumentError
 from dynamiq.storages.vector.exceptions import VectorStoreException as DocumentStoreError
 from dynamiq.storages.vector.policies import DuplicatePolicy
@@ -22,7 +22,6 @@ from dynamiq.storages.vector.qdrant.converters import (
     convert_qdrant_point_to_dynamiq_document,
 )
 from dynamiq.storages.vector.qdrant.filters import convert_filters_to_qdrant
-from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 
 if TYPE_CHECKING:
@@ -73,7 +72,7 @@ class QdrantWriterVectorStoreParams(BaseWriterVectorStoreParams):
     metric: QdrantSimilarityMetric = QdrantSimilarityMetric.COSINE
 
 
-class QdrantVectorStore:
+class QdrantVectorStore(BaseVectorStore):
     """QdrantVectorStore a Document Store for Qdrant.
 
     Usage example:
@@ -418,16 +417,6 @@ class QdrantVectorStore:
             self.delete_documents(document_ids=document_ids)
         else:
             raise ValueError("No filters provided to delete documents.")
-
-    def delete_documents_by_file_id(self, file_id: str) -> None:
-        """
-        Delete documents from the DocumentStore based on the provided file_id.
-
-        Args:
-            file_id (str): The file ID to filter by.
-        """
-        filters = create_file_id_filter(file_id)
-        self.delete_documents_by_filters(filters)
 
     def get_documents_generator(
         self,
