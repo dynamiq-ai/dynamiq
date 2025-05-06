@@ -5,7 +5,7 @@ import pytest
 from dynamiq import Workflow, flows
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig
+from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEntitySource
 
 
 @pytest.fixture()
@@ -39,9 +39,9 @@ def test_node_streaming(
     final_wf_event_output = None
     for e in streaming:
         if e.entity_id != wf.id:
-            events_output[e.entity_id].append((e.event, e.data["choices"][0]["delta"]["content"]))
+            events_output[e.entity_id].append((e.event, e.data["choices"][0]["delta"]["content"], e.source))
         else:
-            final_wf_event_output = e.event, e.data
+            final_wf_event_output = e.event, e.data, e.source
 
     expected_output = {
         node_with_streaming.id: RunnableResult(
@@ -50,14 +50,21 @@ def test_node_streaming(
             output={"content": mock_llm_response_text},
         ).to_dict()
     }
+
+    expected_final_output_source = StreamingEntitySource(name="Workflow", group=None, type="dynamiq.workflows.Workflow")
+
     assert response == RunnableResult(
         status=RunnableStatus.SUCCESS, input=input_data, output=expected_output
     )
     assert final_wf_event_output[0] == STREAMING_EVENT
     assert final_wf_event_output[1] == expected_output
+    assert final_wf_event_output[2] == expected_final_output_source
+
     assert mock_llm_executor.call_count == 1
     node_output = events_output[node_with_streaming.id]
-    assert (
-        "".join([content for event, content in node_output]) == mock_llm_response_text
+    assert "".join([content for _, content, _ in node_output]) == mock_llm_response_text
+    assert all(event == streaming_custom_event for event, _, _ in node_output)
+    expected_streaming_node_source = StreamingEntitySource(
+        name="OpenAI", group="llms", type="dynamiq.nodes.llms.OpenAI"
     )
-    assert all(event == streaming_custom_event for event, content in node_output)
+    assert all(source == expected_streaming_node_source for _, _, source in node_output)
