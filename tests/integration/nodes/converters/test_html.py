@@ -1,9 +1,40 @@
+import os
 from io import BytesIO
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 from dynamiq import Workflow
 from dynamiq.flows import Flow
 from dynamiq.nodes.converters.html import HTMLConverter
+from dynamiq.nodes.node import NodeDependency
+from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableStatus
+
+
+@pytest.fixture
+def html_node():
+    return HTMLConverter(
+        id="html_converter",
+        name="Test HTML Converter",
+    )
+
+
+@pytest.fixture
+def output_node(html_node):
+    return Output(id="output_node", depends=[NodeDependency(html_node)])
+
+
+@pytest.fixture
+def workflow(html_node, output_node):
+    return Workflow(
+        id="test_workflow",
+        flow=Flow(
+            nodes=[html_node, output_node],
+        ),
+        version="1",
+    )
 
 
 def test_workflow_with_html_converter():
@@ -11,7 +42,6 @@ def test_workflow_with_html_converter():
         flow=Flow(nodes=[HTMLConverter()]),
     )
 
-    # Create a simple HTML file content
     html_content = """
     <!DOCTYPE html>
     <html>
@@ -36,18 +66,13 @@ def test_workflow_with_html_converter():
     input_data = {"files": [file]}
     response = wf_html.run(input_data=input_data)
 
-    # Verify the response status
     assert response.status == RunnableStatus.SUCCESS
 
-    # Verify that documents were created
     node_id = wf_html.flow.nodes[0].id
     assert "documents" in response.output[node_id]["output"]
     assert len(response.output[node_id]["output"]["documents"]) == 1
 
-    # Get the actual document content
     document = response.output[node_id]["output"]["documents"][0]
-
-    # Check for expected elements in the content
     assert "Hello, World!" in document["content"]
     assert "This is a test paragraph for the HTML converter" in document["content"]
     assert "Item 1" in document["content"]
@@ -61,7 +86,6 @@ def test_html_converter_with_complex_content():
         flow=Flow(nodes=[HTMLConverter()]),
     )
 
-    # Create a more complex HTML file with various elements
     html_content = """
     <!DOCTYPE html>
     <html>
@@ -109,19 +133,14 @@ def test_html_converter_with_complex_content():
     input_data = {"files": [file]}
     response = wf_html.run(input_data=input_data)
 
-    # Verify the response status
     assert response.status == RunnableStatus.SUCCESS
 
-    # Verify that documents were created
     node_id = wf_html.flow.nodes[0].id
     assert "documents" in response.output[node_id]["output"]
     assert len(response.output[node_id]["output"]["documents"]) == 1
 
-    # Verify document content contains expected markdown elements
     document = response.output[node_id]["output"]["documents"][0]
     content = document["content"]
-
-    # Check for various markdown elements in the content
     assert "Complex HTML Test" in content
     assert "bold text" in content
     assert "italic text" in content
@@ -133,3 +152,58 @@ def test_html_converter_with_complex_content():
     assert "Example Website" in content
     assert "https://example.com" in content
     assert "blockquote" in content
+
+
+def test_workflow_with_html_node_failure(workflow, html_node, output_node, tmp_path):
+    test_file = tmp_path / "test_file.html"
+    test_file.write_text("Not valid HTML content")
+
+    with patch(
+        "dynamiq.components.converters.html.lxml_html.fromstring", side_effect=Exception("Failed to parse HTML content")
+    ):
+        input_data = {"file_paths": [str(test_file)]}
+
+        result = workflow.run(input_data=input_data)
+
+        assert result.status == RunnableStatus.SUCCESS
+
+        html_result = result.output[html_node.id]
+        assert html_result["status"] == RunnableStatus.FAILURE.value
+        assert "Failed to parse HTML content" in html_result["error"]["message"]
+
+        output_result = result.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_html_node_file_not_found(workflow, html_node, output_node):
+    non_existent_path = str(Path("/tmp") / f"non_existent_file_{os.getpid()}.html")
+    input_data = {"file_paths": [non_existent_path]}
+
+    result = workflow.run(input_data=input_data)
+
+    assert result.status == RunnableStatus.SUCCESS
+
+    html_result = result.output[html_node.id]
+    assert html_result["status"] == RunnableStatus.FAILURE.value
+    assert "No files found in the provided paths" in html_result["error"]["message"]
+
+    output_result = result.output[output_node.id]
+    assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_html_node_empty_file(workflow, html_node, output_node, tmp_path):
+    empty_file = tmp_path / "empty_file.html"
+    empty_file.touch()
+
+    input_data = {"file_paths": [str(empty_file)]}
+
+    result = workflow.run(input_data=input_data)
+
+    assert result.status == RunnableStatus.SUCCESS
+
+    html_result = result.output[html_node.id]
+    if html_result["status"] == RunnableStatus.FAILURE.value:
+        output_result = result.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SKIP.value
+    else:
+        assert "error" not in html_result
