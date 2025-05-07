@@ -1,12 +1,42 @@
+import os
 from io import BytesIO
+from pathlib import Path
+from unittest.mock import patch
 
+import pytest
 from pptx import Presentation
 
 from dynamiq import Workflow
 from dynamiq.flows import Flow
 from dynamiq.nodes.converters.pptx import PPTXFileConverter
+from dynamiq.nodes.node import NodeDependency
+from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.types import Document
+
+
+@pytest.fixture
+def pptx_converter():
+    return PPTXFileConverter(
+        id="pptx_converter",
+        name="Test PPTX Converter",
+    )
+
+
+@pytest.fixture
+def output_node(pptx_converter):
+    return Output(id="output_node", depends=[NodeDependency(pptx_converter)])
+
+
+@pytest.fixture
+def workflow_with_pptx_converter_and_output(pptx_converter, output_node):
+    return Workflow(
+        id="test_workflow",
+        flow=Flow(
+            nodes=[pptx_converter, output_node],
+        ),
+        version="1",
+    )
 
 
 def test_workflow_with_pptx_converter():
@@ -34,3 +64,80 @@ def test_workflow_with_pptx_converter():
 
     expected_output = {pptx_converter.id: pptx_converter_expected_result}
     assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
+
+
+def test_workflow_with_pptx_converter_parsing_error(
+    workflow_with_pptx_converter_and_output, pptx_converter, output_node
+):
+    with patch("dynamiq.components.converters.pptx.Presentation", side_effect=Exception("PPTX parsing error")):
+        file = BytesIO(b"corrupted pptx content")
+        file.name = "corrupted.pptx"
+        input_data = {"files": [file]}
+
+        response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+        assert response.output[pptx_converter.id]["status"] == RunnableStatus.FAILURE.value
+        assert "PPTX parsing error" in response.output[pptx_converter.id]["error"]["message"]
+        assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_pptx_converter_file_not_found(
+    workflow_with_pptx_converter_and_output, pptx_converter, output_node
+):
+    non_existent_path = str(Path("/tmp") / f"non_existent_file_{os.getpid()}.pptx")
+    input_data = {"file_paths": [non_existent_path]}
+
+    response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+    assert response.output[pptx_converter.id]["status"] == RunnableStatus.FAILURE.value
+    assert "No files found in the provided paths" in response.output[pptx_converter.id]["error"]["message"]
+    assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_pptx_converter_empty_file(workflow_with_pptx_converter_and_output, pptx_converter, output_node):
+    empty_file = BytesIO(b"")
+    empty_file.name = "empty.pptx"
+    input_data = {"files": [empty_file]}
+
+    response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+    assert response.output[pptx_converter.id]["status"] == RunnableStatus.FAILURE.value
+    assert "error" in response.output[pptx_converter.id]
+    assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_pptx_converter_no_slides(workflow_with_pptx_converter_and_output, pptx_converter, output_node):
+    prs = Presentation()
+    file = BytesIO()
+    prs.save(file)
+    file.name = "no_slides.pptx"
+    file.seek(0)
+
+    with patch("dynamiq.components.converters.base.BaseConverter.run") as mock_converter:
+        mock_converter.side_effect = ValueError("No content found in presentation")
+
+        input_data = {"files": [file]}
+        response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+        assert response.output[pptx_converter.id]["status"] == RunnableStatus.FAILURE.value
+        assert "No content found" in response.output[pptx_converter.id]["error"]["message"]
+        assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_pptx_converter_unsupported_file(
+    workflow_with_pptx_converter_and_output, pptx_converter, output_node
+):
+    wrong_file = BytesIO(b"This is not a PPTX file, just plain text")
+    wrong_file.name = "text.txt"
+    input_data = {"files": [wrong_file]}
+
+    response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+    assert response.output[pptx_converter.id]["status"] == RunnableStatus.FAILURE.value
+    assert "error" in response.output[pptx_converter.id]
+    assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
