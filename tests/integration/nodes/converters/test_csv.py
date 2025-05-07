@@ -1,15 +1,20 @@
 import csv
 import os
 import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from dynamiq import Workflow
+from dynamiq.flows import Flow
 from dynamiq.nodes.converters.csv import CSVConverter
+from dynamiq.nodes.node import NodeDependency
+from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableResult, RunnableStatus
 
 
 def create_test_csv(data: list[list[str]], header: list[str]) -> str:
-    """Create a temporary CSV file for testing."""
     with tempfile.NamedTemporaryFile(mode="w+", newline="", delete=False, suffix=".csv") as tmp_csv:
         writer = csv.writer(tmp_csv)
         writer.writerow(header)
@@ -19,7 +24,6 @@ def create_test_csv(data: list[list[str]], header: list[str]) -> str:
 
 @pytest.fixture
 def sample_csv():
-    """Fixture providing a sample CSV file."""
     header = ["Target", "Feature_1", "Feature_2"]
     rows = [
         ["Document 1", "Value 1A", "Value 2A"],
@@ -32,8 +36,34 @@ def sample_csv():
         os.remove(tmp_path)
 
 
+@pytest.fixture
+def csv_converter():
+    return CSVConverter(
+        id="csv_converter",
+        name="Test CSV Converter",
+        delimiter=",",
+        content_column="Target",
+        metadata_columns=["Feature_1", "Feature_2"],
+    )
+
+
+@pytest.fixture
+def output_node(csv_converter):
+    return Output(id="output_node", depends=[NodeDependency(csv_converter)])
+
+
+@pytest.fixture
+def workflow_with_csv_converter_and_output(csv_converter, output_node):
+    return Workflow(
+        id="test_workflow",
+        flow=Flow(
+            nodes=[csv_converter, output_node],
+        ),
+        version="1",
+    )
+
+
 def test_csv_loader_basic_functionality(sample_csv):
-    """Test basic CSV loader functionality."""
     csv_loader = CSVConverter(delimiter=",", content_column="Target", metadata_columns=["Feature_1", "Feature_2"])
     input_data = {"file_paths": [sample_csv]}
 
@@ -54,7 +84,6 @@ def test_csv_loader_basic_functionality(sample_csv):
 
 
 def test_csv_loader_missing_metadata_columns(sample_csv):
-    """Test CSV loader with missing metadata columns."""
     csv_loader = CSVConverter(
         delimiter=",", content_column="Target", metadata_columns=["Feature_1", "NonExistentFeature"]
     )
@@ -65,3 +94,108 @@ def test_csv_loader_missing_metadata_columns(sample_csv):
     first_doc = result.output["documents"][0]
     assert "Feature_1" in first_doc["metadata"]
     assert "NonExistentFeature" not in first_doc["metadata"]
+
+
+def test_workflow_with_csv_converter_file_not_found(workflow_with_csv_converter_and_output, csv_converter, output_node):
+    non_existent_path = str(Path("/tmp") / f"non_existent_file_{os.getpid()}.csv")
+    input_data = {"file_paths": [non_existent_path]}
+
+    response = workflow_with_csv_converter_and_output.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+    assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
+    assert "No such file or directory" in response.output[csv_converter.id]["error"]["message"]
+    assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_csv_converter_empty_file(
+    workflow_with_csv_converter_and_output, csv_converter, output_node, tmp_path
+):
+    empty_file = tmp_path / "empty.csv"
+    empty_file.touch()
+
+    with patch("dynamiq.nodes.converters.csv.csv.DictReader") as mock_reader:
+        mock_reader.side_effect = ValueError("Empty file has no content")
+
+        input_data = {"file_paths": [str(empty_file)]}
+
+        response = workflow_with_csv_converter_and_output.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+        assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
+        assert "error" in response.output[csv_converter.id]
+        assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_csv_converter_invalid_content(
+    workflow_with_csv_converter_and_output, csv_converter, output_node, tmp_path
+):
+    invalid_file = tmp_path / "invalid.csv"
+    invalid_file.write_text("This is not a valid CSV format")
+
+    with patch("dynamiq.nodes.converters.csv.csv.DictReader") as mock_reader:
+        mock_reader.side_effect = csv.Error("Invalid CSV format")
+
+        input_data = {"file_paths": [str(invalid_file)]}
+
+        response = workflow_with_csv_converter_and_output.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+        assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
+        assert "error" in response.output[csv_converter.id]
+        assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_csv_converter_missing_content_column(
+    workflow_with_csv_converter_and_output, csv_converter, output_node, tmp_path
+):
+    header = ["Feature_1", "Feature_2"]
+    rows = [
+        ["Value 1A", "Value 2A"],
+        ["Value 1B", "Value 2B"],
+    ]
+
+    missing_column_csv = create_test_csv(rows, header)
+
+    try:
+        input_data = {"file_paths": [missing_column_csv]}
+
+        response = workflow_with_csv_converter_and_output.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+        assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
+        assert "Content column 'Target' not found" in response.output[csv_converter.id]["error"]["message"]
+        assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+    finally:
+        if os.path.exists(missing_column_csv):
+            os.remove(missing_column_csv)
+
+
+def test_workflow_with_csv_converter_permission_error(
+    workflow_with_csv_converter_and_output, csv_converter, output_node
+):
+    with patch("dynamiq.nodes.converters.csv.open", side_effect=PermissionError("Permission denied")):
+        input_data = {"file_paths": ["/some/path/file.csv"]}
+
+        response = workflow_with_csv_converter_and_output.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+        assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
+        assert "Permission denied" in response.output[csv_converter.id]["error"]["message"]
+        assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_csv_converter_corrupted_file(
+    workflow_with_csv_converter_and_output, csv_converter, output_node, tmp_path
+):
+    corrupted_file = tmp_path / "corrupted.csv"
+    corrupted_file.write_text('Header1,Header2,Header3\n"Unclosed quote,Value2,Value3\nValue4,Value5,Value6')
+
+    input_data = {"file_paths": [str(corrupted_file)]}
+
+    response = workflow_with_csv_converter_and_output.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+    assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
+    assert "error" in response.output[csv_converter.id]
+    assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
