@@ -8,7 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Literal
 
-from datamodel_code_generator import InputFileType, generate
+from datamodel_code_generator import DataModelType, InputFileType, generate
 from mcp import ClientSession
 from pydantic import BaseModel, PrivateAttr
 
@@ -82,22 +82,24 @@ class MCPTool(ConnectionNode):
             schema_dict (dict[str, Any]): A JSON schema dictionary describing the tool's expected input.
         """
         schema_dict = rename_keys_recursive(schema_dict, {"type_": "type"})
+
+        for _, props in schema_dict.get("properties", {}).items():
+            enum_values = props.pop("enum", None)
+            if enum_values:
+                description = props.get("description", "")
+                enum_description = f" Allowed values: {', '.join(map(str, enum_values))}."
+                props["description"] = description.rstrip() + enum_description
+
+        input_schema = json.dumps(schema_dict)
+
         with TemporaryDirectory() as tmpdir:
-            schema_path = Path(tmpdir) / "schema.json"
             out_path = Path(tmpdir) / "model.py"
 
-            for _, props in schema_dict.get("properties", {}).items():
-                enum_values = props.pop("enum", None)
-                if enum_values:
-                    description = props.get("description", "")
-                    enum_description = f" Allowed values: {', '.join(map(str, enum_values))}."
-                    props["description"] = description.rstrip() + enum_description
-
-            schema_path.write_text(json.dumps(schema_dict))
             generate(
-                input_=schema_path,
+                input_schema,
                 input_file_type=InputFileType.JsonSchema,
                 output=out_path,
+                output_model_type=DataModelType.PydanticV2BaseModel,
             )
 
             spec = importlib.util.spec_from_file_location("dynamiq.nodes.tools.MCPTool", out_path)
