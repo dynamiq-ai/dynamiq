@@ -58,21 +58,25 @@ IMPORTANT RULES:
 - Do not mention tools or actions since you don't have access to any
 """
 
-REACT_BLOCK_XML_INSTRUCTIONS = """Always use this exact XML format in your responses:
+REACT_BLOCK_XML_INSTRUCTIONS = """Always use one of these exact XML formats in your responses:
+
+**Format for Tool Usage (Single or Multiple):**
 <output>
     <thought>
         [Your detailed reasoning about what to do next]
     </thought>
-    <action>
-        [Tool name from ONLY [{tools_name}]]
-    </action>
-    <action_input>
-        [JSON input for the tool]
-    </action_input>
+    <tool_calls>
+        <tool>
+            <name>[Tool name from ONLY [{tools_name}]]</name>
+            <input>[JSON input for the tool]</input>
+        </tool>
+        <!-- Add more tool elements for multiple tools -->
+        <tool>
+            <name>[Tool name from ONLY [{tools_name}]]</name>
+            <input>[JSON input for tool]</input>
+        </tool>
+    </tool_calls>
 </output>
-
-After each action, you'll receive:
-Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
 <output>
@@ -94,14 +98,47 @@ For questions that don't require tools:
     </answer>
 </output>
 
-IMPORTANT RULES:
-- ALWAYS include <thought> tags with detailed reasoning
-- For tool use, include action and action_input tags
-- For direct answers, only include thought and answer tags
-- Ensure action_input contains valid JSON with double quotes
-- Properly close all XML tags
-- Do not use markdown formatting inside XML
-"""  # noqa: E501
+After each tool usage, you'll receive:
+Observation: [Result(s) from the tool(s)]
+
+MANDATORY MULTI-TOOL REQUIREMENTS:
+Efficiency in Tool Calls: For research tasks, prioritize making multiple independent
+tool calls in parallel within a single `<tool_calls>` block whenever possible,
+to gather all required information efficiently.
+Use sequential tool calls across multiple iterations only when later queries depend
+on the results of earlier ones (e.g., refining a query based on initial findings).
+
+1. Research Tasks (MINIMUM 3 tool calls required):
+   - FIRST CALL: Use a broad query to get general information on the topic
+   - SECOND CALL: Use a more specific query focused on benefits, advantages, or key features
+   - THIRD CALL: Use a query focused on limitations, challenges, requirements, or comparison
+   ... go deeper if needed
+   - Structure queries to cover complementary aspects of the same topic
+   - Use different parameters (e.g., category filters) when appropriate
+   - Plan your tool calls to cover all required aspects in a single `<tool_calls>`
+     block when the queries are independent. Include reasoning in `<thought>`
+     about how each call contributes to a complete answer.
+
+2. Data Collection/Scraping
+   - When scraping websites, ALWAYS gather data from different sources in parallel
+   - Use the same tool multiple times with different targets (URLs, parameters)
+   - Break down large scraping tasks into parallel subtasks for efficiency
+
+3. Complex Analysis
+   - ALWAYS decompose problems into smaller independent subproblems if applicable
+   - Use specialized parameters for different aspects of the same problem
+   - Collect preliminary data across multiple dimensions before final analysis
+
+IMPLEMENTATION REQUIREMENTS:
+- For research tasks, NEVER provide a final answer after just one tool call
+- For any question seeking detailed information, ALWAYS use multiple tool calls
+- Structure multiple tools in a single `<tool_calls>` block
+- Include detailed reasoning in the <thought> tags explaining your multi-tool strategy
+- Ensure diversity in your queries when using the same tool multiple times
+- If a tool call fails or provides insufficient data, note this in `<thought>` and include additional
+  tool calls in the same or a subsequent `<tool_calls>` block to compensate,
+  targeting alternative sources or adjusted parameters.
+"""
 
 
 REACT_BLOCK_INSTRUCTIONS = """Always follow this exact format in your responses:
@@ -112,6 +149,14 @@ Action Input: [JSON input for the tool]
 
 After each action, you'll receive:
 Observation: [Result from the tool]
+
+When you need to use multiple tools in parallel, list them sequentially:
+Thought: [Your detailed reasoning about why multiple tools are needed]
+Action: [Tool name from ONLY [{tools_name}]]
+Action Input: [JSON input for the tool]
+Action: [Another tool name from ONLY [{tools_name}]]
+Action Input: [JSON input for another tool]
+... (repeat for each tool)
 
 When you have enough information to provide a final answer:
 Thought: [Your reasoning for the final answer]
@@ -129,7 +174,10 @@ IMPORTANT RULES:
 - JSON must be properly formatted with correct commas and brackets
 - Only use tools from the provided list
 - If you can answer directly, use only Thought followed by Answer
-"""  # noqa: E501
+- For multi-tool calls, list each Action and Action Input separately, one after another
+- For research tasks, always use at least 3 different tool calls to gather comprehensive information
+- When researching a topic, use complementary queries across your tools to cover different aspects
+"""
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
 Always structure your responses in this JSON format:
@@ -346,60 +394,74 @@ class ReActAgent(Agent):
 
         return ""
 
-    def _parse_action(self, output: str) -> tuple[str | None, str | None, dict | None]:
+    def _parse_action(self, output: str) -> tuple[str | None, str | None, dict | list | None]:
         """
-        Parses the action, its input, and thought from the output string.
+        Parses the action(s), input(s), and thought from the output string.
+        Supports both single tool actions and multiple sequential tool calls.
 
         Args:
-            output (str): The input string containing Thought, Action, and Action Input.
+            output (str): The output string from the LLM containing Thought, Action, and Action Input.
 
         Returns:
-            Tuple[Optional[str], Optional[str], Optional[dict]]: (thought, action, action_input)
-            where thought is the extracted thought, action is the action name,
-            and action_input is the parsed JSON input.
-
-        Raises:
-            ActionParsingException: If the output format is invalid or parsing fails.
+            tuple: (thought, action_type, actions_data) where:
+                - thought is the extracted reasoning
+                - action_type is either a tool name (for single tool) or "multiple_tools" (for multiple tools)
+                - actions_data is either a dict (for single tool) or a list of dicts (for multiple tools)
         """
         try:
             thought_pattern = r"Thought:\s*(.*?)(?:Action:|$)"
-            action_pattern = r"Action:\s*(.*?)\nAction Input:\s*((?:{\n)?.*?)(?:[^}]*$)"
-
             thought_match = re.search(thought_pattern, output, re.DOTALL)
             thought = thought_match.group(1).strip() if thought_match else None
 
-            action_match = re.search(action_pattern, output, re.DOTALL)
-            if not action_match:
+            action_pattern = r"Action:\s*(.*?)\nAction Input:\s*((?:[\[{][\s\S]*?[\]}]))"
+
+            remaining_text = output
+            actions = []
+
+            while "Action:" in remaining_text:
+                action_match = re.search(action_pattern, remaining_text, re.DOTALL)
+                if not action_match:
+                    break
+
+                action_name = action_match.group(1).strip()
+                raw_input = action_match.group(2).strip()
+
+                for marker in ["```json", "```JSON", "```"]:
+                    raw_input = raw_input.replace(marker, "").strip()
+
+                try:
+                    action_input = json.loads(raw_input)
+                    actions.append({"tool_name": action_name, "tool_input": action_input})
+                except json.JSONDecodeError as e:
+                    raise ActionParsingException(
+                        f"Invalid JSON in Action Input for {action_name}: {str(e)}",
+                        recoverable=True,
+                    )
+
+                end_pos = action_match.end()
+                remaining_text = remaining_text[end_pos:]
+
+            if not actions:
                 raise ActionParsingException(
-                    "No valid Action and Action Input found. "
-                    "Ensure the format is 'Thought: ... Action: ... Action Input: ...' "
-                    "with a valid dictionary as input.",
+                    "No valid Action and Action Input pairs found in the output.",
                     recoverable=True,
                 )
 
-            action = action_match.group(1).strip()
-            raw_input = action_match.group(2).strip()
-
-            json_markers = ["```json", "```JSON", "```"]
-            for marker in json_markers:
-                raw_input = raw_input.replace(marker, "").strip()
-            try:
-                action_input = json.loads(raw_input)
-            except json.JSONDecodeError as e:
-                raise ActionParsingException(
-                    f"Invalid JSON in Action Input: {str(e)}. Ensure the Action Input is a valid JSON dictionary.",
-                    recoverable=True,
-                )
-
-            return thought, action, action_input
+            if len(actions) == 1:
+                action = actions[0]["tool_name"]
+                action_input = actions[0]["tool_input"]
+                return thought, action, action_input
+            else:
+                return thought, "multiple_tools", actions
 
         except Exception as e:
             if isinstance(e, ActionParsingException):
                 raise
             raise ActionParsingException(
-                f"Error parsing action: {str(e)}. "
+                f"Error parsing action(s): {str(e)}. "
                 f"Please ensure the output follows the format 'Thought: <text> "
-                f"Action: <action> Action Input: <valid JSON>'.",
+                f"Action: <action> Action Input: <valid JSON>' "
+                f"with possible multiple Action/Action Input pairs.",
                 recoverable=True,
             )
 
@@ -637,127 +699,151 @@ class ReActAgent(Agent):
 
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
-
                         try:
-                            parsed_data = XMLParser.parse(
-                                llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
-                            )
-                            thought = parsed_data.get("thought")
-                            final_answer = parsed_data.get("answer")
-                            self.log_final_output(thought, final_answer, loop_num)
-                            self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled:
-                                if self.streaming.mode == StreamingMode.ALL:
+                            parsed_result = XMLParser.parse_unified_xml_format(llm_generated_output)
+
+                            thought = parsed_result.get("thought", "")
+
+                            if parsed_result.get("is_final", False):
+                                final_answer = parsed_result.get("answer", "")
+                                self.log_final_output(thought, final_answer, loop_num)
+                                self.tracing_final(loop_num, final_answer, config, kwargs)
+
+                                if self.streaming.enabled:
+                                    if self.streaming.mode == StreamingMode.ALL:
+                                        self.stream_content(
+                                            content={"thought": thought, "loop_num": loop_num},
+                                            source=self.name,
+                                            step="reasoning",
+                                            config=config,
+                                            **kwargs,
+                                        )
                                     self.stream_content(
-                                        content={"thought": thought, "loop_num": loop_num},
+                                        content=final_answer,
                                         source=self.name,
-                                        step="reasoning",
+                                        step="answer",
                                         config=config,
                                         **kwargs,
                                     )
-                                self.stream_content(
-                                    content=final_answer,
-                                    source=self.name,
-                                    step="answer",
-                                    config=config,
-                                    **kwargs,
+                                return final_answer
+
+                            tools_data = parsed_result.get("tools", [])
+                            action = tools_data
+
+                            if len(tools_data) == 1:
+                                self.log_reasoning(
+                                    thought,
+                                    tools_data[0].get("name", "unknown_tool"),
+                                    tools_data[0].get("input", {}),
+                                    loop_num,
                                 )
-                            return final_answer
+                            else:
+                                self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
 
-                        except TagNotFoundError:
-                            logger.debug("XMLParser: Not a final answer structure, trying action structure.")
-                            try:
-                                parsed_data = XMLParser.parse(
-                                    llm_generated_output,
-                                    required_tags=["thought", "action", "action_input"],
-                                    optional_tags=["output"],
-                                    json_fields=["action_input"],
-                                )
-                                thought = parsed_data.get("thought")
-                                action = parsed_data.get("action")
-                                action_input = parsed_data.get("action_input")
-                                self.log_reasoning(thought, action, action_input, loop_num)
-                            except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
-                                logger.error(f"XMLParser: Failed to parse XML for action or answer: {e}")
-                                raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
-
-                        except (XMLParsingError, JSONParsingError) as e:
-                            logger.error(f"XMLParser: Error parsing potential final answer XML: {e}")
-                            raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
-
-                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
-
-                if action and self.tools:
-                    try:
-                        tool = self.tool_by_names.get(self.sanitize_tool_name(action))
-                        if not tool:
                             self.stream_reasoning(
                                 {
                                     "thought": thought,
-                                    "action": action,
-                                    "action_input": action_input,
+                                    "tools": tools_data,
                                     "loop_num": loop_num,
                                 },
                                 config,
                                 **kwargs,
                             )
 
-                            raise AgentUnknownToolException(
-                                f"Unknown tool: {action}."
-                                "Use only available tools and provide only the tool's name in the action field. "
-                                "Do not include any additional reasoning. "
-                                "Please correct the action field or state that you cannot answer the question."
+                        except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
+                            self._prompt.messages.append(
+                                Message(role=MessageRole.ASSISTANT, content=llm_generated_output)
+                            )
+                            self._prompt.messages.append(
+                                Message(
+                                    role=MessageRole.SYSTEM,
+                                    content=f"Correction Instruction: The previous response could not be parsed due to "
+                                    f"the following error: '{type(e).__name__}: {e}'. "
+                                    f"Please regenerate the response strictly following the "
+                                    f"required XML format, ensuring all tags are present and "
+                                    f"correctly structured, and that any JSON content is valid.",
+                                )
+                            )
+                            continue
+
+                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
+
+                if action and self.tools:
+                    if self.inference_mode == InferenceMode.XML:
+                        tool_result = self._execute_tools(tools_data, config, **kwargs)
+
+                    elif self.inference_mode == InferenceMode.DEFAULT:
+                        if action == "multiple_tools":
+                            tools_data = []
+                            for tool_call in action_input:
+                                if (
+                                    not isinstance(tool_call, dict)
+                                    or "tool_name" not in tool_call
+                                    or "tool_input" not in tool_call
+                                ):
+                                    raise ActionParsingException(
+                                        "Invalid tool call format. "
+                                        "Each tool call must have 'tool_name' and 'tool_input'.",
+                                        recoverable=True,
+                                    )
+
+                                tools_data.append({"name": tool_call["tool_name"], "input": tool_call["tool_input"]})
+
+                                self.stream_reasoning(
+                                    {
+                                        "thought": thought,
+                                        "action": "multiple_tools",
+                                        "tools": tools_data,
+                                        "loop_num": loop_num,
+                                    },
+                                    config,
+                                    **kwargs,
+                                )
+
+                            tool_result = self._execute_tools(tools_data, config, **kwargs)
+
+                            action_input_json = json.dumps(action_input)
+
+                            self._intermediate_steps[loop_num]["model_observation"].update(
+                                AgentIntermediateStepModelObservation(
+                                    tool_using="multiple_tools",
+                                    tool_input=str(action_input_json),
+                                    tool_output=str(tool_result),
+                                    updated=llm_generated_output,
+                                ).model_dump()
                             )
 
-                        self.stream_reasoning(
-                            {
-                                "thought": thought,
-                                "action": action,
-                                "tool": tool,
-                                "action_input": action_input,
-                                "loop_num": loop_num,
-                            },
-                            config,
-                            **kwargs,
-                        )
+                            # observation = f"\nObservation: {tool_result}\n"
+                            # self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
+                        else:
+                            try:
+                                tool = self.tool_by_names.get(self.sanitize_tool_name(action))
+                                if not tool:
+                                    raise AgentUnknownToolException(
+                                        f"Unknown tool: {action}."
+                                        "Use only available tools and provide "
+                                        "only the tool's name in the action field. "
+                                        "Do not include any additional reasoning. "
+                                        "Please correct the action field or state that you cannot answer the question. "
+                                    )
+                                self.stream_reasoning(
+                                    {
+                                        "thought": thought,
+                                        "action": action,
+                                        "tool": tool,
+                                        "action_input": action_input,
+                                        "loop_num": loop_num,
+                                    },
+                                    config,
+                                    **kwargs,
+                                )
 
-                        tool_result = self._run_tool(tool, action_input, config, **kwargs)
-
-                    except RecoverableAgentException as e:
-                        tool_result = f"{type(e).__name__}: {e}"
+                                tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                            except RecoverableAgentException as e:
+                                tool_result = f"{type(e).__name__}: {e}"
 
                     observation = f"\nObservation: {tool_result}\n"
-                    if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                        self.stream_content(
-                            content={"name": tool.name, "input": action_input, "result": tool_result},
-                            source=tool.name if tool else action,
-                            step="tool",
-                            config=config,
-                            by_tokens=False,
-                            **kwargs,
-                        )
-
-                    self._intermediate_steps[loop_num]["model_observation"].update(
-                        AgentIntermediateStepModelObservation(
-                            tool_using=action,
-                            tool_input=action_input,
-                            tool_output=tool_result,
-                            updated=llm_generated_output,
-                        ).model_dump()
-                    )
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
-                else:
-                    self.stream_reasoning(
-                        {
-                            "thought": thought,
-                            "action": action,
-                            "action_input": action_input,
-                            "loop_num": loop_num,
-                        },
-                        config,
-                        **kwargs,
-                    )
-
             except ActionParsingException as e:
                 self._prompt.messages.append(
                     Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output)
@@ -1007,3 +1093,67 @@ class ReActAgent(Agent):
                 )
 
         self._prompt_blocks.update(prompt_blocks)
+
+    def _execute_tools(self, tools_data: list[dict], config: RunnableConfig, **kwargs) -> str:
+        """
+        Execute one or more tools and gather their results.
+
+        Args:
+            tools_data (list): List of dictionaries containing name and input for each tool
+            config (RunnableConfig): Configuration for the runnable
+            **kwargs: Additional arguments for tool execution
+
+        Returns:
+            str: Combined observation string with all tool results
+        """
+        all_results = []
+
+        for tool_data in tools_data:
+            try:
+                tool_name = tool_data["name"]
+                tool_input = tool_data["input"]
+
+                tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
+                if not tool:
+                    error_message = f"Unknown tool: {tool_name}. Please use only available tools."
+                    all_results.append({"tool_name": tool_name, "success": False, "result": error_message})
+                    continue
+
+                tool_result = self._run_tool(tool, tool_input, config, **kwargs)
+
+                all_results.append(
+                    {"tool_name": tool_name, "success": True, "tool_input": tool_input, "result": tool_result}
+                )
+
+                if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                    self.stream_content(
+                        content={"name": tool.name, "input": tool_input, "result": tool_result},
+                        source=tool.name,
+                        step="tool",
+                        config=config,
+                        by_tokens=False,
+                        **kwargs,
+                    )
+
+            except Exception as e:
+                error_message = f"Error executing tool {tool_data['name']}: {str(e)}"
+                logger.error(error_message)
+                all_results.append(
+                    {
+                        "tool_name": tool_data["name"],
+                        "success": False,
+                        "tool_input": tool_input,
+                        "result": error_message,
+                    }
+                )
+
+        observation_parts = []
+        for result in all_results:
+            tool_name = result["tool_name"]
+            result_content = result["result"]
+            success_status = "SUCCESS" if result["success"] else "ERROR"
+            observation_parts.append(f"--- {tool_name} has resulted in {success_status} ---\n{result_content}")
+
+        combined_observation = "\n\n".join(observation_parts)
+
+        return combined_observation

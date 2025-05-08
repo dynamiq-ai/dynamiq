@@ -197,8 +197,8 @@ class AgentStatus(str, Enum):
 
 class AgentIntermediateStepModelObservation(BaseModel):
     initial: str | dict | None = None
-    tool_using: str | dict | None = None
-    tool_input: str | dict | None = None
+    tool_using: str | dict | list | None = None
+    tool_input: str | dict | list | None = None
     tool_output: Any = None
     updated: str | dict | None = None
 
