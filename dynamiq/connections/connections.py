@@ -1,11 +1,12 @@
 import enum
 import json
 from abc import ABC, abstractmethod
+from enum import Enum
 from functools import cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -1235,122 +1236,62 @@ class Databricks(BaseApiKeyConnection):
         }
 
 
-class MCP(BaseConnection):
-    # SSE
-    url: str | None = Field(None, description="The SSE endpoint URL to connect to.")
+class MCPSse(BaseConnection):
+    url: str = Field(..., description="The SSE endpoint URL to connect to.")
     headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the SSE request.")
     timeout: float = Field(default=5.0, description="Timeout in seconds for establishing the initial connection.")
-    sse_read_timeout: float = Field(
-        default=60 * 5, description="Timeout in seconds for reading SSE messages. Defaults to 5 minutes."
-    )
-
-    # STDIO
-    command: str | None = Field(None, description="The executable to run to start the server.")
-    args: list[str] = Field(default_factory=list, description="Command line arguments to pass to the executable.")
-    env: dict[str, str] | None = Field(None, description="The environment to use when spawning the process.")
-    cwd: str | Path | None = Field(None, description="The working directory to use when spawning the process.")
-    encoding: str = Field(
-        default="utf-8", description="The text encoding used when sending/receiving messages to the server."
-    )
-    encoding_error_handler: Literal["strict", "ignore", "replace"] = Field(
-        default="strict", description="The text encoding error handler."
-    )
-
-    @model_validator(mode="after")
-    def check_connection_config(cls, values):
-        url = values.url
-        command = values.command
-
-        if url and command:
-            raise ValueError("Only one connection type can be used: either 'url' (SSE) or 'command' (STDIO), not both.")
-        if not url and not command:
-            raise ValueError("One of 'url' (SSE) or 'command' (STDIO) must be provided.")
-
-        if url:
-            if not isinstance(url, str) or not url.startswith("http"):
-                raise ValueError("'url' must be a valid HTTP(S) URL.")
-        if command:
-            if not isinstance(command, str) or not command:
-                raise ValueError("'command' must be a non-empty string.")
-
-        return values
-
-    @classmethod
-    def from_sse(cls, url: str, headers: dict[str, Any] = None, timeout: float = 5.0, sse_read_timeout: float = 60 * 5):
-        """
-        Creates an MCP instance configured for SSE.
-
-        Args:
-            url (str): The SSE endpoint URL.
-            headers (dict, optional): Optional HTTP headers.
-            timeout (float): Connection timeout.
-            sse_read_timeout (float): Read timeout for SSE.
-
-        Returns:
-            MCP: Configured instance.
-        """
-        return cls(url=url, headers=headers, timeout=timeout, sse_read_timeout=sse_read_timeout)
-
-    @classmethod
-    def from_stdio(
-        cls,
-        command: str,
-        args: list[str] = [],
-        env: dict[str, str] = None,
-        cwd: str | Path = None,
-        encoding: str = "utf-8",
-        encoding_error_handler: Literal["strict", "ignore", "replace"] = "strict",
-    ):
-        """
-        Creates an MCP instance configured for STDIO.
-
-        Args:
-            command (str): Executable command to run.
-            args (list[str], optional): Arguments to the command.
-            env (dict[str, str], optional): Environment variables.
-            cwd (str | Path, optional): Working directory.
-            encoding (str): Encoding for communication.
-            encoding_error_handler (str): Encoding error handler.
-
-        Returns:
-            MCP: Configured instance.
-        """
-        return cls(
-            command=command,
-            args=args,
-            env=env,
-            cwd=cwd,
-            encoding=encoding,
-            encoding_error_handler=encoding_error_handler,
-        )
+    sse_read_timeout: float = Field(default=60 * 5, description="Timeout for reading SSE messages (in seconds).")
 
     def connect(self):
         """
-        Creates an asynchronous client context manager based on server parameters.
+        Establishes an SSE connection.
 
         Returns:
-            Async context manager for a client connection (either stdio or SSE).
+            Async context manager for the SSE client.
+        """
+        from mcp.client.sse import sse_client
+
+        return sse_client(
+            url=self.url,
+            headers=self.headers,
+            timeout=self.timeout,
+            sse_read_timeout=self.sse_read_timeout,
+        )
+
+
+class MCPEncodingErrorHandler(str, Enum):
+    STRICT = "strict"
+    IGNORE = "ignore"
+    REPLACE = "replace"
+
+
+class MCPStdio(BaseConnection):
+    command: str = Field(..., description="The executable to run to start the server.")
+    args: list[str] = Field(default_factory=list, description="Command-line arguments to pass to the executable.")
+    env: dict[str, str] | None = Field(None, description="Environment variables for the process.")
+    cwd: str | Path | None = Field(None, description="Working directory for the process.")
+    encoding: str = Field(default="utf-8", description="Text encoding for communication.")
+    encoding_error_handler: MCPEncodingErrorHandler = Field(
+        default=MCPEncodingErrorHandler.STRICT, description="Strategy for handling encoding errors."
+    )
+
+    def connect(self):
+        """
+        Establishes a STDIO connection using a subprocess.
+
+        Returns:
+            Async context manager for the STDIO client.
         """
         from mcp import StdioServerParameters
-        from mcp.client.sse import sse_client
         from mcp.client.stdio import stdio_client
 
-        if self.url is not None:
-            return sse_client(
-                url=self.url,
-                headers=self.headers,
-                timeout=self.timeout,
-                sse_read_timeout=self.sse_read_timeout,
+        return stdio_client(
+            StdioServerParameters(
+                command=self.command,
+                args=self.args,
+                env=self.env,
+                cwd=self.cwd,
+                encoding=self.encoding,
+                encoding_error_handler=self.encoding_error_handler.value,
             )
-        elif self.command is not None:
-            return stdio_client(
-                StdioServerParameters(
-                    command=self.command,
-                    args=self.args,
-                    env=self.env,
-                    cwd=self.cwd,
-                    encoding=self.encoding,
-                    encoding_error_handler=self.encoding_error_handler,
-                )
-            )
-        raise TypeError("Unsupported server parameter type.")
+        )

@@ -3,7 +3,7 @@ import os
 
 from dynamiq import Workflow, runnables
 from dynamiq.callbacks import TracingCallbackHandler
-from dynamiq.connections import MCP as MPCConnection
+from dynamiq.connections import MCPStdio
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections.managers import get_connection_manager
 from dynamiq.flows import Flow
@@ -27,14 +27,14 @@ def setup_agent_with_server(path_to_server: str):
     llm = OpenAI(
         name="OpenAI LLM",
         id="openai-llm",
-        connection=OpenAIConnection(id="openai-connection"),
+        connection=OpenAIConnection(id="openai-conn"),
         model="gpt-4o-mini",
         temperature=0.3,
         max_tokens=1000,
     )
 
-    stdio_connection = MPCConnection(
-        id="mcp-connection",
+    stdio_connection = MCPStdio(
+        id="mcp-conn",
         command="python",
         args=[path_to_server],
     )
@@ -76,7 +76,7 @@ def setup_agent_with_tool(path_to_server: str):
         max_tokens=1000,
     )
 
-    stdio_connection = MPCConnection(
+    stdio_connection = MCPStdio(
         id="mcp-conn",
         command="python",
         args=[path_to_server],

@@ -8,7 +8,7 @@ from pydantic import Field, create_model
 from dynamiq import connections
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter, MCPTool, MPCConnection, ToolFilterMode
+from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter, MCPSse, MCPTool, ToolFilterMode
 
 
 def assert_tool_matches(tool, expected, connection):
@@ -52,7 +52,7 @@ def llm_model():
 
 @pytest.fixture
 def sse_server_connection():
-    return MPCConnection(url="https://example.com/")
+    return MCPSse(url="https://example.com/")
 
 
 @pytest.fixture

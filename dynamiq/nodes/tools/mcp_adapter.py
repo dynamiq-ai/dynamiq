@@ -13,7 +13,7 @@ from datamodel_code_generator import InputFileType, generate
 from mcp import ClientSession
 from pydantic import BaseModel, PrivateAttr
 
-from dynamiq.connections import MCP as MPCConnection
+from dynamiq.connections import MCPSse, MCPStdio
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
@@ -47,7 +47,7 @@ class MCPTool(ConnectionNode):
       name (str): Node name.
       description (str): Node description.
       input_schema (ClassVar[type[BaseModel]]): The schema that defines the expected structure of tool's input.
-      connection (MPCConnection): The connection module with parameters needed to the MCP server.
+      connection (MCPSse | MCPStdio): The connection module with parameters needed to the MCP server.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -55,7 +55,7 @@ class MCPTool(ConnectionNode):
     description: str
     input_schema: type[BaseModel]
     json_input_schema: dict[str, Any]
-    connection: MPCConnection
+    connection: MCPSse | MCPStdio
 
     def __init__(self, json_input_schema: dict[str, Any], **kwargs):
         """
@@ -173,7 +173,7 @@ class MCPServerAdapter(ConnectionNode):
       group (Literal[NodeGroup.TOOLS]): Node group.
       name (str): Node name.
       description (str): Node description.
-      connection (MPCConnection): The connection module with parameters needed to the MCP server.
+      connection (MCPSse | MCPStdio): The connection module with parameters needed to the MCP server.
       tool_filter_names (list[str]): Names of tools to include or exclude.
       tool_filter_mode (ToolFilterMode): Strategy for tool filtering (INCLUDE or EXCLUDE).
       _mcp_tools (dict[str, MCPTool]): Internal dict of initialized MCP tools.
@@ -182,7 +182,7 @@ class MCPServerAdapter(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "MCP Adapter Tool"
     description: str = "The tool used to initialize available MCP tools based on provided server parameters."
-    connection: MPCConnection
+    connection: MCPSse | MCPStdio
 
     tool_filter_names: list[str] = field(default_factory=list)
     tool_filter_mode: ToolFilterMode = ToolFilterMode.INCLUDE

@@ -6,14 +6,12 @@ connections:
     type: dynamiq.connections.OpenAI
   mcp-conn:
     id: mcp-conn
-    timeout: 5.0
-    sse_read_timeout: 300
     command: python
     args:
     - ../../tools/mcp_server_as_tool/mcp_servers/math_server.py
     encoding: utf-8
     encoding_error_handler: strict
-    type: dynamiq.connections.MCP
+    type: dynamiq.connections.MCPStdio
 nodes:
   react-agent:
     id: react-agent

@@ -2,7 +2,7 @@ import os
 
 from dynamiq import Workflow
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter, MPCConnection
+from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter, MCPSse, MCPStdio
 from examples.llm_setup import setup_llm
 
 llm = setup_llm()
@@ -21,7 +21,7 @@ def use_stdio_connection(path_to_server: str):
     Returns:
         result (str): The result of executing the workflow.
     """
-    stdio_connection = MPCConnection.from_stdio(
+    stdio_connection = MCPStdio(
         command="python",
         args=[path_to_server],
     )
@@ -56,7 +56,7 @@ def use_sse_connection():
     Returns:
         result (str): The result of executing the workflow.
     """
-    sse_connection = MPCConnection.from_sse(url="http://localhost:8000/sse")
+    sse_connection = MCPSse(url="http://localhost:8000/sse")
 
     mcp_tool_adapter = MCPServerAdapter(connection=sse_connection)
 
@@ -85,7 +85,7 @@ def use_remote_server_oauth():
     Returns:
         result (str): The result of executing the workflow.
     """
-    stdio_connection = MPCConnection.from_stdio(
+    stdio_connection = MCPStdio(
         command="npx",
         args=["-y", "mcp-remote", "https://mcp.linear.app/sse"],
     )
@@ -117,9 +117,7 @@ def use_remote_server_open():
     Returns:
         result (str): The result of executing the workflow.
     """
-    stdio_connection = MPCConnection.from_stdio(
-        command="npx", args=["mcp-remote", "https://remote.mcpservers.org/fetch/mcp"]
-    )
+    stdio_connection = MCPStdio(command="npx", args=["mcp-remote", "https://remote.mcpservers.org/fetch/mcp"])
 
     mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
 
@@ -148,9 +146,7 @@ def use_local_server_with_token():
     Returns:
         result (str): The result of executing the workflow.
     """
-    stdio_connection = MPCConnection.from_stdio(
-        command="npx", args=["-y", "tavily-mcp@0.1.4"], env={"TAVILY_API_KEY": "tvly-token"}
-    )
+    stdio_connection = MCPStdio(command="npx", args=["-y", "tavily-mcp@0.1.4"], env={"TAVILY_API_KEY": "tvly-token"})
 
     mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
 
