@@ -2,7 +2,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Optional
 
 from dynamiq.connections import Chroma
-from dynamiq.storages.vector.utils import create_file_id_filter
+from dynamiq.storages.vector.base import BaseVectorStore
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -23,7 +23,7 @@ CHROMA_OPERATOR_MAPPING = {
 }
 
 
-class ChromaVectorStore:
+class ChromaVectorStore(BaseVectorStore):
     """
     Vector store using Chroma.
 
@@ -140,17 +140,6 @@ class ChromaVectorStore:
         else:
             ids, where, where_document = self._normalize_filters(filters)
             self._collection.delete(ids=ids, where=where, where_document=where_document)
-
-    def delete_documents_by_file_id(self, file_id: str) -> None:
-        """
-        Delete documents from the vector store based on the provided file ID.
-            file_id should be located in the metadata of the document.
-
-        Args:
-            file_id (str): The file ID to filter by.
-        """
-        filters = create_file_id_filter(file_id)
-        self.delete_documents_by_filters(filters)
 
     def search_embeddings(
         self,
