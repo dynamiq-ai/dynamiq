@@ -100,11 +100,15 @@ class BaseLLM(ConnectionNode):
     input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
     inference_mode: InferenceMode = Field(
         default=InferenceMode.DEFAULT,
-        deprecated="Please use `tools` and `response_format` parameters"
-        "for function calling and structured output respectively",
+        deprecated="Please use `tools` and `response_format` parameters "
+        "for selecting between function calling and structured output.",
     )
     schema_: dict[str, Any] | type[BaseModel] | None = Field(
-        None, description="Schema for structured output or function calling.", alias="schema"
+        None,
+        description="Schema for structured output or function calling.",
+        alias="schema",
+        deprecated="Please use `tools` and `response_format` parameters "
+        "for function calling and structured output respectively.",
     )
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
