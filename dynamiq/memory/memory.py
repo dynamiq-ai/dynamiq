@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -67,7 +67,7 @@ class Memory(BaseModel):
         try:
             metadata = metadata or {}
             if "timestamp" not in metadata:
-                metadata["timestamp"] = datetime.utcnow().timestamp()
+                metadata["timestamp"] = datetime.now(timezone.utc).timestamp()
 
             sanitized_metadata = {}
             for key, value in metadata.items():
