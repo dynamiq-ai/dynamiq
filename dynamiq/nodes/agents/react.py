@@ -21,7 +21,7 @@ from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
-from dynamiq.prompts import Message, MessageRole, VisionMessage
+from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
@@ -218,9 +218,9 @@ REACT_BLOCK_OUTPUT_FORMAT = (
 
 
 REACT_MAX_LOOPS_PROMPT = """
-You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
+You are tasked with providing a final answer for initial user question based on information gathered during a process that has reached its maximum number of loops.
 Your goal is to analyze the given context and formulate a clear, concise response.
-First, carefully review the history, which contains thoughts and information gathered during the process.
+First, carefully review the information gathered during the process.
 
 Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
 Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
@@ -782,7 +782,7 @@ class ReActAgent(Agent):
             )
             raise MaxLoopsExceededException(message=error_message)
         else:
-            max_loop_final_answer = self._handle_max_loops_exceeded(config, **kwargs)
+            max_loop_final_answer = self._handle_max_loops_exceeded(input_message, config, **kwargs)
             if self.streaming.enabled:
                 self.stream_content(
                     content=max_loop_final_answer,
@@ -793,13 +793,52 @@ class ReActAgent(Agent):
                 )
             return max_loop_final_answer
 
-    def _handle_max_loops_exceeded(self, config: RunnableConfig | None = None, **kwargs) -> str:
+    def aggregate_messages(self, messages: list[Message, VisionMessage]) -> str:
+        """
+        Concatenates multiple messages with USER rolr into one unified string.
+
+        Args:
+            messages (list[Message, VisionMessage]): List of messages to aggregate.
+
+        Returns:
+            str: Aggregated content.
+        """
+
+        history = ""
+
+        for message in messages:
+            if message.role == MessageRole.USER:
+                if isinstance(message, VisionMessage):
+                    for content in message.content:
+                        if isinstance(content, VisionMessageTextContent):
+                            history += content.text
+                else:
+                    history += message.content
+
+        return history
+
+    def _handle_max_loops_exceeded(
+        self, input_message: Message | VisionMessage, config: RunnableConfig | None = None, **kwargs
+    ) -> str:
         """
         Handle the case where max loops are exceeded by crafting a thoughtful response.
         Uses XMLParser to extract the final answer from the LLM's last attempt.
+
+        Args:
+            input_message (Message | VisionMessage): Initial user message.
+            config (RunnableConfig | None): Configuration for the agent run.
+            **kwargs: Additional parameters for running the agent.
+
+        Returns:
+            str: Final answer provided by the agent.
         """
-        self._prompt.messages.append(Message(role=MessageRole.SYSTEM, content=REACT_MAX_LOOPS_PROMPT))
-        llm_final_attempt_result = self._run_llm(self._prompt.messages, config=config, **kwargs)
+        system_message = Message(content=REACT_MAX_LOOPS_PROMPT, role=MessageRole.SYSTEM)
+        conversation_history = Message(
+            content=self.aggregate_messages(self._prompt.messages), role=MessageRole.ASSISTANT
+        )
+        llm_final_attempt_result = self._run_llm(
+            [system_message, input_message, conversation_history], config=config, **kwargs
+        )
         llm_final_attempt = llm_final_attempt_result.output["content"]
         self._run_depends = [NodeDependency(node=self.llm).to_dict()]
 
