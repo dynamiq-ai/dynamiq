@@ -8,7 +8,6 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
-from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils.logger import logger
@@ -55,8 +54,7 @@ def create_orchestrator() -> GraphOrchestrator:
             prompt=Prompt(
                 messages=messages,
             ),
-            schema=code_sample if structured_output else None,
-            inference_mode=InferenceMode.STRUCTURED_OUTPUT if structured_output else InferenceMode.XML,
+            response_format=code_sample if structured_output else None,
         ).output["content"]
 
         return json.loads(llm_result) if structured_output else llm_result
