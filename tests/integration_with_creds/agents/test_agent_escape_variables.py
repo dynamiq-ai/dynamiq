@@ -8,7 +8,7 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def python_tool_code():
     return """
 def run(input_data):
@@ -17,32 +17,32 @@ def run(input_data):
 """
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def test_input_string():
     return "dsfdfgdsfgfsghfghsddfg"
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def expected_length(test_input_string):
     return len(test_input_string)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def agent_role():
     return "is to help user with various tasks, goal is to provide best of possible answers to user queries"
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def agent_input(test_input_string):
     return {"input": f"What is the length of the string '{test_input_string}'?"}
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def run_config():
     return RunnableConfig(request_timeout=120)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def llm_instance():
     logger.info("\n--- Setting up REAL LLM (Fixture) ---")
     connection = OpenAIConnection()
@@ -55,7 +55,7 @@ def llm_instance():
     return llm
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def string_length_tool_instance(python_tool_code):
     logger.info("--- Creating Python tool (StringLengthTool) (Fixture) ---")
     tool = Python(
@@ -75,12 +75,9 @@ def run_and_assert_agent(agent: ReActAgent, agent_input, expected_length, run_co
         result = agent.run(input_data=agent_input, config=run_config)
         logger.info(f"Agent raw result object: {result}")
 
-        if result.status != RunnableStatus.SUCCESS:
-            intermediate_steps = (
-                result.output.get("intermediate_steps", "N/A") if isinstance(result.output, dict) else "N/A"
-            )
-            logger.info(f"Intermediate Steps on Failure: {intermediate_steps}")
-            pytest.fail(f"Agent run failed with status '{result.status}'. Output: {result.output}.")
+        assert (
+            result.status == RunnableStatus.SUCCESS
+        ), f"Agent run failed with status '{result.status}'. Output: {result.output}."
 
         if isinstance(result.output, dict) and "content" in result.output:
             agent_output = result.output["content"]
@@ -91,7 +88,7 @@ def run_and_assert_agent(agent: ReActAgent, agent_input, expected_length, run_co
         logger.info(f"Agent final output content: {agent_output}")
 
     except Exception as e:
-        pytest.fail(f"Agent run failed with exception: {e}")
+        assert False, f"Agent run failed with exception: {e}"
 
     logger.info("Asserting results...")
     assert agent_output is not None, "Agent output content should not be None"
