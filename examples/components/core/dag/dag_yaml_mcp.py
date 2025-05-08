@@ -9,14 +9,14 @@ from dynamiq.connections.managers import get_connection_manager
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter
+from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 from dynamiq.utils import JsonWorkflowEncoder
 
 
 def setup_agent_with_server(path_to_server: str):
     """
-    Sets up a ReAct agent using an MCPServerAdapter.
+    Sets up a ReAct agent using an MCPServer.
 
     Args:
         path_to_server (str): Path to the MCP server.
@@ -39,9 +39,9 @@ def setup_agent_with_server(path_to_server: str):
         args=[path_to_server],
     )
 
-    mcp_tool_adapter = MCPServerAdapter(
-        id="mcp-adapter",
-        name="mcp-adapter",
+    mcp_server = MCPServer(
+        id="mcp-server",
+        name="mcp-server",
         connection=stdio_connection,
     )
 
@@ -49,7 +49,7 @@ def setup_agent_with_server(path_to_server: str):
         name="react-agent",
         id="react-agent",
         llm=llm,
-        tools=[mcp_tool_adapter],
+        tools=[mcp_server],
         max_loops=5,
     )
 
@@ -82,13 +82,13 @@ def setup_agent_with_tool(path_to_server: str):
         args=[path_to_server],
     )
 
-    mcp_tool_adapter = MCPServerAdapter(
-        id="mcp-adapter",
-        name="mcp-adapter",
+    mcp_server = MCPServer(
+        id="mcp-server",
+        name="mcp-server",
         connection=stdio_connection,
     )
 
-    tools = mcp_tool_adapter.get_mcp_tools()
+    tools = mcp_server.get_mcp_tools()
 
     agent = ReActAgent(
         name="react-agent",

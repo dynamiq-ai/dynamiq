@@ -43,16 +43,14 @@ nodes:
       depends: []
       input_mapping: {}
     tools:
-    - id: mcp-adapter
-      name: mcp-adapter
+    - id: mcp-server
+      name: mcp-server
       description: The tool used to initialize available MCP tools based on provided
         server parameters.
       group: tools
       callbacks: []
       connection: mcp-conn
-      tool_filter_names: []
-      tool_filter_mode: include
-      type: dynamiq.nodes.tools.MCPServerAdapter
+      type: dynamiq.nodes.tools.MCPServer
       depends: []
       input_mapping: {}
 flows:

@@ -4,7 +4,6 @@ import inspect
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import field
-from enum import Enum
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Literal
@@ -20,11 +19,6 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.logger import logger
-
-
-class ToolFilterMode(Enum):
-    INCLUDE = "include"
-    EXCLUDE = "exclude"
 
 
 def rename_keys_recursive(data: dict[str, Any] | list[str], key_map: dict[str, str]) -> Any:
@@ -165,7 +159,7 @@ class MCPTool(ConnectionNode):
         return {"content": result}
 
 
-class MCPServerAdapter(ConnectionNode):
+class MCPServer(ConnectionNode):
     """
     A tool that manages connections to MCP servers and initializes MCP tools.
 
@@ -174,18 +168,18 @@ class MCPServerAdapter(ConnectionNode):
       name (str): Node name.
       description (str): Node description.
       connection (MCPSse | MCPStdio): The connection module with parameters needed to the MCP server.
-      tool_filter_names (list[str]): Names of tools to include or exclude.
-      tool_filter_mode (ToolFilterMode): Strategy for tool filtering (INCLUDE or EXCLUDE).
+      include_tools (list[str]): Names of tools to include. If empty, all tools are included.
+      exclude_tools (list[str]): Names of tools to exclude.
       _mcp_tools (dict[str, MCPTool]): Internal dict of initialized MCP tools.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "MCP Adapter Tool"
+    name: str = "MCP Tool"
     description: str = "The tool used to initialize available MCP tools based on provided server parameters."
     connection: MCPSse | MCPStdio
 
-    tool_filter_names: list[str] = field(default_factory=list)
-    tool_filter_mode: ToolFilterMode = ToolFilterMode.INCLUDE
+    include_tools: list[str] = field(default_factory=list)
+    exclude_tools: list[str] = field(default_factory=list)
     _mcp_tools: dict[str, MCPTool] = PrivateAttr(default_factory=dict)
 
     async def initialize_tools(self):
@@ -221,7 +215,7 @@ class MCPServerAdapter(ConnectionNode):
         """
         if is_called_from_async_context():
             with ThreadPoolExecutor() as executor:
-                future = executor.submit(lambda: asyncio.run(self.get_mcp_tools_async()))
+                future = executor.submit(lambda: asyncio.run(self.get_mcp_tools_async(select_all=select_all)))
                 return future.result()
         return asyncio.run(self.get_mcp_tools_async(select_all=select_all))
 
@@ -238,19 +232,17 @@ class MCPServerAdapter(ConnectionNode):
         if not self._mcp_tools:
             await self.initialize_tools()
 
-        if not self.tool_filter_names or select_all:
+        if select_all or not self.include_tools and not self.exclude_tools:
             return list(self._mcp_tools.values())
 
-        if self.tool_filter_mode == ToolFilterMode.INCLUDE:
-            return [v for k, v in self._mcp_tools.items() if k in self.tool_filter_names]
-        elif self.tool_filter_mode == ToolFilterMode.EXCLUDE:
-            return [v for k, v in self._mcp_tools.items() if k not in self.tool_filter_names]
-        else:
-            raise ValueError(f"Invalid selection mode: {self.tool_filter_mode}")
+        if self.include_tools:
+            return [v for k, v in self._mcp_tools.items() if k in self.include_tools and k not in self.exclude_tools]
+
+        return [v for k, v in self._mcp_tools.items() if k not in self.exclude_tools]
 
     def execute(self, **kwargs):
         """
-        Disabled for the adapter tool. Use `get_mcp_tools()` to access individual tools.
+        Disabled for the MCP server. Use `get_mcp_tools()` to access individual tools.
 
         Raises:
             NotImplementedError: Always, because this method is not supported.

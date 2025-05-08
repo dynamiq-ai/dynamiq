@@ -8,7 +8,7 @@ from pydantic import Field, create_model
 from dynamiq import connections
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter, MCPSse, MCPTool, ToolFilterMode
+from dynamiq.nodes.tools.mcp import MCPServer, MCPSse, MCPTool
 
 
 def assert_tool_matches(tool, expected, connection):
@@ -96,16 +96,16 @@ def mock_mcp_tools(sse_server_connection):
 
 
 @pytest.fixture
-def mcp_adapter_tool(sse_server_connection, mock_mcp_tools):
-    tool = MCPServerAdapter(connection=sse_server_connection)
+def mcp_server_tool(sse_server_connection, mock_mcp_tools):
+    tool = MCPServer(connection=sse_server_connection)
     tool._mcp_tools = mock_mcp_tools
     return tool
 
 
 @pytest.mark.asyncio
-async def test_get_mcp_tools(mcp_adapter_tool, sse_server_connection):
-    with patch.object(MCPServerAdapter, "initialize_tools", new=AsyncMock()) as mock_init:
-        tools = mcp_adapter_tool.get_mcp_tools()
+async def test_get_mcp_tools(mcp_server_tool, sse_server_connection):
+    with patch.object(MCPServer, "initialize_tools", new=AsyncMock()) as mock_init:
+        tools = mcp_server_tool.get_mcp_tools()
         mock_init.assert_not_awaited()
 
         expected_tools = [
@@ -121,53 +121,66 @@ async def test_get_mcp_tools(mcp_adapter_tool, sse_server_connection):
 
 
 @pytest.mark.asyncio
-async def test_mock_tool_execute(mcp_adapter_tool):
-    tool = mcp_adapter_tool._mcp_tools["add"]  # "add"
+async def test_mock_tool_execute(mcp_server_tool):
+    tool = mcp_server_tool._mcp_tools["add"]  # "add"
 
     mocked_result = {"content": {"result": 42}}
 
-    with patch("dynamiq.nodes.tools.mcp_adapter.MCPTool.execute", return_value=mocked_result) as mock_exec:
+    with patch("dynamiq.nodes.tools.mcp.MCPTool.execute", return_value=mocked_result) as mock_exec:
         result = tool.execute(tool.input_schema(a=20, b=22))
         mock_exec.assert_called_once()
         assert result == mocked_result
 
-    with patch("dynamiq.nodes.tools.mcp_adapter.MCPTool.execute", return_value=mocked_result) as mock_exec:
+    with patch("dynamiq.nodes.tools.mcp.MCPTool.execute", return_value=mocked_result) as mock_exec:
         result = await tool.run(input_data={"a": 20, "b": 22})
         mock_exec.assert_called_once()
         assert result.output == mocked_result
 
 
-def test_mcp_tool_filter_names(mcp_adapter_tool, mock_mcp_tools):
-    mcp_adapter_tool._mcp_tools = mock_mcp_tools
+def test_mcp_tool_filter_names(mcp_server_tool, mock_mcp_tools):
+    mcp_server_tool._mcp_tools = mock_mcp_tools
 
-    mcp_adapter_tool.tool_filter_names = ["add", "multiply"]
-    mcp_adapter_tool.tool_filter_mode = ToolFilterMode.INCLUDE
-    tools = mcp_adapter_tool.get_mcp_tools()
+    mcp_server_tool.include_tools = ["add", "multiply"]
+    mcp_server_tool.exclude_tools = []
+    tools = mcp_server_tool.get_mcp_tools()
     assert len(tools) == 2
     assert tools[0].name == "add" and tools[1].name == "multiply"
 
-    mcp_adapter_tool.tool_filter_mode = ToolFilterMode.EXCLUDE
-    tools = mcp_adapter_tool.get_mcp_tools()
+    mcp_server_tool.include_tools = []
+    mcp_server_tool.exclude_tools = ["add", "multiply"]
+    tools = mcp_server_tool.get_mcp_tools()
     assert len(tools) == 1
     assert tools[0].name == "subtract"
 
-    mcp_adapter_tool.tool_filter_names = ["multiply"]
-    mcp_adapter_tool.tool_filter_mode = ToolFilterMode.INCLUDE
-    tools = mcp_adapter_tool.get_mcp_tools()
+    mcp_server_tool.include_tools = ["multiply"]
+    mcp_server_tool.exclude_tools = []
+    tools = mcp_server_tool.get_mcp_tools()
     assert len(tools) == 1
     assert tools[0].name == "multiply"
 
-    mcp_adapter_tool.tool_filter_mode = ToolFilterMode.EXCLUDE
-    tools = mcp_adapter_tool.get_mcp_tools()
+    mcp_server_tool.include_tools = ["add", "multiply"]
+    mcp_server_tool.exclude_tools = ["add"]
+    tools = mcp_server_tool.get_mcp_tools()
+    assert len(tools) == 1
+    assert tools[0].name == "multiply"
+
+    mcp_server_tool.include_tools = []
+    mcp_server_tool.exclude_tools = ["multiply"]
+    tools = mcp_server_tool.get_mcp_tools()
     assert len(tools) == 2
     assert tools[0].name == "add" and tools[1].name == "subtract"
 
-    tools = mcp_adapter_tool.get_mcp_tools(select_all=True)
+    mcp_server_tool.include_tools = ["add"]
+    mcp_server_tool.exclude_tools = ["add"]
+    tools = mcp_server_tool.get_mcp_tools()
+    assert len(tools) == 0
+
+    tools = mcp_server_tool.get_mcp_tools(select_all=True)
     assert len(tools) == 3
 
 
 def test_agent_integration_with_mcp_tools(sse_server_connection, mock_mcp_tools, llm_model):
-    mcp_server = MCPServerAdapter(connection=sse_server_connection)
+    mcp_server = MCPServer(connection=sse_server_connection)
     mcp_server._mcp_tools = {"add": mock_mcp_tools["add"], "multiply": mock_mcp_tools["multiply"]}
     mcp_tool = mock_mcp_tools["subtract"]
 
@@ -189,4 +202,4 @@ def test_agent_integration_with_mcp_tools(sse_server_connection, mock_mcp_tools,
     assert len(dict_tools) == 2
     assert dict_tools[0]["name"] == "subtract"
     assert dict_tools[0]["type"] == "dynamiq.nodes.tools.MCPTool"
-    assert dict_tools[1]["type"] == "dynamiq.nodes.tools.MCPServerAdapter"
+    assert dict_tools[1]["type"] == "dynamiq.nodes.tools.MCPServer"

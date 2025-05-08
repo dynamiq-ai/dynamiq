@@ -14,7 +14,7 @@ from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_input, process_tool_output_for_agent
 from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter
+from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
@@ -299,7 +299,7 @@ class Agent(Node):
     role: str | None = ""
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _mcp_servers: list[MCPServerAdapter] = PrivateAttr(default_factory=list)
+    _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -313,7 +313,7 @@ class Agent(Node):
 
         expanded_tools = []
         for tool in self.tools:
-            if isinstance(tool, MCPServerAdapter):
+            if isinstance(tool, MCPServer):
                 self._mcp_servers.append(tool)
                 subtools = tool.get_mcp_tools()
                 expanded_tools.extend(subtools)

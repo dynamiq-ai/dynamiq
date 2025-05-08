@@ -2,7 +2,7 @@ import os
 
 from dynamiq import Workflow
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.tools.mcp_adapter import MCPServerAdapter, MCPSse, MCPStdio
+from dynamiq.nodes.tools.mcp import MCPServer, MCPSse, MCPStdio
 from examples.llm_setup import setup_llm
 
 llm = setup_llm()
@@ -12,7 +12,7 @@ def use_stdio_connection(path_to_server: str):
     """
     Initializes a Dynamiq workflow using an MCP server over stdio.
 
-    The MCPAdapterTool retrieves all available tools from the server and makes them accessible to a ReActAgent,
+    The MCPTool retrieves all available tools from the server and makes them accessible to a ReActAgent,
     which can then use these tools to reason and respond to user queries.
 
     Args:
@@ -26,13 +26,13 @@ def use_stdio_connection(path_to_server: str):
         args=[path_to_server],
     )
 
-    mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
+    mcp_server = MCPServer(connection=stdio_connection)
 
     agent = ReActAgent(
         name="react-agent",
         id="react-agent",
         llm=llm,
-        tools=[mcp_tool_adapter],
+        tools=[mcp_server],
         max_loops=10,
     )
 
@@ -50,7 +50,7 @@ def use_sse_connection():
     """
     Initializes a workflow using an MCP server over SSE (Server-Sent Events).
 
-    The MCPAdapterTool retrieves all available tools from the server and makes them accessible to a ReActAgent,
+    The MCPTool retrieves all available tools from the server and makes them accessible to a ReActAgent,
     which can then use these tools to reason and respond to user queries.
 
     Returns:
@@ -58,13 +58,13 @@ def use_sse_connection():
     """
     sse_connection = MCPSse(url="http://localhost:8000/sse")
 
-    mcp_tool_adapter = MCPServerAdapter(connection=sse_connection)
+    mcp_server = MCPServer(connection=sse_connection)
 
     agent = ReActAgent(
         name="react-agent",
         id="react-agent",
         llm=llm,
-        tools=[mcp_tool_adapter],
+        tools=[mcp_server],
         max_loops=10,
     )
 
@@ -90,13 +90,13 @@ def use_remote_server_oauth():
         args=["-y", "mcp-remote", "https://mcp.linear.app/sse"],
     )
 
-    mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
+    mcp_server = MCPServer(connection=stdio_connection)
 
     agent = ReActAgent(
         name="react-agent",
         id="react-agent",
         llm=llm,
-        tools=[mcp_tool_adapter],
+        tools=[mcp_server],
         max_loops=10,
     )
 
@@ -119,13 +119,13 @@ def use_remote_server_open():
     """
     stdio_connection = MCPStdio(command="npx", args=["mcp-remote", "https://remote.mcpservers.org/fetch/mcp"])
 
-    mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
+    mcp_server = MCPServer(connection=stdio_connection)
 
     agent = ReActAgent(
         name="react-agent",
         id="react-agent",
         llm=llm,
-        tools=[mcp_tool_adapter],
+        tools=[mcp_server],
         max_loops=10,
     )
 
@@ -148,13 +148,13 @@ def use_local_server_with_token():
     """
     stdio_connection = MCPStdio(command="npx", args=["-y", "tavily-mcp@0.1.4"], env={"TAVILY_API_KEY": "tvly-token"})
 
-    mcp_tool_adapter = MCPServerAdapter(connection=stdio_connection)
+    mcp_server = MCPServer(connection=stdio_connection)
 
     agent = ReActAgent(
         name="react-agent",
         id="react-agent",
         llm=llm,
-        tools=[mcp_tool_adapter],
+        tools=[mcp_server],
         max_loops=10,
     )
 
