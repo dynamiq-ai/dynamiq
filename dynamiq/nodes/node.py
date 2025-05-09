@@ -256,6 +256,8 @@ class Node(BaseModel, Runnable, ABC):
         Parameters name to be included in the schema are either defined in the _json_schema_fields class variable or
         passed via the fields parameter.
 
+        Supported Nodes: Simple (non-nested) nodes and agents.
+
         Args:
             fields (list[str]): List of parameters to include in schema.
             **kwargs: Additional keyword arguments.

@@ -1,3 +1,4 @@
+import random
 import types
 from typing import Any, Union, get_args
 
@@ -44,7 +45,7 @@ def generate_integer(minimum: int, maximum: int) -> int:
     Returns:
         int: A integer between minimum and maximum.
     """
-    return (minimum + maximum) // 2
+    return random.randint(minimum, maximum)  # nosec
 
 
 def generate_number(minimum: float, maximum: float) -> float:
@@ -58,7 +59,7 @@ def generate_number(minimum: float, maximum: float) -> float:
     Returns:
         float: A random float between minimum and maximum.
     """
-    return (minimum + maximum) / 2
+    return random.uniform(minimum, maximum)  # nosec
 
 
 def generate_boolean() -> bool:
@@ -68,7 +69,7 @@ def generate_boolean() -> bool:
     Returns:
         bool: A randomly chosen boolean value.
     """
-    return False
+    return random.choice([False, True])  # nosec
 
 
 def generate_data_from_schema(schema: dict[str, Any]) -> Any:
@@ -175,6 +176,8 @@ def generate_yaml_data(node_cls: type[Node], node_info: dict[str, Any]) -> tuple
 def generate_node(node_cls: type[Node], node_info: dict[str, Any], taken_names: list[str]):
     """
     Generates instance of node with unique name.
+
+    Supported Nodes: Simple (non-nested) nodes and agents.
 
     Args:
         node_cls (type[Node]): Class of node to generate.
