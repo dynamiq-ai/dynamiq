@@ -199,7 +199,12 @@ def test_workflow_with_html_node_empty_file(workflow, html_node, output_node, tm
 
     html_result = result.output[html_node.id]
     if html_result["status"] == RunnableStatus.FAILURE.value:
+        assert "error" in html_result
         output_result = result.output[output_node.id]
         assert output_result["status"] == RunnableStatus.SKIP.value
     else:
         assert "error" not in html_result
+        assert "output" in html_result
+        assert "documents" in html_result["output"]
+        assert len(html_result["output"]["documents"]) == 1
+        assert html_result["output"]["documents"][0]["content"] == ""
