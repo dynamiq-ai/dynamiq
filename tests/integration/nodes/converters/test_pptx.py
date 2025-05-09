@@ -1,6 +1,4 @@
-import os
 from io import BytesIO
-from pathlib import Path
 
 import pytest
 from pptx import Presentation
@@ -81,9 +79,9 @@ def test_workflow_with_pptx_converter_parsing_error(
 
 
 def test_workflow_with_pptx_converter_file_not_found(
-    workflow_with_pptx_converter_and_output, pptx_converter, output_node
+    workflow_with_pptx_converter_and_output, pptx_converter, output_node, tmp_path
 ):
-    non_existent_path = str(Path("/tmp") / f"non_existent_file_{os.getpid()}.pptx")
+    non_existent_path = str(tmp_path / "non_existent_file.pptx")
     input_data = {"file_paths": [non_existent_path]}
 
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
@@ -94,10 +92,13 @@ def test_workflow_with_pptx_converter_file_not_found(
     assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
 
 
-def test_workflow_with_pptx_converter_empty_file(workflow_with_pptx_converter_and_output, pptx_converter, output_node):
-    empty_file = BytesIO(b"")
-    empty_file.name = "empty.pptx"
-    input_data = {"files": [empty_file]}
+def test_workflow_with_pptx_converter_empty_file(
+    workflow_with_pptx_converter_and_output, pptx_converter, output_node, tmp_path
+):
+    empty_file_path = tmp_path / "empty.pptx"
+    empty_file_path.touch()
+
+    input_data = {"file_paths": [str(empty_file_path)]}
 
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
 

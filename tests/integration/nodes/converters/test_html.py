@@ -1,6 +1,4 @@
-import os
 from io import BytesIO
-from pathlib import Path
 
 import pytest
 
@@ -171,8 +169,8 @@ def test_workflow_with_html_node_failure(workflow, html_node, output_node, tmp_p
     assert output_result["status"] == RunnableStatus.SKIP.value
 
 
-def test_workflow_with_html_node_file_not_found(workflow, html_node, output_node):
-    non_existent_path = str(Path("/tmp") / f"non_existent_file_{os.getpid()}.html")
+def test_workflow_with_html_node_file_not_found(workflow, html_node, output_node, tmp_path):
+    non_existent_path = str(tmp_path / "non_existent_file.html")
     input_data = {"file_paths": [non_existent_path]}
 
     result = workflow.run(input_data=input_data)

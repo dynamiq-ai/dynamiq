@@ -1,6 +1,4 @@
 import csv
-import os
-from pathlib import Path
 
 import pytest
 
@@ -89,8 +87,10 @@ def test_csv_loader_missing_metadata_columns(sample_csv):
     assert "NonExistentFeature" not in first_doc["metadata"]
 
 
-def test_workflow_with_csv_converter_file_not_found(workflow_with_csv_converter_and_output, csv_converter, output_node):
-    non_existent_path = str(Path("/tmp") / f"non_existent_file_{os.getpid()}.csv")
+def test_workflow_with_csv_converter_file_not_found(
+    workflow_with_csv_converter_and_output, csv_converter, output_node, tmp_path
+):
+    non_existent_path = str(tmp_path / "non_existent_file.csv")
     input_data = {"file_paths": [non_existent_path]}
 
     response = workflow_with_csv_converter_and_output.run(input_data=input_data)

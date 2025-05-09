@@ -1,6 +1,4 @@
-import os
 from io import BytesIO
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -121,8 +119,8 @@ def test_workflow_with_unstructured_node_failure(workflow, unstructured_node, ou
         assert output_result["status"] == RunnableStatus.SKIP.value
 
 
-def test_workflow_with_unstructured_node_file_not_found(workflow, unstructured_node, output_node):
-    non_existent_path = str(Path("/tmp") / f"non_existent_file_{os.getpid()}.pdf")
+def test_workflow_with_unstructured_node_file_not_found(workflow, unstructured_node, output_node, tmp_path):
+    non_existent_path = str(tmp_path / "non_existent_file.pdf")
     input_data = {"file_paths": [non_existent_path]}
 
     result = workflow.run(input_data=input_data)
