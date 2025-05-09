@@ -10,7 +10,7 @@ from typing import Any, Callable, ClassVar, Self, Union
 from uuid import uuid4
 
 from jinja2 import Template
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, create_model, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler
@@ -40,6 +40,7 @@ from dynamiq.utils.duration import format_duration
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import clear_annotation
 
 
 def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
@@ -210,6 +211,8 @@ class Node(BaseModel, Runnable, ABC):
         is_postponed_component_init (bool): Whether component initialization is postponed.
         is_optimized_for_agents (bool): Whether to optimize output for agents. By default is set to False.
         supports_files (bool): Whether the node has access to files. By default is set to False.
+        _json_schema_fields (list[str]): List of parameter names that will be used when generating json schema
+          with _generate_json_schema.
     """
     id: str = Field(default_factory=generate_uuid)
     name: str | None = None
@@ -235,6 +238,7 @@ class Node(BaseModel, Runnable, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[BaseModel] | None] = None
     callbacks: list[NodeCallbackHandler] = []
+    _json_schema_fields: ClassVar[list[str]] = []
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -242,6 +246,53 @@ class Node(BaseModel, Runnable, ABC):
             self.init_components()
 
         self._output_references = NodeOutputReferences(node=self)
+
+    @classmethod
+    def _generate_json_schema(cls, fields: list[str] = None, **kwargs) -> dict[str, Any]:
+        """
+        Generates base json schema of Node for specified parameters.
+        This schema is designed for compatibility with the WorkflowYamlParser,
+        containing enough partial information to instantiate an Node.
+        Parameters name to be included in the schema are either defined in the _json_schema_fields class variable or
+        passed via the fields parameter.
+
+        Supported Nodes: Simple (non-nested) nodes and agents.
+
+        Args:
+            fields (list[str]): List of parameters to include in schema.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict[str, Any]: Generated json schema.
+        """
+        fields_to_include = {}
+        generated_schemas = {}
+        for name in fields or cls._json_schema_fields:
+            field = cls.__fields__[name]
+            annotation = clear_annotation(field.annotation)
+            parameter_name = name
+            if field.alias:
+                parameter_name = field.alias
+            if hasattr(annotation, "_generate_json_schema"):
+                generated_schemas[name] = annotation._generate_json_schema()
+            else:
+                fields_to_include[parameter_name] = (annotation, Field(..., description=field.description))
+
+        model = create_model(cls.__name__, **fields_to_include)
+        schema = model.schema()
+        schema["additionalProperties"] = False
+        for param, param_schema in generated_schemas.items():
+            schema["properties"][param] = param_schema
+
+        class_type = f"{cls.__module__.rsplit('.', 1)[0]}.{cls.__name__}"
+        schema["properties"]["type"] = {"type": "string", "enum": [class_type]}
+
+        if "required" not in schema:
+            schema["required"] = []
+        schema["required"].append("type")
+
+        schema["type"] = "object"
+        return schema
 
     @computed_field
     @cached_property
