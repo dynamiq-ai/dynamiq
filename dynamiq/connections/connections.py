@@ -1253,7 +1253,7 @@ class MCPSse(BaseConnection):
     url: str = Field(..., description="The SSE endpoint URL to connect to.")
     headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the SSE request.")
     timeout: float = Field(default=5.0, description="Timeout in seconds for establishing the initial connection.")
-    read_timeout: float = Field(default=60 * 5, description="Timeout for reading SSE messages (in seconds).")
+    sse_read_timeout: float = Field(default=60 * 5, description="Timeout for reading SSE messages (in seconds).")
 
     def connect(self):
         """
@@ -1268,7 +1268,7 @@ class MCPSse(BaseConnection):
             url=self.url,
             headers=self.headers,
             timeout=self.timeout,
-            sse_read_timeout=self.read_timeout,
+            sse_read_timeout=self.sse_read_timeout,
         )
 
 
@@ -1278,7 +1278,9 @@ class MCPStreamableHTTP(BaseConnection):
     timeout: timedelta = Field(
         timedelta(seconds=30), description="Timeout in seconds for establishing the initial connection."
     )
-    read_timeout: timedelta = Field(timedelta(seconds=60 * 5), description="Timeout for reading messages (in seconds).")
+    sse_read_timeout: timedelta = Field(
+        timedelta(seconds=60 * 5), description="Timeout for reading messages (in seconds)."
+    )
 
     def connect(self):
         """
@@ -1293,7 +1295,7 @@ class MCPStreamableHTTP(BaseConnection):
             url=self.url,
             headers=self.headers,
             timeout=self.timeout,
-            sse_read_timeout=self.read_timeout,
+            sse_read_timeout=self.sse_read_timeout,
         )
 
 
