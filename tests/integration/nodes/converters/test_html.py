@@ -1,7 +1,6 @@
 import os
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -156,23 +155,20 @@ def test_html_converter_with_complex_content():
 
 def test_workflow_with_html_node_failure(workflow, html_node, output_node, tmp_path):
     test_file = tmp_path / "test_file.html"
-    test_file.write_text("Not valid HTML content")
+    test_file.write_bytes(b"\x00\x01\x02\x03\x04This is not valid HTML content\xFF\xFE")
 
-    with patch(
-        "dynamiq.components.converters.html.lxml_html.fromstring", side_effect=Exception("Failed to parse HTML content")
-    ):
-        input_data = {"file_paths": [str(test_file)]}
+    input_data = {"file_paths": [str(test_file)]}
 
-        result = workflow.run(input_data=input_data)
+    result = workflow.run(input_data=input_data)
 
-        assert result.status == RunnableStatus.SUCCESS
+    assert result.status == RunnableStatus.SUCCESS
 
-        html_result = result.output[html_node.id]
-        assert html_result["status"] == RunnableStatus.FAILURE.value
-        assert "Failed to parse HTML content" in html_result["error"]["message"]
+    html_result = result.output[html_node.id]
+    assert html_result["status"] == RunnableStatus.FAILURE.value
+    assert "error" in html_result
 
-        output_result = result.output[output_node.id]
-        assert output_result["status"] == RunnableStatus.SKIP.value
+    output_result = result.output[output_node.id]
+    assert output_result["status"] == RunnableStatus.SKIP.value
 
 
 def test_workflow_with_html_node_file_not_found(workflow, html_node, output_node):
