@@ -249,7 +249,7 @@ def test_workflow_with_pptx_converter_empty_presentation(
     assert len(documents) == 1
     assert documents[0]["content"] == ""
 
-    expected_path = empty_pptx if input_type == "file_paths" else "empty_presentation.pptx"
+    expected_path = empty_pptx if input_type == "file_paths" else empty_pptx.name
     assert documents[0]["metadata"]["file_path"] == expected_path
 
     assert response.output[output_node.id]["status"] == RunnableStatus.SUCCESS.value

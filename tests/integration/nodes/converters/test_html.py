@@ -200,7 +200,7 @@ def test_workflow_with_html_converter(request, input_type, input_fixture):
     assert "Item 2" in document["content"]
     assert "Item 3" in document["content"]
 
-    expected_source = html_input if input_type == "file_paths" else "test.html"
+    expected_source = html_input if input_type == "file_paths" else html_input.name
     assert document["metadata"]["file_path"] == expected_source
 
 
@@ -240,7 +240,7 @@ def test_html_converter_with_complex_content(request, input_type, input_fixture)
     assert "https://example.com" in content
     assert "blockquote" in content
 
-    expected_source = html_input if input_type == "file_paths" else "complex.html"
+    expected_source = html_input if input_type == "file_paths" else html_input.name
     assert document["metadata"]["file_path"] == expected_source
 
 

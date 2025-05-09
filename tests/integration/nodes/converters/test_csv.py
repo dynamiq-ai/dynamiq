@@ -187,7 +187,7 @@ def test_csv_loader_basic_functionality(request, input_type, input_fixture):
     assert first_doc["metadata"]["Feature_1"] == "Value 1A"
     assert first_doc["metadata"]["Feature_2"] == "Value 2A"
 
-    expected_source = csv_input if input_type == "file_paths" else "sample_bytesio.csv"
+    expected_source = csv_input if input_type == "file_paths" else csv_input.name
     assert first_doc["metadata"]["source"] == expected_source
 
 
