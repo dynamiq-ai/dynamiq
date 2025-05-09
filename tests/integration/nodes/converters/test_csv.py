@@ -149,20 +149,20 @@ def test_workflow_with_csv_converter_missing_content_column(
         ["Value 1B", "Value 2B"],
     ]
 
-    missing_column_csv = create_test_csv(rows, header)
+    test_file = tmp_path / "missing_column.csv"
+    with open(test_file, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(header)
+        writer.writerows(rows)
 
-    try:
-        input_data = {"file_paths": [missing_column_csv]}
+    input_data = {"file_paths": [str(test_file)]}
 
-        response = workflow_with_csv_converter_and_output.run(input_data=input_data)
+    response = workflow_with_csv_converter_and_output.run(input_data=input_data)
 
-        assert response.status == RunnableStatus.SUCCESS
-        assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
-        assert "Content column 'Target' not found" in response.output[csv_converter.id]["error"]["message"]
-        assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
-    finally:
-        if os.path.exists(missing_column_csv):
-            os.remove(missing_column_csv)
+    assert response.status == RunnableStatus.SUCCESS
+    assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
+    assert "Content column 'Target' not found" in response.output[csv_converter.id]["error"]["message"]
+    assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
 
 
 def test_workflow_with_csv_converter_corrupted_file(
