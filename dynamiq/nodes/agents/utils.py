@@ -439,6 +439,8 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
         else:
             content = str(content)
 
+    content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", content)
+
     max_len_in_char: int = max_tokens * 4  # This assumes an average of 4 characters per token.
 
     if len(content) > max_len_in_char and truncate:
