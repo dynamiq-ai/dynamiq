@@ -21,9 +21,8 @@ nodes:
       retry_interval_seconds: 1
       max_retries: 0
       backoff_rate: 1
-    schema:
+    response_format:
       type: "json_object"
-    inference_mode: "STRUCTURED_OUTPUT"
     output_transformer:
       path: null
       selector:
