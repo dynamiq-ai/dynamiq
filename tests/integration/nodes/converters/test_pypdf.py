@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +10,17 @@ from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.types import Document
+
+
+def write_pdf_to_path(path: Path, content: bytes) -> str:
+    path.write_bytes(content)
+    return str(path)
+
+
+def write_pdf_to_bytesio(content: bytes, filename: str = "file.pdf") -> BytesIO:
+    pdf_buffer = BytesIO(content)
+    pdf_buffer.name = filename
+    return pdf_buffer
 
 
 @pytest.fixture
@@ -50,31 +62,60 @@ def valid_pdf_content():
 
 
 @pytest.fixture
-def valid_pdf_file(valid_pdf_content):
-    file = BytesIO(valid_pdf_content)
-    file.name = "mock.pdf"
-    return file
+def valid_pdf_file_path(tmp_path, valid_pdf_content):
+    file_path = tmp_path / "mock.pdf"
+    return write_pdf_to_path(file_path, valid_pdf_content)
 
 
 @pytest.fixture
-def pdf_no_pages():
-    file = BytesIO(b"%PDF-1.7\n\n1 0 obj\n<<\n  /Type /Catalog\n>>\nendobj\n\ntrailer\n<<\n  /Root 1 0 R\n>>\n%%EOF")
-    file.name = "no_pages.pdf"
-    return file
+def valid_pdf_bytesio(valid_pdf_content):
+    return write_pdf_to_bytesio(valid_pdf_content, "mock.pdf")
 
 
 @pytest.fixture
-def corrupted_pdf_file():
-    file = BytesIO(b"%PDF-corrupted-content")
-    file.name = "corrupted.pdf"
-    return file
+def pdf_no_pages_content():
+    return b"%PDF-1.7\n\n1 0 obj\n<<\n  /Type /Catalog\n>>\nendobj\n\ntrailer\n<<\n  /Root 1 0 R\n>>\n%%EOF"
 
 
 @pytest.fixture
-def empty_pdf_file(tmp_path):
+def pdf_no_pages_file_path(tmp_path, pdf_no_pages_content):
+    file_path = tmp_path / "no_pages.pdf"
+    return write_pdf_to_path(file_path, pdf_no_pages_content)
+
+
+@pytest.fixture
+def pdf_no_pages_bytesio(pdf_no_pages_content):
+    return write_pdf_to_bytesio(pdf_no_pages_content, "no_pages.pdf")
+
+
+@pytest.fixture
+def corrupted_pdf_content():
+    return b"%PDF-corrupted-content"
+
+
+@pytest.fixture
+def corrupted_pdf_file_path(tmp_path, corrupted_pdf_content):
+    file_path = tmp_path / "corrupted.pdf"
+    return write_pdf_to_path(file_path, corrupted_pdf_content)
+
+
+@pytest.fixture
+def corrupted_pdf_bytesio(corrupted_pdf_content):
+    return write_pdf_to_bytesio(corrupted_pdf_content, "corrupted.pdf")
+
+
+@pytest.fixture
+def empty_pdf_file_path(tmp_path):
     empty_file_path = tmp_path / "empty.pdf"
     empty_file_path.touch()
     return str(empty_file_path)
+
+
+@pytest.fixture
+def empty_pdf_bytesio():
+    empty_buffer = BytesIO()
+    empty_buffer.name = "empty.pdf"
+    return empty_buffer
 
 
 @pytest.fixture
@@ -83,26 +124,44 @@ def non_existent_pdf_file(tmp_path):
 
 
 @pytest.fixture
-def unsupported_file():
-    wrong_file = BytesIO(b"This is not a PDF file, just plain text")
-    wrong_file.name = "text.txt"
-    return wrong_file
+def unsupported_content():
+    return b"This is not a PDF file, just plain text"
 
 
-def test_workflow_with_pypdf_converter(valid_pdf_file):
+@pytest.fixture
+def unsupported_file_path(tmp_path, unsupported_content):
+    file_path = tmp_path / "text.txt"
+    return write_pdf_to_path(file_path, unsupported_content)
+
+
+@pytest.fixture
+def unsupported_bytesio(unsupported_content):
+    return write_pdf_to_bytesio(unsupported_content, "text.txt")
+
+
+@pytest.mark.parametrize(
+    "input_type,input_fixture",
+    [
+        ("file_paths", "valid_pdf_file_path"),
+        ("files", "valid_pdf_bytesio"),
+    ],
+)
+def test_workflow_with_pypdf_converter(request, input_type, input_fixture):
+    pdf_input = request.getfixturevalue(input_fixture)
     wf_pypdf = Workflow(
         flow=Flow(nodes=[PyPDFConverter()]),
     )
-    input_data = {"files": [valid_pdf_file]}
+    input_data = {input_type: [pdf_input]}
     response = wf_pypdf.run(input_data=input_data)
     document_id = response.output[next(iter(response.output))]["output"]["documents"][0]["id"]
+
+    expected_path = pdf_input if input_type == "file_paths" else pdf_input.name
+
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=input_data,
         output={
-            "documents": [
-                Document(id=document_id, content="Hello, world!", metadata={"file_path": valid_pdf_file.name})
-            ]
+            "documents": [Document(id=document_id, content="Hello, world!", metadata={"file_path": expected_path})]
         },
     ).to_dict(skip_format_types={BytesIO, bytes})
 
@@ -117,10 +176,18 @@ def test_workflow_with_pypdf_converter(valid_pdf_file):
     assert len(response.output[node_id]["output"]["documents"]) == 1
 
 
+@pytest.mark.parametrize(
+    "input_type,input_fixture",
+    [
+        ("file_paths", "corrupted_pdf_file_path"),
+        ("files", "corrupted_pdf_bytesio"),
+    ],
+)
 def test_workflow_with_pypdf_converter_parsing_error(
-    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, corrupted_pdf_file
+    request, workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, input_type, input_fixture
 ):
-    input_data = {"files": [corrupted_pdf_file]}
+    pdf_input = request.getfixturevalue(input_fixture)
+    input_data = {input_type: [pdf_input]}
 
     response = workflow_with_pypdf_converter_and_output.run(input_data=input_data)
 
@@ -143,10 +210,18 @@ def test_workflow_with_pypdf_converter_file_not_found(
     assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
 
 
+@pytest.mark.parametrize(
+    "input_type,input_fixture",
+    [
+        ("file_paths", "empty_pdf_file_path"),
+        ("files", "empty_pdf_bytesio"),
+    ],
+)
 def test_workflow_with_pypdf_converter_empty_file(
-    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, empty_pdf_file
+    request, workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, input_type, input_fixture
 ):
-    input_data = {"file_paths": [empty_pdf_file]}
+    pdf_input = request.getfixturevalue(input_fixture)
+    input_data = {input_type: [pdf_input]}
 
     response = workflow_with_pypdf_converter_and_output.run(input_data=input_data)
 
@@ -156,10 +231,18 @@ def test_workflow_with_pypdf_converter_empty_file(
     assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
 
 
+@pytest.mark.parametrize(
+    "input_type,input_fixture",
+    [
+        ("file_paths", "pdf_no_pages_file_path"),
+        ("files", "pdf_no_pages_bytesio"),
+    ],
+)
 def test_workflow_with_pypdf_converter_no_pages(
-    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, pdf_no_pages
+    request, workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, input_type, input_fixture
 ):
-    input_data = {"files": [pdf_no_pages]}
+    pdf_input = request.getfixturevalue(input_fixture)
+    input_data = {input_type: [pdf_input]}
 
     response = workflow_with_pypdf_converter_and_output.run(input_data=input_data)
 
@@ -169,10 +252,18 @@ def test_workflow_with_pypdf_converter_no_pages(
     assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
 
 
+@pytest.mark.parametrize(
+    "input_type,input_fixture",
+    [
+        ("file_paths", "unsupported_file_path"),
+        ("files", "unsupported_bytesio"),
+    ],
+)
 def test_workflow_with_pypdf_converter_unsupported_file(
-    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, unsupported_file
+    request, workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, input_type, input_fixture
 ):
-    input_data = {"files": [unsupported_file]}
+    pdf_input = request.getfixturevalue(input_fixture)
+    input_data = {input_type: [pdf_input]}
 
     response = workflow_with_pypdf_converter_and_output.run(input_data=input_data)
 
