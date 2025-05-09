@@ -36,7 +36,9 @@ def workflow_with_pptx_converter_and_output(pptx_converter, output_node):
     )
 
 
-def test_workflow_with_pptx_converter():
+@pytest.fixture
+def valid_pptx_file():
+    """Creates a valid PPTX file with simple content."""
     content = "Hello, World!"
     prs = Presentation()
     title_slide_layout = prs.slide_layouts[0]
@@ -44,11 +46,58 @@ def test_workflow_with_pptx_converter():
     title = slide.shapes.title
     title.text = content
 
-    pptx_converter = PPTXFileConverter()
-    wf_pptx = Workflow(flow=Flow(nodes=[pptx_converter]))
     file = BytesIO()
     prs.save(file)
     file.name = "mock.pptx"
+    file.seek(0)
+    return file, content
+
+
+@pytest.fixture
+def empty_pptx_presentation():
+    """Creates an empty PPTX presentation with no slides."""
+    prs = Presentation()
+    file = BytesIO()
+    prs.save(file)
+    file.name = "empty_presentation.pptx"
+    file.seek(0)
+    return file
+
+
+@pytest.fixture
+def empty_pptx_file(tmp_path):
+    """Creates an empty (zero-byte) PPTX file."""
+    empty_file_path = tmp_path / "empty.pptx"
+    empty_file_path.touch()
+    return str(empty_file_path)
+
+
+@pytest.fixture
+def invalid_pptx_file():
+    """Creates an invalid PPTX file with corrupted content."""
+    file = BytesIO(b"This is not a valid PPTX file content")
+    file.name = "invalid.pptx"
+    return file
+
+
+@pytest.fixture
+def unsupported_file():
+    """Creates a file with unsupported format (plain text)."""
+    wrong_file = BytesIO(b"This is not a PPTX file, just plain text")
+    wrong_file.name = "text.txt"
+    return wrong_file
+
+
+@pytest.fixture
+def non_existent_pptx_file(tmp_path):
+    """Returns a path to a non-existent PPTX file."""
+    return str(tmp_path / "non_existent_file.pptx")
+
+
+def test_workflow_with_pptx_converter(valid_pptx_file):
+    file, content = valid_pptx_file
+    pptx_converter = PPTXFileConverter()
+    wf_pptx = Workflow(flow=Flow(nodes=[pptx_converter]))
     input_data = {"files": [file]}
 
     response = wf_pptx.run(input_data=input_data)
@@ -64,11 +113,9 @@ def test_workflow_with_pptx_converter():
 
 
 def test_workflow_with_pptx_converter_parsing_error(
-    workflow_with_pptx_converter_and_output, pptx_converter, output_node
+    workflow_with_pptx_converter_and_output, pptx_converter, output_node, invalid_pptx_file
 ):
-    file = BytesIO(b"This is not a valid PPTX file content")
-    file.name = "invalid.pptx"
-    input_data = {"files": [file]}
+    input_data = {"files": [invalid_pptx_file]}
 
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
 
@@ -79,10 +126,9 @@ def test_workflow_with_pptx_converter_parsing_error(
 
 
 def test_workflow_with_pptx_converter_file_not_found(
-    workflow_with_pptx_converter_and_output, pptx_converter, output_node, tmp_path
+    workflow_with_pptx_converter_and_output, pptx_converter, output_node, non_existent_pptx_file
 ):
-    non_existent_path = str(tmp_path / "non_existent_file.pptx")
-    input_data = {"file_paths": [non_existent_path]}
+    input_data = {"file_paths": [non_existent_pptx_file]}
 
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
 
@@ -93,12 +139,9 @@ def test_workflow_with_pptx_converter_file_not_found(
 
 
 def test_workflow_with_pptx_converter_empty_file(
-    workflow_with_pptx_converter_and_output, pptx_converter, output_node, tmp_path
+    workflow_with_pptx_converter_and_output, pptx_converter, output_node, empty_pptx_file
 ):
-    empty_file_path = tmp_path / "empty.pptx"
-    empty_file_path.touch()
-
-    input_data = {"file_paths": [str(empty_file_path)]}
+    input_data = {"file_paths": [empty_pptx_file]}
 
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
 
@@ -109,15 +152,9 @@ def test_workflow_with_pptx_converter_empty_file(
 
 
 def test_workflow_with_pptx_converter_empty_presentation(
-    workflow_with_pptx_converter_and_output, pptx_converter, output_node
+    workflow_with_pptx_converter_and_output, pptx_converter, output_node, empty_pptx_presentation
 ):
-    prs = Presentation()
-    file = BytesIO()
-    prs.save(file)
-    file.name = "empty_presentation.pptx"
-    file.seek(0)
-
-    input_data = {"files": [file]}
+    input_data = {"files": [empty_pptx_presentation]}
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
 
     assert response.status == RunnableStatus.SUCCESS
@@ -131,11 +168,9 @@ def test_workflow_with_pptx_converter_empty_presentation(
 
 
 def test_workflow_with_pptx_converter_unsupported_file(
-    workflow_with_pptx_converter_and_output, pptx_converter, output_node
+    workflow_with_pptx_converter_and_output, pptx_converter, output_node, unsupported_file
 ):
-    wrong_file = BytesIO(b"This is not a PPTX file, just plain text")
-    wrong_file.name = "text.txt"
-    input_data = {"files": [wrong_file]}
+    input_data = {"files": [unsupported_file]}
 
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
 
