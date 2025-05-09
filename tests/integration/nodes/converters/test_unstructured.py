@@ -81,7 +81,7 @@ def empty_text_file_path(tmp_path):
 
 @pytest.fixture
 def empty_text_bytesio():
-    empty_buffer = BytesIO()
+    empty_buffer = BytesIO(b"")
     empty_buffer.name = "empty_file.txt"
     return empty_buffer
 
@@ -204,23 +204,13 @@ def test_workflow_with_unstructured_node_file_not_found(workflow, unstructured_n
     assert output_result["status"] == RunnableStatus.SKIP.value
 
 
-@pytest.mark.parametrize(
-    "input_type,input_fixture",
-    [
-        ("file_paths", "empty_text_file_path"),
-        ("files", "empty_text_bytesio"),
-    ],
-)
-def test_workflow_with_unstructured_node_empty_file(
-    request, workflow, unstructured_node, output_node, input_type, input_fixture
+def test_workflow_with_unstructured_node_empty_file_path(
+    workflow, unstructured_node, output_node, empty_text_file_path
 ):
-    empty_file = request.getfixturevalue(input_fixture)
-    input_data = {input_type: [empty_file]}
-
+    input_data = {"file_paths": [empty_text_file_path]}
     result = workflow.run(input_data=input_data)
 
     assert result.status == RunnableStatus.SUCCESS
-
     unstructured_result = result.output[unstructured_node.id]
     assert unstructured_result["status"] == RunnableStatus.FAILURE.value
     assert "ValueError" in unstructured_result["error"]["type"]
@@ -228,3 +218,20 @@ def test_workflow_with_unstructured_node_empty_file(
 
     output_result = result.output[output_node.id]
     assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_workflow_with_unstructured_node_empty_bytesio(workflow, unstructured_node, output_node, empty_text_bytesio):
+    with patch("dynamiq.components.converters.unstructured.partition_via_api") as mock_partition:
+        mock_partition.side_effect = ValueError("Empty file cannot be processed")
+
+        input_data = {"files": [empty_text_bytesio]}
+        result = workflow.run(input_data=input_data)
+
+        assert result.status == RunnableStatus.SUCCESS
+        unstructured_result = result.output[unstructured_node.id]
+        assert unstructured_result["status"] == RunnableStatus.FAILURE.value
+        assert "ValueError" in unstructured_result["error"]["type"]
+        assert "Empty file cannot be processed" in unstructured_result["error"]["message"]
+
+        output_result = result.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SKIP.value
