@@ -6,11 +6,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import field
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
 from datamodel_code_generator import DataModelType, InputFileType, generate
 from mcp import ClientSession
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from dynamiq.connections import MCPSse, MCPStdio, MCPStreamableHTTP
 from dynamiq.nodes import NodeGroup
@@ -32,10 +32,12 @@ def rename_keys_recursive(data: dict[str, Any] | list[str], key_map: dict[str, s
     return data
 
 
-class ServerMetadata(TypedDict, total=False):
-    id: str
-    name: str
-    description: str
+class ServerMetadata(BaseModel):
+    id: str | None = None
+    name: str | None = None
+    description: str | None = None
+
+    model_config = ConfigDict(extra="allow")
 
 
 class MCPTool(ConnectionNode):
@@ -211,11 +213,7 @@ class MCPServer(ConnectionNode):
                         description=tool.description or "MCP Tool",
                         json_input_schema=tool.inputSchema,
                         connection=self.connection,
-                        server_metadata={
-                            "id": self.id,
-                            "name": self.name,
-                            "description": self.description,
-                        },
+                        server_metadata=ServerMetadata(id=self.id, name=self.name, description=self.description),
                     )
 
         logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
