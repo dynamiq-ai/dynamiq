@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import field
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from datamodel_code_generator import DataModelType, InputFileType, generate
 from mcp import ClientSession
@@ -32,6 +32,12 @@ def rename_keys_recursive(data: dict[str, Any] | list[str], key_map: dict[str, s
     return data
 
 
+class ServerMetadata(TypedDict, total=False):
+    id: str
+    name: str
+    description: str
+
+
 class MCPTool(ConnectionNode):
     """
     A tool that interacts with the MCP server, enabling execution of specific server-side functions.
@@ -42,6 +48,7 @@ class MCPTool(ConnectionNode):
       description (str): Node description.
       input_schema (ClassVar[type[BaseModel]]): The schema that defines the expected structure of tool's input.
       connection (MCPSse | MCPStdio | MCPStreamableHTTP): Connection module for the MCP server.
+      server_metadata (ServerMetadata): Server metadata for tracing.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -50,6 +57,7 @@ class MCPTool(ConnectionNode):
     input_schema: type[BaseModel]
     json_input_schema: dict[str, Any]
     connection: MCPSse | MCPStdio | MCPStreamableHTTP
+    server_metadata: ServerMetadata = field(default_factory=dict)
 
     def __init__(self, json_input_schema: dict[str, Any], **kwargs):
         """
@@ -203,6 +211,11 @@ class MCPServer(ConnectionNode):
                         description=tool.description or "MCP Tool",
                         json_input_schema=tool.inputSchema,
                         connection=self.connection,
+                        server_metadata={
+                            "id": self.id,
+                            "name": self.name,
+                            "description": self.description,
+                        },
                     )
 
         logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
