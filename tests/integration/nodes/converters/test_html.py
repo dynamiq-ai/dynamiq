@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +9,17 @@ from dynamiq.nodes.converters.html import HTMLConverter
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableStatus
+
+
+def write_html_to_path(path: Path, content: str) -> str:
+    path.write_text(content)
+    return str(path)
+
+
+def write_html_to_bytesio(content: str, filename: str = "file.html") -> BytesIO:
+    html_buffer = BytesIO(content.encode("utf-8"))
+    html_buffer.name = filename
+    return html_buffer
 
 
 @pytest.fixture
@@ -56,10 +68,14 @@ def basic_html_content():
 
 
 @pytest.fixture
-def basic_html_file(basic_html_content):
-    file = BytesIO(basic_html_content.encode("utf-8"))
-    file.name = "test.html"
-    return file
+def basic_html_file_path(tmp_path, basic_html_content):
+    test_file = tmp_path / "test.html"
+    return write_html_to_path(test_file, basic_html_content)
+
+
+@pytest.fixture
+def basic_html_bytesio(basic_html_content):
+    return write_html_to_bytesio(basic_html_content, "test.html")
 
 
 @pytest.fixture
@@ -107,24 +123,47 @@ def complex_html_content():
 
 
 @pytest.fixture
-def complex_html_file(complex_html_content):
-    file = BytesIO(complex_html_content.encode("utf-8"))
-    file.name = "complex.html"
-    return file
+def complex_html_file_path(tmp_path, complex_html_content):
+    test_file = tmp_path / "complex.html"
+    return write_html_to_path(test_file, complex_html_content)
 
 
 @pytest.fixture
-def invalid_html_file(tmp_path):
+def complex_html_bytesio(complex_html_content):
+    return write_html_to_bytesio(complex_html_content, "complex.html")
+
+
+@pytest.fixture
+def invalid_html_content():
+    return b"\x00\x01\x02\x03\x04This is not valid HTML content\xFF\xFE"
+
+
+@pytest.fixture
+def invalid_html_file_path(tmp_path, invalid_html_content):
     test_file = tmp_path / "test_file.html"
-    test_file.write_bytes(b"\x00\x01\x02\x03\x04This is not valid HTML content\xFF\xFE")
+    test_file.write_bytes(invalid_html_content)
     return str(test_file)
 
 
 @pytest.fixture
-def empty_html_file(tmp_path):
+def invalid_html_bytesio(invalid_html_content):
+    invalid_buffer = BytesIO(invalid_html_content)
+    invalid_buffer.name = "invalid.html"
+    return invalid_buffer
+
+
+@pytest.fixture
+def empty_html_file_path(tmp_path):
     empty_file = tmp_path / "empty_file.html"
     empty_file.touch()
     return str(empty_file)
+
+
+@pytest.fixture
+def empty_html_bytesio():
+    empty_buffer = BytesIO()
+    empty_buffer.name = "empty.html"
+    return empty_buffer
 
 
 @pytest.fixture
@@ -132,12 +171,20 @@ def non_existent_html_file(tmp_path):
     return str(tmp_path / "non_existent_file.html")
 
 
-def test_workflow_with_html_converter(basic_html_file):
+@pytest.mark.parametrize(
+    "input_type,input_fixture",
+    [
+        ("file_paths", "basic_html_file_path"),
+        ("files", "basic_html_bytesio"),
+    ],
+)
+def test_workflow_with_html_converter(request, input_type, input_fixture):
+    html_input = request.getfixturevalue(input_fixture)
     wf_html = Workflow(
         flow=Flow(nodes=[HTMLConverter()]),
     )
 
-    input_data = {"files": [basic_html_file]}
+    input_data = {input_type: [html_input]}
     response = wf_html.run(input_data=input_data)
 
     assert response.status == RunnableStatus.SUCCESS
@@ -152,15 +199,25 @@ def test_workflow_with_html_converter(basic_html_file):
     assert "Item 1" in document["content"]
     assert "Item 2" in document["content"]
     assert "Item 3" in document["content"]
-    assert document["metadata"]["file_path"] == "test.html"
+
+    expected_source = html_input if input_type == "file_paths" else "test.html"
+    assert document["metadata"]["file_path"] == expected_source
 
 
-def test_html_converter_with_complex_content(complex_html_file):
+@pytest.mark.parametrize(
+    "input_type,input_fixture",
+    [
+        ("file_paths", "complex_html_file_path"),
+        ("files", "complex_html_bytesio"),
+    ],
+)
+def test_html_converter_with_complex_content(request, input_type, input_fixture):
+    html_input = request.getfixturevalue(input_fixture)
     wf_html = Workflow(
         flow=Flow(nodes=[HTMLConverter()]),
     )
 
-    input_data = {"files": [complex_html_file]}
+    input_data = {input_type: [html_input]}
     response = wf_html.run(input_data=input_data)
 
     assert response.status == RunnableStatus.SUCCESS
@@ -183,9 +240,20 @@ def test_html_converter_with_complex_content(complex_html_file):
     assert "https://example.com" in content
     assert "blockquote" in content
 
+    expected_source = html_input if input_type == "file_paths" else "complex.html"
+    assert document["metadata"]["file_path"] == expected_source
 
-def test_workflow_with_html_node_failure(workflow, html_node, output_node, invalid_html_file):
-    input_data = {"file_paths": [invalid_html_file]}
+
+@pytest.mark.parametrize(
+    "input_type,input_fixture",
+    [
+        ("file_paths", "invalid_html_file_path"),
+        ("files", "invalid_html_bytesio"),
+    ],
+)
+def test_workflow_with_html_node_failure(request, workflow, html_node, output_node, input_type, input_fixture):
+    html_input = request.getfixturevalue(input_fixture)
+    input_data = {input_type: [html_input]}
 
     result = workflow.run(input_data=input_data)
 
@@ -214,8 +282,16 @@ def test_workflow_with_html_node_file_not_found(workflow, html_node, output_node
     assert output_result["status"] == RunnableStatus.SKIP.value
 
 
-def test_workflow_with_html_node_empty_file(workflow, html_node, output_node, empty_html_file):
-    input_data = {"file_paths": [empty_html_file]}
+@pytest.mark.parametrize(
+    "input_type,input_fixture",
+    [
+        ("file_paths", "empty_html_file_path"),
+        ("files", "empty_html_bytesio"),
+    ],
+)
+def test_workflow_with_html_node_empty_file(request, workflow, html_node, output_node, input_type, input_fixture):
+    html_input = request.getfixturevalue(input_fixture)
+    input_data = {input_type: [html_input]}
 
     result = workflow.run(input_data=input_data)
 
