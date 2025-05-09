@@ -107,20 +107,26 @@ def test_workflow_with_pptx_converter_empty_file(workflow_with_pptx_converter_an
     assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
 
 
-def test_workflow_with_pptx_converter_no_slides(workflow_with_pptx_converter_and_output, pptx_converter, output_node):
+def test_workflow_with_pptx_converter_empty_presentation(
+    workflow_with_pptx_converter_and_output, pptx_converter, output_node
+):
     prs = Presentation()
     file = BytesIO()
     prs.save(file)
-    file.name = "no_slides.pptx"
+    file.name = "empty_presentation.pptx"
     file.seek(0)
 
     input_data = {"files": [file]}
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
 
     assert response.status == RunnableStatus.SUCCESS
-    assert response.output[pptx_converter.id]["status"] == RunnableStatus.FAILURE.value
-    assert "error" in response.output[pptx_converter.id]
-    assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+    assert response.output[pptx_converter.id]["status"] == RunnableStatus.SUCCESS.value
+    assert "documents" in response.output[pptx_converter.id]["output"]
+    documents = response.output[pptx_converter.id]["output"]["documents"]
+    assert len(documents) == 1
+    assert documents[0]["content"] == ""
+    assert documents[0]["metadata"]["file_path"] == "empty_presentation.pptx"
+    assert response.output[output_node.id]["status"] == RunnableStatus.SUCCESS.value
 
 
 def test_workflow_with_pptx_converter_unsupported_file(
