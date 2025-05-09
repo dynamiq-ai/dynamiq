@@ -34,12 +34,9 @@ def workflow(html_node, output_node):
     )
 
 
-def test_workflow_with_html_converter():
-    wf_html = Workflow(
-        flow=Flow(nodes=[HTMLConverter()]),
-    )
-
-    html_content = """
+@pytest.fixture
+def basic_html_content():
+    return """
     <!DOCTYPE html>
     <html>
     <head>
@@ -57,33 +54,17 @@ def test_workflow_with_html_converter():
     </html>
     """
 
-    file = BytesIO(html_content.encode("utf-8"))
+
+@pytest.fixture
+def basic_html_file(basic_html_content):
+    file = BytesIO(basic_html_content.encode("utf-8"))
     file.name = "test.html"
-
-    input_data = {"files": [file]}
-    response = wf_html.run(input_data=input_data)
-
-    assert response.status == RunnableStatus.SUCCESS
-
-    node_id = wf_html.flow.nodes[0].id
-    assert "documents" in response.output[node_id]["output"]
-    assert len(response.output[node_id]["output"]["documents"]) == 1
-
-    document = response.output[node_id]["output"]["documents"][0]
-    assert "Hello, World!" in document["content"]
-    assert "This is a test paragraph for the HTML converter" in document["content"]
-    assert "Item 1" in document["content"]
-    assert "Item 2" in document["content"]
-    assert "Item 3" in document["content"]
-    assert document["metadata"]["file_path"] == "test.html"
+    return file
 
 
-def test_html_converter_with_complex_content():
-    wf_html = Workflow(
-        flow=Flow(nodes=[HTMLConverter()]),
-    )
-
-    html_content = """
+@pytest.fixture
+def complex_html_content():
+    return """
     <!DOCTYPE html>
     <html>
     <head>
@@ -124,10 +105,62 @@ def test_html_converter_with_complex_content():
     </html>
     """
 
-    file = BytesIO(html_content.encode("utf-8"))
-    file.name = "complex.html"
 
-    input_data = {"files": [file]}
+@pytest.fixture
+def complex_html_file(complex_html_content):
+    file = BytesIO(complex_html_content.encode("utf-8"))
+    file.name = "complex.html"
+    return file
+
+
+@pytest.fixture
+def invalid_html_file(tmp_path):
+    test_file = tmp_path / "test_file.html"
+    test_file.write_bytes(b"\x00\x01\x02\x03\x04This is not valid HTML content\xFF\xFE")
+    return str(test_file)
+
+
+@pytest.fixture
+def empty_html_file(tmp_path):
+    empty_file = tmp_path / "empty_file.html"
+    empty_file.touch()
+    return str(empty_file)
+
+
+@pytest.fixture
+def non_existent_html_file(tmp_path):
+    return str(tmp_path / "non_existent_file.html")
+
+
+def test_workflow_with_html_converter(basic_html_file):
+    wf_html = Workflow(
+        flow=Flow(nodes=[HTMLConverter()]),
+    )
+
+    input_data = {"files": [basic_html_file]}
+    response = wf_html.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+
+    node_id = wf_html.flow.nodes[0].id
+    assert "documents" in response.output[node_id]["output"]
+    assert len(response.output[node_id]["output"]["documents"]) == 1
+
+    document = response.output[node_id]["output"]["documents"][0]
+    assert "Hello, World!" in document["content"]
+    assert "This is a test paragraph for the HTML converter" in document["content"]
+    assert "Item 1" in document["content"]
+    assert "Item 2" in document["content"]
+    assert "Item 3" in document["content"]
+    assert document["metadata"]["file_path"] == "test.html"
+
+
+def test_html_converter_with_complex_content(complex_html_file):
+    wf_html = Workflow(
+        flow=Flow(nodes=[HTMLConverter()]),
+    )
+
+    input_data = {"files": [complex_html_file]}
     response = wf_html.run(input_data=input_data)
 
     assert response.status == RunnableStatus.SUCCESS
@@ -151,11 +184,8 @@ def test_html_converter_with_complex_content():
     assert "blockquote" in content
 
 
-def test_workflow_with_html_node_failure(workflow, html_node, output_node, tmp_path):
-    test_file = tmp_path / "test_file.html"
-    test_file.write_bytes(b"\x00\x01\x02\x03\x04This is not valid HTML content\xFF\xFE")
-
-    input_data = {"file_paths": [str(test_file)]}
+def test_workflow_with_html_node_failure(workflow, html_node, output_node, invalid_html_file):
+    input_data = {"file_paths": [invalid_html_file]}
 
     result = workflow.run(input_data=input_data)
 
@@ -169,9 +199,8 @@ def test_workflow_with_html_node_failure(workflow, html_node, output_node, tmp_p
     assert output_result["status"] == RunnableStatus.SKIP.value
 
 
-def test_workflow_with_html_node_file_not_found(workflow, html_node, output_node, tmp_path):
-    non_existent_path = str(tmp_path / "non_existent_file.html")
-    input_data = {"file_paths": [non_existent_path]}
+def test_workflow_with_html_node_file_not_found(workflow, html_node, output_node, non_existent_html_file):
+    input_data = {"file_paths": [non_existent_html_file]}
 
     result = workflow.run(input_data=input_data)
 
@@ -185,11 +214,8 @@ def test_workflow_with_html_node_file_not_found(workflow, html_node, output_node
     assert output_result["status"] == RunnableStatus.SKIP.value
 
 
-def test_workflow_with_html_node_empty_file(workflow, html_node, output_node, tmp_path):
-    empty_file = tmp_path / "empty_file.html"
-    empty_file.touch()
-
-    input_data = {"file_paths": [str(empty_file)]}
+def test_workflow_with_html_node_empty_file(workflow, html_node, output_node, empty_html_file):
+    input_data = {"file_paths": [empty_html_file]}
 
     result = workflow.run(input_data=input_data)
 
