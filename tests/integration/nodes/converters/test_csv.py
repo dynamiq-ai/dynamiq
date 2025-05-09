@@ -28,6 +28,44 @@ def sample_csv(tmp_path):
 
 
 @pytest.fixture
+def empty_csv_file(tmp_path):
+    empty_file = tmp_path / "empty.csv"
+    empty_file.touch()
+    return str(empty_file)
+
+
+@pytest.fixture
+def invalid_csv_file(tmp_path):
+    invalid_file = tmp_path / "invalid.csv"
+    invalid_file.write_text('Column1,Column2\n"unterminated quote,value2')
+    return str(invalid_file)
+
+
+@pytest.fixture
+def missing_column_csv_file(tmp_path):
+    header = ["Feature_1", "Feature_2"]
+    rows = [
+        ["Value 1A", "Value 2A"],
+        ["Value 1B", "Value 2B"],
+    ]
+
+    test_file = tmp_path / "missing_column.csv"
+    with open(test_file, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(header)
+        writer.writerows(rows)
+
+    return str(test_file)
+
+
+@pytest.fixture
+def corrupted_csv_file(tmp_path):
+    corrupted_file = tmp_path / "corrupted.csv"
+    corrupted_file.write_text('Header1,Header2,Header3\n"Unclosed quote,Value2,Value3\nValue4,Value5,Value6')
+    return str(corrupted_file)
+
+
+@pytest.fixture
 def csv_converter():
     return CSVConverter(
         id="csv_converter",
@@ -102,12 +140,9 @@ def test_workflow_with_csv_converter_file_not_found(
 
 
 def test_workflow_with_csv_converter_empty_file(
-    workflow_with_csv_converter_and_output, csv_converter, output_node, tmp_path
+    workflow_with_csv_converter_and_output, csv_converter, output_node, empty_csv_file
 ):
-    empty_file = tmp_path / "empty.csv"
-    empty_file.touch()
-
-    input_data = {"file_paths": [str(empty_file)]}
+    input_data = {"file_paths": [empty_csv_file]}
 
     response = workflow_with_csv_converter_and_output.run(input_data=input_data)
 
@@ -119,12 +154,9 @@ def test_workflow_with_csv_converter_empty_file(
 
 
 def test_workflow_with_csv_converter_invalid_content(
-    workflow_with_csv_converter_and_output, csv_converter, output_node, tmp_path
+    workflow_with_csv_converter_and_output, csv_converter, output_node, invalid_csv_file
 ):
-    invalid_file = tmp_path / "invalid.csv"
-    invalid_file.write_text('Column1,Column2\n"unterminated quote,value2')
-
-    input_data = {"file_paths": [str(invalid_file)]}
+    input_data = {"file_paths": [invalid_csv_file]}
 
     response = workflow_with_csv_converter_and_output.run(input_data=input_data)
 
@@ -135,21 +167,9 @@ def test_workflow_with_csv_converter_invalid_content(
 
 
 def test_workflow_with_csv_converter_missing_content_column(
-    workflow_with_csv_converter_and_output, csv_converter, output_node, tmp_path
+    workflow_with_csv_converter_and_output, csv_converter, output_node, missing_column_csv_file
 ):
-    header = ["Feature_1", "Feature_2"]
-    rows = [
-        ["Value 1A", "Value 2A"],
-        ["Value 1B", "Value 2B"],
-    ]
-
-    test_file = tmp_path / "missing_column.csv"
-    with open(test_file, "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(header)
-        writer.writerows(rows)
-
-    input_data = {"file_paths": [str(test_file)]}
+    input_data = {"file_paths": [missing_column_csv_file]}
 
     response = workflow_with_csv_converter_and_output.run(input_data=input_data)
 
@@ -160,12 +180,9 @@ def test_workflow_with_csv_converter_missing_content_column(
 
 
 def test_workflow_with_csv_converter_corrupted_file(
-    workflow_with_csv_converter_and_output, csv_converter, output_node, tmp_path
+    workflow_with_csv_converter_and_output, csv_converter, output_node, corrupted_csv_file
 ):
-    corrupted_file = tmp_path / "corrupted.csv"
-    corrupted_file.write_text('Header1,Header2,Header3\n"Unclosed quote,Value2,Value3\nValue4,Value5,Value6')
-
-    input_data = {"file_paths": [str(corrupted_file)]}
+    input_data = {"file_paths": [corrupted_csv_file]}
 
     response = workflow_with_csv_converter_and_output.run(input_data=input_data)
 
