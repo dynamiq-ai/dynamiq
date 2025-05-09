@@ -131,19 +131,16 @@ def test_workflow_with_csv_converter_invalid_content(
     workflow_with_csv_converter_and_output, csv_converter, output_node, tmp_path
 ):
     invalid_file = tmp_path / "invalid.csv"
-    invalid_file.write_text("This is not a valid CSV format")
+    invalid_file.write_text('Column1,Column2\n"unterminated quote,value2')
 
-    with patch("dynamiq.nodes.converters.csv.csv.DictReader") as mock_reader:
-        mock_reader.side_effect = csv.Error("Invalid CSV format")
+    input_data = {"file_paths": [str(invalid_file)]}
 
-        input_data = {"file_paths": [str(invalid_file)]}
+    response = workflow_with_csv_converter_and_output.run(input_data=input_data)
 
-        response = workflow_with_csv_converter_and_output.run(input_data=input_data)
-
-        assert response.status == RunnableStatus.SUCCESS
-        assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
-        assert "error" in response.output[csv_converter.id]
-        assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+    assert response.status == RunnableStatus.SUCCESS
+    assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
+    assert "error" in response.output[csv_converter.id]
+    assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
 
 
 def test_workflow_with_csv_converter_missing_content_column(
