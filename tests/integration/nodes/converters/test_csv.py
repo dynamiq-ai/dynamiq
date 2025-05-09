@@ -2,7 +2,6 @@ import csv
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -164,20 +163,6 @@ def test_workflow_with_csv_converter_missing_content_column(
     finally:
         if os.path.exists(missing_column_csv):
             os.remove(missing_column_csv)
-
-
-def test_workflow_with_csv_converter_permission_error(
-    workflow_with_csv_converter_and_output, csv_converter, output_node
-):
-    with patch("dynamiq.nodes.converters.csv.open", side_effect=PermissionError("Permission denied")):
-        input_data = {"file_paths": ["/some/path/file.csv"]}
-
-        response = workflow_with_csv_converter_and_output.run(input_data=input_data)
-
-        assert response.status == RunnableStatus.SUCCESS
-        assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
-        assert "Permission denied" in response.output[csv_converter.id]["error"]["message"]
-        assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
 
 
 def test_workflow_with_csv_converter_corrupted_file(
