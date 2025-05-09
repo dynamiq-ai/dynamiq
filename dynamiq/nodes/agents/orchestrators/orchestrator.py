@@ -213,10 +213,7 @@ class Orchestrator(Node, ABC):
         """
         logger.debug(f"Orchestrator {self.name} - {self.id}: Running final summarizer")
         manager_result = self.manager.run(
-            input_data={"action": "final", **input_data},
-            config=config,
-            run_depends=self._run_depends,
-            **kwargs,
+            input_data={"action": "final", **input_data}, config=config, run_depends=self._run_depends, **kwargs
         )
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
