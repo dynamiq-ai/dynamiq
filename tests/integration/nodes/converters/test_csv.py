@@ -114,17 +114,15 @@ def test_workflow_with_csv_converter_empty_file(
     empty_file = tmp_path / "empty.csv"
     empty_file.touch()
 
-    with patch("dynamiq.nodes.converters.csv.csv.DictReader") as mock_reader:
-        mock_reader.side_effect = ValueError("Empty file has no content")
+    input_data = {"file_paths": [str(empty_file)]}
 
-        input_data = {"file_paths": [str(empty_file)]}
+    response = workflow_with_csv_converter_and_output.run(input_data=input_data)
 
-        response = workflow_with_csv_converter_and_output.run(input_data=input_data)
-
-        assert response.status == RunnableStatus.SUCCESS
-        assert response.output[csv_converter.id]["status"] == RunnableStatus.FAILURE.value
-        assert "error" in response.output[csv_converter.id]
-        assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
+    assert response.status == RunnableStatus.SUCCESS
+    assert response.output[csv_converter.id]["status"] == RunnableStatus.SUCCESS.value
+    assert "documents" in response.output[csv_converter.id]["output"]
+    assert len(response.output[csv_converter.id]["output"]["documents"]) == 0
+    assert response.output[output_node.id]["status"] == RunnableStatus.SUCCESS.value
 
 
 def test_workflow_with_csv_converter_invalid_content(
