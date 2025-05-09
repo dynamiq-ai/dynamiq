@@ -44,20 +44,51 @@ def workflow(unstructured_node, output_node):
     )
 
 
-def test_workflow_with_unstructured_converter_success(unstructured_node, tmp_path):
-    wf = Workflow(flow=flows.Flow(nodes=[unstructured_node]))
+@pytest.fixture
+def test_text_file(tmp_path):
+    test_file = tmp_path / "test_file.txt"
+    test_file.write_text("test content")
+    return str(test_file)
 
-    mock_elements = [
+
+@pytest.fixture
+def empty_text_file(tmp_path):
+    empty_file = tmp_path / "empty_file.txt"
+    empty_file.touch()
+    return str(empty_file)
+
+
+@pytest.fixture
+def non_existent_file(tmp_path):
+    return str(tmp_path / "non_existent_file.pdf")
+
+
+@pytest.fixture
+def mock_bytesio_file():
+    file = BytesIO(b"mock content")
+    file.name = "mock_file.pdf"
+    return file
+
+
+@pytest.fixture
+def mock_elements_single():
+    return [{"text": "This is a document from BytesIO", "category": "Text"}]
+
+
+@pytest.fixture
+def mock_elements_multiple():
+    return [
         {"text": "This is title", "category": "Title"},
         {"text": "This is paragraph 1", "category": "Text"},
         {"text": "This is paragraph 2", "category": "Text"},
     ]
 
-    test_file = tmp_path / "test_file.txt"
-    test_file.write_text("test content")
 
-    with patch("dynamiq.components.converters.unstructured.partition_via_api", return_value=mock_elements):
-        input_data = {"file_paths": [str(test_file)]}
+def test_workflow_with_unstructured_converter_success(unstructured_node, test_text_file, mock_elements_multiple):
+    wf = Workflow(flow=flows.Flow(nodes=[unstructured_node]))
+
+    with patch("dynamiq.components.converters.unstructured.partition_via_api", return_value=mock_elements_multiple):
+        input_data = {"file_paths": [test_text_file]}
         response = wf.run(input_data=input_data)
 
         assert response.status == RunnableStatus.SUCCESS
@@ -71,18 +102,14 @@ def test_workflow_with_unstructured_converter_success(unstructured_node, tmp_pat
         assert "# This is title" in document["content"]
         assert "This is paragraph 1" in document["content"]
         assert "This is paragraph 2" in document["content"]
-        assert document["metadata"]["file_path"] == str(test_file)
+        assert document["metadata"]["file_path"] == test_text_file
 
 
-def test_workflow_with_bytesio_success(unstructured_node):
+def test_workflow_with_bytesio_success(unstructured_node, mock_bytesio_file, mock_elements_single):
     wf = Workflow(flow=flows.Flow(nodes=[unstructured_node]))
 
-    mock_elements = [{"text": "This is a document from BytesIO", "category": "Text"}]
-
-    with patch("dynamiq.components.converters.unstructured.partition_via_api", return_value=mock_elements):
-        file = BytesIO(b"mock content")
-        file.name = "mock_file.pdf"
-        input_data = {"files": [file]}
+    with patch("dynamiq.components.converters.unstructured.partition_via_api", return_value=mock_elements_single):
+        input_data = {"files": [mock_bytesio_file]}
 
         response = wf.run(input_data=input_data)
 
@@ -96,15 +123,12 @@ def test_workflow_with_bytesio_success(unstructured_node):
         assert document["metadata"]["file_path"] == "mock_file.pdf"
 
 
-def test_workflow_with_unstructured_node_failure(workflow, unstructured_node, output_node, tmp_path):
-    test_file = tmp_path / "test_file.txt"
-    test_file.write_text("test content")
-
+def test_workflow_with_unstructured_node_failure(workflow, unstructured_node, output_node, test_text_file):
     with patch("dynamiq.components.converters.unstructured.partition_via_api") as mock_partition:
         error_msg = "File format not supported or invalid"
         mock_partition.side_effect = ValueError(error_msg)
 
-        input_data = {"file_paths": [str(test_file)]}
+        input_data = {"file_paths": [test_text_file]}
 
         result = workflow.run(input_data=input_data)
 
@@ -119,9 +143,8 @@ def test_workflow_with_unstructured_node_failure(workflow, unstructured_node, ou
         assert output_result["status"] == RunnableStatus.SKIP.value
 
 
-def test_workflow_with_unstructured_node_file_not_found(workflow, unstructured_node, output_node, tmp_path):
-    non_existent_path = str(tmp_path / "non_existent_file.pdf")
-    input_data = {"file_paths": [non_existent_path]}
+def test_workflow_with_unstructured_node_file_not_found(workflow, unstructured_node, output_node, non_existent_file):
+    input_data = {"file_paths": [non_existent_file]}
 
     result = workflow.run(input_data=input_data)
 
@@ -135,11 +158,8 @@ def test_workflow_with_unstructured_node_file_not_found(workflow, unstructured_n
     assert output_result["status"] == RunnableStatus.SKIP.value
 
 
-def test_workflow_with_unstructured_node_empty_file(workflow, unstructured_node, output_node, tmp_path):
-    empty_file = tmp_path / "empty_file.txt"
-    empty_file.touch()
-
-    input_data = {"file_paths": [str(empty_file)]}
+def test_workflow_with_unstructured_node_empty_file(workflow, unstructured_node, output_node, empty_text_file):
+    input_data = {"file_paths": [empty_text_file]}
 
     result = workflow.run(input_data=input_data)
 

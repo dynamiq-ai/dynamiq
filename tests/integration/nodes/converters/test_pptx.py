@@ -38,7 +38,6 @@ def workflow_with_pptx_converter_and_output(pptx_converter, output_node):
 
 @pytest.fixture
 def valid_pptx_file():
-    """Creates a valid PPTX file with simple content."""
     content = "Hello, World!"
     prs = Presentation()
     title_slide_layout = prs.slide_layouts[0]
@@ -55,7 +54,6 @@ def valid_pptx_file():
 
 @pytest.fixture
 def empty_pptx_presentation():
-    """Creates an empty PPTX presentation with no slides."""
     prs = Presentation()
     file = BytesIO()
     prs.save(file)
@@ -66,7 +64,6 @@ def empty_pptx_presentation():
 
 @pytest.fixture
 def empty_pptx_file(tmp_path):
-    """Creates an empty (zero-byte) PPTX file."""
     empty_file_path = tmp_path / "empty.pptx"
     empty_file_path.touch()
     return str(empty_file_path)
@@ -74,7 +71,6 @@ def empty_pptx_file(tmp_path):
 
 @pytest.fixture
 def invalid_pptx_file():
-    """Creates an invalid PPTX file with corrupted content."""
     file = BytesIO(b"This is not a valid PPTX file content")
     file.name = "invalid.pptx"
     return file
@@ -82,7 +78,6 @@ def invalid_pptx_file():
 
 @pytest.fixture
 def unsupported_file():
-    """Creates a file with unsupported format (plain text)."""
     wrong_file = BytesIO(b"This is not a PPTX file, just plain text")
     wrong_file.name = "text.txt"
     return wrong_file
@@ -90,7 +85,6 @@ def unsupported_file():
 
 @pytest.fixture
 def non_existent_pptx_file(tmp_path):
-    """Returns a path to a non-existent PPTX file."""
     return str(tmp_path / "non_existent_file.pptx")
 
 

@@ -37,7 +37,6 @@ def workflow_with_pypdf_converter_and_output(pypdf_converter, output_node):
 
 @pytest.fixture
 def valid_pdf_content():
-    """Creates valid PDF content with 'Hello, world!' text."""
     return (
         b"%PDF-1.7\n\n1 0 obj  % entry point\n<<\n  /Type /Catalog\n  /Pages 2 0 R\n>>\nendobj\n\n2 0 obj\n<<\n  "
         b"/Type /Pages\n  /MediaBox [ 0 0 200 200 ]\n  /Count 1\n  /Kids [ 3 0 R ]\n>>\nendobj\n\n3 0 obj\n<<\n  "
@@ -52,7 +51,6 @@ def valid_pdf_content():
 
 @pytest.fixture
 def valid_pdf_file(valid_pdf_content):
-    """Creates a valid PDF file with content."""
     file = BytesIO(valid_pdf_content)
     file.name = "mock.pdf"
     return file
@@ -60,7 +58,6 @@ def valid_pdf_file(valid_pdf_content):
 
 @pytest.fixture
 def pdf_no_pages():
-    """Creates a PDF file with no pages."""
     file = BytesIO(b"%PDF-1.7\n\n1 0 obj\n<<\n  /Type /Catalog\n>>\nendobj\n\ntrailer\n<<\n  /Root 1 0 R\n>>\n%%EOF")
     file.name = "no_pages.pdf"
     return file
@@ -68,7 +65,6 @@ def pdf_no_pages():
 
 @pytest.fixture
 def corrupted_pdf_file():
-    """Creates a corrupted PDF file."""
     file = BytesIO(b"%PDF-corrupted-content")
     file.name = "corrupted.pdf"
     return file
@@ -76,7 +72,6 @@ def corrupted_pdf_file():
 
 @pytest.fixture
 def empty_pdf_file(tmp_path):
-    """Creates an empty PDF file."""
     empty_file_path = tmp_path / "empty.pdf"
     empty_file_path.touch()
     return str(empty_file_path)
@@ -84,13 +79,11 @@ def empty_pdf_file(tmp_path):
 
 @pytest.fixture
 def non_existent_pdf_file(tmp_path):
-    """Returns a path to a non-existent PDF file."""
     return str(tmp_path / "non_existent_file.pdf")
 
 
 @pytest.fixture
 def unsupported_file():
-    """Creates a plain text file (unsupported for PDF)."""
     wrong_file = BytesIO(b"This is not a PDF file, just plain text")
     wrong_file.name = "text.txt"
     return wrong_file
