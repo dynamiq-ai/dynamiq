@@ -12,7 +12,7 @@ from datamodel_code_generator import DataModelType, InputFileType, generate
 from mcp import ClientSession
 from pydantic import BaseModel, PrivateAttr
 
-from dynamiq.connections import MCPSse, MCPStdio
+from dynamiq.connections import MCPSse, MCPStdio, MCPStreamableHTTP
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
@@ -41,7 +41,7 @@ class MCPTool(ConnectionNode):
       name (str): Node name.
       description (str): Node description.
       input_schema (ClassVar[type[BaseModel]]): The schema that defines the expected structure of tool's input.
-      connection (MCPSse | MCPStdio): The connection module with parameters needed to the MCP server.
+      connection (MCPSse | MCPStdio | MCPStreamableHTTP): Connection module for the MCP server.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -49,7 +49,7 @@ class MCPTool(ConnectionNode):
     description: str
     input_schema: type[BaseModel]
     json_input_schema: dict[str, Any]
-    connection: MCPSse | MCPStdio
+    connection: MCPSse | MCPStdio | MCPStreamableHTTP
 
     def __init__(self, json_input_schema: dict[str, Any], **kwargs):
         """
@@ -145,7 +145,8 @@ class MCPTool(ConnectionNode):
         input_dict = input_data.model_dump()
 
         try:
-            async with self.connection.connect() as (read, write):
+            async with self.connection.connect() as result:
+                read, write = result[:2]
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     result = await session.call_tool(self.name, input_dict)
@@ -169,7 +170,7 @@ class MCPServer(ConnectionNode):
       group (Literal[NodeGroup.TOOLS]): Node group.
       name (str): Node name.
       description (str): Node description.
-      connection (MCPSse | MCPStdio): The connection module with parameters needed to the MCP server.
+      connection (MCPSse | MCPStdio | MCPStreamableHTTP): Connection module for the MCP server.
       include_tools (list[str]): Names of tools to include. If empty, all tools are included.
       exclude_tools (list[str]): Names of tools to exclude.
       _mcp_tools (dict[str, MCPTool]): Internal dict of initialized MCP tools.
@@ -178,7 +179,7 @@ class MCPServer(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "MCP Tool"
     description: str = "The tool used to initialize available MCP tools based on provided server parameters."
-    connection: MCPSse | MCPStdio
+    connection: MCPSse | MCPStdio | MCPStreamableHTTP
 
     include_tools: list[str] = field(default_factory=list)
     exclude_tools: list[str] = field(default_factory=list)
@@ -191,7 +192,8 @@ class MCPServer(ConnectionNode):
         Returns:
             None
         """
-        async with self.connection.connect() as (read, write):
+        async with self.connection.connect() as result:
+            read, write = result[:2]
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()

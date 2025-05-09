@@ -1,3 +1,4 @@
+import argparse
 from datetime import datetime, timedelta, timezone
 
 from mcp.server.fastmcp import FastMCP
@@ -34,4 +35,10 @@ async def list_supported_locations() -> list[str]:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    parser = argparse.ArgumentParser(description="Run MCP with selected transport.")
+    parser.add_argument(
+        "--transport", choices=["streamable-http", "sse"], default="streamable-http", help="Transport type to use"
+    )
+    args = parser.parse_args()
+
+    mcp.run(transport=args.transport)

@@ -1,6 +1,7 @@
 import enum
 import json
 from abc import ABC, abstractmethod
+from datetime import timedelta
 from enum import Enum
 from functools import cached_property, partial
 from pathlib import Path
@@ -1252,7 +1253,7 @@ class MCPSse(BaseConnection):
     url: str = Field(..., description="The SSE endpoint URL to connect to.")
     headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the SSE request.")
     timeout: float = Field(default=5.0, description="Timeout in seconds for establishing the initial connection.")
-    sse_read_timeout: float = Field(default=60 * 5, description="Timeout for reading SSE messages (in seconds).")
+    read_timeout: float = Field(default=60 * 5, description="Timeout for reading SSE messages (in seconds).")
 
     def connect(self):
         """
@@ -1267,7 +1268,32 @@ class MCPSse(BaseConnection):
             url=self.url,
             headers=self.headers,
             timeout=self.timeout,
-            sse_read_timeout=self.sse_read_timeout,
+            sse_read_timeout=self.read_timeout,
+        )
+
+
+class MCPStreamableHTTP(BaseConnection):
+    url: str = Field(..., description="The endpoint URL to connect to.")
+    headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the request.")
+    timeout: timedelta = Field(
+        timedelta(seconds=30), description="Timeout in seconds for establishing the initial connection."
+    )
+    read_timeout: timedelta = Field(timedelta(seconds=60 * 5), description="Timeout for reading messages (in seconds).")
+
+    def connect(self):
+        """
+        Establishes a streamable HTTP connection.
+
+        Returns:
+            Async context manager for the streamable HTTP client.
+        """
+        from mcp.client.streamable_http import streamablehttp_client
+
+        return streamablehttp_client(
+            url=self.url,
+            headers=self.headers,
+            timeout=self.timeout,
+            sse_read_timeout=self.read_timeout,
         )
 
 
