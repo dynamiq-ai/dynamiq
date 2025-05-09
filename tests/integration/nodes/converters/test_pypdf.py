@@ -35,11 +35,10 @@ def workflow_with_pypdf_converter_and_output(pypdf_converter, output_node):
     )
 
 
-def test_workflow_with_pypdf_converter():
-    wf_pypdf = Workflow(
-        flow=Flow(nodes=[PyPDFConverter()]),
-    )
-    file = BytesIO(
+@pytest.fixture
+def valid_pdf_content():
+    """Creates valid PDF content with 'Hello, world!' text."""
+    return (
         b"%PDF-1.7\n\n1 0 obj  % entry point\n<<\n  /Type /Catalog\n  /Pages 2 0 R\n>>\nendobj\n\n2 0 obj\n<<\n  "
         b"/Type /Pages\n  /MediaBox [ 0 0 200 200 ]\n  /Count 1\n  /Kids [ 3 0 R ]\n>>\nendobj\n\n3 0 obj\n<<\n  "
         b"/Type /Page\n  /Parent 2 0 R\n  /Resources <<\n    /Font <<\n      /F1 4 0 R \n    >>\n  >>\n  /Contents "
@@ -49,14 +48,69 @@ def test_workflow_with_pypdf_converter():
         b"\n0000000173 00000 n \n0000000301 00000 n \n0000000380 00000 n \ntrailer\n<<\n  /Size 6\n  /Root 1 0 "
         b"R\n>>\nstartxref\n492\n%%EOF"
     )
+
+
+@pytest.fixture
+def valid_pdf_file(valid_pdf_content):
+    """Creates a valid PDF file with content."""
+    file = BytesIO(valid_pdf_content)
     file.name = "mock.pdf"
-    input_data = {"files": [file]}
+    return file
+
+
+@pytest.fixture
+def pdf_no_pages():
+    """Creates a PDF file with no pages."""
+    file = BytesIO(b"%PDF-1.7\n\n1 0 obj\n<<\n  /Type /Catalog\n>>\nendobj\n\ntrailer\n<<\n  /Root 1 0 R\n>>\n%%EOF")
+    file.name = "no_pages.pdf"
+    return file
+
+
+@pytest.fixture
+def corrupted_pdf_file():
+    """Creates a corrupted PDF file."""
+    file = BytesIO(b"%PDF-corrupted-content")
+    file.name = "corrupted.pdf"
+    return file
+
+
+@pytest.fixture
+def empty_pdf_file(tmp_path):
+    """Creates an empty PDF file."""
+    empty_file_path = tmp_path / "empty.pdf"
+    empty_file_path.touch()
+    return str(empty_file_path)
+
+
+@pytest.fixture
+def non_existent_pdf_file(tmp_path):
+    """Returns a path to a non-existent PDF file."""
+    return str(tmp_path / "non_existent_file.pdf")
+
+
+@pytest.fixture
+def unsupported_file():
+    """Creates a plain text file (unsupported for PDF)."""
+    wrong_file = BytesIO(b"This is not a PDF file, just plain text")
+    wrong_file.name = "text.txt"
+    return wrong_file
+
+
+def test_workflow_with_pypdf_converter(valid_pdf_file):
+    wf_pypdf = Workflow(
+        flow=Flow(nodes=[PyPDFConverter()]),
+    )
+    input_data = {"files": [valid_pdf_file]}
     response = wf_pypdf.run(input_data=input_data)
     document_id = response.output[next(iter(response.output))]["output"]["documents"][0]["id"]
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=input_data,
-        output={"documents": [Document(id=document_id, content="Hello, world!", metadata={"file_path": file.name})]},
+        output={
+            "documents": [
+                Document(id=document_id, content="Hello, world!", metadata={"file_path": valid_pdf_file.name})
+            ]
+        },
     ).to_dict(skip_format_types={BytesIO, bytes})
 
     expected_output = {wf_pypdf.flow.nodes[0].id: expected_result}
@@ -71,11 +125,9 @@ def test_workflow_with_pypdf_converter():
 
 
 def test_workflow_with_pypdf_converter_parsing_error(
-    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node
+    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, corrupted_pdf_file
 ):
-    file = BytesIO(b"%PDF-corrupted-content")
-    file.name = "corrupted.pdf"
-    input_data = {"files": [file]}
+    input_data = {"files": [corrupted_pdf_file]}
 
     response = workflow_with_pypdf_converter_and_output.run(input_data=input_data)
 
@@ -86,10 +138,9 @@ def test_workflow_with_pypdf_converter_parsing_error(
 
 
 def test_workflow_with_pypdf_converter_file_not_found(
-    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, tmp_path
+    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, non_existent_pdf_file
 ):
-    non_existent_path = str(tmp_path / "non_existent_file.pdf")
-    input_data = {"file_paths": [non_existent_path]}
+    input_data = {"file_paths": [non_existent_pdf_file]}
 
     response = workflow_with_pypdf_converter_and_output.run(input_data=input_data)
 
@@ -100,12 +151,9 @@ def test_workflow_with_pypdf_converter_file_not_found(
 
 
 def test_workflow_with_pypdf_converter_empty_file(
-    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, tmp_path
+    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, empty_pdf_file
 ):
-    empty_file_path = tmp_path / "empty.pdf"
-    empty_file_path.touch()
-
-    input_data = {"file_paths": [str(empty_file_path)]}
+    input_data = {"file_paths": [empty_pdf_file]}
 
     response = workflow_with_pypdf_converter_and_output.run(input_data=input_data)
 
@@ -115,10 +163,10 @@ def test_workflow_with_pypdf_converter_empty_file(
     assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
 
 
-def test_workflow_with_pypdf_converter_no_pages(workflow_with_pypdf_converter_and_output, pypdf_converter, output_node):
-    file = BytesIO(b"%PDF-1.7\n\n1 0 obj\n<<\n  /Type /Catalog\n>>\nendobj\n\ntrailer\n<<\n  /Root 1 0 R\n>>\n%%EOF")
-    file.name = "no_pages.pdf"
-    input_data = {"files": [file]}
+def test_workflow_with_pypdf_converter_no_pages(
+    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, pdf_no_pages
+):
+    input_data = {"files": [pdf_no_pages]}
 
     response = workflow_with_pypdf_converter_and_output.run(input_data=input_data)
 
@@ -129,11 +177,9 @@ def test_workflow_with_pypdf_converter_no_pages(workflow_with_pypdf_converter_an
 
 
 def test_workflow_with_pypdf_converter_unsupported_file(
-    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node
+    workflow_with_pypdf_converter_and_output, pypdf_converter, output_node, unsupported_file
 ):
-    wrong_file = BytesIO(b"This is not a PDF file, just plain text")
-    wrong_file.name = "text.txt"
-    input_data = {"files": [wrong_file]}
+    input_data = {"files": [unsupported_file]}
 
     response = workflow_with_pypdf_converter_and_output.run(input_data=input_data)
 
