@@ -130,7 +130,7 @@ def test_workflow_with_pypdf_converter_no_pages(workflow_with_pypdf_converter_an
     else:
         assert "output" in response.output[pypdf_converter.id]
         assert "documents" in response.output[pypdf_converter.id]["output"]
-        assert len(response.output[pypdf_converter.id]["output"]["documents"]) >= 0
+        assert len(response.output[pypdf_converter.id]["output"]["documents"]) == 0
 
 
 def test_workflow_with_pypdf_converter_unsupported_file(
