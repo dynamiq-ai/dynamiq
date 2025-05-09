@@ -1,6 +1,5 @@
 import csv
 import os
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -13,26 +12,21 @@ from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableResult, RunnableStatus
 
 
-def create_test_csv(data: list[list[str]], header: list[str]) -> str:
-    with tempfile.NamedTemporaryFile(mode="w+", newline="", delete=False, suffix=".csv") as tmp_csv:
-        writer = csv.writer(tmp_csv)
-        writer.writerow(header)
-        writer.writerows(data)
-        return tmp_csv.name
-
-
 @pytest.fixture
-def sample_csv():
+def sample_csv(tmp_path):
     header = ["Target", "Feature_1", "Feature_2"]
     rows = [
         ["Document 1", "Value 1A", "Value 2A"],
         ["Document 2", "Value 1B", "Value 2B"],
     ]
 
-    tmp_path = create_test_csv(rows, header)
-    yield tmp_path
-    if os.path.exists(tmp_path):
-        os.remove(tmp_path)
+    test_file = tmp_path / "sample.csv"
+    with open(test_file, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(header)
+        writer.writerows(rows)
+
+    return str(test_file)
 
 
 @pytest.fixture
