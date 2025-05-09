@@ -15,6 +15,7 @@ from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidAc
 from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_input, process_tool_output_for_agent
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils.logger import logger
@@ -299,6 +300,8 @@ class Agent(Node):
     role: str | None = ""
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
+    _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
@@ -349,6 +352,18 @@ class Agent(Node):
         self._intermediate_steps: dict[int, dict] = {}
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
+
+        expanded_tools = []
+        for tool in self.tools:
+            if isinstance(tool, MCPServer):
+                self._mcp_servers.append(tool)
+                subtools = tool.get_mcp_tools()
+                expanded_tools.extend(subtools)
+                self._mcp_server_tool_ids.extend([subtool.id for subtool in subtools])
+            else:
+                expanded_tools.append(tool)
+        self.tools = expanded_tools
+
         self._init_prompt_blocks()
 
     @model_validator(mode="after")
@@ -376,7 +391,10 @@ class Agent(Node):
         """Converts the instance to a dictionary."""
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
-        data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools]
+
+        data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools if tool.id not in self._mcp_server_tool_ids]
+        data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_servers]
+
         data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
         if self.files:
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
