@@ -72,7 +72,7 @@ def test_workflow_with_custom_llm(mock_llm_response_text, mock_llm_executor):
         stream=False,
         temperature=0.1,
         api_key=connection.api_key,
-        max_tokens=1000,
+        max_tokens=None,
         seed=None,
         frequency_penalty=None,
         tools=None,
