@@ -18,14 +18,14 @@ from dynamiq.nodes.agents.exceptions import (
     XMLParsingError,
 )
 from dynamiq.nodes.agents.utils import XMLParser
+from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.llms.gemini import Gemini
-
 
 REACT_BLOCK_TOOLS = """
 You have access to a variety of tools,
@@ -280,7 +280,8 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
-    format_schema: list = []
+    _tools: list[Tool] = []
+    _response_format: dict[str, Any] | None = None
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -484,10 +485,10 @@ class ReActAgent(Agent):
         for loop_num in range(1, self.max_loops + 1):
             try:
                 llm_result = self._run_llm(
-                    self._prompt.messages,
+                    messages=self._prompt.messages,
+                    tools=self._tools,
+                    response_format=self._response_format,
                     config=config,
-                    schema=self.format_schema,
-                    inference_mode=self.inference_mode,
                     **kwargs,
                 )
                 action, action_input = None, None
@@ -868,7 +869,7 @@ class ReActAgent(Agent):
             },
         }
 
-        self.format_schema = schema
+        self._response_format = schema
 
     @staticmethod
     def filter_format_type(param_annotation: Any) -> list[str]:
@@ -915,7 +916,7 @@ class ReActAgent(Agent):
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
-        self.format_schema.append(final_answer_function_schema)
+        self._tools.append(final_answer_function_schema)
         for tool in self.tools:
             properties = {}
             input_params = tool.input_schema.model_fields.items()
@@ -950,7 +951,7 @@ class ReActAgent(Agent):
                     },
                 }
 
-                self.format_schema.append(schema)
+                self._tools.append(schema)
 
             else:
                 schema = {
@@ -977,7 +978,7 @@ class ReActAgent(Agent):
                     },
                 }
 
-                self.format_schema.append(schema)
+                self._tools.append(schema)
 
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
