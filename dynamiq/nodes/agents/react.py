@@ -220,7 +220,7 @@ REACT_BLOCK_OUTPUT_FORMAT = (
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer for initial user question based on information gathered during a process that has reached its maximum number of loops.
 Your goal is to analyze the given context and formulate a clear, concise response.
-First, carefully review the information gathered during the process.
+First, carefully review the information gathered during the process, tool calls and their outputs.
 
 Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
 Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
@@ -793,9 +793,9 @@ class ReActAgent(Agent):
                 )
             return max_loop_final_answer
 
-    def aggregate_messages(self, messages: list[Message, VisionMessage]) -> str:
+    def aggregate_history(self, messages: list[Message, VisionMessage]) -> str:
         """
-        Concatenates multiple messages with USER role into one unified string.
+        Concatenates multiple history into one unified string.
 
         Args:
             messages (list[Message, VisionMessage]): List of messages to aggregate.
@@ -810,12 +810,12 @@ class ReActAgent(Agent):
             if isinstance(message, VisionMessage):
                 for content in message.content:
                     if isinstance(content, VisionMessageTextContent):
-                        if message.role == MessageRole.ASSISTANT:
-                            history += f"- TOOL DESCRIPTION START -\n{content.text}\n- TOOL DESCRIPTION END -"
-                        elif message.role == MessageRole.USER:
-                            history += f"- TOOL OUTPUT START -\n{content.text}\n- TOOL OUTPUT END -"
+                        history += content.text
             else:
-                history += message.content
+                if message.role == MessageRole.ASSISTANT:
+                    history += f"-TOOL DESCRIPTION START-\n{message.content}\n-TOOL DESCRIPTION END-\n"
+                elif message.role == MessageRole.USER:
+                    history += f"-TOOL OUTPUT START-\n{message.content}\n-TOOL OUTPUT END-\n"
 
         return history
 
@@ -835,9 +835,7 @@ class ReActAgent(Agent):
             str: Final answer provided by the agent.
         """
         system_message = Message(content=REACT_MAX_LOOPS_PROMPT, role=MessageRole.SYSTEM)
-        conversation_history = Message(
-            content=self.aggregate_messages(self._prompt.messages), role=MessageRole.ASSISTANT
-        )
+        conversation_history = Message(content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER)
         llm_final_attempt_result = self._run_llm(
             [system_message, input_message, conversation_history], config=config, **kwargs
         )
