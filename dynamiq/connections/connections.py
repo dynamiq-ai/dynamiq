@@ -1,7 +1,10 @@
 import enum
 import json
 from abc import ABC, abstractmethod
+from datetime import timedelta
+from enum import Enum
 from functools import cached_property, partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
@@ -241,18 +244,30 @@ class AWS(BaseConnection):
         pass
 
     @property
-    def conn_params(self):
+    def conn_params(self) -> dict:
+        """Return parameters with aws_ prefix for compatibility with other systems"""
+        params = {}
         if self.profile:
-            return {
-                "aws_profile_name": self.profile,
-                "aws_region_name": self.region,
-            }
+            params["aws_profile_name"] = self.profile
+            params["aws_region_name"] = self.region
         else:
-            return {
-                "aws_access_key_id": self.access_key_id,
-                "aws_secret_access_key": self.secret_access_key,
-                "aws_region_name": self.region,
-            }
+            params["aws_access_key_id"] = self.access_key_id
+            params["aws_secret_access_key"] = self.secret_access_key
+            params["aws_region_name"] = self.region
+        return params
+
+    def get_boto3_session(self):
+        """Create and return a boto3.Session with properly formatted parameters"""
+        import boto3
+        params = {}
+        if self.profile:
+            params["profile_name"] = self.profile
+        elif self.access_key_id and self.secret_access_key:
+            params["aws_access_key_id"] = self.access_key_id
+            params["aws_secret_access_key"] = self.secret_access_key
+        if self.region:
+            params["region_name"] = self.region
+        return boto3.Session(**params)
 
 
 class Gemini(BaseApiKeyConnection):
@@ -1232,3 +1247,91 @@ class Databricks(BaseApiKeyConnection):
             "api_base": self.url,
             "api_key": self.api_key,
         }
+
+
+class MCPSse(BaseConnection):
+    url: str = Field(..., description="The SSE endpoint URL to connect to.")
+    headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the SSE request.")
+    timeout: float = Field(default=5.0, description="Timeout in seconds for establishing the initial connection.")
+    sse_read_timeout: float = Field(default=60 * 5, description="Timeout for reading SSE messages (in seconds).")
+
+    def connect(self):
+        """
+        Establishes an SSE connection.
+
+        Returns:
+            Async context manager for the SSE client.
+        """
+        from mcp.client.sse import sse_client
+
+        return sse_client(
+            url=self.url,
+            headers=self.headers,
+            timeout=self.timeout,
+            sse_read_timeout=self.sse_read_timeout,
+        )
+
+
+class MCPStreamableHTTP(BaseConnection):
+    url: str = Field(..., description="The endpoint URL to connect to.")
+    headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the request.")
+    timeout: timedelta = Field(
+        timedelta(seconds=30), description="Timeout in seconds for establishing the initial connection."
+    )
+    sse_read_timeout: timedelta = Field(
+        timedelta(seconds=60 * 5), description="Timeout for reading messages (in seconds)."
+    )
+
+    def connect(self):
+        """
+        Establishes a streamable HTTP connection.
+
+        Returns:
+            Async context manager for the streamable HTTP client.
+        """
+        from mcp.client.streamable_http import streamablehttp_client
+
+        return streamablehttp_client(
+            url=self.url,
+            headers=self.headers,
+            timeout=self.timeout,
+            sse_read_timeout=self.sse_read_timeout,
+        )
+
+
+class MCPEncodingErrorHandler(str, Enum):
+    STRICT = "strict"
+    IGNORE = "ignore"
+    REPLACE = "replace"
+
+
+class MCPStdio(BaseConnection):
+    command: str = Field(..., description="The executable to run to start the server.")
+    args: list[str] = Field(default_factory=list, description="Command-line arguments to pass to the executable.")
+    env: dict[str, str] | None = Field(None, description="Environment variables for the process.")
+    cwd: str | Path | None = Field(None, description="Working directory for the process.")
+    encoding: str = Field(default="utf-8", description="Text encoding for communication.")
+    encoding_error_handler: MCPEncodingErrorHandler = Field(
+        default=MCPEncodingErrorHandler.STRICT, description="Strategy for handling encoding errors."
+    )
+
+    def connect(self):
+        """
+        Establishes a STDIO connection using a subprocess.
+
+        Returns:
+            Async context manager for the STDIO client.
+        """
+        from mcp import StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        return stdio_client(
+            StdioServerParameters(
+                command=self.command,
+                args=self.args,
+                env=self.env,
+                cwd=self.cwd,
+                encoding=self.encoding,
+                encoding_error_handler=self.encoding_error_handler.value,
+            )
+        )

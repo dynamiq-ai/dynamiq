@@ -167,7 +167,7 @@ class E2BInterpreterTool(ConnectionNode):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if self.persistent_sandbox:
+        if self.persistent_sandbox and self.connection.api_key:
             self._initialize_persistent_sandbox()
         else:
             logger.debug(f"Tool {self.name} - {self.id}: Will initialize sandbox on each execute")

@@ -1,0 +1,112 @@
+connections:
+  openai-conn:
+    id: openai-conn
+    api_key: ${oc.env:OPENAI_API_KEY}
+    url: https://api.openai.com/v1
+    type: dynamiq.connections.OpenAI
+  mcp-conn:
+    id: mcp-conn
+    command: python
+    args:
+    - ../../tools/mcp_server_as_tool/mcp_servers/math_server.py
+    encoding: utf-8
+    encoding_error_handler: strict
+    type: dynamiq.connections.MCPStdio
+nodes:
+  react-agent:
+    id: react-agent
+    name: react-agent
+    description: null
+    group: agents
+    role: ''
+    inference_mode: DEFAULT
+    behaviour_on_max_loops: raise
+    format_schema: []
+    type: dynamiq.nodes.agents.ReActAgent
+    depends: []
+    input_mapping: {}
+    llm:
+      id: openai-llm
+      name: OpenAI LLM
+      description: null
+      group: llms
+      metadata: null
+      is_postponed_component_init: false
+      is_optimized_for_agents: false
+      is_files_allowed: false
+      callbacks: []
+      connection: openai-conn
+      model: gpt-4o-mini
+      prompt: null
+      type: dynamiq.nodes.llms.OpenAI
+      depends: []
+      input_mapping: {}
+    tools:
+    - id: mcp-tool-add
+      name: add
+      description: Add two numbers
+      group: tools
+      metadata: null
+      is_postponed_component_init: false
+      is_optimized_for_agents: true
+      is_files_allowed: false
+      callbacks: []
+      connection: mcp-conn
+      json_input_schema:
+        properties:
+          a:
+            title: A
+            type_: integer
+          b:
+            title: B
+            type_: integer
+        required:
+        - a
+        - b
+        title: addArguments
+        type_: object
+      type: dynamiq.nodes.tools.MCPTool
+      depends: []
+      input_mapping: {}
+    - id: mcp-tool-multiply
+      name: multiply
+      description: Multiply two numbers
+      group: tools
+      metadata: null
+      is_postponed_component_init: false
+      is_optimized_for_agents: true
+      is_files_allowed: false
+      callbacks: []
+      connection: mcp-conn
+      json_input_schema:
+        properties:
+          a:
+            title: A
+            type_: number
+          b:
+            title: B
+            type_: number
+        required:
+        - a
+        - b
+        title: multiplyArguments
+        type_: object
+      type: dynamiq.nodes.tools.MCPTool
+      depends: []
+      input_mapping: {}
+    memory: null
+flows:
+  flow-id:
+    id: flow-id
+    name: flow
+    max_node_workers: null
+    type: dynamiq.flows.Flow
+    nodes:
+    - react-agent
+workflows:
+  workflow-id:
+    name: workflow
+    id: workflow-id
+    version: null
+    type: dynamiq.workflows.Workflow
+    flow: flow-id
