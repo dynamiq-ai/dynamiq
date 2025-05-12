@@ -349,7 +349,7 @@ class WorkflowYAMLLoader:
             elif isinstance(param_data, dict):
                 updated_param_data = {}
                 for param_name_inner, param_data_inner in param_data.items():
-                    if param_name_inner == "prompt":
+                    if param_name_inner in ("prompt", "schema"):
                         updated_param_data[param_name_inner] = param_data_inner
                     elif isinstance(param_data_inner, (dict, list)):
                         param_id = None
