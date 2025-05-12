@@ -159,51 +159,16 @@ def document_embedder_workflow():
     )
 
 
-def test_text_embedder_authentication_error(text_embedder_workflow):
+@pytest.mark.parametrize(
+    "error_msg,test_name",
+    [
+        ("Invalid API key", "authentication_error"),
+        ("Rate limit exceeded", "rate_limit_error"),
+        ("Service unavailable", "api_error"),
+    ],
+)
+def test_text_embedder_api_errors(text_embedder_workflow, error_msg, test_name):
     workflow, embedder, output_node = text_embedder_workflow
-    error_msg = "Invalid API key"
-
-    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
-        mock_embedding.side_effect = ValueError(error_msg)
-
-        input_data = {"query": "Test query"}
-        response = workflow.run(input_data=input_data)
-
-        assert response.status == RunnableStatus.SUCCESS
-
-        embedder_result = response.output[embedder.id]
-        assert embedder_result["status"] == RunnableStatus.FAILURE.value
-        assert embedder_result["error"]["type"] == "ValueError"
-        assert embedder_result["error"]["message"] == error_msg
-
-        output_result = response.output[output_node.id]
-        assert output_result["status"] == RunnableStatus.SKIP.value
-
-
-def test_text_embedder_rate_limit_error(text_embedder_workflow):
-    workflow, embedder, output_node = text_embedder_workflow
-    error_msg = "Rate limit exceeded"
-
-    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
-        mock_embedding.side_effect = ValueError(error_msg)
-
-        input_data = {"query": "Test query"}
-        response = workflow.run(input_data=input_data)
-
-        assert response.status == RunnableStatus.SUCCESS
-
-        embedder_result = response.output[embedder.id]
-        assert embedder_result["status"] == RunnableStatus.FAILURE.value
-        assert embedder_result["error"]["type"] == "ValueError"
-        assert embedder_result["error"]["message"] == error_msg
-
-        output_result = response.output[output_node.id]
-        assert output_result["status"] == RunnableStatus.SKIP.value
-
-
-def test_text_embedder_api_error(text_embedder_workflow):
-    workflow, embedder, output_node = text_embedder_workflow
-    error_msg = "Service unavailable"
 
     with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
         mock_embedding.side_effect = ValueError(error_msg)
@@ -252,9 +217,16 @@ def test_text_embedder_empty_input(text_embedder_workflow):
     assert output_result["status"] == RunnableStatus.SKIP.value
 
 
-def test_document_embedder_authentication_error(document_embedder_workflow):
+@pytest.mark.parametrize(
+    "error_msg",
+    [
+        "Invalid API key",
+        "Rate limit exceeded",
+        "Service unavailable",
+    ],
+)
+def test_document_embedder_api_errors(document_embedder_workflow, error_msg):
     workflow, embedder, output_node = document_embedder_workflow
-    error_msg = "Invalid API key"
 
     with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
         mock_embedding.side_effect = ValueError(error_msg)
