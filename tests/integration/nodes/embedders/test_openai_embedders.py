@@ -2,6 +2,7 @@ import uuid
 from unittest.mock import ANY, patch
 
 import pytest
+from litellm import APIError, AuthenticationError, BadRequestError, RateLimitError
 
 from dynamiq import Workflow, connections
 from dynamiq.callbacks import TracingCallbackHandler
@@ -160,18 +161,28 @@ def document_embedder_workflow():
 
 
 @pytest.mark.parametrize(
-    "error_msg,test_name",
+    "error_config,expected_type",
     [
-        ("Invalid API key", "authentication_error"),
-        ("Rate limit exceeded", "rate_limit_error"),
-        ("Service unavailable", "api_error"),
+        ((AuthenticationError, "Invalid API key", "openai", "text-embedding-3-small"), "AuthenticationError"),
+        ((RateLimitError, "Rate limit exceeded", "openai", "text-embedding-3-small"), "RateLimitError"),
+        ((APIError, "Service unavailable", 500, "openai", "text-embedding-3-small"), "APIError"),
+        ((BadRequestError, "Invalid embedding model", "non-existent-model", "openai"), "BadRequestError"),
     ],
 )
-def test_text_embedder_api_errors(text_embedder_workflow, error_msg, test_name):
+def test_text_embedder_api_errors(text_embedder_workflow, error_config, expected_type):
     workflow, embedder, output_node = text_embedder_workflow
 
+    error_class = error_config[0]
+    error_msg = error_config[1]
+    error_args = error_config[2:]
+
     with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
-        mock_embedding.side_effect = ValueError(error_msg)
+        if error_class == APIError:
+            error = error_class(error_args[0], error_msg, error_args[1], error_args[2])
+        else:
+            error = error_class(error_msg, *error_args)
+
+        mock_embedding.side_effect = error
 
         input_data = {"query": "Test query"}
         response = workflow.run(input_data=input_data)
@@ -180,8 +191,8 @@ def test_text_embedder_api_errors(text_embedder_workflow, error_msg, test_name):
 
         embedder_result = response.output[embedder.id]
         assert embedder_result["status"] == RunnableStatus.FAILURE.value
-        assert embedder_result["error"]["type"] == "ValueError"
-        assert embedder_result["error"]["message"] == error_msg
+        assert expected_type in embedder_result["error"]["type"]
+        assert error_msg in embedder_result["error"]["message"]
 
         output_result = response.output[output_node.id]
         assert output_result["status"] == RunnableStatus.SKIP.value
@@ -218,18 +229,28 @@ def test_text_embedder_empty_input(text_embedder_workflow):
 
 
 @pytest.mark.parametrize(
-    "error_msg",
+    "error_config,expected_type",
     [
-        "Invalid API key",
-        "Rate limit exceeded",
-        "Service unavailable",
+        ((AuthenticationError, "Invalid API key", "openai", "text-embedding-3-small"), "AuthenticationError"),
+        ((RateLimitError, "Rate limit exceeded", "openai", "text-embedding-3-small"), "RateLimitError"),
+        ((APIError, "Service unavailable", 500, "openai", "text-embedding-3-small"), "APIError"),
+        ((BadRequestError, "Invalid embedding model", "non-existent-model", "openai"), "BadRequestError"),
     ],
 )
-def test_document_embedder_api_errors(document_embedder_workflow, error_msg):
+def test_document_embedder_api_errors(document_embedder_workflow, error_config, expected_type):
     workflow, embedder, output_node = document_embedder_workflow
 
+    error_class = error_config[0]
+    error_msg = error_config[1]
+    error_args = error_config[2:]
+
     with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
-        mock_embedding.side_effect = ValueError(error_msg)
+        if error_class == APIError:
+            error = error_class(error_args[0], error_msg, error_args[1], error_args[2])
+        else:
+            error = error_class(error_msg, *error_args)
+
+        mock_embedding.side_effect = error
 
         document = [Document(content="Test content")]
         input_data = {"documents": document}
@@ -239,8 +260,8 @@ def test_document_embedder_api_errors(document_embedder_workflow, error_msg):
 
         embedder_result = response.output[embedder.id]
         assert embedder_result["status"] == RunnableStatus.FAILURE.value
-        assert embedder_result["error"]["type"] == "ValueError"
-        assert embedder_result["error"]["message"] == error_msg
+        assert expected_type in embedder_result["error"]["type"]
+        assert error_msg in embedder_result["error"]["message"]
 
         output_result = response.output[output_node.id]
         assert output_result["status"] == RunnableStatus.SKIP.value
