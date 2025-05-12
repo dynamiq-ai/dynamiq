@@ -77,7 +77,7 @@ def test_workflow_with_gemini_llm_and_gemini_ai_studio_conn(
         stream=False,
         temperature=0.1,
         api_key=connection.api_key,
-        max_tokens=1000,
+        max_tokens=None,
         seed=None,
         frequency_penalty=None,
         presence_penalty=None,

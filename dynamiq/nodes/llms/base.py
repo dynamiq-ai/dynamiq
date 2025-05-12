@@ -1,3 +1,4 @@
+import copy
 import json
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
@@ -64,8 +65,8 @@ class BaseLLM(ConnectionNode):
         prompt (Prompt | None): Prompt to use for the LLM.
         connection (BaseConnection): Connection to use for the LLM.
         group (Literal[NodeGroup.LLMS]): Group for the node. Defaults to NodeGroup.LLMS.
-        temperature (float): Temperature for the LLM. Defaults to 0.1.
-        max_tokens (int): Maximum number of tokens for the LLM. Defaults to 1000.
+        temperature (float | None): Temperature for the LLM.
+        max_tokens (int | None): Maximum number of tokens for the LLM.
         stop (list[str]): List of tokens to stop at for the LLM.
         error_handling (ErrorHandling): Error handling config. Defaults to ErrorHandling(timeout_seconds=600).
         top_p (float | None): Value to consider tokens with top_p probability.
@@ -84,8 +85,8 @@ class BaseLLM(ConnectionNode):
     prompt: Prompt | None = None
     connection: BaseConnection
     group: Literal[NodeGroup.LLMS] = NodeGroup.LLMS
-    temperature: float = 0.1
-    max_tokens: int = 1000
+    temperature: float | None = None
+    max_tokens: int | None = None
     stop: list[str] | None = None
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     top_p: float | None = None
@@ -110,6 +111,8 @@ class BaseLLM(ConnectionNode):
         deprecated="Please use `tools` and `response_format` parameters "
         "for function calling and structured output respectively.",
     )
+    model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
+
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
     _json_schema_fields: ClassVar[list[str]] = ["model", "temperature", "max_tokens", "prompt"]
@@ -362,11 +365,14 @@ class BaseLLM(ConnectionNode):
         base_tools = prompt.format_tools(**dict(input_data))
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
 
+        extra = copy.deepcopy(self.__pydantic_extra__)
         params = self.connection.conn_params.copy()
         if self.client and not isinstance(self.connection, HttpApiKey):
             params.update({"client": self.client})
         if self.thinking_enabled:
             params.update({"thinking": {"type": "enabled", "budget_tokens": self.budget_tokens}})
+        if extra:
+            params.update(extra)
 
         schema_response_format, schema_tools = self._get_response_format_and_tools(
             inference_mode=self.inference_mode, schema=self.schema_
