@@ -795,7 +795,7 @@ class ReActAgent(Agent):
 
     def aggregate_messages(self, messages: list[Message, VisionMessage]) -> str:
         """
-        Concatenates multiple messages with USER rolr into one unified string.
+        Concatenates multiple messages with USER role into one unified string.
 
         Args:
             messages (list[Message, VisionMessage]): List of messages to aggregate.
@@ -806,14 +806,16 @@ class ReActAgent(Agent):
 
         history = ""
 
-        for message in messages:
-            if message.role == MessageRole.USER:
-                if isinstance(message, VisionMessage):
-                    for content in message.content:
-                        if isinstance(content, VisionMessageTextContent):
-                            history += content.text
-                else:
-                    history += message.content
+        for index, message in enumerate(messages):
+            if isinstance(message, VisionMessage):
+                for content in message.content:
+                    if isinstance(content, VisionMessageTextContent):
+                        if message.role == MessageRole.ASSISTANT:
+                            history += f"- TOOL DESCRIPTION START -\n{content.text}\n- TOOL DESCRIPTION END -"
+                        elif message.role == MessageRole.USER:
+                            history += f"- TOOL OUTPUT START -\n{content.text}\n- TOOL OUTPUT END -"
+            else:
+                history += message.content
 
         return history
 
