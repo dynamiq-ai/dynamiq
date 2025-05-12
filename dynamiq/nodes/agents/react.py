@@ -806,7 +806,7 @@ class ReActAgent(Agent):
 
         history = ""
 
-        for index, message in enumerate(messages):
+        for message in messages:
             if isinstance(message, VisionMessage):
                 for content in message.content:
                     if isinstance(content, VisionMessageTextContent):
