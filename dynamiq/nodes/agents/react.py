@@ -795,7 +795,7 @@ class ReActAgent(Agent):
 
     def aggregate_history(self, messages: list[Message, VisionMessage]) -> str:
         """
-        Concatenates multiple history into one unified string.
+        Concatenates multiple history messages into one unified string.
 
         Args:
             messages (list[Message, VisionMessage]): List of messages to aggregate.
