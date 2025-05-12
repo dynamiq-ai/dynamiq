@@ -70,27 +70,24 @@ def string_length_tool_instance(python_tool_code):
 def run_and_assert_agent(agent: ReActAgent, agent_input, expected_length, run_config):
     """Helper function to run agent and perform common assertions."""
     logger.info(f"\n--- Running Agent: {agent.name} (Mode: {agent.inference_mode.value}) ---")
-    agent_output = None
-    try:
-        result = agent.run(input_data=agent_input, config=run_config)
-        logger.info(f"Agent raw result object: {result}")
 
-        assert (
+    # Let exceptions propagate naturally - no try/except needed
+    result = agent.run(input_data=agent_input, config=run_config)
+    logger.info(f"Agent raw result object: {result}")
+
+    assert (
             result.status == RunnableStatus.SUCCESS
-        ), f"Agent run failed with status '{result.status}'. Output: {result.output}."
+    ), f"Agent run failed with status '{result.status}'. Output: {result.output}."
 
-        if isinstance(result.output, dict) and "content" in result.output:
-            agent_output = result.output["content"]
-        else:
-            agent_output = result.output
-            logger.info(f"Warning: Agent output structure unexpected: {type(result.output)}")
+    if isinstance(result.output, dict) and "content" in result.output:
+        agent_output = result.output["content"]
+    else:
+        agent_output = result.output
+        logger.info(f"Warning: Agent output structure unexpected: {type(result.output)}")
 
-        logger.info(f"Agent final output content: {agent_output}")
-
-    except Exception as e:
-        assert False, f"Agent run failed with exception: {e}"
-
+    logger.info(f"Agent final output content: {agent_output}")
     logger.info("Asserting results...")
+
     assert agent_output is not None, "Agent output content should not be None"
     assert isinstance(agent_output, str), f"Agent output content should be a string, got {type(agent_output)}"
 
