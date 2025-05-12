@@ -257,7 +257,6 @@ def test_xmlparser_extract_regex_not_found():
     result = XMLParser.extract_first_tag_regex(text, ["output", "final_answer"])
     assert result is None
 
-
 def test_strips_jinja_braces_keep_inner_text():
     inp = "Hello, {{  world  }}!"
     out = process_tool_output_for_agent(inp)
@@ -289,3 +288,28 @@ def test_other_types_converted_to_str():
             return "dummy!"
 
     assert process_tool_output_for_agent(Dummy()) == "dummy!"
+    
+def test_xmlparser_parse_with_chart_in_answer():
+    """Test that XML parser preserves markdown code blocks for charts in answer tags."""
+    text = """<output>
+  <thought>The user wants to create a chart.</thought>
+  <answer>
+    # Total Approved Expenses
+    ```chart
+    {
+      "title": "Total Approved Expenses Per Month (USD)",
+      "width": 500,
+      "height": 300,
+      "data": {
+        "values": [
+          {"month": "January 2025", "amount": 745982.33}
+        ]
+      }
+    }
+    ```
+    The chart shows January expenses.
+  </answer>
+</output>"""
+
+    result = XMLParser.parse(text, required_tags=["thought", "answer"])
+    assert "```chart" in result["answer"]
