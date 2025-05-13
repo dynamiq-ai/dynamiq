@@ -1,4 +1,3 @@
-import json
 import uuid
 from unittest.mock import MagicMock
 
@@ -13,7 +12,7 @@ from dynamiq.nodes.agents.exceptions import (
     XMLParsingError,
 )
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.agents.utils import XMLParser, process_tool_output_for_agent
+from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableStatus

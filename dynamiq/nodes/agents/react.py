@@ -835,7 +835,9 @@ class ReActAgent(Agent):
             str: Final answer provided by the agent.
         """
         system_message = Message(content=REACT_MAX_LOOPS_PROMPT, role=MessageRole.SYSTEM)
-        conversation_history = Message(content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True)
+        conversation_history = Message(
+            content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True
+        )
         llm_final_attempt_result = self._run_llm(
             [system_message, input_message, conversation_history], config=config, **kwargs
         )
