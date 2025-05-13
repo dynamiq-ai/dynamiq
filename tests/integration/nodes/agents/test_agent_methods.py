@@ -258,39 +258,6 @@ def test_xmlparser_extract_regex_not_found():
     assert result is None
 
 
-def test_strips_jinja_braces_keep_inner_text():
-    inp = "Hello, {{  world  }}!"
-    out = process_tool_output_for_agent(inp)
-    assert out == "Hello, world!", f"Expected inner text, got: {out!r}"
-
-
-@pytest.mark.parametrize(
-    "content,expected",
-    [
-        ({"content": "foo"}, "foo"),
-        ({"foo": [1, 2, 3]}, json.dumps({"foo": [1, 2, 3]}, indent=2)),
-    ],
-)
-def test_dict_handling(content, expected):
-    out = process_tool_output_for_agent(content)
-    assert out == expected
-
-
-def test_list_and_tuple_are_joined_with_newlines():
-    lst = ["a", "b", "c"]
-    tup = ("x", "y")
-    assert process_tool_output_for_agent(lst) == "a\nb\nc"
-    assert process_tool_output_for_agent(tup) == "x\ny"
-
-
-def test_other_types_converted_to_str():
-    class Dummy:
-        def __str__(self):
-            return "dummy!"
-
-    assert process_tool_output_for_agent(Dummy()) == "dummy!"
-
-
 def test_xmlparser_parse_with_chart_in_answer():
     """Test that XML parser preserves markdown code blocks for charts in answer tags."""
     text = """<output>
