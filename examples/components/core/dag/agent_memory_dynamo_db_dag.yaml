@@ -21,7 +21,7 @@ nodes:
       backend:
         type: dynamiq.memory.backends.DynamoDB
         connection: aws-conn
-        index_name: "messages"
+        table_name: "messages"
         create_table_if_not_exists: true
       message_limit: 50
     role: "Helpful assistant focusing on the current conversation."
