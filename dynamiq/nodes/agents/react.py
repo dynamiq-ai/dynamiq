@@ -745,7 +745,7 @@ class ReActAgent(Agent):
                             updated=llm_generated_output,
                         ).model_dump()
                     )
-                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
+                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
                 else:
                     self.stream_reasoning(
                         {
@@ -835,7 +835,7 @@ class ReActAgent(Agent):
             str: Final answer provided by the agent.
         """
         system_message = Message(content=REACT_MAX_LOOPS_PROMPT, role=MessageRole.SYSTEM)
-        conversation_history = Message(content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER)
+        conversation_history = Message(content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True)
         llm_final_attempt_result = self._run_llm(
             [system_message, input_message, conversation_history], config=config, **kwargs
         )

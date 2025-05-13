@@ -56,10 +56,12 @@ class Message(BaseModel):
         content (str): The content of the message.
         role (MessageRole): The role of the message sender.
         metadata (dict | None): Additional metadata for the message, default is None.
+        static (bool): Determines whether it is possible to pass parameters via this message.
     """
     content: str
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
+    static: bool = Field(default=False, exclude=True)
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -302,10 +304,10 @@ class Prompt(BasePrompt):
         parameters = set()
 
         env = Environment(autoescape=True)
-
         for msg in self.messages:
             if isinstance(msg, Message):
-                parameters |= get_parameters_for_template(msg.content, env=env)
+                if not msg.static:
+                    parameters |= get_parameters_for_template(msg.content, env=env)
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
