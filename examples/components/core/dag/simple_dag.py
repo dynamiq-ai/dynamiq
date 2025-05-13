@@ -4,7 +4,8 @@ import os
 from dynamiq import Workflow, prompts
 from dynamiq.connections import connections
 from dynamiq.nodes.llms import Anthropic, OpenAI
-from dynamiq.nodes.operators import Choice, ChoiceCondition, ChoiceOption, ConditionOperator
+from dynamiq.nodes.operators import Choice, ChoiceOption
+from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
