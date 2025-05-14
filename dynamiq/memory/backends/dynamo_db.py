@@ -66,7 +66,7 @@ class DynamoDB(MemoryBackend):
 
     name: str = "DynamoDB"
     connection: AWS = Field(default_factory=AWS)
-    index_name: str = Field("conversations", description="Name of the DynamoDB table.")
+    table_name: str = Field("conversations", description="Name of the DynamoDB table.")
     create_if_not_exist: bool = Field(default=False)
     billing_mode: BillingMode = Field(
         default=BillingMode.PAY_PER_REQUEST,
@@ -118,7 +118,7 @@ class DynamoDB(MemoryBackend):
             self._dynamodb_client = session.client("dynamodb")
             self._dynamodb_table = self._get_or_create_table()
             region = session.region_name or "default"
-            logger.debug(f"DynamoDB backend (Scan Only) connected to table '{self.index_name}' in region '{region}'.")
+            logger.debug(f"DynamoDB backend (Scan Only) connected to table '{self.table_name}' in region '{region}'.")
         except ClientError as e:
             logger.error(f"Failed to initialize DynamoDB connection or table: {e}")
             raise DynamoDBMemoryError(f"Failed to initialize DynamoDB connection or table: {e}") from e
@@ -129,19 +129,19 @@ class DynamoDB(MemoryBackend):
     def _get_or_create_table(self):
         if self._dynamodb_resource is None:
             raise DynamoDBMemoryError("DynamoDB resource not initialized.")
-        table = self._dynamodb_resource.Table(self.index_name)
+        table = self._dynamodb_resource.Table(self.table_name)
         try:
             table.load()
-            logger.debug(f"DynamoDB table '{self.index_name}' found.")
+            logger.debug(f"DynamoDB table '{self.table_name}' found.")
             return table
         except ClientError as e:
             if e.response["Error"]["Code"] == "ResourceNotFoundException":
                 if self.create_if_not_exist:
-                    logger.info(f"DynamoDB table '{self.index_name}' not found. Attempting creation (Scan Only)...")
+                    logger.info(f"DynamoDB table '{self.table_name}' not found. Attempting creation (Scan Only)...")
                     return self._create_table()
                 else:
-                    logger.error(f"DynamoDB table '{self.index_name}' not found and create_if_not_exist is False.")
-                    raise DynamoDBMemoryError(f"DynamoDB table '{self.index_name}' not found.") from e
+                    logger.error(f"DynamoDB table '{self.table_name}' not found and create_if_not_exist is False.")
+                    raise DynamoDBMemoryError(f"DynamoDB table '{self.table_name}' not found.") from e
             else:
                 raise
 
@@ -158,7 +158,7 @@ class DynamoDB(MemoryBackend):
             {"AttributeName": self.sort_key_name, "KeyType": "RANGE"},
         ]
         create_params = {
-            "TableName": self.index_name,
+            "TableName": self.table_name,
             "AttributeDefinitions": attribute_definitions,
             "KeySchema": key_schema,
             "BillingMode": self.billing_mode,
@@ -170,13 +170,13 @@ class DynamoDB(MemoryBackend):
             }
         try:
             table = self._dynamodb_resource.create_table(**create_params)
-            logger.info(f"Waiting for table '{self.index_name}' to become active...")
+            logger.info(f"Waiting for table '{self.table_name}' to become active...")
             table.wait_until_exists()
-            logger.info(f"DynamoDB table '{self.index_name}' created successfully (Scan Only - No GSIs).")
+            logger.info(f"DynamoDB table '{self.table_name}' created successfully (Scan Only - No GSIs).")
             return table
         except ClientError as e:
-            logger.error(f"Failed to create DynamoDB table '{self.index_name}': {e}")
-            raise DynamoDBMemoryError(f"Failed to create DynamoDB table '{self.index_name}': {e}") from e
+            logger.error(f"Failed to create DynamoDB table '{self.table_name}': {e}")
+            raise DynamoDBMemoryError(f"Failed to create DynamoDB table '{self.table_name}': {e}") from e
 
     def _serialize_timestamp(self, ts: float | int | Decimal) -> Decimal:
         if isinstance(ts, (float, int)):
@@ -253,7 +253,7 @@ class DynamoDB(MemoryBackend):
         if self._dynamodb_table is None:
             raise DynamoDBMemoryError("DynamoDB table not initialized.")
         logger.warning(
-            f"Performing DynamoDB Scan on table '{self.index_name}' for search/get_all. This can be slow and costly."
+            f"Performing DynamoDB Scan on table '{self.table_name}' for search/get_all. This can be slow and costly."
         )
 
         scan_params = {}
@@ -334,7 +334,7 @@ class DynamoDB(MemoryBackend):
             return final_results
 
         except ClientError as e:
-            logger.error(f"Error scanning DynamoDB table '{self.index_name}': {e}")
+            logger.error(f"Error scanning DynamoDB table '{self.table_name}': {e}")
             logger.error(f"Scan parameters used: {scan_params}")  # Log params on error
             raise DynamoDBMemoryError(f"Error scanning DynamoDB table: {e}") from e
         except Exception as e:
@@ -410,7 +410,7 @@ class DynamoDB(MemoryBackend):
             response = self._dynamodb_table.scan(Limit=1, Select="COUNT")
             return response.get("Count", 0) == 0
         except ClientError as e:
-            logger.error(f"Error checking emptiness for DynamoDB table '{self.index_name}': {e}")
+            logger.error(f"Error checking emptiness for DynamoDB table '{self.table_name}': {e}")
             raise DynamoDBMemoryError(f"Error checking if DynamoDB memory is empty: {e}") from e
 
     def clear(self) -> None:
@@ -418,7 +418,7 @@ class DynamoDB(MemoryBackend):
         if self._dynamodb_table is None:
             raise DynamoDBMemoryError("DynamoDB table not initialized.")
         logger.warning(
-            f"Clearing all items from DynamoDB table '{self.index_name}'"
+            f"Clearing all items from DynamoDB table '{self.table_name}'"
             f" via Scan/Delete. This may take time and consume capacity."
         )
         try:
@@ -440,9 +440,9 @@ class DynamoDB(MemoryBackend):
                         scan_params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
                     else:
                         break
-            logger.info(f"DynamoDB Memory ({self.index_name}): Finished clearing items.")
+            logger.info(f"DynamoDB Memory ({self.table_name}): Finished clearing items.")
         except ClientError as e:
-            logger.error(f"Error clearing DynamoDB table '{self.index_name}': {e}")
+            logger.error(f"Error clearing DynamoDB table '{self.table_name}': {e}")
             raise DynamoDBMemoryError(f"Error clearing DynamoDB memory: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected error clearing DynamoDB memory: {e}")

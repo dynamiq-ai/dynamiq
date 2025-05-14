@@ -6,7 +6,8 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import Flow
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
-from dynamiq.nodes.operators import Choice, ChoiceCondition, ChoiceOption, operators
+from dynamiq.nodes.operators import Choice, ChoiceOption
+from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
 from dynamiq.nodes.validators import ValidPython
 from dynamiq.prompts import prompts
 
@@ -53,7 +54,7 @@ CHOICE_NODE = Choice(
             id="choice_is_valid_code",
             name="choice_is_valid_code",
             condition=ChoiceCondition(
-                operator=operators.ConditionOperator.BOOLEAN_EQUALS,
+                operator=ConditionOperator.BOOLEAN_EQUALS,
                 variable="value",
                 value=True,
                 operands=[],

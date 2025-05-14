@@ -292,7 +292,7 @@ def test_react_agent_with_dynamodb_memory(
     try:
         memory_backend = DynamoDB(
             connection=aws_connection,
-            index_name="messages",
+            table_name="messages",
             create_if_not_exist=True,
         )
         logger.info("DynamoDB backend initialized.")

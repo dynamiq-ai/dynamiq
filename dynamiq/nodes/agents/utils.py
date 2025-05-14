@@ -67,7 +67,10 @@ class XMLParser:
 
     @staticmethod
     def _extract_data_lxml(
-        root: LET._Element, required_tags: Sequence[str], optional_tags: Sequence[str] = None
+        root: LET._Element,
+        required_tags: Sequence[str],
+        optional_tags: Sequence[str] = None,
+        preserve_format_tags: Sequence[str] = None,
     ) -> dict[str, str]:
         """
         Extracts text content from specified tags using XPath.
@@ -77,6 +80,8 @@ class XMLParser:
         """
         data = {}
         optional_tags = optional_tags or []
+        preserve_format_tags = preserve_format_tags or ["answer"]
+
         all_tags = list(required_tags) + list(optional_tags)
 
         for tag in all_tags:
@@ -86,7 +91,10 @@ class XMLParser:
             if elements:
                 element_found = True
                 for elem in elements:
-                    text = "".join(elem.itertext()).strip()
+                    if tag in preserve_format_tags:
+                        text = LET.tostring(elem, encoding="unicode", method="text")
+                    else:
+                        text = "".join(elem.itertext()).strip()
                     if text:
                         tag_content = text
                         break
@@ -158,6 +166,7 @@ class XMLParser:
         required_tags: Sequence[str],
         optional_tags: Sequence[str] = None,
         json_fields: Sequence[str] = None,
+        preserve_format_tags: Sequence[str] = None,
         attempt_wrap: bool = True,
     ) -> dict[str, Any]:
         """
@@ -168,6 +177,8 @@ class XMLParser:
             required_tags (Sequence[str]): A list/tuple of tag names that MUST be present.
             optional_tags (Sequence[str], optional): A list/tuple of optional tag names. Defaults to None.
             json_fields (Sequence[str], optional): A list/tuple of fields whose content should be parsed as JSON.
+            preserve_format_tags (Sequence[str], optional): A list/tuple of tags
+            whose content should be preserved as-is.
             attempt_wrap (bool): If initial parsing fails, try wrapping the content in <root> and parse again.
 
         Returns:
@@ -203,7 +214,7 @@ class XMLParser:
             )
 
         try:
-            extracted_data = XMLParser._extract_data_lxml(root, required_tags, optional_tags)
+            extracted_data = XMLParser._extract_data_lxml(root, required_tags, optional_tags, preserve_format_tags)
         except TagNotFoundError as e:
             raise e
         except Exception as e:
@@ -438,6 +449,8 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
             content = "\n".join(str(item) for item in content)
         else:
             content = str(content)
+
+    content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", content)
 
     max_len_in_char: int = max_tokens * 4  # This assumes an average of 4 characters per token.
 
