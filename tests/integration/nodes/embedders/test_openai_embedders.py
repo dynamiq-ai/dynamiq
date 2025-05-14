@@ -28,26 +28,6 @@ def openai_model():
 
 
 @pytest.fixture
-def query_text():
-    return "I love pizza!"
-
-
-@pytest.fixture
-def document_content():
-    return "Test document content"
-
-
-@pytest.fixture
-def query_input(query_text):
-    return {"query": query_text}
-
-
-@pytest.fixture
-def document_input(document_content):
-    return {"documents": [Document(content=document_content)]}
-
-
-@pytest.fixture
 def openai_text_embedder(openai_connection, openai_model):
     return OpenAITextEmbedder(
         id="text_embedder", name="OpenAITextEmbedder", connection=openai_connection, model=openai_model
@@ -89,6 +69,16 @@ def openai_document_embedder_workflow(openai_document_embedder):
     return workflow, openai_document_embedder, output_node
 
 
+@pytest.fixture
+def query_text():
+    return "I love pizza!"
+
+
+@pytest.fixture
+def query_input(query_text):
+    return {"query": query_text}
+
+
 def test_workflow_with_openai_text_embedder(
     mock_embedding_executor, openai_text_embedder_workflow, query_input, openai_model
 ):
@@ -107,6 +97,8 @@ def test_workflow_with_openai_text_embedder(
     assert embedder_result["output"]["query"] == query_input["query"]
     assert "embedding" in embedder_result["output"]
     assert embedder_result["output"]["embedding"] == [0]
+    assert isinstance(embedder_result["output"]["embedding"], list)
+    assert len(embedder_result["output"]["embedding"]) == 1
 
     output_result = response.output[output_node.id]
     assert output_result["status"] == RunnableStatus.SUCCESS.value
@@ -116,6 +108,16 @@ def test_workflow_with_openai_text_embedder(
         model=openai_model,
         client=ANY,
     )
+
+
+@pytest.fixture
+def document_content():
+    return "Test document content"
+
+
+@pytest.fixture
+def document_input(document_content):
+    return {"documents": [Document(content=document_content)]}
 
 
 def test_workflow_with_openai_document_embedder(
@@ -157,15 +159,6 @@ def empty_query_input():
 @pytest.fixture
 def missing_input():
     return {}
-
-
-@pytest.fixture
-def empty_embedding_response(openai_model):
-    response = MagicMock()
-    response.data = [{"embedding": []}]
-    response.model = openai_model
-    response.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    return response
 
 
 @pytest.mark.parametrize(
@@ -317,6 +310,15 @@ def test_document_embedder_empty_content(openai_document_embedder_workflow, empt
     assert output_result["status"] == RunnableStatus.SKIP.value
 
 
+@pytest.fixture
+def empty_embedding_response(openai_model):
+    response = MagicMock()
+    response.data = [{"embedding": []}]
+    response.model = openai_model
+    response.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    return response
+
+
 def test_text_embedder_api_returns_empty_embedding(
     openai_text_embedder_workflow, query_input, empty_embedding_response
 ):
@@ -333,6 +335,11 @@ def test_text_embedder_api_returns_empty_embedding(
         assert embedder_result["status"] == RunnableStatus.SUCCESS.value
         assert "embedding" in embedder_result["output"]
         assert embedder_result["output"]["embedding"] == []
+        assert isinstance(embedder_result["output"]["embedding"], list)
+        assert len(embedder_result["output"]["embedding"]) == 0
+
+        output_result = response.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SUCCESS.value
 
 
 def test_document_embedder_api_returns_empty_embedding(
@@ -351,6 +358,9 @@ def test_document_embedder_api_returns_empty_embedding(
         assert embedder_result["status"] == RunnableStatus.SUCCESS.value
         assert "documents" in embedder_result["output"]
         assert len(embedder_result["output"]["documents"]) == 1
+
+        output_result = response.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SUCCESS.value
 
 
 @pytest.fixture
