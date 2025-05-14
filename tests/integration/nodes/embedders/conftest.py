@@ -79,6 +79,18 @@ def empty_embedding_response_factory():
     return _factory
 
 
+@pytest.fixture
+def null_embedding_response_factory():
+    def _factory(model):
+        response = MagicMock()
+        response.data = [{"embedding": None}]
+        response.model = model
+        response.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        return response
+
+    return _factory
+
+
 @pytest.fixture(
     params=[
         (AuthenticationError, "Invalid credentials", ["invalid", "model"], "AuthenticationError"),
