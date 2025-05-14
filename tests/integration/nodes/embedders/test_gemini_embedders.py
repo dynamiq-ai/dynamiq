@@ -208,7 +208,10 @@ def test_text_embedder_api_returns_empty_embedding(
     with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
         mock_embedding.return_value = empty_response
         response = workflow.run(input_data=query_input)
-        assert_embedder_success(response, embedder, output_node, expected_embedding_length=0)
+        assert response.status == RunnableStatus.SUCCESS
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.FAILURE.value
+        assert "Invalid embedding" in embedder_result["error"]["message"]
 
 
 def test_document_embedder_api_returns_empty_embedding(
@@ -220,7 +223,40 @@ def test_document_embedder_api_returns_empty_embedding(
     with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
         mock_embedding.return_value = empty_response
         response = workflow.run(input_data=document_input)
-        assert_embedder_success(response, embedder, output_node)
+        assert response.status == RunnableStatus.SUCCESS
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.FAILURE.value
+        assert "Embedding is empty" in embedder_result["error"]["message"]
+
+
+def test_text_embedder_api_returns_null_embedding(
+    gemini_text_embedder_workflow, query_input, null_embedding_response_factory, gemini_model
+):
+    workflow, embedder, output_node = gemini_text_embedder_workflow
+    null_response = null_embedding_response_factory(gemini_model)
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        mock_embedding.return_value = null_response
+        response = workflow.run(input_data=query_input)
+        assert response.status == RunnableStatus.SUCCESS
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.FAILURE.value
+        assert "Invalid embedding" in embedder_result["error"]["message"]
+
+
+def test_document_embedder_api_returns_null_embedding(
+    gemini_document_embedder_workflow, document_input, null_embedding_response_factory, gemini_model
+):
+    workflow, embedder, output_node = gemini_document_embedder_workflow
+    null_response = null_embedding_response_factory(gemini_model)
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        mock_embedding.return_value = null_response
+        response = workflow.run(input_data=document_input)
+        assert response.status == RunnableStatus.SUCCESS
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.FAILURE.value
+        assert "has no embedding" in embedder_result["error"]["message"]
 
 
 @pytest.fixture
