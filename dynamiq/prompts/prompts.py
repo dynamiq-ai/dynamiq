@@ -334,7 +334,9 @@ class Prompt(BasePrompt):
         out: list[dict] = []
         for msg in self.messages:
             if isinstance(msg, Message):
-                out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
+                if not msg.static:
+                    msg = msg.format_message(**kwargs)
+                out.append(msg.model_dump(exclude={"metadata"}))
             elif isinstance(msg, VisionMessage):
                 out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
             else:
