@@ -1,4 +1,4 @@
-from dynamiq.connections import HttpApiKey
+from dynamiq.connections import Http
 from dynamiq.nodes.llms.base import BaseLLM
 
 
@@ -8,6 +8,7 @@ class CustomLLM(BaseLLM):
     This class provides a foundation for sending various requests using different LLM endpoints.
 
     Attributes:
-        connection (HttpApiKey): The connection to use for the LLM.
+        connection (Http): The connection to use for the LLM.
     """
-    connection: HttpApiKey
+
+    connection: Http
