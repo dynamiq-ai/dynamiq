@@ -4,6 +4,8 @@ from pydantic import BaseModel, PrivateAttr
 
 from dynamiq.connections import BaseConnection
 from dynamiq.types import Document
+from dynamiq.utils.embedding_validators import validate_document_embeddings, validate_embedding
+from dynamiq.utils.logger import logger
 
 
 class BaseEmbedder(BaseModel):
@@ -71,6 +73,10 @@ class BaseEmbedder(BaseModel):
             dict: A dictionary containing:
                 - 'embedding': A list representing the embedding vector of the input text.
                 - 'meta': A dictionary with metadata information about the model usage.
+
+        Raises:
+            TypeError: If input is not a string
+            ValueError: If the embedding response is invalid
         """
         if not isinstance(text, str):
             msg = (
@@ -87,8 +93,14 @@ class BaseEmbedder(BaseModel):
         )
 
         meta = {"model": response.model, "usage": dict(response.usage)}
+        embedding = response.data[0]["embedding"]
 
-        return {"embedding": response.data[0]["embedding"], "meta": meta}
+        is_valid, error_message = validate_embedding(embedding)
+        if not is_valid:
+            logger.error(f"Invalid embedding returned by model {self.model}: {error_message}")
+            raise ValueError(f"Invalid embedding returned by the model: {error_message}")
+
+        return {"embedding": embedding, "meta": meta}
 
     def _prepare_documents_to_embed(self, documents: list[Document]) -> list[str]:
         """
@@ -150,6 +162,10 @@ class BaseEmbedder(BaseModel):
             dict: A dictionary containing:
                 - 'documents' (list[Document]): The input documents with their embeddings populated.
                 - 'meta' (dict): Metadata information about the embedding process.
+
+        Raises:
+            TypeError: If input is not a list of Documents
+            ValueError: If the embedding response is invalid
         """
         if (
             not isinstance(documents, list)
@@ -174,5 +190,10 @@ class BaseEmbedder(BaseModel):
 
         for doc, emb in zip(documents, embeddings):
             doc.embedding = emb
+
+        is_valid, error_message = validate_document_embeddings(documents)
+        if not is_valid:
+            logger.error(f"Invalid document embeddings returned by model {self.model}: {error_message}")
+            raise ValueError(f"Invalid document embeddings: {error_message}")
 
         return {"documents": documents, "meta": meta}
