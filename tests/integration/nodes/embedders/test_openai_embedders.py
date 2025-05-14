@@ -1,5 +1,5 @@
 import uuid
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 from litellm import APIError, AuthenticationError, BadRequestError, RateLimitError
@@ -310,3 +310,117 @@ def test_document_embedder_empty_content(document_embedder_workflow):
 
     output_result = response.output[output_node.id]
     assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_text_embedder_api_returns_empty_embedding(text_embedder_workflow):
+    workflow, embedder, output_node = text_embedder_workflow
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        empty_embedding_response = MagicMock()
+        empty_embedding_response.data = [{"embedding": []}]
+        empty_embedding_response.model = "text-embedding-3-small"
+        empty_embedding_response.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        mock_embedding.return_value = empty_embedding_response
+
+        input_data = {"query": "Test query"}
+        response = workflow.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.SUCCESS.value
+        assert "embedding" in embedder_result["output"]
+        assert embedder_result["output"]["embedding"] == []
+
+
+def test_document_embedder_api_returns_empty_embedding(document_embedder_workflow):
+    workflow, embedder, output_node = document_embedder_workflow
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        empty_embedding_response = MagicMock()
+        empty_embedding_response.data = [{"embedding": []}]
+        empty_embedding_response.model = "text-embedding-3-small"
+        empty_embedding_response.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        mock_embedding.return_value = empty_embedding_response
+
+        document = [Document(content="Test content")]
+        input_data = {"documents": document}
+        response = workflow.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.SUCCESS.value
+        assert "documents" in embedder_result["output"]
+        assert len(embedder_result["output"]["documents"]) == 1
+
+
+def test_text_embedder_max_tokens_error(text_embedder_workflow):
+    workflow, embedder, output_node = text_embedder_workflow
+    error_msg = "This model's maximum context length is 8191 tokens, but the provided inputs have 10000 tokens"
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        error = BadRequestError(error_msg, "text-embedding-3-small", "openai")
+        mock_embedding.side_effect = error
+
+        # Create a very long text that would exceed token limits
+        long_text = "text " * 5000
+        input_data = {"query": long_text}
+        response = workflow.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.FAILURE.value
+        assert "BadRequestError" in embedder_result["error"]["type"]
+        assert "maximum context length" in embedder_result["error"]["message"]
+
+        output_result = response.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_document_embedder_max_tokens_error(document_embedder_workflow):
+    workflow, embedder, output_node = document_embedder_workflow
+    error_msg = "This model's maximum context length is 8191 tokens, but the provided inputs have 10000 tokens"
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        error = BadRequestError(error_msg, "text-embedding-3-small", "openai")
+        mock_embedding.side_effect = error
+
+        # Create a document with very long content that would exceed token limits
+        long_text = "text " * 5000
+        document = [Document(content=long_text)]
+        input_data = {"documents": document}
+        response = workflow.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.FAILURE.value
+        assert "BadRequestError" in embedder_result["error"]["type"]
+        assert "maximum context length" in embedder_result["error"]["message"]
+
+        output_result = response.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_text_embedder_invalid_params(text_embedder_workflow):
+    workflow, embedder, output_node = text_embedder_workflow
+    error_msg = "Invalid dimensions parameter: must be between 1 and 1536"
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        error = BadRequestError(error_msg, "text-embedding-3-small", "openai")
+        mock_embedding.side_effect = error
+
+        input_data = {"query": "Test query"}
+        response = workflow.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.FAILURE.value
+        assert "BadRequestError" in embedder_result["error"]["type"]
+        assert "Invalid dimensions" in embedder_result["error"]["message"]
+
+        output_result = response.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SKIP.value

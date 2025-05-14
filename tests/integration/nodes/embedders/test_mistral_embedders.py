@@ -1,9 +1,15 @@
 import uuid
+from unittest.mock import MagicMock, patch
+
+import pytest
+from litellm import APIError, AuthenticationError, BadRequestError, RateLimitError
 
 from dynamiq import Workflow, connections
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.embedders import MistralDocumentEmbedder, MistralTextEmbedder
+from dynamiq.nodes.node import NodeDependency
+from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types import Document
 
@@ -103,3 +109,294 @@ def test_workflow_with_mistral_document_embedder(mock_embedding_executor):
         model=model,
         api_key=connection.api_key,
     )
+
+
+@pytest.fixture
+def text_embedder_workflow():
+    connection = connections.Mistral(
+        id=str(uuid.uuid4()),
+        api_key="api_key",
+    )
+    model = "mistral/mistral-embed"
+    embedder = MistralTextEmbedder(id="text_embedder", name="MistralTextEmbedder", connection=connection, model=model)
+    output_node = Output(id="output_node", depends=[NodeDependency(embedder)])
+
+    return (
+        Workflow(
+            id=str(uuid.uuid4()),
+            flow=Flow(
+                nodes=[embedder, output_node],
+            ),
+        ),
+        embedder,
+        output_node,
+    )
+
+
+@pytest.fixture
+def document_embedder_workflow():
+    connection = connections.Mistral(
+        id=str(uuid.uuid4()),
+        api_key="api_key",
+    )
+    model = "mistral/mistral-embed"
+    embedder = MistralDocumentEmbedder(
+        id="document_embedder",
+        name="MistralDocumentEmbedder",
+        connection=connection,
+        model=model,
+    )
+    output_node = Output(id="output_node", depends=[NodeDependency(embedder)])
+
+    return (
+        Workflow(
+            id=str(uuid.uuid4()),
+            flow=Flow(
+                nodes=[embedder, output_node],
+            ),
+        ),
+        embedder,
+        output_node,
+    )
+
+
+@pytest.mark.parametrize(
+    "error_config,expected_type",
+    [
+        ((AuthenticationError, "Invalid API key", "mistral", "mistral/mistral-embed"), "AuthenticationError"),
+        ((RateLimitError, "Rate limit exceeded", "mistral", "mistral/mistral-embed"), "RateLimitError"),
+        ((APIError, "Service unavailable", 500, "mistral", "mistral/mistral-embed"), "APIError"),
+        ((BadRequestError, "Invalid embedding model", "non-existent-model", "mistral"), "BadRequestError"),
+    ],
+)
+def test_text_embedder_api_errors(text_embedder_workflow, error_config, expected_type):
+    workflow, embedder, output_node = text_embedder_workflow
+
+    error_class = error_config[0]
+    error_msg = error_config[1]
+    error_args = error_config[2:]
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        if error_class == APIError:
+            error = error_class(error_args[0], error_msg, error_args[1], error_args[2])
+        else:
+            error = error_class(error_msg, *error_args)
+
+        mock_embedding.side_effect = error
+
+        input_data = {"query": "Test query"}
+        response = workflow.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.FAILURE.value
+        assert expected_type in embedder_result["error"]["type"]
+        assert error_msg in embedder_result["error"]["message"]
+
+        output_result = response.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_text_embedder_missing_input(text_embedder_workflow):
+    workflow, embedder, output_node = text_embedder_workflow
+
+    input_data = {}
+    response = workflow.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+
+    embedder_result = response.output[embedder.id]
+    assert embedder_result["status"] == RunnableStatus.FAILURE.value
+
+    output_result = response.output[output_node.id]
+    assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_text_embedder_empty_input(text_embedder_workflow):
+    workflow, embedder, output_node = text_embedder_workflow
+
+    input_data = {"query": ""}
+    response = workflow.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+
+    embedder_result = response.output[embedder.id]
+    assert embedder_result["status"] == RunnableStatus.FAILURE.value
+
+    output_result = response.output[output_node.id]
+    assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+@pytest.mark.parametrize(
+    "error_config,expected_type",
+    [
+        ((AuthenticationError, "Invalid API key", "mistral", "mistral/mistral-embed"), "AuthenticationError"),
+        ((RateLimitError, "Rate limit exceeded", "mistral", "mistral/mistral-embed"), "RateLimitError"),
+        ((APIError, "Service unavailable", 500, "mistral", "mistral/mistral-embed"), "APIError"),
+        ((BadRequestError, "Invalid embedding model", "non-existent-model", "mistral"), "BadRequestError"),
+    ],
+)
+def test_document_embedder_api_errors(document_embedder_workflow, error_config, expected_type):
+    workflow, embedder, output_node = document_embedder_workflow
+
+    error_class = error_config[0]
+    error_msg = error_config[1]
+    error_args = error_config[2:]
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        if error_class == APIError:
+            error = error_class(error_args[0], error_msg, error_args[1], error_args[2])
+        else:
+            error = error_class(error_msg, *error_args)
+
+        mock_embedding.side_effect = error
+
+        document = [Document(content="Test content")]
+        input_data = {"documents": document}
+        response = workflow.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.FAILURE.value
+        assert expected_type in embedder_result["error"]["type"]
+        assert error_msg in embedder_result["error"]["message"]
+
+        output_result = response.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_document_embedder_missing_input(document_embedder_workflow):
+    workflow, embedder, output_node = document_embedder_workflow
+
+    input_data = {}
+    response = workflow.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+
+    embedder_result = response.output[embedder.id]
+    assert embedder_result["status"] == RunnableStatus.FAILURE.value
+
+    output_result = response.output[output_node.id]
+    assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_document_embedder_empty_document_list(document_embedder_workflow):
+    workflow, embedder, output_node = document_embedder_workflow
+
+    input_data = {"documents": []}
+    response = workflow.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+
+    embedder_result = response.output[embedder.id]
+    assert embedder_result["status"] == RunnableStatus.SUCCESS.value
+
+    output_result = response.output[output_node.id]
+    assert output_result["status"] == RunnableStatus.SUCCESS.value
+
+
+def test_document_embedder_empty_content(document_embedder_workflow):
+    workflow, embedder, output_node = document_embedder_workflow
+
+    input_data = {"documents": [Document(content="")]}
+    response = workflow.run(input_data=input_data)
+
+    assert response.status == RunnableStatus.SUCCESS
+
+    embedder_result = response.output[embedder.id]
+    assert embedder_result["status"] == RunnableStatus.FAILURE.value
+
+    output_result = response.output[output_node.id]
+    assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_text_embedder_api_returns_empty_embedding(text_embedder_workflow):
+    workflow, embedder, output_node = text_embedder_workflow
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        empty_embedding_response = MagicMock()
+        empty_embedding_response.data = [{"embedding": []}]
+        empty_embedding_response.model = "mistral/mistral-embed"
+        empty_embedding_response.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        mock_embedding.return_value = empty_embedding_response
+
+        input_data = {"query": "Test query"}
+        response = workflow.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.SUCCESS.value
+        assert "embedding" in embedder_result["output"]
+        assert embedder_result["output"]["embedding"] == []
+
+
+def test_document_embedder_api_returns_empty_embedding(document_embedder_workflow):
+    workflow, embedder, output_node = document_embedder_workflow
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        empty_embedding_response = MagicMock()
+        empty_embedding_response.data = [{"embedding": []}]
+        empty_embedding_response.model = "mistral/mistral-embed"
+        empty_embedding_response.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        mock_embedding.return_value = empty_embedding_response
+
+        document = [Document(content="Test content")]
+        input_data = {"documents": document}
+        response = workflow.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.SUCCESS.value
+        assert "documents" in embedder_result["output"]
+        assert len(embedder_result["output"]["documents"]) == 1
+
+
+def test_text_embedder_max_tokens_error(text_embedder_workflow):
+    workflow, embedder, output_node = text_embedder_workflow
+    error_msg = "This model's maximum context length is 8192 tokens, but the provided inputs have 10000 tokens"
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        error = BadRequestError(error_msg, "mistral/mistral-embed", "mistral")
+        mock_embedding.side_effect = error
+
+        long_text = "text " * 5000
+        input_data = {"query": long_text}
+        response = workflow.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.FAILURE.value
+        assert "BadRequestError" in embedder_result["error"]["type"]
+        assert "maximum context length" in embedder_result["error"]["message"]
+
+        output_result = response.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SKIP.value
+
+
+def test_document_embedder_max_tokens_error(document_embedder_workflow):
+    workflow, embedder, output_node = document_embedder_workflow
+    error_msg = "This model's maximum context length is 8192 tokens, but the provided inputs have 10000 tokens"
+
+    with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
+        error = BadRequestError(error_msg, "mistral/mistral-embed", "mistral")
+        mock_embedding.side_effect = error
+
+        long_text = "text " * 5000
+        document = [Document(content=long_text)]
+        input_data = {"documents": document}
+        response = workflow.run(input_data=input_data)
+
+        assert response.status == RunnableStatus.SUCCESS
+
+        embedder_result = response.output[embedder.id]
+        assert embedder_result["status"] == RunnableStatus.FAILURE.value
+        assert "BadRequestError" in embedder_result["error"]["type"]
+        assert "maximum context length" in embedder_result["error"]["message"]
+
+        output_result = response.output[output_node.id]
+        assert output_result["status"] == RunnableStatus.SKIP.value
