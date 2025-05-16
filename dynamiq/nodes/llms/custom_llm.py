@@ -49,7 +49,7 @@ class CustomLLM(BaseLLM):
             params["model"] = f"{self.provider_prefix}/{params['model']}"
 
         if extra and "headers" in extra:
-            params["headers"] = extra["headers"]
+            params["headers"] = {**params.get("headers", {}), **extra["headers"]}
             params.pop("extra_headers", None)
 
         return params
