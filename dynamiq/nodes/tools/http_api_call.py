@@ -5,6 +5,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from dynamiq.connections import Http as HttpConnection
+from dynamiq.connections import HTTPMethod
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
@@ -82,6 +83,7 @@ class HttpApiCallInputSchema(BaseModel):
     payload_type: RequestPayloadType = Field(default=None, description="Parameter to specify the type of payload data.")
     headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
+    method: HTTPMethod = Field(default=None, description="Parameter to specify the HTTP method for sending request.")
 
     @field_validator("data", "headers", "params", mode="before")
     @classmethod
@@ -111,6 +113,8 @@ class HttpApiCall(ConnectionNode):
         headers(dict[str,Any]): The headers of request.
         payload_type (dict[str, Any]): Parameter to specify the type of payload data.
         params(dict[str,Any]): The additional query params of request.
+        url(str): The endpoint url for sending request
+        method(str): The HTTP method for sending request.
         response_type(ResponseType|str): The type of response content.
     """
 
@@ -125,6 +129,7 @@ class HttpApiCall(ConnectionNode):
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     url: str = ""
+    method: HTTPMethod | None = None
     response_type: ResponseType | str | None = ResponseType.RAW
     input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
@@ -156,10 +161,11 @@ class HttpApiCall(ConnectionNode):
             raise ValueError("No url provided.")
         headers = input_data.headers
         params = input_data.params
+        method = input_data.method or self.method or self.connection.method
 
         try:
             response = self.client.request(
-                method=self.connection.method,
+                method=method,
                 url=url,
                 headers=self.connection.headers | self.headers | headers,
                 params=self.connection.params | self.params | params,
