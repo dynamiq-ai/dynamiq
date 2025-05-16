@@ -208,14 +208,14 @@ class TavilyTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result = (
-                "<Sources with URLs>\n"
-                + "\n".join(sources_with_url)
-                + f"\n<\\Sources with URLs>\n\n<Search results for query {input_data.query}>\n"
+                "## Sources\n"
+                + "\n".join([f"- {source}" for source in sources_with_url])
+                + "\n\n## Search Results for Query: "
+                + f"'{input_data.query}'\n\n"
                 + formatted_results
-                + f"\n<\\Search results for query {input_data.query}>"
             )
-            if search_result.get("answer", "") != "":
-                result += f"\n\n<Answer>\n{search_result.get('answer')}\n<\\Answer>"
+            if search_result.get("answer", ""):
+                result += f"\n\n## Summary Answer\n\n{search_result.get('answer')}"
         else:
             result = {
                 "result": formatted_results,
