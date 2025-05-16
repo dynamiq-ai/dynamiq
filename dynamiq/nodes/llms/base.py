@@ -111,7 +111,7 @@ class BaseLLM(ConnectionNode):
         deprecated="Please use `tools` and `response_format` parameters "
         "for function calling and structured output respectively.",
     )
-    model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
