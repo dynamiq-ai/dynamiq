@@ -7,8 +7,8 @@ from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
-class EmptyEmbeddingError(ValueError):
-    """Error raised when an embedding is empty or invalid."""
+class InvalidEmbeddingError(ValueError):
+    """Error raised when an embedding is invalid, including empty, null, or malformed embeddings."""
 
     pass
 
@@ -49,22 +49,22 @@ class BaseEmbedder(BaseModel):
     @staticmethod
     def validate_embedding(embedding: Any) -> None:
         """
-        Validates that an embedding is not empty.
+        Validates that an embedding is valid.
 
         Args:
             embedding: The embedding vector to validate
 
         Raises:
-            EmptyEmbeddingError: If the embedding is None, empty, or invalid
+            InvalidEmbeddingError: If the embedding is None, empty, or malformed
         """
         try:
             if embedding is None:
-                raise EmptyEmbeddingError("Embedding is None")
+                raise InvalidEmbeddingError("Embedding is None")
 
             if len(embedding) == 0:
-                raise EmptyEmbeddingError("Embedding is empty (zero length)")
+                raise InvalidEmbeddingError("Embedding is empty (zero length)")
         except (TypeError, AttributeError):
-            raise EmptyEmbeddingError("Embedding has no length attribute or is not iterable")
+            raise InvalidEmbeddingError("Embedding has no length attribute or is not iterable")
 
     @staticmethod
     def validate_document_embeddings(documents: Any) -> None:
@@ -87,7 +87,7 @@ class BaseEmbedder(BaseModel):
 
                 try:
                     BaseEmbedder.validate_embedding(doc.embedding)
-                except EmptyEmbeddingError as e:
+                except InvalidEmbeddingError as e:
                     raise DocumentEmbeddingValidationError(f"Document at index {i}: {str(e)}")
         except (TypeError, AttributeError):
             raise DocumentEmbeddingValidationError("Documents is not iterable or has incorrect structure")
@@ -154,7 +154,7 @@ class BaseEmbedder(BaseModel):
 
         try:
             self.validate_embedding(embedding)
-        except EmptyEmbeddingError as e:
+        except InvalidEmbeddingError as e:
             logger.error(f"Invalid embedding returned by model {self.model}: {str(e)}")
             raise ValueError(f"Invalid embedding returned by the model: {str(e)}")
 
