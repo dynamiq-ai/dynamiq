@@ -119,6 +119,13 @@ def test_text_embedder_api_errors(bedrock_text_embedder_workflow, error_class, e
         response = workflow.run(input_data=input_data)
 
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
+        mock_embedding.assert_called_once_with(
+            model=embedder.model,
+            input=["Test query"],
+            aws_access_key_id=embedder.connection.access_key_id,
+            aws_secret_access_key=embedder.connection.secret_access_key,
+            aws_region_name=embedder.connection.region,
+        )
 
 
 def test_text_embedder_missing_input(bedrock_text_embedder_workflow, missing_input):
@@ -156,6 +163,13 @@ def test_document_embedder_api_errors(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=document_input)
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
+        mock_embedding.assert_called_once_with(
+            model=embedder.model,
+            input=[document_input["documents"][0].content],
+            aws_access_key_id=embedder.connection.access_key_id,
+            aws_secret_access_key=embedder.connection.secret_access_key,
+            aws_region_name=embedder.connection.region,
+        )
 
 
 def test_document_embedder_missing_input(bedrock_document_embedder_workflow, missing_input):
