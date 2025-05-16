@@ -113,6 +113,11 @@ def test_text_embedder_api_errors(openai_text_embedder_workflow, error_class, er
         response = workflow.run(input_data=input_data)
 
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
+        mock_embedding.assert_called_once_with(
+            input=["Test query"],
+            model=embedder.model,
+            client=ANY,
+        )
 
 
 def test_text_embedder_missing_input(openai_text_embedder_workflow, missing_input):
@@ -150,6 +155,11 @@ def test_document_embedder_api_errors(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=document_input)
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
+        mock_embedding.assert_called_once_with(
+            input=[document_input["documents"][0].content],
+            model=embedder.model,
+            client=ANY,
+        )
 
 
 def test_document_embedder_missing_input(openai_document_embedder_workflow, missing_input):

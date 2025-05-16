@@ -131,6 +131,12 @@ def test_text_embedder_api_errors(vertexai_text_embedder_workflow, error_class, 
         response = workflow.run(input_data=input_data)
 
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
+        mock_embedding.assert_called_once_with(
+            task_type="RETRIEVAL_QUERY",
+            input=["Test query"],
+            model=embedder.model,
+            **embedder.connection.conn_params,
+        )
 
 
 def test_text_embedder_missing_input(vertexai_text_embedder_workflow, missing_input):
@@ -173,6 +179,12 @@ def test_document_embedder_api_errors(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=document_input)
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
+        mock_embedding.assert_called_once_with(
+            task_type="RETRIEVAL_DOCUMENT",
+            input=[document_input["documents"][0].content],
+            model=embedder.model,
+            **embedder.connection.conn_params,
+        )
 
 
 def test_document_embedder_missing_input(vertexai_document_embedder_workflow, missing_input):
