@@ -329,13 +329,13 @@ class E2BInterpreterTool(ConnectionNode):
         if self.is_optimized_for_agents:
             result = ""
             if files_installation := content.get("files_installation"):
-                result += "<Files installation>\n" + files_installation + "\n</Files installation>"
+                result += "## Files Installation\n\n" + files_installation + "\n\n"
             if packages_installation := content.get("packages_installation"):
-                result += "<Package installation>\n" + packages_installation + "\n</Package installation>"
+                result += "## Package Installation\n\n" + packages_installation + "\n\n"
             if shell_command_execution := content.get("shell_command_execution"):
-                result += "<Shell command execution>\n" + shell_command_execution + "\n</Shell command execution>"
+                result += "## Shell Command Execution\n\n" + shell_command_execution + "\n\n"
             if code_execution := content.get("code_execution"):
-                result += "<Code execution>\n" + code_execution + "\n</Code execution>"
+                result += "## Code Execution\n\n" + code_execution + "\n\n"
             content = result
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")

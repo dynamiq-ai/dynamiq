@@ -278,8 +278,8 @@ class ExaTool(ConnectionNode):
         sources_with_url = [f"{result.get('title')}: ({result.get('url')})" for result in results]
 
         if self.is_optimized_for_agents:
-            result_parts = ["<Sources with URLs>", "\n".join(sources_with_url), "</Sources with URLs>"]
-            result_parts.extend(["<Search results>", formatted_results, "</Search results>"])
+            result_parts = ["## Sources with URLs", "\n".join(sources_with_url)]
+            result_parts.extend(["## Search Results", formatted_results])
             result = "\n\n".join(result_parts)
         else:
             urls = [result.get("url") for result in results]
