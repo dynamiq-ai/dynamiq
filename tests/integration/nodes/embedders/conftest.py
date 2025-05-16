@@ -2,7 +2,6 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
-from litellm import APIError, AuthenticationError, BadRequestError, RateLimitError
 
 from dynamiq import Workflow
 from dynamiq.flows import Flow
@@ -89,18 +88,6 @@ def null_embedding_response_factory():
         return response
 
     return _factory
-
-
-@pytest.fixture(
-    params=[
-        (AuthenticationError, "Invalid credentials", ["invalid", "model"], "AuthenticationError"),
-        (RateLimitError, "Rate limit exceeded", ["provider", "model"], "RateLimitError"),
-        (APIError, "Service unavailable", [500, "provider", "model"], "APIError"),
-        (BadRequestError, "Invalid embedding model", ["non-existent-model", "provider"], "BadRequestError"),
-    ]
-)
-def api_error_params(request):
-    return request.param
 
 
 def create_text_embedder_workflow(embedder):
