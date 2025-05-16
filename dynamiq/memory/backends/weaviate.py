@@ -33,10 +33,10 @@ class Weaviate(MemoryBackend):
     name: str = "Weaviate"
     connection: WeaviateConnection = Field(default_factory=WeaviateConnection)
     embedder: DocumentEmbedder
-    index_name: str = Field(default="conversations")
+    collection_name: str = Field(default="conversations")
     tenant_name: str | None = Field(default=None)
     create_if_not_exist: bool = Field(default=True)
-    content_key: str = Field(default="message_content")
+    content_property_name: str = Field(default="message_content")
     alpha: float = Field(default=0.5, description="Alpha for hybrid search (0=keyword, 1=vector)")
 
     _vector_store: WeaviateVectorStore | None = PrivateAttr(default=None)
@@ -67,7 +67,6 @@ class Weaviate(MemoryBackend):
         exclude = kwargs.pop("exclude", self.to_dict_exclude_params.copy())
         data = self.model_dump(exclude=exclude, **kwargs)
 
-        data["connection"] = self.connection.to_dict(include_secure_params=include_secure_params, **kwargs)
         data["embedder"] = self.embedder.to_dict(include_secure_params=include_secure_params, **kwargs)
 
         if "type" not in data:
@@ -79,14 +78,14 @@ class Weaviate(MemoryBackend):
         """Initialize the Weaviate vector store and ensure schema properties."""
         try:
             writer_params = WeaviateWriterVectorStoreParams(
-                index_name=self.index_name,
+                collection_name=self.collection_name,
                 create_if_not_exist=self.create_if_not_exist,
-                content_key=self.content_key,
+                content_property_name=self.content_property_name,
                 tenant_name=self.tenant_name,
             )
 
             properties_to_define = list(self._CORE_MEMORY_PROPERTIES)
-            properties_to_define.append(self.content_key)
+            properties_to_define.append(self.content_property_name)
 
             self._vector_store = WeaviateVectorStore(
                 connection=self.connection,
@@ -102,7 +101,7 @@ class Weaviate(MemoryBackend):
 
             if self._vector_store and self.create_if_not_exist:
                 properties_to_ensure = list(self._CORE_MEMORY_PROPERTIES)
-                properties_to_ensure.append(self.content_key)
+                properties_to_ensure.append(self.content_property_name)
                 self._vector_store.ensure_properties_exist(properties_to_ensure)
 
         except Exception as e:
@@ -194,8 +193,8 @@ class Weaviate(MemoryBackend):
             if not document.embedding:
                 raise WeaviateMemoryError("Generated embedding is empty.")
 
-            self._vector_store.write_documents([document], content_key=self.content_key)
-            logger.debug(f"Weaviate Memory ({self.index_name}): Added message {document.id}")
+            self._vector_store.write_documents([document], content_property_name=self.content_property_name)
+            logger.debug(f"Weaviate Memory ({self.collection_name}): Added message {document.id}")
 
         except Exception as e:
             logger.error(f"Error adding message to Weaviate: {e}")
@@ -213,7 +212,9 @@ class Weaviate(MemoryBackend):
             raise WeaviateMemoryError("Weaviate vector store not initialized.")
 
         try:
-            documents = self._vector_store.list_documents(include_embeddings=False, content_key=self.content_key)
+            documents = self._vector_store.list_documents(
+                include_embeddings=False, content_property_name=self.content_property_name
+            )
 
             messages = [self._document_to_message(doc) for doc in documents]
 
@@ -225,7 +226,7 @@ class Weaviate(MemoryBackend):
                 retrieved_messages = messages
 
             logger.debug(
-                f"Weaviate Memory ({self.index_name}): Retrieved {len(retrieved_messages)} messages"
+                f"Weaviate Memory ({self.collection_name}): Retrieved {len(retrieved_messages)} messages"
                 f"{f' (limited to {limit})' if limit else ''}."
             )
             return retrieved_messages
@@ -312,24 +313,27 @@ class Weaviate(MemoryBackend):
                     top_k=effective_limit,
                     exclude_document_embeddings=True,
                     alpha=self.alpha,
-                    content_key=self.content_key,
+                    content_property_name=self.content_property_name,
                 )
                 retrieved_messages = [self._document_to_message(doc) for doc in documents]
 
             elif prepared_filters:
-                documents = self._vector_store.filter_documents(filters=prepared_filters, content_key=self.content_key)
+                documents = self._vector_store.filter_documents(
+                    filters=prepared_filters, content_property_name=self.content_property_name
+                )
                 retrieved_messages = [self._document_to_message(doc) for doc in documents]
                 if effective_limit > 0:
                     retrieved_messages = retrieved_messages[:effective_limit]
 
             else:
                 logger.debug(
-                    f"Weaviate Memory ({self.index_name}): Search called with no query or filters. Returning empty."
+                    f"Weaviate Memory ({self.collection_name}): Search called with no "
+                    f"query or filters. Returning empty."
                 )
                 retrieved_messages = []
 
             logger.debug(
-                f"Weaviate Memory ({self.index_name}):"
+                f"Weaviate Memory ({self.collection_name}):"
                 f" Found {len(retrieved_messages)} search results "
                 f"(Query: {'Yes' if query else 'No'}, "
                 f"Filters: {'Yes' if prepared_filters else 'No'}, Limit: {effective_limit})"
@@ -362,11 +366,11 @@ class Weaviate(MemoryBackend):
             if count > 0:
                 self._vector_store.delete_documents(delete_all=True)
                 logger.info(
-                    f"Weaviate Memory ({self.index_name}): Cleared {count} documents "
+                    f"Weaviate Memory ({self.collection_name}): Cleared {count} documents "
                     f"{f'from tenant {self.tenant_name}' if self.tenant_name else 'from collection'}."
                 )
             else:
-                logger.info(f"Weaviate Memory ({self.index_name}): Clear called, but memory was already empty.")
+                logger.info(f"Weaviate Memory ({self.collection_name}): Clear called, but memory was already empty.")
         except Exception as e:
             logger.error(f"Error clearing Weaviate memory: {e}")
             raise WeaviateMemoryError(f"Error clearing Weaviate memory: {e}") from e

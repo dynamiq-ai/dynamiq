@@ -44,7 +44,7 @@ def setup_agent():
         weaviate_backend = WeaviateMemoryBackend(
             connection=weaviate_connection,
             embedder=embedder,
-            index_name=WEAVIATE_INDEX_NAME,
+            collection_name=WEAVIATE_INDEX_NAME,
             create_if_not_exist=True,
         )
         print(f"Weaviate memory backend initialized for index '{WEAVIATE_INDEX_NAME}'.")
