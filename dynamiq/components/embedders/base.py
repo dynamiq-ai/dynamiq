@@ -4,7 +4,6 @@ from pydantic import BaseModel, PrivateAttr
 
 from dynamiq.connections import BaseConnection
 from dynamiq.types import Document
-from dynamiq.utils.embedding_validators import validate_document_embeddings, validate_embedding
 from dynamiq.utils.logger import logger
 
 
@@ -34,6 +33,59 @@ class BaseEmbedder(BaseModel):
             Only supported in OpenAI/Azure text-embedding-3 and later models.
 
     """
+
+    @staticmethod
+    def validate_embedding(embedding: Any) -> tuple[bool, str]:
+        """
+        Validates that an embedding is not empty.
+
+        Args:
+            embedding: The embedding vector to validate
+
+        Returns:
+            Tuple containing:
+                - Boolean indicating if embedding is valid
+                - String containing error message if invalid, empty string if valid
+        """
+        try:
+            if embedding is None:
+                return False, "Embedding is None"
+
+            if len(embedding) == 0:
+                return False, "Embedding is empty (zero length)"
+        except (TypeError, AttributeError):
+            return False, "Embedding has no length attribute or is not iterable"
+
+        return True, ""
+
+    @staticmethod
+    def validate_document_embeddings(documents: Any) -> tuple[bool, str]:
+        """
+        Validates embeddings for a list of documents.
+
+        Args:
+            documents: List of documents with embeddings
+
+        Returns:
+            Tuple containing:
+                - Boolean indicating if all document embeddings are valid
+                - String containing error message if invalid, empty string if valid
+        """
+        if not documents:
+            return True, ""
+
+        try:
+            for i, doc in enumerate(documents):
+                if not hasattr(doc, "embedding") or doc.embedding is None:
+                    return False, f"Document at index {i} has no embedding"
+
+                is_valid, error_msg = BaseEmbedder.validate_embedding(doc.embedding)
+                if not is_valid:
+                    return False, f"Document at index {i}: {error_msg}"
+        except (TypeError, AttributeError):
+            return False, "Documents is not iterable or has incorrect structure"
+
+        return True, ""
     model: str
     connection: BaseConnection
     prefix: str = ""
@@ -95,7 +147,7 @@ class BaseEmbedder(BaseModel):
         meta = {"model": response.model, "usage": dict(response.usage)}
         embedding = response.data[0]["embedding"]
 
-        is_valid, error_message = validate_embedding(embedding)
+        is_valid, error_message = self.validate_embedding(embedding)
         if not is_valid:
             logger.error(f"Invalid embedding returned by model {self.model}: {error_message}")
             raise ValueError(f"Invalid embedding returned by the model: {error_message}")
@@ -191,7 +243,7 @@ class BaseEmbedder(BaseModel):
         for doc, emb in zip(documents, embeddings):
             doc.embedding = emb
 
-        is_valid, error_message = validate_document_embeddings(documents)
+        is_valid, error_message = self.validate_document_embeddings(documents)
         if not is_valid:
             logger.error(f"Invalid document embeddings returned by model {self.model}: {error_message}")
             raise ValueError(f"Invalid document embeddings: {error_message}")
