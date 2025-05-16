@@ -7,6 +7,18 @@ from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
 
+class EmptyEmbeddingError(ValueError):
+    """Error raised when an embedding is empty or invalid."""
+
+    pass
+
+
+class DocumentEmbeddingValidationError(ValueError):
+    """Error raised when document embeddings validation fails."""
+
+    pass
+
+
 class BaseEmbedder(BaseModel):
     """
     Initializes the Embedder component with given configuration.
@@ -35,57 +47,50 @@ class BaseEmbedder(BaseModel):
     """
 
     @staticmethod
-    def validate_embedding(embedding: Any) -> tuple[bool, str]:
+    def validate_embedding(embedding: Any) -> None:
         """
         Validates that an embedding is not empty.
 
         Args:
             embedding: The embedding vector to validate
 
-        Returns:
-            Tuple containing:
-                - Boolean indicating if embedding is valid
-                - String containing error message if invalid, empty string if valid
+        Raises:
+            EmptyEmbeddingError: If the embedding is None, empty, or invalid
         """
         try:
             if embedding is None:
-                return False, "Embedding is None"
+                raise EmptyEmbeddingError("Embedding is None")
 
             if len(embedding) == 0:
-                return False, "Embedding is empty (zero length)"
+                raise EmptyEmbeddingError("Embedding is empty (zero length)")
         except (TypeError, AttributeError):
-            return False, "Embedding has no length attribute or is not iterable"
-
-        return True, ""
+            raise EmptyEmbeddingError("Embedding has no length attribute or is not iterable")
 
     @staticmethod
-    def validate_document_embeddings(documents: Any) -> tuple[bool, str]:
+    def validate_document_embeddings(documents: Any) -> None:
         """
         Validates embeddings for a list of documents.
 
         Args:
             documents: List of documents with embeddings
 
-        Returns:
-            Tuple containing:
-                - Boolean indicating if all document embeddings are valid
-                - String containing error message if invalid, empty string if valid
+        Raises:
+            DocumentEmbeddingValidationError: If any document embedding is invalid
         """
         if not documents:
-            return True, ""
+            return
 
         try:
             for i, doc in enumerate(documents):
                 if not hasattr(doc, "embedding") or doc.embedding is None:
-                    return False, f"Document at index {i} has no embedding"
+                    raise DocumentEmbeddingValidationError(f"Document at index {i} has no embedding")
 
-                is_valid, error_msg = BaseEmbedder.validate_embedding(doc.embedding)
-                if not is_valid:
-                    return False, f"Document at index {i}: {error_msg}"
+                try:
+                    BaseEmbedder.validate_embedding(doc.embedding)
+                except EmptyEmbeddingError as e:
+                    raise DocumentEmbeddingValidationError(f"Document at index {i}: {str(e)}")
         except (TypeError, AttributeError):
-            return False, "Documents is not iterable or has incorrect structure"
-
-        return True, ""
+            raise DocumentEmbeddingValidationError("Documents is not iterable or has incorrect structure")
     model: str
     connection: BaseConnection
     prefix: str = ""
@@ -147,10 +152,11 @@ class BaseEmbedder(BaseModel):
         meta = {"model": response.model, "usage": dict(response.usage)}
         embedding = response.data[0]["embedding"]
 
-        is_valid, error_message = self.validate_embedding(embedding)
-        if not is_valid:
-            logger.error(f"Invalid embedding returned by model {self.model}: {error_message}")
-            raise ValueError(f"Invalid embedding returned by the model: {error_message}")
+        try:
+            self.validate_embedding(embedding)
+        except EmptyEmbeddingError as e:
+            logger.error(f"Invalid embedding returned by model {self.model}: {str(e)}")
+            raise ValueError(f"Invalid embedding returned by the model: {str(e)}")
 
         return {"embedding": embedding, "meta": meta}
 
@@ -243,9 +249,10 @@ class BaseEmbedder(BaseModel):
         for doc, emb in zip(documents, embeddings):
             doc.embedding = emb
 
-        is_valid, error_message = self.validate_document_embeddings(documents)
-        if not is_valid:
-            logger.error(f"Invalid document embeddings returned by model {self.model}: {error_message}")
-            raise ValueError(f"Invalid document embeddings: {error_message}")
+        try:
+            self.validate_document_embeddings(documents)
+        except DocumentEmbeddingValidationError as e:
+            logger.error(f"Invalid document embeddings returned by model {self.model}: {str(e)}")
+            raise ValueError(f"Invalid document embeddings: {str(e)}")
 
         return {"documents": documents, "meta": meta}
