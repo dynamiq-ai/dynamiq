@@ -128,6 +128,9 @@ def test_text_embedder_api_errors(gemini_text_embedder_workflow, error_class, er
         response = workflow.run(input_data=input_data)
 
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
+        mock_embedding.assert_called_once_with(
+            model=embedder.model, input=["Test query"], task_type="RETRIEVAL_QUERY", api_key=embedder.connection.api_key
+        )
 
 
 def test_text_embedder_missing_input(gemini_text_embedder_workflow, missing_input):
@@ -170,6 +173,12 @@ def test_document_embedder_api_errors(
         mock_embedding.side_effect = error
         response = workflow.run(input_data=document_input)
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
+        mock_embedding.assert_called_once_with(
+            model=embedder.model,
+            input=[document_input["documents"][0].content],
+            task_type="RETRIEVAL_DOCUMENT",
+            api_key=embedder.connection.api_key,
+        )
 
 
 def test_document_embedder_missing_input(gemini_document_embedder_workflow, missing_input):
