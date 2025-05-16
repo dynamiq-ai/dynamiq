@@ -31,15 +31,13 @@ class XMLParser:
     def _clean_content(text: str) -> str:
         """
         Cleans the input string to remove common LLM artifacts and isolate XML.
-        - Removes markdown code fences (```json, ```, etc.).
         - Strips leading/trailing whitespace.
         - Attempts to extract the first well-formed XML block if surrounded by text.
         """
         if not isinstance(text, str):
             return ""
 
-        cleaned = re.sub(r"^```(?:[a-zA-Z]+\s*)?|```$", "", text.strip(), flags=re.MULTILINE)
-        cleaned = cleaned.strip()
+        cleaned = text.strip()
 
         xml_match = re.search(r"<(\w+)\b[^>]*>.*?</\1>", cleaned, re.DOTALL)
         if xml_match:
