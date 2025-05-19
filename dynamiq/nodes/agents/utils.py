@@ -7,7 +7,7 @@ from typing import Any, Sequence
 import filetype
 from lxml import etree as LET  # nosec: B410
 
-from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
+from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError
 from dynamiq.prompts import (
     Message,
     MessageRole,
@@ -27,23 +27,70 @@ class XMLParser:
     Prioritizes lxml for robustness, with fallbacks for common issues.
     """
 
+    DEFAULT_PRESERVE_TAGS = ["answer", "thought"]
+
     @staticmethod
     def _clean_content(text: str) -> str:
         """
         Cleans the input string to remove common LLM artifacts and isolate XML.
-        - Strips leading/trailing whitespace.
-        - Attempts to extract the first well-formed XML block if surrounded by text.
         """
         if not isinstance(text, str):
             return ""
 
         cleaned = text.strip()
 
+        if cleaned.startswith("```") and cleaned.endswith("```"):
+            cleaned = re.sub(r"^```.*?\n", "", cleaned)
+            cleaned = re.sub(r"\n```$", "", cleaned)
+
         xml_match = re.search(r"<(\w+)\b[^>]*>.*?</\1>", cleaned, re.DOTALL)
         if xml_match:
             cleaned = xml_match.group(0)
 
         return cleaned
+
+    @staticmethod
+    def extract_content_with_regex_fallback(text: str, tag_name: str) -> str | None:
+        """
+        Extract tag content using regex as a fallback when XML parsing fails.
+        Works with both complete and incomplete tags.
+        """
+        complete_pattern = f"<{tag_name}[^>]*>(.*?)</{tag_name}>"
+        complete_match = re.search(complete_pattern, text, re.DOTALL)
+
+        if complete_match:
+            content = complete_match.group(1).strip()
+            if content:
+                return content
+            return None
+
+        incomplete_pattern = f"<{tag_name}[^>]*>(.*?)(?=<(?!/{tag_name})|$)"
+        incomplete_match = re.search(incomplete_pattern, text, re.DOTALL)
+
+        if incomplete_match:
+            content = incomplete_match.group(1).strip()
+            if content:
+                return content
+
+        return None
+
+    @staticmethod
+    def preprocess_xml_content(text: str) -> dict[str, tuple[str, str]]:
+        """
+        Extract raw content for all tags that need special handling before parsing.
+        Returns a dict mapping tag names to (modified_text, raw_content) tuples.
+        """
+        extracted_contents = {}
+
+        for tag in XMLParser.DEFAULT_PRESERVE_TAGS:
+            content = XMLParser.extract_content_with_regex_fallback(text, tag)
+            if content:
+                tag_pattern = f"<{tag}[^>]*>.*?(?=<(?!/{tag})|$)|<{tag}[^>]*>.*?</{tag}>"
+                modified_text = re.sub(tag_pattern, f"<{tag}>CONTENT_PLACEHOLDER_{tag}</{tag}>", text, flags=re.DOTALL)
+                extracted_contents[tag] = (modified_text, content)
+                text = modified_text
+
+        return extracted_contents
 
     @staticmethod
     def _parse_with_lxml(cleaned_text: str) -> LET._Element | None:
@@ -53,14 +100,32 @@ class XMLParser:
         if not cleaned_text:
             return None
         try:
+            tags_to_check = ["thought", "answer", "action", "action_input", "output"]
+            fixed_text = cleaned_text
+
+            for tag in tags_to_check:
+                opening_count = len(re.findall(f"<{tag}[^>]*>", fixed_text))
+                closing_count = len(re.findall(f"</{tag}>", fixed_text))
+
+                if opening_count > closing_count:
+                    logger.debug(f"XMLParser: Adding missing </{tag}> tags")
+                    if tag == "output":
+                        fixed_text += f"</{tag}>"
+                    else:
+                        pos = fixed_text.find(f"<{tag}")
+                        if pos >= 0:
+                            next_tag_pos = fixed_text.find("<", pos + 1)
+                            if next_tag_pos > 0 and f"</{tag}>" not in fixed_text[pos:next_tag_pos]:
+                                fixed_text = fixed_text[:next_tag_pos] + f"</{tag}>" + fixed_text[next_tag_pos:]
+
             parser = LET.XMLParser(recover=True, encoding="utf-8")
-            root = LET.fromstring(cleaned_text.encode("utf-8"), parser=parser)  # nosec: B320
+            root = LET.fromstring(fixed_text.encode("utf-8"), parser=parser)  # nosec: B320
             return root
         except LET.XMLSyntaxError as e:
-            logger.warning(f"XMLParser: lxml parsing failed even with recovery: {e}. Content: {cleaned_text[:200]}...")
+            logger.warning(f"XMLParser: lxml parsing failed with recovery: {e}. Content: {cleaned_text[:200]}...")
             return None
         except Exception as e:
-            logger.error(f"XMLParser: Unexpected error during lxml parsing: {e}. Content: {cleaned_text[:200]}...")
+            logger.error(f"XMLParser: Unexpected error during parsing: {e}. Content: {cleaned_text[:200]}...")
             return None
 
     @staticmethod
@@ -72,13 +137,14 @@ class XMLParser:
     ) -> dict[str, str]:
         """
         Extracts text content from specified tags using XPath.
-        Handles cases where the provided 'root' might be a child element
-        by navigating up to the parent if necessary.
-        Distinguishes between missing tags and found-but-empty tags.
         """
         data = {}
         optional_tags = optional_tags or []
-        preserve_format_tags = preserve_format_tags or ["answer"]
+        preserve_format_tags = list(preserve_format_tags or [])
+
+        for tag in XMLParser.DEFAULT_PRESERVE_TAGS:
+            if tag not in preserve_format_tags:
+                preserve_format_tags.append(tag)
 
         all_tags = list(required_tags) + list(optional_tags)
 
@@ -90,10 +156,19 @@ class XMLParser:
                 element_found = True
                 for elem in elements:
                     if tag in preserve_format_tags:
-                        text = LET.tostring(elem, encoding="unicode", method="text")
+                        xml_content = LET.tostring(elem, encoding="unicode", method="xml")
+                        tag_pattern = re.compile(f"<{tag}[^>]*>(.*?)</{tag}>", re.DOTALL)
+                        match = tag_pattern.search(xml_content)
+                        text = match.group(1) if match else ""
                     else:
                         text = "".join(elem.itertext()).strip()
+
+                    if not text and tag in required_tags:
+                        raise TagNotFoundError(f"Required tag <{tag}> found but contains no text content.")
+
                     if text:
+                        if text.startswith("CONTENT_PLACEHOLDER_"):
+                            continue
                         tag_content = text
                         break
 
@@ -108,18 +183,13 @@ class XMLParser:
                                 if text_parent_child:
                                     tag_content = text_parent_child
                                     break
-                except AttributeError:
-                    logger.debug(
-                        f"XMLParser: Root element '{root.tag}' has no parent, cannot search siblings via parent."
-                    )
-                    pass
-                except Exception as e:
-                    logger.warning(f"XMLParser: Error during parent navigation XPath for tag '{tag}': {e}")
+                except (AttributeError, Exception) as e:
+                    logger.debug(f"XMLParser: Error checking parent for tag '{tag}': {e}")
                     pass
 
             if tag_content is not None:
                 data[tag] = tag_content
-            elif element_found and tag in required_tags:
+            elif element_found and tag in required_tags and tag_content is None:
                 raise TagNotFoundError(f"Required tag <{tag}> found but contains no text content.")
             elif not element_found and tag in required_tags:
                 raise TagNotFoundError(
@@ -169,28 +239,14 @@ class XMLParser:
     ) -> dict[str, Any]:
         """
         Parses XML-like text to extract structured data.
-
-        Args:
-            text (str): The raw text input potentially containing XML.
-            required_tags (Sequence[str]): A list/tuple of tag names that MUST be present.
-            optional_tags (Sequence[str], optional): A list/tuple of optional tag names. Defaults to None.
-            json_fields (Sequence[str], optional): A list/tuple of fields whose content should be parsed as JSON.
-            preserve_format_tags (Sequence[str], optional): A list/tuple of tags
-            whose content should be preserved as-is.
-            attempt_wrap (bool): If initial parsing fails, try wrapping the content in <root> and parse again.
-
-        Returns:
-            dict[str, Any]: A dictionary containing the extracted data.
-                           Values for json_fields will be parsed JSON objects/primitives.
-
-        Raises:
-            XMLParsingError: If the text cannot be parsed as XML even with recovery/wrapping.
-            TagNotFoundError: If any of the required_tags are not found or are empty.
-            JSONParsingError: If any field listed in json_fields contains invalid JSON.
-            ParsingError: For other generic parsing issues.
         """
         optional_tags = optional_tags or []
         json_fields = json_fields or []
+        preserve_format_tags = list(preserve_format_tags or [])
+
+        for tag in XMLParser.DEFAULT_PRESERVE_TAGS:
+            if tag not in preserve_format_tags:
+                preserve_format_tags.append(tag)
 
         cleaned_text = XMLParser._clean_content(text)
         if not cleaned_text:
@@ -199,37 +255,62 @@ class XMLParser:
             else:
                 return {}
 
-        root = XMLParser._parse_with_lxml(cleaned_text)
+        extracted_contents = XMLParser.preprocess_xml_content(cleaned_text)
 
-        if root is None and attempt_wrap:
-            logger.info("XMLParser: Initial lxml parse failed, attempting to wrap content in <root>...")
-            wrapped_text = f"<root>{cleaned_text}</root>"
-            root = XMLParser._parse_with_lxml(wrapped_text)
-        if root is None:
-            raise XMLParsingError(
-                f"Failed to parse content as XML even after cleaning "
-                f"and wrapping attempts. Content: {cleaned_text[:200]}..."
-            )
+        if extracted_contents:
+            modified_text = cleaned_text
+            for tag, (tag_modified_text, _) in extracted_contents.items():
+                modified_text = tag_modified_text
+        else:
+            modified_text = cleaned_text
+
+        result = {}
+        for tag, (_, content) in extracted_contents.items():
+            if tag in required_tags + optional_tags:
+                result[tag] = content
 
         try:
-            extracted_data = XMLParser._extract_data_lxml(root, required_tags, optional_tags, preserve_format_tags)
-        except TagNotFoundError as e:
-            raise e
+            root = XMLParser._parse_with_lxml(modified_text)
+
+            if root is None and attempt_wrap:
+                wrapped_text = f"<root>{modified_text}</root>"
+                root = XMLParser._parse_with_lxml(wrapped_text)
+
+            if root is not None:
+                remaining_required = [tag for tag in required_tags if tag not in result]
+                remaining_optional = [tag for tag in optional_tags if tag not in result]
+
+                if remaining_required or remaining_optional:
+                    xml_data = XMLParser._extract_data_lxml(
+                        root, remaining_required, remaining_optional, preserve_format_tags
+                    )
+                    result.update(xml_data)
         except Exception as e:
-            raise ParsingError(f"Error extracting data using XPath: {e}")
+            logger.warning(f"XMLParser: XML parsing failed: {e}")
 
-        if json_fields:
-            try:
-                final_data = XMLParser._parse_json_fields(extracted_data, json_fields)
-            except JSONParsingError as e:
-                raise e
-            except Exception as e:
-                # Catch potential errors during JSON parsing
-                raise ParsingError(f"Unexpected error during JSON field processing: {e}")
-        else:
-            final_data = extracted_data
+        missing_tags = [tag for tag in required_tags if tag not in result]
+        if missing_tags:
+            for tag in missing_tags:
+                content = XMLParser.extract_content_with_regex_fallback(text, tag)
+                if content:
+                    result[tag] = content
+                else:
+                    empty_tag_pattern = f"<{tag}[^>]*>\\s*</{tag}>"
+                    if re.search(empty_tag_pattern, text):
+                        raise TagNotFoundError(f"Required tag <{tag}> found but contains no text content.")
+                    else:
+                        raise TagNotFoundError(f"Required tag <{tag}> not found even with fallback methods")
 
-        return final_data
+        for tag in optional_tags:
+            if tag not in result:
+                content = XMLParser.extract_content_with_regex_fallback(text, tag)
+                if content:
+                    result[tag] = content
+
+        if json_fields and result:
+            result = XMLParser._parse_json_fields(result, json_fields)
+
+        return result
 
     @staticmethod
     def extract_first_tag_lxml(text: str, tags: Sequence[str]) -> str | None:
