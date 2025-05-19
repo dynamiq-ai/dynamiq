@@ -7,6 +7,7 @@ from typing import Any, Union, get_args, get_origin
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
+from dynamiq.memory.inner_memory import InnerMemoryConfig
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -20,6 +21,7 @@ from dynamiq.nodes.agents.exceptions import (
 from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
+from dynamiq.nodes.tools.memory import MemoryWriterTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
@@ -241,6 +243,67 @@ Your response should be clear, concise, and professional.
 </answer>
 """  # noqa: E501
 
+HISTORY_SUMMARIZATION_PROMPT = """
+Your task is to extract valuable information, summarize it for each section individually and
+ identify the information that is truly worth saving.
+ Focus on extracting the key points and discard any irrelevant or excessive details, like artifacts of scraping etc.
+ Ensure that only the most important, contextually significant information is preserved in your summary.
+# Information extraction and summarization:
+
+Each section in the input is marked using the format:
+=== Section [section_number] ===
+
+For the output, summarize each section and enclose it within a custom tag that matches the section number.
+
+Use the format: <section(section_number)>
+For example, if the section has section_numner 4, use: <section4>
+
+You may receive multiple sections, and each one must be summarized and returned using its corresponding tag.
+
+Guidelines:
+- Make sure that every provided section has its summary.
+- Try to keep information which responds for initial user request.
+- Do not merge or combine content from different sections.
+- Maintain the numbering to match the original section order.
+- Use plain text inside the tags (no extra formatting like Markdown or bullet points unless specified).
+
+# Memorization:
+
+You have access to Memory writer tool to save relevant detailed information in memory.
+
+Parameters:
+- key (str): A unique identifier for this memory entry. Use a descriptive, stable key
+  (e.g., "user_name", "project_goal", "preferred_language").
+- data (str): The memory content to store. This can be a sentence, paragraph, or list
+  of facts written in natural language.
+- description (str | optional): Additional metadata to help organize the memory. This is required to add more
+  context of what is saved under specific key.
+
+<memory>
+[
+  {
+    "key": "[unique_identifier]",
+    "description": "[brief_summary_of_the_memory]",
+    "data": "[content_to_store]"
+  },
+  ...
+]
+</memory>
+
+Guidelines:
+- Don’t overwrite or delete; update or append carefully.
+- Add relevant details in the memory.
+- Ensure the memory contains important details not presented in the summary.
+- Include any aggregated information in the memory.
+"""
+
+MEMORY_PROMPT = """
+You have access to the memory managment tools.
+
+Use MemoryWriterTool to save usefull information in memory.
+
+Usefull for aggregationg of results. Make sure you save necessary information in
+"""
 
 final_answer_function_schema = {
     "type": "function",
@@ -282,8 +345,17 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
+    inner_memory_config: InnerMemoryConfig = Field(default=None)
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if self.inner_memory_config.enabled:
+            self.tools += [
+                # MemoryRetrieverTool(backend=self.inner_memory_config.inner_memory),
+                MemoryWriterTool(backend=self.inner_memory_config.inner_memory)
+            ]
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -445,6 +517,42 @@ class ReActAgent(Agent):
                 **kwargs,
             )
 
+    def summarize_history(self, messages_offset: int, config: RunnableConfig | None = None, **kwargs):
+        messages_history = ""
+        summary_sections = []
+
+        for index, message in enumerate(self._prompt.messages[messages_offset:]):
+            if message.role == MessageRole.USER:
+                messages_history += (
+                    f"=== Section: {index + messages_offset} === \n {message.content}"
+                    f"\n === Section: {index + messages_offset} === \n"
+                )
+                print(f"Output {index + messages_offset}: message content {message.content[:300]}")
+                summary_sections.append(index + messages_offset)
+            else:
+                messages_history += f"\n{message.content}\n"
+
+        llm_result = self._run_llm(
+            messages=[
+                Message(content=HISTORY_SUMMARIZATION_PROMPT, role=MessageRole.SYSTEM),
+                self._prompt.messages[messages_offset - 1],
+                Message(content=messages_history, role=MessageRole.USER),
+            ],
+            config=config,
+            **kwargs,
+        )
+
+        output = llm_result.output["content"]
+
+        parsed_data = XMLParser.parse(
+            f"<root>{output}</root>",
+            required_tags=[f"section{index}" for index in summary_sections],
+            optional_tags=["memory"],
+        )
+
+        for index in summary_sections:
+            self._prompt.messages[index].content = parsed_data.get(f"section{index}")
+
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
@@ -469,8 +577,7 @@ class ReActAgent(Agent):
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(
-                tools_name=self.tool_names,
-                input_formats=self.generate_input_formats(self.tools),
+                tools_name=self.tool_names, input_formats=self.generate_input_formats(self.tools)
             ),
         )
 
@@ -479,12 +586,26 @@ class ReActAgent(Agent):
         else:
             self._prompt.messages = [system_message, input_message]
 
+        if self.inner_memory_config.enabled:
+            self._prompt.messages.insert(1, Message(role=MessageRole.SYSTEM, content=""))
+
         stop_sequences = []
         if self.inference_mode in [InferenceMode.XML, InferenceMode.DEFAULT]:
             stop_sequences.extend(["Observation: ", "\nObservation:"])
         self.llm.stop = stop_sequences
 
         for loop_num in range(1, self.max_loops + 1):
+            if self.inner_memory_config.enabled:
+                self._prompt.messages[1].content = f"# Memory:\n \n {self.inner_memory_config.inner_memory.data}"
+                prompt_tokens = self._prompt.count_tokens(self.llm.model)
+                if (
+                    self.inner_memory_config.max_context_length
+                    and prompt_tokens > self.inner_memory_config.max_context_length
+                ):
+                    self.summarize_history(len(history_messages) + 3 if history_messages else 3)
+                elif prompt_tokens / self.llm.get_token_limit() > self.inner_memory_config.context_usage_ratio:
+                    self.summarize_history(len(history_messages) + 3 if history_messages else 3)
+
             try:
                 llm_result = self._run_llm(
                     messages=self._prompt.messages,
@@ -1048,5 +1169,8 @@ class ReActAgent(Agent):
                 prompt_blocks["instructions"] = (
                     REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS if not self.tools else REACT_BLOCK_XML_INSTRUCTIONS
                 )
+
+        if self.inner_memory_config.enabled:
+            prompt_blocks["instructions"] += MEMORY_PROMPT
 
         self._prompt_blocks.update(prompt_blocks)
