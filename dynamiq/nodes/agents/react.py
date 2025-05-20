@@ -292,7 +292,7 @@ Parameters:
 
 Guidelines:
 - Don’t overwrite or delete; update or append carefully.
-- Add relevant details in the memory.
+- Add relevant details in the memory, save as much as possible.
 - Ensure the memory contains important details not presented in the summary.
 - Include any aggregated information in the memory.
 """
@@ -303,6 +303,7 @@ You have access to the memory managment tools.
 Use MemoryWriterTool to save usefull information in memory.
 
 Usefull for aggregationg of results. Make sure you save necessary information in
+Save as much infomation as possible.
 """
 
 final_answer_function_schema = {
@@ -345,7 +346,7 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
-    inner_memory_config: InnerMemoryConfig = Field(default=None)
+    inner_memory_config: InnerMemoryConfig = Field(default_factory=InnerMemoryConfig)
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
 
@@ -546,12 +547,13 @@ class ReActAgent(Agent):
 
         parsed_data = XMLParser.parse(
             f"<root>{output}</root>",
-            required_tags=[f"section{index}" for index in summary_sections],
-            optional_tags=["memory"],
+            required_tags=[],
+            optional_tags=[f"section{index}" for index in summary_sections] + ["memory"],
         )
 
         for index in summary_sections:
-            self._prompt.messages[index].content = parsed_data.get(f"section{index}")
+            if content := parsed_data.get(f"section{index}"):
+                self._prompt.messages[index].content = content
 
     def _run_agent(
         self,
