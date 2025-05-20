@@ -158,8 +158,8 @@ def test_exa_search_agent_optimized(mock_requests, mock_exa_response):
     assert result.status == RunnableStatus.SUCCESS
 
     content = result.output["content"]
-    assert "<Sources with URLs>" in content
-    assert "<Search results>" in content
+    assert "## Sources with URLs" in content
+    assert "## Search Results" in content
     assert all(f"{r['title']}: ({r['url']})" in content for r in mock_exa_response["results"])
 
     for result in mock_exa_response["results"]:
