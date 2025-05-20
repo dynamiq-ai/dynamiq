@@ -9,8 +9,8 @@ from examples.llm_setup import setup_llm
 
 AGENT_ROLE = "A helpful and general-purpose AI assistant"
 
-PROMPT1 = """Parse 10 pages of https://clutch.co/developers/artificial-intelligence/generative?page=1
- and generate csv like file with information for this 10 pages."""
+PROMPT1 = """Parse 3 pages of https://clutch.co/developers/artificial-intelligence/generative?page=1
+ and generate csv like file with information for this 3 pages."""
 
 PROMPT2 = """Create long research on state of AI in EU. Give report for each country."""
 
@@ -33,9 +33,11 @@ if __name__ == "__main__":
         role=AGENT_ROLE,
         max_loops=30,
         inference_mode=InferenceMode.XML,
-        context_config=ContextConfig(enabled=True, context=Context(), max_context_length=20000),
+        context_config=ContextConfig(enabled=True, context=Context(), max_context_length=100000),
     )
 
+    print("Context: ")
+    print(agent.context_config.context)
     result = agent.run(input_data={"input": PROMPT1, "files": None})
 
     output_content = result.output.get("content")
