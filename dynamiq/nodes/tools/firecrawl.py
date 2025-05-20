@@ -118,14 +118,17 @@ class FirecrawlTool(ConnectionNode):
         return {**base_data, **filtered_fields}
 
     def _format_agent_response(self, url: str, data: dict) -> str:
-        """Format the response for agent consumption."""
-        sections = [f"<Source URL>\n{url}\n<\\Source URL>"]
+        """Format the response for agent consumption using Markdown."""
+        sections = [f"## Source URL\n{url}"]
 
-        format_mappings = {"content": "Scraped result", "markdown": "Markdown", "html": "HTML", "json": "JSON"}
+        format_mappings = {"content": "Scraped Result", "markdown": "Markdown Content", "html": "HTML", "json": "JSON"}
 
         for data_key, section_name in format_mappings.items():
             if data_key in data:
-                sections.append(f"<{section_name}>\n{data[data_key]}\n<\\{section_name}>")
+                if data_key in ["html", "json"]:
+                    sections.append(f"## {section_name}\n{data_key}\n{data[data_key]}\n")
+                else:
+                    sections.append(f"## {section_name}\n{data[data_key]}")
 
         return "\n\n".join(sections)
 
