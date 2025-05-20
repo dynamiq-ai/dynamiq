@@ -7,7 +7,7 @@ from functools import cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -1335,3 +1335,32 @@ class MCPStdio(BaseConnection):
                 encoding_error_handler=self.encoding_error_handler.value,
             )
         )
+
+
+class Stagehand(BaseConnection):
+    server_url: str = "http://api.stagehand.browserbase.com/v1"
+    browserbase_api: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_API_KEY"))
+    browserbase_project_id: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_PROJECT_ID"))
+    openai_api_key: str | None = Field(default_factory=partial(get_env_var, "OPENAI_API_KEY"))
+    antropic_api_key: str | None = Field(
+        default_factory=partial(get_env_var, "ANTHROPIC_API_KEY"),
+    )
+
+    @model_validator(mode="after")
+    def check_api_keys(self) -> "Stagehand":
+        if self.openai_api_key is None and self.antropic_api_key is None:
+            raise ValueError("Either 'openai_api_key' or 'antropic_api_key' must be provided.")
+        return self
+
+    @property
+    def conn_params(self) -> dict:
+        return {
+            "server_url": self.server_url,
+            "browserbase_api": self.browserbase_api,
+            "browserbase_project_id": self.browserbase_project_id,
+            "openai_api_key": self.openai_api_key,
+            "antropic_api_key": self.antropic_api_key,
+        }
+
+    def connect(self):
+        pass

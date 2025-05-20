@@ -8,5 +8,6 @@ from .mcp import MCPServer, MCPTool
 from .python import Python
 from .scale_serp import ScaleSerpTool
 from .sql_executor import SQLExecutor
+from .stagehand_tool import StagehandTool
 from .tavily import TavilyTool
 from .zenrows import ZenRowsTool
