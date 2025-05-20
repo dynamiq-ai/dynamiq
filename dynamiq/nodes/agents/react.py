@@ -22,7 +22,7 @@ from dynamiq.nodes.agents.exceptions import (
 from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
-from dynamiq.nodes.tools.context_tools import ContextRetrieverTool, ContextWriterTool
+from dynamiq.nodes.tools.context_tools import ContextWriterTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
@@ -247,8 +247,7 @@ Your response should be clear, concise, and professional.
 HISTORY_SUMMARIZATION_PROMPT = """
 Your task is to extract valuable information, summarize it for each section individually and
  identify the information that is truly worth saving.
- Focus on extracting the key points and discard any irrelevant or excessive details, like artifacts of scraping etc.
- Ensure that only the most important, contextually significant information is preserved in your summary.
+
 # Information extraction and summarization:
 
 Each section in the input is marked using the format:
@@ -262,7 +261,9 @@ For example, if the section has section_number 4, use: <section4>
 You may receive multiple sections, and each one must be summarized and returned using its corresponding tag.
 
 Guidelines:
-- Make sure that every provided section has its summary.
+- Summarize every section, even if it's just a simple instruction.
+Make sure that every provided section has its summary.
+- Focus on extracting the key points and discard any irrelevant or excessive details, like artifacts of scraping etc.
 - Try to keep information which responds for initial user request.
 - Do not merge or combine content from different sections.
 - Maintain the numbering to match the original section order.
@@ -280,9 +281,9 @@ Parameters:
   context of what is saved under specific key.
 
 Guidelines:
+- Do not provide information that is alredy saved in the context, don’t overwrite or delete
 - Add relevant details in the context, save as much as possible.
 - Ensure the context contains important details not presented in the summary.
-- Don’t overwrite or delete; update or append carefully.
 - Always save information in context that is not present in the summary.
 
 # Structure of output
@@ -304,18 +305,20 @@ same for other sections
 ]
 </context>
 
+# Current context:
+
 """
 
-MEMORY_PROMPT = """
+CONTEXT_MANAGEMENT_PROMPT = """
 You have access to context and its management tools.
 
 Use ContextWriterTool to store useful information in the context.
 This is essential for aggregating results over time.
 
-Save relevant information immediately, as it may be summarized in the next iteration.
+Always save all important information, including partial answers and intermediate findings
+in context after each tool call by calling ContextWriterTool, as it may be erased in next iterations.
 
-Except for the most important information save
-also  specific details, examples, and any data that may be useful later.
+Do not dublicate information in context.
 """
 
 final_answer_function_schema = {
@@ -366,7 +369,6 @@ class ReActAgent(Agent):
         super().__init__(**kwargs)
         if self.context_config.enabled:
             self.tools += [
-                ContextRetrieverTool(backend=self.context_config.context),
                 ContextWriterTool(backend=self.context_config.context),
             ]
 
@@ -530,17 +532,24 @@ class ReActAgent(Agent):
                 **kwargs,
             )
 
-    def summarize_history(self, history_offset: int, config: RunnableConfig | None = None, **kwargs) -> None:
+    def summarize_history(
+        self,
+        input_message: Message | VisionMessage,
+        history_offset: int,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> None:
         """
         Summarizes history and saves relevant information in the context
 
         Args:
+            input_message (Message | VisionMessage): User reqeust message.
             history_offset (int): Offset to the first message in the conversation history within the prompt.
             config (RunnableConfig | None): Configuration for the agent run.
             **kwargs: Additional parameters for running the agent.
         """
 
-        messages_history = ""
+        messages_history = "History to summarize: \n"
         summary_sections = []
 
         for index, message in enumerate(self._prompt.messages[history_offset:]):
@@ -553,10 +562,17 @@ class ReActAgent(Agent):
             else:
                 messages_history += f"\n{message.content}\n"
 
+        messages_history = (
+            messages_history
+            + f"\n Required tags in the output {[f"section{index}" for index in summary_sections] + ["context"]}"
+        )
+
         summary_messages = [
-            Message(content=HISTORY_SUMMARIZATION_PROMPT, role=MessageRole.SYSTEM),
-            self._prompt.messages[history_offset - 1],
-            Message(content=messages_history, role=MessageRole.USER),
+            Message(
+                content=HISTORY_SUMMARIZATION_PROMPT + self.context_config.context.formatted_data,
+                role=MessageRole.SYSTEM,
+            ),
+            Message(content=messages_history, role=MessageRole.USER),  # History to summarize
         ]
 
         for _ in range(self.max_loops):
@@ -638,7 +654,14 @@ class ReActAgent(Agent):
             self._prompt.messages = [system_message, input_message]
 
         if self.context_config.enabled:
-            self._prompt.messages.insert(1, Message(role=MessageRole.SYSTEM, content=""))
+            self._prompt.messages.insert(
+                -1,
+                Message(
+                    role=MessageRole.SYSTEM, content=f"# Context:\n \n {self.context_config.context.formatted_data}"
+                ),
+            )
+
+        history_offset = len(self._prompt.messages)
 
         stop_sequences = []
         if self.inference_mode in [InferenceMode.XML, InferenceMode.DEFAULT]:
@@ -646,16 +669,6 @@ class ReActAgent(Agent):
         self.llm.stop = stop_sequences
 
         for loop_num in range(1, self.max_loops + 1):
-
-            if self.context_config.enabled:
-                self._prompt.messages[1].content = f"# Memory:\n \n {self.context_config.context.data}"
-                prompt_tokens = self._prompt.count_tokens(self.llm.model)
-                if self.context_config.max_context_length and prompt_tokens > self.context_config.max_context_length:
-
-                    self.summarize_history(len(history_messages) + 3 if history_messages else 3)
-                elif prompt_tokens / self.llm.get_token_limit() > self.context_config.context_usage_ratio:
-                    self.summarize_history(len(history_messages) + 3 if history_messages else 3)
-
             try:
                 llm_result = self._run_llm(
                     messages=self._prompt.messages,
@@ -947,6 +960,16 @@ class ReActAgent(Agent):
                 )
                 continue
 
+            if self.context_config.enabled:
+                self._prompt.messages[history_offset - 2].content = (
+                    f"# Context:\n \n {self.context_config.context.formatted_data}"
+                )
+                prompt_tokens = self._prompt.count_tokens(self.llm.model)
+                if self.context_config.max_context_length and prompt_tokens > self.context_config.max_context_length:
+                    self.summarize_history(input_message, history_offset, config=config, **kwargs)
+                elif prompt_tokens / self.llm.get_token_limit() > self.context_config.context_usage_ratio:
+                    self.summarize_history(input_message, history_offset, config=config, **kwargs)
+
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
                 f"Agent {self.name} (ID: {self.id}) has reached the maximum loop limit of {self.max_loops} without finding a final answer. "  # noqa: E501
@@ -1221,6 +1244,6 @@ class ReActAgent(Agent):
                 )
 
         if self.context_config.enabled:
-            prompt_blocks["instructions"] += MEMORY_PROMPT
+            prompt_blocks["context"] = CONTEXT_MANAGEMENT_PROMPT
 
         self._prompt_blocks.update(prompt_blocks)
