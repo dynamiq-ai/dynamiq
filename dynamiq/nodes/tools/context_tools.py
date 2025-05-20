@@ -1,16 +1,17 @@
 from typing import Any, ClassVar, Literal
+
 from pydantic import BaseModel, Field
+
+from dynamiq.memory.agent_context import Context, ContextEntry
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.node import Node, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.node import Node
-from dynamiq.memory.inner_memory import InnerMemory, MemoryEntry
 
-MEMORY_WRITER_TOOL_DESCRIPTION = """
-Memory Writer Tool
+CONTEXT_WRITER_TOOL_DESCRIPTION = """
+Context Writer Tool
 
-Writes a memory entries to storage. Use this tool to record important information
+Writes a memory entries to context. Use this tool to record important information
 that may be useful in the future, such as facts, events, decisions, user preferences,
 or observations made during the conversation or task execution.
 
@@ -32,8 +33,8 @@ Guidance:
 
 
 
-MEMORY_RETRIEVER_TOOL_DESCRIPTION = """
-Memory Retriever Tool
+CONTEXT_RETRIEVER_TOOL_DESCRIPTION = """
+Context Retriever Tool
 
 Retrieves relevant memory entries from long-term storage based on a query or context.
 Use this tool when you need to recall previously stored information that may help
@@ -54,49 +55,48 @@ Guidance:
 
 """  # noqa: E501
 
-class MemoryWriterToolInputSchema(BaseModel):
+
+class ContextWriterToolInputSchema(BaseModel):
     key: str
     data: str
     description: str
 
-class MemoryWriterTool(Node):
-    group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "MemoryWriterTool"
-    backend: InnerMemory = Field(default_factory=InnerMemory)
 
-    description: str = MEMORY_WRITER_TOOL_DESCRIPTION
-    input_schema: ClassVar[type[MemoryWriterToolInputSchema]] = MemoryWriterToolInputSchema
+class ContextWriterTool(Node):
+    group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    name: str = "ContextWriterTool"
+    backend: Context = Field(default_factory=Context)
+
+    description: str = CONTEXT_WRITER_TOOL_DESCRIPTION
+    input_schema: ClassVar[type[ContextWriterToolInputSchema]] = ContextWriterToolInputSchema
 
     def execute(
-        self, input_data: MemoryWriterToolInputSchema, config: RunnableConfig | None = None, **kwargs
+        self, input_data: ContextWriterToolInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Executes the requested action based on the input data."""
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        entry = MemoryEntry(key=input_data.key, data=input_data.data, description=input_data.description)
-        print(")@@@@@@@@")
-        print(entry)
+        entry = ContextEntry(key=input_data.key, data=input_data.data, description=input_data.description)
         self.backend.add_entry(entry)
 
         logger.info(f"Tool {self.name} - {self.id}: finished.")
         return {"content": "Content was successfully saved"}
 
 
-class MemoryRetrieverToolInputSchema(BaseModel):
+class ContextRetrieverToolInputSchema(BaseModel):
     key: str = Field(default="", description="")
 
-class MemoryRetrieverTool(Node):
-
+class ContextRetrieverTool(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "MemoryRetrieverTool"
-    backend: InnerMemory = Field(default_factory=InnerMemory)
-    description: str = MEMORY_RETRIEVER_TOOL_DESCRIPTION
-    input_schema: ClassVar[type[MemoryWriterToolInputSchema]] = MemoryWriterToolInputSchema
+    name: str = "ContextRetrieverTool"
+    backend: Context = Field(default_factory=Context)
+    description: str = CONTEXT_RETRIEVER_TOOL_DESCRIPTION
+    input_schema: ClassVar[type[ContextWriterToolInputSchema]] = ContextWriterToolInputSchema
 
     def execute(
-        self, input_data: MemoryRetrieverToolInputSchema, config: RunnableConfig | None = None, **kwargs
+        self, input_data: ContextRetrieverToolInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Executes the requested action based on the input data."""
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")

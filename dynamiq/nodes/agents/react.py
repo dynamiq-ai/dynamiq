@@ -5,15 +5,16 @@ from enum import Enum
 from typing import Any, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationError, model_validator
 
-from dynamiq.memory.inner_memory import InnerMemoryConfig
+from dynamiq.memory.agent_context import ContextConfig, ContextEntry
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     AgentUnknownToolException,
     JSONParsingError,
     MaxLoopsExceededException,
+    ParsingError,
     RecoverableAgentException,
     TagNotFoundError,
     XMLParsingError,
@@ -21,7 +22,7 @@ from dynamiq.nodes.agents.exceptions import (
 from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
-from dynamiq.nodes.tools.memory import MemoryWriterTool
+from dynamiq.nodes.tools.context_tools import ContextRetrieverTool, ContextWriterTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
@@ -268,8 +269,7 @@ Guidelines:
 - Use plain text inside the tags (no extra formatting like Markdown or bullet points unless specified).
 
 # Memorization:
-
-You have access to Memory writer tool to save relevant detailed information in memory.
+You have access to context—use it to save relevant, detailed information for future use.
 
 Parameters:
 - key (str): A unique identifier for this memory entry. Use a descriptive, stable key
@@ -279,7 +279,21 @@ Parameters:
 - description (str | optional): Additional metadata to help organize the memory. This is required to add more
   context of what is saved under specific key.
 
-<memory>
+Guidelines:
+- Add relevant details in the context, save as much as possible.
+- Ensure the context contains important details not presented in the summary.
+- Don’t overwrite or delete; update or append carefully.
+- Always save information in context that is not present in the summary.
+
+# Structure of output
+
+<section(section_number)>
+[Summary of section (section_number)]
+<section(section_number)>
+
+same for other sections
+
+<context>
 [
   {
     "key": "[unique_identifier]",
@@ -288,22 +302,20 @@ Parameters:
   },
   ...
 ]
-</memory>
+</context>
 
-Guidelines:
-- Don’t overwrite or delete; update or append carefully.
-- Add relevant details in the memory, save as much as possible.
-- Ensure the memory contains important details not presented in the summary.
-- Include any aggregated information in the memory.
 """
 
 MEMORY_PROMPT = """
-You have access to the memory managment tools.
+You have access to context and its management tools.
 
-Use MemoryWriterTool to save usefull information in memory.
+Use ContextWriterTool to store useful information in the context.
+This is essential for aggregating results over time.
 
-Usefull for aggregationg of results. Make sure you save necessary information in
-Save as much infomation as possible.
+Save relevant information immediately, as it may be summarized in the next iteration.
+
+Except for the most important information save
+also  specific details, examples, and any data that may be useful later.
 """
 
 final_answer_function_schema = {
@@ -346,16 +358,16 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
-    inner_memory_config: InnerMemoryConfig = Field(default_factory=InnerMemoryConfig)
+    context_config: ContextConfig = Field(default_factory=ContextConfig)
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if self.inner_memory_config.enabled:
+        if self.context_config.enabled:
             self.tools += [
-                # MemoryRetrieverTool(backend=self.inner_memory_config.inner_memory),
-                MemoryWriterTool(backend=self.inner_memory_config.inner_memory)
+                ContextRetrieverTool(backend=self.context_config.context),
+                ContextWriterTool(backend=self.context_config.context),
             ]
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
@@ -518,42 +530,79 @@ class ReActAgent(Agent):
                 **kwargs,
             )
 
-    def summarize_history(self, messages_offset: int, config: RunnableConfig | None = None, **kwargs):
+    def summarize_history(self, history_offset: int, config: RunnableConfig | None = None, **kwargs) -> None:
+        """
+        Summarizes history and saves relevant information in the context
+
+        Args:
+            history_offset (int): Offset to the first message in the conversation history within the prompt.
+            config (RunnableConfig | None): Configuration for the agent run.
+            **kwargs: Additional parameters for running the agent.
+        """
+
         messages_history = ""
         summary_sections = []
 
-        for index, message in enumerate(self._prompt.messages[messages_offset:]):
+        for index, message in enumerate(self._prompt.messages[history_offset:]):
             if message.role == MessageRole.USER:
                 messages_history += (
-                    f"=== Section: {index + messages_offset} === \n {message.content}"
-                    f"\n === Section: {index + messages_offset} === \n"
+                    f"=== Section: {index + history_offset} === \n {message.content}"
+                    f"\n === Section: {index + history_offset} === \n"
                 )
-                print(f"Output {index + messages_offset}: message content {message.content[:300]}")
-                summary_sections.append(index + messages_offset)
+                summary_sections.append(index + history_offset)
             else:
                 messages_history += f"\n{message.content}\n"
 
-        llm_result = self._run_llm(
-            messages=[
-                Message(content=HISTORY_SUMMARIZATION_PROMPT, role=MessageRole.SYSTEM),
-                self._prompt.messages[messages_offset - 1],
-                Message(content=messages_history, role=MessageRole.USER),
-            ],
-            config=config,
-            **kwargs,
-        )
+        summary_messages = [
+            Message(content=HISTORY_SUMMARIZATION_PROMPT, role=MessageRole.SYSTEM),
+            self._prompt.messages[history_offset - 1],
+            Message(content=messages_history, role=MessageRole.USER),
+        ]
 
-        output = llm_result.output["content"]
+        for _ in range(self.max_loops):
+            llm_result = self._run_llm(
+                messages=summary_messages,
+                config=config,
+                **kwargs,
+            )
 
-        parsed_data = XMLParser.parse(
-            f"<root>{output}</root>",
-            required_tags=[],
-            optional_tags=[f"section{index}" for index in summary_sections] + ["memory"],
-        )
+            output = llm_result.output["content"]
+            summary_messages.append(Message(content=output, role=MessageRole.ASSISTANT))
 
-        for index in summary_sections:
-            if content := parsed_data.get(f"section{index}"):
-                self._prompt.messages[index].content = content
+            try:
+                parsed_data = XMLParser.parse(
+                    f"<root>{output}</root>",
+                    required_tags=[f"section{index}" for index in summary_sections] + ["context"],
+                    optional_tags=[],
+                )
+            except ParsingError as e:
+                logger.error(f"Error: {e}")
+                summary_messages.append(Message(content=str(e), role=MessageRole.USER))
+                continue
+
+            for index in summary_sections:
+                self._prompt.messages[index].content = parsed_data.get(f"section{index}")
+
+            if context := parsed_data.get("context"):
+                try:
+                    entries = json.loads(context)
+                    for entry in entries:
+                        self.context_config.context.add_entry(
+                            ContextEntry(
+                                key=entry.get("key"),
+                                description=entry.get("description"),
+                                data=entry.get("data"),
+                            )
+                        )
+
+                except (JSONParsingError, ValidationError) as e:
+                    logger.error(f"Error parsing context entries {e}")
+                    summary_messages.append(
+                        Message(content=f"Error parsing context entries {e}", role=MessageRole.USER)
+                    )
+                    continue
+
+            break
 
     def _run_agent(
         self,
@@ -588,7 +637,7 @@ class ReActAgent(Agent):
         else:
             self._prompt.messages = [system_message, input_message]
 
-        if self.inner_memory_config.enabled:
+        if self.context_config.enabled:
             self._prompt.messages.insert(1, Message(role=MessageRole.SYSTEM, content=""))
 
         stop_sequences = []
@@ -597,15 +646,14 @@ class ReActAgent(Agent):
         self.llm.stop = stop_sequences
 
         for loop_num in range(1, self.max_loops + 1):
-            if self.inner_memory_config.enabled:
-                self._prompt.messages[1].content = f"# Memory:\n \n {self.inner_memory_config.inner_memory.data}"
+
+            if self.context_config.enabled:
+                self._prompt.messages[1].content = f"# Memory:\n \n {self.context_config.context.data}"
                 prompt_tokens = self._prompt.count_tokens(self.llm.model)
-                if (
-                    self.inner_memory_config.max_context_length
-                    and prompt_tokens > self.inner_memory_config.max_context_length
-                ):
+                if self.context_config.max_context_length and prompt_tokens > self.context_config.max_context_length:
+
                     self.summarize_history(len(history_messages) + 3 if history_messages else 3)
-                elif prompt_tokens / self.llm.get_token_limit() > self.inner_memory_config.context_usage_ratio:
+                elif prompt_tokens / self.llm.get_token_limit() > self.context_config.context_usage_ratio:
                     self.summarize_history(len(history_messages) + 3 if history_messages else 3)
 
             try:
@@ -1172,7 +1220,7 @@ class ReActAgent(Agent):
                     REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS if not self.tools else REACT_BLOCK_XML_INSTRUCTIONS
                 )
 
-        if self.inner_memory_config.enabled:
+        if self.context_config.enabled:
             prompt_blocks["instructions"] += MEMORY_PROMPT
 
         self._prompt_blocks.update(prompt_blocks)
