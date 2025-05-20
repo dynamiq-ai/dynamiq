@@ -281,3 +281,101 @@ def test_xmlparser_parse_with_chart_in_answer():
 
     result = XMLParser.parse(text, required_tags=["thought", "answer"])
     assert "```chart" in result["answer"]
+
+
+def test_xmlparser_parse_with_markdown_in_answer():
+    """Test that XML parser preserves markdown formatting in answer tags."""
+    text = """<output>
+  <thought>Let me provide a detailed answer.</thought>
+  <answer>
+    # Heading 1
+    ## Heading 2
+
+    This is **bold text** and *italic text*.
+
+    * Bullet point 1
+    * Bullet point 2
+
+    1. Numbered item
+    2. Another numbered item
+
+    Here's a [link](https://example.com).
+
+    And a code example:
+    ```python
+    def hello_world():
+        print("Hello, world!")
+    ```
+  </answer>
+</output>"""
+
+    result = XMLParser.parse(text, required_tags=["thought", "answer"])
+
+    # Check markdown elements are preserved
+    assert "# Heading 1" in result["answer"]
+    assert "**bold text**" in result["answer"]
+    assert "```python" in result["answer"]
+    assert "* Bullet point" in result["answer"]
+
+
+def test_xmlparser_parse_with_special_characters_in_answer():
+    """Test that XML parser preserves special characters like & in answer tags."""
+    text = """<output>
+  <thought>Let me provide information about R&D practices.</thought>
+  <answer>
+    # Research & Development (R&D)
+
+    R&D departments are crucial for innovation. Companies like AT&T, Johnson & Johnson,
+    and Procter & Gamble invest heavily in R&D.
+
+    Common R&D focus areas:
+    * AI & Machine Learning
+    * Blockchain & Distributed Systems
+    * AR/VR & Immersive Technologies
+
+    The R&D tax credit can be 14% & 20% depending on jurisdiction.
+  </answer>
+</output>"""
+
+    result = XMLParser.parse(text, required_tags=["thought", "answer"])
+
+    assert "# Research & Development (R&D)" in result["answer"]
+    assert "R&D departments" in result["answer"]
+    assert "AI & Machine Learning" in result["answer"]
+    assert "14% & 20%" in result["answer"]
+
+
+def test_xmlparser_parse_with_unclosed_answer_tag():
+    """Test that XML parser correctly handles unclosed answer tags."""
+    text = """<output>
+  <thought>Let me provide an answer to your question.</thought>
+  <answer>
+    This is the answer to your question about climate change.
+
+    Climate change is driven by several factors:
+    1. Greenhouse gas emissions
+    2. Deforestation
+    3. Industrial processes
+
+    Recent studies suggest that we need immediate action.
+</output>"""
+
+    result = XMLParser.parse(text, required_tags=["thought", "answer"])
+
+    assert "climate change" in result["answer"]
+    assert "Greenhouse gas emissions" in result["answer"]
+    assert "immediate action" in result["answer"]
+
+
+def test_xmlparser_parse_with_only_opening_answer_tag():
+    """Test that XML parser handles cases where only the opening answer tag exists."""
+    text = """<output>
+  <thought>Here's what I found.</thought>
+  <answer>
+    The GDP of France in 2024 was approximately 3.2 trillion USD,
+    representing a 2.1% increase from the previous year."""
+
+    result = XMLParser.parse(text, required_tags=["thought", "answer"])
+
+    assert "GDP of France" in result["answer"]
+    assert "3.2 trillion USD" in result["answer"]

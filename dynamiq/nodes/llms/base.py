@@ -1,5 +1,6 @@
 import copy
 import json
+import warnings
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
@@ -290,29 +291,42 @@ class BaseLLM(ConnectionNode):
         return self._handle_completion_response(response=full_response, config=config, **kwargs)
 
     def _get_response_format_and_tools(
-        self, inference_mode: InferenceMode, schema: dict[str, Any] | type[BaseModel] | None
+        self,
+        input_data: BaseLLMInputSchema,
+        prompt: Prompt | None = None,
+        tools: list[Tool] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        """Get response format and tools based on inference mode and schema.
+        """Get response format and tools
         Args:
-            inference_mode (InferenceMode): The inference mode to use.
-            schema (dict[str, Any] | type[BaseModel] | None): The schema to use.
+            input_data (BaseLLMInputSchema): The input data for the LLM.
+            prompt (Prompt | None): The prompt to use.
+            tools (list[Tool] | None): The tools to use.
+            response_format (dict[str, Any] | None): The response format to use.
         Returns:
             tuple[dict[str, Any] | None, dict[str, Any] | None]: Response format and tools.
         Raises:
             ValueError: If schema is None when using STRUCTURED_OUTPUT or FUNCTION_CALLING modes.
         """
-        response_format = None
-        tools = None
+        response_format = response_format or self.response_format or prompt.response_format
+        tools = tools or self.tools or prompt.format_tools(**dict(input_data))
 
-        match inference_mode:
-            case InferenceMode.STRUCTURED_OUTPUT:
-                if schema is None:
-                    raise ValueError("Schema must be provided when using STRUCTURED_OUTPUT inference mode")
-                response_format = schema
-            case InferenceMode.FUNCTION_CALLING:
-                if schema is None:
-                    raise ValueError("Schema must be provided when using FUNCTION_CALLING inference mode")
-                tools = schema
+        # Suppress DeprecationWarning if deprecated parameters are not set
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=DeprecationWarning)
+            use_inference_mode = (not response_format or not tools) and self.inference_mode != InferenceMode.DEFAULT
+
+        if use_inference_mode:
+            schema = self.schema_
+            match self.inference_mode:
+                case InferenceMode.STRUCTURED_OUTPUT:
+                    if schema is None:
+                        raise ValueError("Schema must be provided when using STRUCTURED_OUTPUT inference mode")
+                    response_format = response_format or schema
+                case InferenceMode.FUNCTION_CALLING:
+                    if schema is None:
+                        raise ValueError("Schema must be provided when using FUNCTION_CALLING inference mode")
+                    tools = tools or schema
 
         return response_format, tools
 
@@ -362,7 +376,6 @@ class BaseLLM(ConnectionNode):
         config = ensure_config(config)
         prompt = prompt or self.prompt or Prompt(messages=[], tools=None, response_format=None)
         messages = self.get_messages(prompt, input_data)
-        base_tools = prompt.format_tools(**dict(input_data))
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
 
         extra = copy.deepcopy(self.__pydantic_extra__)
@@ -374,12 +387,12 @@ class BaseLLM(ConnectionNode):
         if extra:
             params.update(extra)
 
-        schema_response_format, schema_tools = self._get_response_format_and_tools(
-            inference_mode=self.inference_mode, schema=self.schema_
+        response_format, tools = self._get_response_format_and_tools(
+            input_data=input_data,
+            prompt=prompt,
+            tools=tools,
+            response_format=response_format,
         )
-
-        response_format = response_format or self.response_format or prompt.response_format or schema_response_format
-        tools = tools or self.tools or base_tools or schema_tools
 
         common_params: dict[str, Any] = {
             "model": self.model,

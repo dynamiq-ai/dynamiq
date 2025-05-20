@@ -100,7 +100,9 @@ IMPORTANT RULES:
 - For direct answers, only include thought and answer tags
 - Ensure action_input contains valid JSON with double quotes
 - Properly close all XML tags
-- Do not use markdown formatting inside XML
+- For all tags other than <answer>, text content should ideally be XML-escaped.
+- Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
+- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
 """  # noqa: E501
 
 
