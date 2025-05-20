@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "dynamiq"
-version = "0.16.3"
+version = "0.17.0"
 description = "Dynamiq is an orchestration framework for agentic AI and LLM applications"
 authors = ["Dynamiq Team <hello@getdynamiq.ai>"]
 license = "Apache License 2.0"
