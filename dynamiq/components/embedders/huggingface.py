@@ -18,3 +18,16 @@ class HuggingFaceEmbedder(BaseEmbedder):
         if kwargs.get("client") is None and kwargs.get("connection") is None:
             kwargs["connection"] = HuggingFaceConnection()
         super().__init__(**kwargs)
+
+    @property
+    def embed_params(self) -> dict:
+        params = super().embed_params
+
+        if self.model.startswith("huggingface/"):
+            model_id = self.model[len("huggingface/") :]
+        else:
+            model_id = self.model
+
+        params["api_base"] = f"https://api-inference.huggingface.co/models/{model_id}"
+
+        return params
