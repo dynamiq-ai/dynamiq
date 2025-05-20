@@ -145,7 +145,7 @@ class BaseEmbedder(BaseModel):
         text_to_embed = self.prefix + text + self.suffix
         text_to_embed = text_to_embed.replace("\n", " ")
 
-        response = self._embedding(model=self.model, input=text_to_embed, **self.embed_params)
+        response = self._embedding(model=self.model, input=[text_to_embed], **self.embed_params)
 
         meta = {"model": response.model, "usage": dict(response.usage)}
         embedding = response.data[0]["embedding"]
