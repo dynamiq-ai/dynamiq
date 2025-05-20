@@ -32,7 +32,6 @@ Guidance:
 """  # noqa: E501
 
 
-
 CONTEXT_RETRIEVER_TOOL_DESCRIPTION = """
 Context Retriever Tool
 
@@ -87,6 +86,7 @@ class ContextWriterTool(Node):
 
 class ContextRetrieverToolInputSchema(BaseModel):
     key: str = Field(default="", description="")
+
 
 class ContextRetrieverTool(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
