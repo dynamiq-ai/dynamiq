@@ -208,9 +208,9 @@ class TavilyTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result = (
-                "## Sources\n"
+                "## Sources with URLs\n"
                 + "\n".join([f"- {source}" for source in sources_with_url])
-                + "\n\n## Search Results for Query: "
+                + "\n\n## Search results for: "
                 + f"'{input_data.query}'\n\n"
                 + formatted_results
             )
