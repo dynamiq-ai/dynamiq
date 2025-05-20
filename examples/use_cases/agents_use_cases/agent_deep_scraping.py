@@ -9,8 +9,13 @@ from examples.llm_setup import setup_llm
 
 AGENT_ROLE = "A helpful and general-purpose AI assistant"
 
-PROMPT = """Parse 10 pages of https://clutch.co/developers/artificial-intelligence/generative?page=1
+PROMPT1 = """Parse 10 pages of https://clutch.co/developers/artificial-intelligence/generative?page=1
  and generate csv like file with information for this 10 pages."""
+
+PROMPT2 = """Create long research on state of AI in EU. Give report for each country."""
+
+PROMPT3 = """Find all AWS partners."""
+
 
 if __name__ == "__main__":
     connection_tavily = Tavily()
@@ -31,7 +36,7 @@ if __name__ == "__main__":
         context_config=ContextConfig(enabled=True, context=Context(), max_context_length=20000),
     )
 
-    result = agent.run(input_data={"input": PROMPT, "files": None})
+    result = agent.run(input_data={"input": PROMPT1, "files": None})
 
     output_content = result.output.get("content")
     logger.info("RESULT")
