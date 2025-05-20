@@ -257,7 +257,7 @@ Each section in the input is marked using the format:
 For the output, summarize each section and enclose it within a custom tag that matches the section number.
 
 Use the format: <section(section_number)>
-For example, if the section has section_numner 4, use: <section4>
+For example, if the section has section_number 4, use: <section4>
 
 You may receive multiple sections, and each one must be summarized and returned using its corresponding tag.
 

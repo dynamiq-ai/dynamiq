@@ -299,7 +299,7 @@ class Prompt(BasePrompt):
 
     def count_tokens(self, model: str) -> int:
         """
-        Counts number of tokens in prompt give model name.
+        Counts number of tokens in prompt based on the model name.
 
         Args:
             * model (str): Model name.

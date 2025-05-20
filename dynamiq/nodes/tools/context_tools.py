@@ -93,7 +93,7 @@ class ContextRetrieverTool(Node):
     name: str = "ContextRetrieverTool"
     backend: Context = Field(default_factory=Context)
     description: str = CONTEXT_RETRIEVER_TOOL_DESCRIPTION
-    input_schema: ClassVar[type[ContextWriterToolInputSchema]] = ContextWriterToolInputSchema
+    input_schema: ClassVar[type[ContextRetrieverToolInputSchema]] = ContextRetrieverToolInputSchema
 
     def execute(
         self, input_data: ContextRetrieverToolInputSchema, config: RunnableConfig | None = None, **kwargs
