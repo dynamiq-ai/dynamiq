@@ -339,7 +339,7 @@ def test_xmlparser_parse_with_special_characters_in_answer():
 
     result = XMLParser.parse(text, required_tags=["thought", "answer"])
 
-    assert "Research & Development (R&D)" in result["answer"]
+    assert "# Research & Development (R&D)" in result["answer"]
     assert "R&D departments" in result["answer"]
     assert "AI & Machine Learning" in result["answer"]
     assert "14% & 20%" in result["answer"]
