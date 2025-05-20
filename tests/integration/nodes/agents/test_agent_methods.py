@@ -379,3 +379,96 @@ def test_xmlparser_parse_with_only_opening_answer_tag():
 
     assert "GDP of France" in result["answer"]
     assert "3.2 trillion USD" in result["answer"]
+
+
+def test_parsing_succeeds_at_step2_preprocessing_regex():
+    """Test when parsing succeeds during Step 2 (preprocessing with regex for special tags)."""
+    text = """
+    <output>
+        <thought>
+            This is my thought process.
+            It contains multiple lines.
+            And needs to be preserved exactly as is.
+        </thought>
+        <action>search</action>
+    </output>
+    """
+
+    result = XMLParser.parse(text, required_tags=["thought", "action"], preserve_format_tags=["thought"])
+
+    assert "my thought process" in result["thought"]
+    assert "multiple lines" in result["thought"]
+    assert "preserved exactly" in result["thought"]
+    assert result["action"] == "search"
+
+
+def test_parsing_succeeds_at_step3_lxml_parsing():
+    """Test when parsing succeeds at Step 3 (lxml parsing) and extracts at least some tags."""
+
+    text = """
+    <root>
+        <metadata>
+            <timestamp>2025-05-20 10:15:00</timestamp>
+        </metadata>
+        <content>
+            <thought>I should search for information</thought>
+            <action>search</action>
+        </content>
+    </root>
+    """
+
+    result = XMLParser.parse(text, required_tags=["thought", "action"])
+
+    assert result["thought"] == "I should search for information"
+    assert result["action"] == "search"
+
+
+def test_parsing_succeeds_at_step4_regex_fallback():
+    """Test when parsing succeeds at Step 4 (regex fallback) and extracts at least some tags."""
+    text = """
+    <output>
+        <thought>I need to find data about this topic</thought>
+        <action>search
+        <!-- Deliberately missing closing tag for action -->
+        <action_input>{"query": "climate change statistics"}</action_input>
+    </output>
+    """
+
+    result = XMLParser.parse(text, required_tags=["thought", "action", "action_input"], json_fields=["action_input"])
+
+    assert result["thought"] == "I need to find data about this topic"
+    assert result["action"] == "search"
+    assert result["action_input"]["query"] == "climate change statistics"
+
+
+def test_parsing_combined_pipeline_stages():
+    """Test demonstrating all stages of the parsing pipeline working together."""
+    # This test creates a scenario where:
+    # - Step 2 extracts the thought tag (preserve formatting)
+    # - Step 3 extracts the action tag (standard lxml)
+    # - Step 4 extracts the observation tag (regex fallback due to malformed XML)
+    text = """
+    <output>
+        <thought>
+            Multi-line thought with **markdown** formatting
+            - Bullet point 1
+            - Bullet point 2
+        </thought>
+        <action>search</action>
+        <action_input>{"query": "test query"}</action_input>
+        <observation>This result is missing its closing tag
+    </output>
+    """
+
+    result = XMLParser.parse(
+        text,
+        required_tags=["thought", "action", "action_input", "observation"],
+        preserve_format_tags=["thought"],
+        json_fields=["action_input"],
+    )
+
+    assert "Multi-line thought with **markdown** formatting" in result["thought"]
+    assert "Bullet point" in result["thought"]
+    assert result["action"] == "search"
+    assert result["action_input"]["query"] == "test query"
+    assert "This result is missing its closing tag" in result["observation"]
