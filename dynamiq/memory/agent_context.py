@@ -8,7 +8,7 @@ class ContextEntry(BaseModel):
 
 
 class Context(BaseModel):
-    data: dict[str, ContextEntry] = Field(default=dict(), description="Storage")
+    data: dict[str, ContextEntry] = Field(default_factory=dict, description="Storage")
 
     def add_entry(self, entry: ContextEntry) -> None:
         if entry.key not in self.data:
