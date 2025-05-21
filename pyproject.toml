@@ -60,6 +60,7 @@ mcp = "1.8.0"
 datamodel-code-generator = "0.30.0"
 stagehand-py = "~0.3.6"
 browserbase = "~1.4.0"
+rich = "~14.0.0"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~70.0.0"
