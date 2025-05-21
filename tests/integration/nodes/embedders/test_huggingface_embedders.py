@@ -73,7 +73,7 @@ def test_workflow_with_huggingface_text_embedder(
 
     assert_embedder_success(response, embedder, output_node)
     mock_embedding_executor.assert_called_once_with(
-        input=[query_input["query"]],
+        input=query_input["query"],
         model=huggingface_model,
         api_key="api_key",
         api_base=huggingface_api_base,
@@ -96,7 +96,7 @@ def test_workflow_with_huggingface_document_embedder(
 
     assert_embedder_success(response, embedder, output_node)
     mock_embedding_executor.assert_called_once_with(
-        input=[document_input["documents"][0].content],
+        input=document_input["documents"][0].content,
         model=huggingface_model,
         api_key="api_key",
         api_base=huggingface_api_base,
@@ -136,7 +136,7 @@ def test_text_embedder_api_errors(
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
         mock_embedding.assert_called_once_with(
             model=embedder.model,
-            input=["Test query"],
+            input="Test query",
             api_key=embedder.connection.api_key,
             api_base=huggingface_api_base,
         )
@@ -185,7 +185,7 @@ def test_document_embedder_api_errors(
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
         mock_embedding.assert_called_once_with(
             model=embedder.model,
-            input=[document_input["documents"][0].content],
+            input=document_input["documents"][0].content,
             api_key=embedder.connection.api_key,
             api_base=huggingface_api_base,
         )
