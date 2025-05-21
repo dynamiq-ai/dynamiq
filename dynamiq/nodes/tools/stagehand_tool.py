@@ -2,6 +2,7 @@ from enum import Enum
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
+from stagehand import StagehandConfig
 from stagehand.sync import Stagehand
 
 from dynamiq.connections import Stagehand as StagehandConnection
@@ -138,15 +139,12 @@ class StagehandTool(ConnectionNode):
         Raises:
             ToolExecutionException: If a required API key is missing or the model is unknown.
         """
-        from stagehand import StagehandConfig
-        from stagehand.sync import Stagehand
-
         if self.model_name in {AvailableModel.GPT_4O, AvailableModel.GPT_4O_MINI}:
             api_key = self.connection.openai_api_key
             if not api_key:
                 raise ToolExecutionException("Missing OpenAI API key for selected model", recoverable=False)
         elif self.model_name in {AvailableModel.CLAUDE_3_5_SONNET_LATEST, AvailableModel.CLAUDE_3_7_SONNET_LATEST}:
-            api_key = self.connection.antropic_api_key
+            api_key = self.connection.anthropic_api_key
             if not api_key:
                 raise ToolExecutionException("Missing Anthropic API key for selected model", recoverable=False)
         else:

@@ -1342,14 +1342,14 @@ class Stagehand(BaseConnection):
     browserbase_api: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_API_KEY"))
     browserbase_project_id: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_PROJECT_ID"))
     openai_api_key: str | None = Field(default_factory=partial(get_env_var, "OPENAI_API_KEY"))
-    antropic_api_key: str | None = Field(
+    anthropic_api_key: str | None = Field(
         default_factory=partial(get_env_var, "ANTHROPIC_API_KEY"),
     )
 
     @model_validator(mode="after")
     def check_api_keys(self) -> "Stagehand":
-        if self.openai_api_key is None and self.antropic_api_key is None:
-            raise ValueError("Either 'openai_api_key' or 'antropic_api_key' must be provided.")
+        if self.openai_api_key is None and self.anthropic_api_key is None:
+            raise ValueError("Either 'openai_api_key' or 'anthropic_api_key' must be provided.")
         return self
 
     @property
@@ -1359,7 +1359,7 @@ class Stagehand(BaseConnection):
             "browserbase_api": self.browserbase_api,
             "browserbase_project_id": self.browserbase_project_id,
             "openai_api_key": self.openai_api_key,
-            "antropic_api_key": self.antropic_api_key,
+            "anthropic_api_key": self.anthropic_api_key,
         }
 
     def connect(self):
