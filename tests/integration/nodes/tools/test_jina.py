@@ -86,8 +86,8 @@ def test_jina_search_agent_optimized(mock_search_requests, mock_jina_search_resp
     assert result.status == RunnableStatus.SUCCESS
 
     content = result.output["content"]
-    assert "<Sources with URLs>" in content
-    assert f"<Search results for query {input_data['query']}>" in content
+    assert "## Sources with URLs" in content
+    assert f"## Search results for query '{input_data['query']}'\n" in content
     assert all(f"[{r['title']}]({r['url']})" in content for r in mock_jina_search_response["data"])
 
     for result in mock_jina_search_response["data"]:
@@ -135,5 +135,5 @@ def test_jina_scrape_agent_optimized(mock_scrape_requests):
     assert result.status == RunnableStatus.SUCCESS
 
     content = result.output["content"]
-    assert "<Source URL>" in content
-    assert "<Scraped result>" in content
+    assert "## Source URL" in content
+    assert "## Scraped Result" in content

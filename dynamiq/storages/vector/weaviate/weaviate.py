@@ -2,10 +2,10 @@ import datetime
 import re
 from typing import TYPE_CHECKING, Any, Optional
 
-from weaviate.classes.config import Configure
+from weaviate.classes.config import Configure, DataType, Property
 from weaviate.classes.query import HybridFusion
 from weaviate.classes.tenants import Tenant, TenantActivityStatus
-from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateQueryError
+from weaviate.exceptions import ObjectAlreadyExistsException, UnexpectedStatusCodeError, WeaviateQueryError
 from weaviate.util import generate_uuid5
 
 from dynamiq.connections import Weaviate
@@ -45,6 +45,21 @@ class WeaviateVectorStore(BaseVectorStore):
 
     PATTERN_COLLECTION_NAME = re.compile(r"^[A-Z][_0-9A-Za-z]*$")
     PATTERN_PROPERTY_NAME = re.compile(r"^[_A-Za-z][_0-9A-Za-z]*$")
+    _PROPERTY_DATA_TYPES: dict[str, str] = {
+        "content": DataType.TEXT,
+        "message_content": DataType.TEXT,
+        "message_role": DataType.TEXT,
+        "message_timestamp": DataType.NUMBER,
+        "message_id": DataType.TEXT,
+        "user_id": DataType.TEXT,
+        "session_id": DataType.TEXT,
+    }
+
+    def _get_property_type(self, property_name: str) -> str:
+        """Gets the Weaviate data type for a known property, defaults to TEXT."""
+        if property_name == self.content_key:
+            return DataType.TEXT
+        return self._PROPERTY_DATA_TYPES.get(property_name, DataType.TEXT)
 
     @staticmethod
     def is_valid_collection_name(name: str) -> bool:
@@ -145,27 +160,83 @@ class WeaviateVectorStore(BaseVectorStore):
         # Set up the collection - either with tenant context or without
         self._setup_collection(base_collection, collection_name, tenant_name)
 
-    def _create_collection(self, collection_name: str, tenant_name: str | None):
+    def _create_collection(
+        self, collection_name: str, tenant_name: str | None, properties_to_define: list[str] | None = None
+    ):
         """
-        Create a new Weaviate collection with appropriate configuration.
+        Create a new Weaviate collection with appropriate configuration and properties.
 
         Args:
             collection_name: Name of the collection to create
             tenant_name: Optional tenant name to enable multi-tenancy
+            properties_to_define: List of property names to explicitly define in the schema.
         """
+        collection_config_params = {
+            "name": collection_name,
+            "inverted_index_config": Configure.inverted_index(index_null_state=True),
+            "vector_index_config": Configure.VectorIndex.hnsw(),
+        }
 
-        # Set up basic collection configuration
-        collection_config = {"inverted_index_config": Configure.inverted_index(index_null_state=True)}
-
-        # Add multi-tenancy configuration if tenant_name is provided
         if tenant_name is not None:
-            mt_config = {"enabled": True}
+            collection_config_params["multi_tenancy_config"] = Configure.multi_tenancy(enabled=True)
 
-            collection_config["multi_tenancy_config"] = Configure.multi_tenancy(**mt_config)
+        properties = []
+        all_props_to_define = set(properties_to_define or [])
+        all_props_to_define.add(self.content_key)
+        all_props_to_define.add("_original_id")
 
-        # Create the collection
-        self.client.collections.create(name=collection_name, **collection_config)
-        logger.info(f"Created collection '{collection_name}'")
+        for prop_name in all_props_to_define:
+            if self.is_valid_property_name(prop_name):
+                prop_type = self._get_property_type(prop_name)
+                properties.append(Property(name=prop_name, data_type=prop_type))
+                logger.debug(f"Prepared property definition: {prop_name} (Type: {prop_type})")
+            else:
+                logger.warning(f"Skipping definition for invalid property name: '{prop_name}'")
+
+        if properties:
+            collection_config_params["properties"] = properties
+        try:
+            self.client.collections.create(**collection_config_params)
+            logger.info(f"Created collection '{collection_name}' with defined properties.")
+        except ObjectAlreadyExistsException:
+            logger.warning(f"Collection '{collection_name}' already exists. Skipping creation.")
+        except Exception as e:
+            logger.error(f"Failed to create collection '{collection_name}': {e}")
+            raise
+
+    def ensure_properties_exist(self, properties_to_ensure: list[str]):
+        """
+        Checks if properties exist in the schema and adds them if they don't.
+
+        Args:
+            properties_to_ensure: A list of property names to check/add.
+        """
+        if not properties_to_ensure:
+            return
+
+        try:
+            collection_config = self._collection.config.get()
+            existing_properties = {prop.name for prop in collection_config.properties}
+
+            for prop_name in properties_to_ensure:
+                if prop_name not in existing_properties and self.is_valid_property_name(prop_name):
+                    prop_type = self._get_property_type(prop_name)
+                    try:
+                        self._collection.config.add_property(Property(name=prop_name, data_type=prop_type))
+                        logger.info(
+                            f"Added missing property '{prop_name}' "
+                            f"(Type: {prop_type}) to collection "
+                            f"'{self._collection.name}' schema."
+                        )
+                    except Exception as add_err:
+                        logger.error(f"Failed to add property '{prop_name}' to schema: {add_err}")
+                elif prop_name in existing_properties:
+                    logger.debug(f"Property '{prop_name}' already exists in schema.")
+                elif not self.is_valid_property_name(prop_name):
+                    logger.warning(f"Cannot ensure invalid property name: '{prop_name}'")
+
+        except Exception as e:
+            logger.error(f"Failed to check or update schema properties for collection '{self._collection.name}': {e}")
 
     def _update_multi_tenancy_status(self, collection):
         """

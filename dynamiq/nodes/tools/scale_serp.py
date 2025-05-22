@@ -191,19 +191,16 @@ class ScaleSerpTool(ConnectionNode):
         formatted_results = self._format_search_results(search_result)
         content_results = search_result.get(search_type.result_key, [])
 
-        sources_with_url = [
-            f"{result.get('title')}: ({result.get('link')})"
-            for result in content_results
-        ]
+        sources_with_url = [f"[{result.get('title')}]({result.get('link')})" for result in content_results]
 
         if self.is_optimized_for_agents:
+            search_term = query or url
             return {
                 "content": (
-                    "<Sources with URLs>\n"
+                    "## Sources with URLs\n"
                     + "\n".join(sources_with_url)
-                    + "</Sources with URLs>\n\n<Search results>"
+                    + f"\n\n## Search results for '{search_term}'\n"
                     + formatted_results
-                    + "</Search results>"
                 )
             }
 

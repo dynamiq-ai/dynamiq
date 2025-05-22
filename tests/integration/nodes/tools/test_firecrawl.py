@@ -85,15 +85,12 @@ def test_firecrawl_agent_optimized(mock_firecrawl_requests, mock_firecrawl_respo
     assert result.status == RunnableStatus.SUCCESS
 
     content = result.output["content"]
-    assert "<Source URL>" in content
+    assert "## Source URL" in content
     assert input_data["url"] in content
-    assert "<\\Source URL>" in content
-    assert "<Markdown>" in content
+    assert "Markdown Content" in content
     assert mock_firecrawl_response["data"]["markdown"] in content
-    assert "<\\Markdown>" in content
-    assert "<HTML>" in content
+    assert "HTML" in content
     assert mock_firecrawl_response["data"]["html"] in content
-    assert "<\\HTML>" in content
 
     mock_firecrawl_requests.assert_called_once()
     call_args = mock_firecrawl_requests.call_args

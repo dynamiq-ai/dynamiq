@@ -154,7 +154,7 @@ class JinaScrapeTool(ConnectionNode):
             )
 
         if self.is_optimized_for_agents:
-            result = f"<Source URL>\n{url}\n<\\Source URL>" f"\n<Scraped result>\n{scrape_result}\n<\\Scraped result>"
+            result = f"## Source URL\n{url}\n\n## Scraped Result\n\n{scrape_result}\n"
         else:
             result = {"url": url, "content": scrape_result}
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
@@ -289,11 +289,10 @@ class JinaSearchTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result = (
-                "<Sources with URLs>\n"
+                "## Sources with URLs\n"
                 + "\n".join(sources_with_url)
-                + f"\n<\\Sources with URLs>\n\n<Search results for query {query}>\n"
+                + f"\n\n## Search results for query '{query}'\n"
                 + formatted_results
-                + f"\n<\\Search results for query {query}>"
             )
         else:
             images = {}
