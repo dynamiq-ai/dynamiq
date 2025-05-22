@@ -684,7 +684,7 @@ class ToolCacheEntry(BaseModel):
     @classmethod
     def convert_to_str(cls, data):
         if isinstance(data, dict):
-            data["action_input"] = str(data.get("action_input"))
+            data["action_input"] = json.dumps(data.get('action_input'), sort_keys=True)
         return data
 
 
