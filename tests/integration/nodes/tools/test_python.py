@@ -12,6 +12,22 @@ from dynamiq.types import Document
 from dynamiq.utils import JsonWorkflowEncoder
 
 
+def test_python_node_with_kwargs():
+    """Test Python node with additional keyword arguments."""
+    python_code = """
+def run(input_data, config = None, **kwargs):
+    return str(config)
+"""
+    python_node = Python(code=python_code, model_config=ConfigDict())
+    input_data = {}
+    config = RunnableConfig(callbacks=[])
+    result = python_node.run(input_data, config=config)
+    assert isinstance(result, RunnableResult)
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == str(config)
+    assert result.input == input_data
+
+
 def test_python_node_with_input():
     """Test Python node with specific input data for name and age calculation."""
     python_code = """

@@ -1,4 +1,5 @@
 import importlib
+import inspect
 import io
 from typing import Any, ClassVar, Literal
 
@@ -152,6 +153,16 @@ class Python(Node):
     code: str
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
 
+    def accepts_kwargs(self, func):
+        """
+        Returns True if the function accepts **kwargs.
+        """
+        try:
+            sig = inspect.signature(func)
+            return any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values())
+        except (ValueError, TypeError):
+            return False
+
     def execute(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
         """
         Execute the Python code.
@@ -187,7 +198,12 @@ class Python(Node):
             restricted_globals = compile_and_execute(self.code, restricted_globals)
             if "run" not in restricted_globals:
                 raise ValueError("The 'run' function is not defined in the provided code.")
-            result = restricted_globals["run"](dict(input_data))
+
+            if self.accepts_kwargs(restricted_globals["run"]):
+                result = restricted_globals["run"](dict(input_data), config=config, **kwargs)
+            else:
+                result = restricted_globals["run"](dict(input_data))
+
             if self.is_optimized_for_agents:
                 result = str(result)
         except Exception as e:
