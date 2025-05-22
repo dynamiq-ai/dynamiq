@@ -1,6 +1,6 @@
 from dynamiq.connections import Firecrawl, Tavily
-from dynamiq.memory.agent_context import Context, ContextConfig
 from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.tavily import TavilyTool
 from dynamiq.nodes.types import InferenceMode
@@ -9,12 +9,11 @@ from examples.llm_setup import setup_llm
 
 AGENT_ROLE = "A helpful and general-purpose AI assistant"
 
-PROMPT1 = """Parse 3 pages of https://clutch.co/developers/artificial-intelligence/generative?page=1
- and generate csv like file with information for this 3 pages."""
+PROMPT1 = """Parse 5 pages of https://clutch.co/developers/artificial-intelligence/generative?page=1
+ and generate csv like file with this structure
+ Company Name,Rating,Reviews,Location,Minimum Project Size,Hourly Rate,Company Size,Services Focus."""
 
 PROMPT2 = """Create long research on state of AI in EU. Give report for each country."""
-
-PROMPT3 = """Find all AWS partners."""
 
 
 if __name__ == "__main__":
@@ -33,12 +32,10 @@ if __name__ == "__main__":
         role=AGENT_ROLE,
         max_loops=30,
         inference_mode=InferenceMode.XML,
-        context_config=ContextConfig(enabled=True, context=Context(), max_context_length=100000),
+        summarization_config=SummarizationConfig(enabled=True, max_context_length=10000),
     )
 
-    print("Context: ")
-    print(agent.context_config.context)
-    result = agent.run(input_data={"input": PROMPT1, "files": None})
+    result = agent.run(input_data={"input": PROMPT2, "files": None})
 
     output_content = result.output.get("content")
     logger.info("RESULT")

@@ -5,9 +5,8 @@ from enum import Enum
 from typing import Any, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, model_validator
 
-from dynamiq.memory.agent_context import ContextConfig, ContextEntry
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -19,10 +18,9 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-from dynamiq.nodes.agents.utils import XMLParser
+from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
-from dynamiq.nodes.tools.context_tools import ContextWriterTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
@@ -245,80 +243,32 @@ Your response should be clear, concise, and professional.
 """  # noqa: E501
 
 HISTORY_SUMMARIZATION_PROMPT = """
-Your task is to extract valuable information, summarize it for each section individually and
- identify the information that is truly worth saving.
+Task: Extract valuable information from tool outputs.
 
-# Information extraction and summarization:
+Each tool output that needs to be processed is clearly marked using the following format:
+=== TOOL_OUTPUT [tool_number] ===
 
-Each section in the input is marked using the format:
-=== Section [section_number] ===
+Instructions:
 
-For the output, summarize each section and enclose it within a custom tag that matches the section number.
+For each marked section, extract the relevant and valuable information.
+Wrap the extracted content in a custom tag that corresponds to the section number.
+Tag Format:
+Use <tool_outputX>, where X is the tool number.
+Example: If the tool output is labeled with the number 4, wrap your extracted content as follows:
+    <tool_output4>...extracted content...</tool_output4>
 
-Use the format: <section(section_number)>
-For example, if the section has section_number 4, use: <section4>
+You may encounter multiple tool outputs within the history.
+Ensure each extracted section is enclosed in its corresponding tag based on its tool number.
 
-You may receive multiple sections, and each one must be summarized and returned using its corresponding tag.
-
-Guidelines:
-- Summarize every section, even if it's just a simple instruction.
-Make sure that every provided section has its summary.
-- Focus on extracting the key points and discard any irrelevant or excessive details, like artifacts of scraping etc.
-- Try to keep information which responds for initial user request.
-- Do not merge or combine content from different sections.
-- Maintain the numbering to match the original section order.
-- Use plain text inside the tags (no extra formatting like Markdown or bullet points unless specified).
-
-# Memorization:
-You have access to context—use it to save relevant, detailed information for future use.
-
-Parameters:
-- key (str): A unique identifier for this memory entry. Use a descriptive, stable key
-  (e.g., "user_name", "project_goal", "preferred_language").
-- data (str): The memory content to store. This can be a sentence, paragraph, or list
-  of facts written in natural language.
-- description (str | optional): Additional metadata to help organize the memory. This is required to add more
-  context of what is saved under specific key.
+Information that will not be included in extracted part will be removed.
 
 Guidelines:
-- Do not provide information that is alredy saved in the context, don’t overwrite or delete
-- Add relevant details in the context, save as much as possible.
-- Ensure the context contains important details not presented in the summary.
-- Always save information in context that is not present in the summary.
+* Try to keep information which responds for initial user request and is consistent with previous extracted information.
+* Preserve as much important details as possible.
+* Do not merge or combine content from different sections.
+* Maintain the numbering to match the original section order.
 
-# Structure of output
-
-<section(section_number)>
-[Summary of section (section_number)]
-<section(section_number)>
-
-same for other sections
-
-<context>
-[
-  {
-    "key": "[unique_identifier]",
-    "description": "[brief_summary_of_the_memory]",
-    "data": "[content_to_store]"
-  },
-  ...
-]
-</context>
-
-# Current context:
-
-"""
-
-CONTEXT_MANAGEMENT_PROMPT = """
-You have access to context and its management tools.
-
-Use ContextWriterTool to store useful information in the context.
-This is essential for aggregating results over time.
-
-Always save all important information, including partial answers and intermediate findings
-in context after each tool call by calling ContextWriterTool, as it may be erased in next iterations.
-
-Do not dublicate information in context.
+Input request:
 """
 
 final_answer_function_schema = {
@@ -361,16 +311,13 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
-    context_config: ContextConfig = Field(default_factory=ContextConfig)
+    summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
+    tool_cache: dict[ToolCacheEntry, Any] = {}
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if self.context_config.enabled:
-            self.tools += [
-                ContextWriterTool(backend=self.context_config.context),
-            ]
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -534,8 +481,9 @@ class ReActAgent(Agent):
 
     def summarize_history(
         self,
-        input_message: Message | VisionMessage,
+        input_message,
         history_offset: int,
+        summary_offset: int,
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> None:
@@ -543,35 +491,39 @@ class ReActAgent(Agent):
         Summarizes history and saves relevant information in the context
 
         Args:
-            input_message (Message | VisionMessage): User reqeust message.
+            input_message (Message | VisionMessage): User request message.
             history_offset (int): Offset to the first message in the conversation history within the prompt.
+            summary_offset (int): Offset to the position of the first message in prompt that was not summarized.
             config (RunnableConfig | None): Configuration for the agent run.
             **kwargs: Additional parameters for running the agent.
         """
 
-        messages_history = "History to summarize: \n"
+        logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output started.")
+        messages_history = "\nHistory to extract information from: \n"
         summary_sections = []
 
-        for index, message in enumerate(self._prompt.messages[history_offset:]):
+        offset = max(history_offset, summary_offset - self.summarization_config.context_history_length)
+        for index, message in enumerate(self._prompt.messages[offset:]):
             if message.role == MessageRole.USER:
-                messages_history += (
-                    f"=== Section: {index + history_offset} === \n {message.content}"
-                    f"\n === Section: {index + history_offset} === \n"
-                )
-                summary_sections.append(index + history_offset)
+                if index + history_offset >= summary_offset:
+                    messages_history += (
+                        f"=== TOOL_OUTPUT: {index + offset} === \n {message.content}"
+                        f"\n === TOOL_OUTPUT: {index + offset} === \n"
+                    )
+                    summary_sections.append(index + offset)
             else:
                 messages_history += f"\n{message.content}\n"
 
         messages_history = (
-            messages_history
-            + f"\n Required tags in the output {[f"section{index}" for index in summary_sections] + ["context"]}"
+            messages_history + f"\n Required tags in the output {[f"tool_output{index}" for index in summary_sections]}"
         )
 
         summary_messages = [
             Message(
-                content=HISTORY_SUMMARIZATION_PROMPT + self.context_config.context.formatted_data,
+                content=HISTORY_SUMMARIZATION_PROMPT,
                 role=MessageRole.SYSTEM,
             ),
+            input_message,
             Message(content=messages_history, role=MessageRole.USER),  # History to summarize
         ]
 
@@ -588,7 +540,7 @@ class ReActAgent(Agent):
             try:
                 parsed_data = XMLParser.parse(
                     f"<root>{output}</root>",
-                    required_tags=[f"section{index}" for index in summary_sections] + ["context"],
+                    required_tags=[f"tool_output{index}" for index in summary_sections],
                     optional_tags=[],
                 )
             except ParsingError as e:
@@ -597,27 +549,8 @@ class ReActAgent(Agent):
                 continue
 
             for index in summary_sections:
-                self._prompt.messages[index].content = parsed_data.get(f"section{index}")
-
-            if context := parsed_data.get("context"):
-                try:
-                    entries = json.loads(context)
-                    for entry in entries:
-                        self.context_config.context.add_entry(
-                            ContextEntry(
-                                key=entry.get("key"),
-                                description=entry.get("description"),
-                                data=entry.get("data"),
-                            )
-                        )
-
-                except (JSONParsingError, ValidationError) as e:
-                    logger.error(f"Error parsing context entries {e}")
-                    summary_messages.append(
-                        Message(content=f"Error parsing context entries {e}", role=MessageRole.USER)
-                    )
-                    continue
-
+                self._prompt.messages[index].content = parsed_data.get(f"tool_output{index}")
+            logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output finished.")
             break
 
     def _run_agent(
@@ -653,16 +586,7 @@ class ReActAgent(Agent):
         else:
             self._prompt.messages = [system_message, input_message]
 
-        if self.context_config.enabled:
-            self._prompt.messages.insert(
-                -1,
-                Message(
-                    role=MessageRole.SYSTEM, content=f"# Context:\n \n {self.context_config.context.formatted_data}"
-                ),
-            )
-
-        history_offset = len(self._prompt.messages)
-
+        summary_offset = history_offset = len(self._prompt.messages)
         stop_sequences = []
         if self.inference_mode in [InferenceMode.XML, InferenceMode.DEFAULT]:
             stop_sequences.extend(["Observation: ", "\nObservation:"])
@@ -907,7 +831,13 @@ class ReActAgent(Agent):
                             **kwargs,
                         )
 
-                        tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                        tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
+                        tool_result = self.tool_cache.get(tool_cache_entry, None)
+                        if not tool_result:
+                            tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                            self.tool_cache[tool_cache_entry] = tool_result
+                        else:
+                            logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
 
                     except RecoverableAgentException as e:
                         tool_result = f"{type(e).__name__}: {e}"
@@ -960,15 +890,14 @@ class ReActAgent(Agent):
                 )
                 continue
 
-            if self.context_config.enabled:
-                self._prompt.messages[history_offset - 2].content = (
-                    f"# Context:\n \n {self.context_config.context.formatted_data}"
-                )
+            if self.summarization_config.enabled:
                 prompt_tokens = self._prompt.count_tokens(self.llm.model)
-                if self.context_config.max_context_length and prompt_tokens > self.context_config.max_context_length:
-                    self.summarize_history(input_message, history_offset, config=config, **kwargs)
-                elif prompt_tokens / self.llm.get_token_limit() > self.context_config.context_usage_ratio:
-                    self.summarize_history(input_message, history_offset, config=config, **kwargs)
+                if (
+                    self.summarization_config.max_context_length
+                    and prompt_tokens > self.summarization_config.max_context_length
+                ) or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio):
+                    self.summarize_history(input_message, history_offset, summary_offset, config=config, **kwargs)
+                    summary_offset = len(self._prompt.messages)
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
@@ -1242,8 +1171,5 @@ class ReActAgent(Agent):
                 prompt_blocks["instructions"] = (
                     REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS if not self.tools else REACT_BLOCK_XML_INSTRUCTIONS
                 )
-
-        if self.context_config.enabled:
-            prompt_blocks["context"] = CONTEXT_MANAGEMENT_PROMPT
 
         self._prompt_blocks.update(prompt_blocks)
