@@ -60,7 +60,7 @@ mcp = "1.8.0"
 datamodel-code-generator = "0.30.0"
 
 [tool.poetry.group.dev.dependencies]
-setuptools = "~70.0.0"
+setuptools = ">=70.0,<78.2"
 pre-commit = "~3.7.0"
 pytest = "~8.3.5"
 pytest-mock = "~3.14.0"
