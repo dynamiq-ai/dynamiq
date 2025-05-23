@@ -2,7 +2,6 @@ from enum import Enum
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
-from stagehand import StagehandConfig
 from stagehand.sync import Stagehand
 
 from dynamiq.connections import Stagehand as StagehandConnection
@@ -83,13 +82,6 @@ class StagehandActionType(str, Enum):
     GOTO = "goto"
 
 
-class AvailableModel(str, Enum):
-    GPT_4O = "gpt-4o"
-    GPT_4O_MINI = "gpt-4o-mini"
-    CLAUDE_3_5_SONNET_LATEST = "claude-3-5-sonnet-latest"
-    CLAUDE_3_7_SONNET_LATEST = "claude-3-7-sonnet-latest"
-
-
 class StagehandInputSchema(BaseModel):
     action_type: StagehandActionType = Field(
         ...,
@@ -123,11 +115,8 @@ class StagehandTool(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Stagehand Tool"
     description: str = DESCRIPTION_STAGEHAND
-    connection: StagehandConnection = StagehandConnection()
-    model_name: str = Field(AvailableModel.GPT_4O, description="Name of the model to use")
-    extra_config: dict[str, Any] = Field(
-        default_factory=dict, description="Additional options to pass into StagehandConfig"
-    )
+    connection: StagehandConnection
+    model_name: str
 
     input_schema: ClassVar[type[StagehandInputSchema]] = StagehandInputSchema
     session: Stagehand | None = None
@@ -139,26 +128,8 @@ class StagehandTool(ConnectionNode):
         Raises:
             ToolExecutionException: If a required API key is missing or the model is unknown.
         """
-        if self.model_name in {AvailableModel.GPT_4O, AvailableModel.GPT_4O_MINI}:
-            api_key = self.connection.openai_api_key
-            if not api_key:
-                raise ToolExecutionException("Missing OpenAI API key for selected model", recoverable=False)
-        elif self.model_name in {AvailableModel.CLAUDE_3_5_SONNET_LATEST, AvailableModel.CLAUDE_3_7_SONNET_LATEST}:
-            api_key = self.connection.anthropic_api_key
-            if not api_key:
-                raise ToolExecutionException("Missing Anthropic API key for selected model", recoverable=False)
-        else:
-            raise ToolExecutionException(f"Unknown model selected: {self.model_name}", recoverable=False)
-
-        config = StagehandConfig(
-            env="BROWSERBASE",
-            api_key=self.connection.browserbase_api,
-            project_id=self.connection.browserbase_project_id,
-            model_name=self.model_name,
-            **self.extra_config,
-        )
-
-        stagehand = Stagehand(config=config, server_url=self.connection.server_url, model_api_key=api_key)
+        stagehand = self.connection.connect()
+        stagehand.model_name = self.model_name
         stagehand.init()
         self.session = stagehand
 

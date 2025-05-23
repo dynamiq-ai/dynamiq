@@ -1,3 +1,5 @@
+import os
+
 from dynamiq import Workflow
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents.react import ReActAgent
@@ -7,7 +9,9 @@ from dynamiq.nodes.tools.stagehand_tool import StagehandConnection, StagehandToo
 
 def set_wf_with_agent():
     stagehand_tool = StagehandTool(
-        connection=StagehandConnection(),
+        connection=StagehandConnection(
+            model_api_key=os.getenv("OPENAI_API_KEY"),
+        ),
         model_name="gpt-4o",
     )
 

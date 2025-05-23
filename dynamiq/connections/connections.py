@@ -7,7 +7,7 @@ from functools import cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -1338,29 +1338,24 @@ class MCPStdio(BaseConnection):
 
 
 class Stagehand(BaseConnection):
-    server_url: str = "http://api.stagehand.browserbase.com/v1"
-    browserbase_api: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_API_KEY"))
+    server_url: Literal["http://api.stagehand.browserbase.com/v1"] = "http://api.stagehand.browserbase.com/v1"
+    browserbase_api_key: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_API_KEY"))
     browserbase_project_id: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_PROJECT_ID"))
-    openai_api_key: str | None = Field(default_factory=partial(get_env_var, "OPENAI_API_KEY"))
-    anthropic_api_key: str | None = Field(
-        default_factory=partial(get_env_var, "ANTHROPIC_API_KEY"),
+    model_api_key: str = Field(..., description="API key for the LLM model.")
+    extra_config: dict[str, Any] = Field(
+        default_factory=dict, description="Additional options to pass into StagehandConfig"
     )
 
-    @model_validator(mode="after")
-    def check_api_keys(self) -> "Stagehand":
-        if self.openai_api_key is None and self.anthropic_api_key is None:
-            raise ValueError("Either 'openai_api_key' or 'anthropic_api_key' must be provided.")
-        return self
-
-    @property
-    def conn_params(self) -> dict:
-        return {
-            "server_url": self.server_url,
-            "browserbase_api": self.browserbase_api,
-            "browserbase_project_id": self.browserbase_project_id,
-            "openai_api_key": self.openai_api_key,
-            "anthropic_api_key": self.anthropic_api_key,
-        }
-
     def connect(self):
-        pass
+        from stagehand import StagehandConfig
+        from stagehand.sync import Stagehand
+
+        config = StagehandConfig(
+            env="BROWSERBASE",
+            api_key=self.browserbase_api_key,
+            project_id=self.browserbase_project_id,
+            **self.extra_config,
+        )
+
+        stagehand = Stagehand(config=config, server_url=self.server_url, model_api_key=self.model_api_key)
+        return stagehand
