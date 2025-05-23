@@ -60,7 +60,7 @@ class HuggingFaceEmbedder(BaseEmbedder):
             )
             raise TypeError(msg)
 
-        text_to_embed = self.prefix + text + self.suffix
+        text_to_embed = f"{self.prefix}{text}{self.suffix}"
         text_to_embed = text_to_embed.replace("\n", " ")
 
         response = self._embedding(model=self.model, input=text_to_embed, **self.embed_params)
