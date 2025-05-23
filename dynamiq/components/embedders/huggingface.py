@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, ClassVar
 
 from dynamiq.components.embedders.base import BaseEmbedder, InvalidEmbeddingError
 from dynamiq.connections import HuggingFace as HuggingFaceConnection
@@ -14,6 +14,8 @@ class HuggingFaceEmbedder(BaseEmbedder):
             is created if none is provided.
         model (str): The model name to use for embedding. Defaults to "huggingface/BAAI/bge-large-zh"
     """
+
+    API_BASE_URL: ClassVar[str] = "https://api-inference.huggingface.co/models"
     connection: HuggingFaceConnection
     model: str = "huggingface/BAAI/bge-large-zh"
 
@@ -31,7 +33,7 @@ class HuggingFaceEmbedder(BaseEmbedder):
         else:
             model_id = self.model
 
-        params["api_base"] = f"https://api-inference.huggingface.co/models/{model_id}"
+        params["api_base"] = f"{self.API_BASE_URL}/{model_id}"
 
         return params
 
