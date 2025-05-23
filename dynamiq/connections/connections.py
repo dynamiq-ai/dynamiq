@@ -1335,3 +1335,27 @@ class MCPStdio(BaseConnection):
                 encoding_error_handler=self.encoding_error_handler.value,
             )
         )
+
+
+class Stagehand(BaseConnection):
+    server_url: Literal["http://api.stagehand.browserbase.com/v1"] = "http://api.stagehand.browserbase.com/v1"
+    browserbase_api_key: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_API_KEY"))
+    browserbase_project_id: str = Field(default_factory=partial(get_env_var, "BROWSERBASE_PROJECT_ID"))
+    model_api_key: str = Field(..., description="API key for the LLM model.")
+    extra_config: dict[str, Any] = Field(
+        default_factory=dict, description="Additional options to pass into StagehandConfig"
+    )
+
+    def connect(self):
+        from stagehand import StagehandConfig
+        from stagehand.sync import Stagehand
+
+        config = StagehandConfig(
+            env="BROWSERBASE",
+            api_key=self.browserbase_api_key,
+            project_id=self.browserbase_project_id,
+            **self.extra_config,
+        )
+
+        stagehand = Stagehand(config=config, server_url=self.server_url, model_api_key=self.model_api_key)
+        return stagehand
