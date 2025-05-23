@@ -7,7 +7,9 @@ from typing import Any
 
 import filetype
 from jinja2 import Environment, meta
+from litellm import token_counter
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+
 from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
 
@@ -294,6 +296,18 @@ class Prompt(BasePrompt):
 
     def __init__(self, **data):
         super().__init__(**data)
+
+    def count_tokens(self, model: str) -> int:
+        """
+        Counts number of tokens in prompt based on the model name.
+
+        Args:
+            * model (str): Model name.
+
+        Returns:
+            int: Number of tokens.
+        """
+        return token_counter(model=model, messages=[message.model_dump() for message in self.messages])
 
     def get_required_parameters(self) -> set[str]:
         """Extracts set of parameters required for messages.
