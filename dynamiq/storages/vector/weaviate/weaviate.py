@@ -29,12 +29,14 @@ DEFAULT_QUERY_LIMIT = 9999
 class WeaviateWriterVectorStoreParams(BaseWriterVectorStoreParams):
     """Parameters for creating and managing Weaviate collections with multi-tenancy."""
     tenant_name: str | None = None
+    dry_run_config: DryRunConfig | None = None
 
 
 class WeaviateRetrieverVectorStoreParams(BaseVectorStoreParams):
     """Parameters for using existing Weaviate collections with tenant context."""
     alpha: float = 0.5
     tenant_name: str | None = None
+    dry_run_config: DryRunConfig | None = None
 
 
 class WeaviateVectorStore(BaseVectorStore):
