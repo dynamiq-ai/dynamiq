@@ -48,9 +48,10 @@ class DryRunOrchestrator:
                 return self._execute_workflow_only(documents, start_time, result)
             elif self.dry_run_config.mode in [DryRunMode.TEMPORARY, DryRunMode.PERSISTENT]:
                 return self._execute_with_vector_store(documents, content_key, start_time, result)
+            elif self.dry_run_config.mode == DryRunMode.INSPECTION:
+                return self._execute_inspection_mode(documents, content_key, start_time, result)
             else:
-                # INSPECTION mode - for Stage 3
-                raise NotImplementedError(f"Mode {self.dry_run_config.mode} will be implemented in Stage 3")
+                raise DryRunExecutionError(f"Unknown dry run mode: {self.dry_run_config.mode}")
 
         except Exception as e:
             logger.error(f"Dry run operation failed: {str(e)}")
@@ -425,3 +426,78 @@ class DryRunOrchestrator:
         except Exception as e:
             logger.error(f"Cleanup failed: {str(e)}")
             return {"cleanup_failed": True, "error": str(e)}
+
+    def _execute_inspection_mode(
+        self, documents: list[Document], content_key: str, start_time: float, result: DryRunResult
+    ) -> DryRunResult:
+        """Execute inspection mode dry run.
+
+        This mode creates test collections, uploads documents, and preserves
+        everything for manual analysis and debugging. No automatic cleanup is performed.
+
+        Args:
+            documents: Documents to process
+            content_key: Optional content key override
+            start_time: Start time for duration calculation
+            result: Result object to populate
+
+        Returns:
+            DryRunResult: Updated result object with inspection details
+        """
+        vector_store = None
+        try:
+            result.add_workflow_step("Document validation")
+            validated_docs = self._validate_documents(documents)
+            logger.debug(f"Validated {len(validated_docs)} documents")
+
+            result.add_workflow_step("Embedding verification")
+            self._verify_embeddings(validated_docs)
+            logger.debug("Embedding verification completed")
+
+            result.add_workflow_step("Vector store initialization")
+            vector_store, test_collection_name = self._initialize_test_vector_store()
+            result.test_collection_name = test_collection_name
+            logger.info(f"Created inspection collection: {test_collection_name}")
+
+            if self.dry_run_config.validation_enabled:
+                result.add_workflow_step("Schema compatibility check")
+                validation_results = self._check_schema_compatibility_with_store(vector_store)
+                for key, value in validation_results.items():
+                    result.add_validation_result(key, value)
+                logger.debug("Schema compatibility check completed")
+
+            result.add_workflow_step("Document preparation")
+            prepared_docs = self._prepare_documents_for_storage(validated_docs)
+            logger.debug(f"Prepared {len(prepared_docs)} documents for storage")
+
+            result.add_workflow_step("Document upload")
+            doc_count = self._upload_documents_to_test_store(vector_store, prepared_docs, content_key)
+            result.documents_processed = doc_count
+            logger.info(f"Uploaded {doc_count} documents for inspection")
+
+            result.add_workflow_step("Inspection setup (NO CLEANUP)")
+            result.add_cleanup_status("no_cleanup_performed", True)
+            result.add_cleanup_status("collection_preserved", True)
+            result.add_cleanup_status("documents_preserved", True)
+            result.add_validation_result("inspection_collection", test_collection_name)
+            result.add_validation_result("manual_cleanup_required", True)
+
+            logger.warning(f"INSPECTION mode: Collection '{test_collection_name}' preserved for analysis")
+            logger.warning("Manual cleanup required when analysis is complete")
+
+            result.success = True
+            result.duration_seconds = time.time() - start_time
+
+            logger.info(f"Inspection mode completed successfully: {result.summary()}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Inspection mode failed: {str(e)}")
+            result.error_message = str(e)
+            result.duration_seconds = time.time() - start_time
+
+            if self.dry_run_config.preserve_on_error and vector_store:
+                logger.warning("Error occurred but resources preserved due to preserve_on_error=True")
+                result.add_cleanup_status("error_resources_preserved", True)
+
+            return result

@@ -525,3 +525,70 @@ def test_writer_configuration_inheritance(mock_weaviate_components):
 
         assert writer.dry_run_config.mode == DryRunMode.WORKFLOW_ONLY
         assert writer.dry_run_config.document_id_prefix == "inherited_"
+
+
+def test_inspection_mode_integration(sample_documents, mock_weaviate_components):
+    writer = WeaviateDocumentWriter(
+        index_name="InspectionTest",
+        dry_run_config=DryRunConfig(
+            mode=DryRunMode.INSPECTION, test_collection_suffix="analysis", validation_enabled=True
+        ),
+    )
+
+    input_data = WriterInputSchema(documents=sample_documents)
+
+    with patch.object(writer, "vector_store") as mock_vector_store:
+        mock_vector_store.write_documents.return_value = len(sample_documents)
+
+        with patch(
+            "dynamiq.storages.vector.dry_run_orchestrator.DryRunOrchestrator._initialize_test_vector_store",
+            return_value=(mock_vector_store, "InspectionTest_analysis"),
+        ):
+            result = writer.execute(input_data)
+
+            assert "dry_run_result" in result
+            assert result["success"] is True
+            assert result["upserted_count"] == 2
+
+            dry_run_result = result["dry_run_result"]
+            assert dry_run_result.mode == DryRunMode.INSPECTION
+            assert dry_run_result.documents_processed == 2
+            assert dry_run_result.cleanup_status["no_cleanup_performed"] is True
+            assert dry_run_result.cleanup_status["collection_preserved"] is True
+            assert dry_run_result.cleanup_status["documents_preserved"] is True
+            assert dry_run_result.validation_results["manual_cleanup_required"] is True
+
+
+def test_inspection_mode_vs_other_modes(sample_documents, mock_weaviate_components):
+    modes_to_test = [
+        (DryRunMode.WORKFLOW_ONLY, {"cleanup_needed": False}),
+        (DryRunMode.TEMPORARY, {"documents": True, "collections": True}),
+        (DryRunMode.PERSISTENT, {"documents": True, "collections_preserved": True}),
+        (DryRunMode.INSPECTION, {"no_cleanup_performed": True, "collection_preserved": True}),
+    ]
+
+    for mode, expected_cleanup in modes_to_test:
+        writer = WeaviateDocumentWriter(
+            index_name=f"ComparisonTest_{mode}",
+            dry_run_config=DryRunConfig(mode=mode),
+        )
+
+        input_data = WriterInputSchema(documents=sample_documents)
+
+        with patch.object(writer, "vector_store") as mock_vector_store:
+            mock_vector_store.write_documents.return_value = len(sample_documents)
+
+            if mode != DryRunMode.WORKFLOW_ONLY:
+                with patch(
+                    "dynamiq.storages.vector.dry_run_orchestrator.DryRunOrchestrator._initialize_test_vector_store",
+                    return_value=(mock_vector_store, f"ComparisonTest_{mode}_test"),
+                ):
+                    result = writer.execute(input_data)
+            else:
+                result = writer.execute(input_data)
+
+            dry_run_result = result["dry_run_result"]
+
+            assert dry_run_result.mode == mode
+            for key, value in expected_cleanup.items():
+                assert dry_run_result.cleanup_status[key] == value

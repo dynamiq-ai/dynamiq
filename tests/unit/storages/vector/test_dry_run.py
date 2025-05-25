@@ -212,15 +212,61 @@ def test_workflow_only_execution_validation_disabled(mock_vector_store_cls, samp
     assert result.success is True
 
 
-def test_inspection_mode_not_implemented(mock_vector_store_cls, sample_documents):
-    config = DryRunConfig(mode=DryRunMode.INSPECTION)
+def test_inspection_mode_execution_success(mock_vector_store_cls, sample_documents):
+    config = DryRunConfig(mode=DryRunMode.INSPECTION, test_collection_suffix="analysis")
     orchestrator = DryRunOrchestrator(
         vector_store_cls=mock_vector_store_cls, vector_store_params={}, dry_run_config=config
     )
 
-    result = orchestrator.execute(sample_documents)
+    mock_vector_store = Mock()
+    mock_vector_store.write_documents.return_value = len(sample_documents)
+    mock_vector_store_cls.return_value = mock_vector_store
+
+    with patch.object(orchestrator, "_initialize_test_vector_store", return_value=(mock_vector_store, "test_analysis")):
+        result = orchestrator.execute(sample_documents)
+
+    assert result.success is True
+    assert result.mode == DryRunMode.INSPECTION
+    assert result.test_collection_name == "test_analysis"
+    assert result.documents_processed == len(sample_documents)
+    assert result.cleanup_status["no_cleanup_performed"] is True
+    assert result.cleanup_status["collection_preserved"] is True
+    assert result.cleanup_status["documents_preserved"] is True
+    assert result.validation_results["manual_cleanup_required"] is True
+    assert "Inspection setup (NO CLEANUP)" in result.workflow_steps_completed
+
+
+def test_inspection_mode_error_handling(mock_vector_store_cls, sample_documents):
+    config = DryRunConfig(mode=DryRunMode.INSPECTION, preserve_on_error=True)
+    orchestrator = DryRunOrchestrator(
+        vector_store_cls=mock_vector_store_cls, vector_store_params={}, dry_run_config=config
+    )
+
+    with patch.object(orchestrator, "_validate_documents", side_effect=ValueError("Test error")):
+        result = orchestrator.execute(sample_documents)
+
     assert result.success is False
-    assert "will be implemented in Stage 3" in result.error_message
+    assert "Test error" in result.error_message
+    assert "error_resources_preserved" not in result.cleanup_status
+
+
+def test_inspection_mode_error_with_vector_store(mock_vector_store_cls, sample_documents):
+    config = DryRunConfig(mode=DryRunMode.INSPECTION, preserve_on_error=True)
+    orchestrator = DryRunOrchestrator(
+        vector_store_cls=mock_vector_store_cls, vector_store_params={}, dry_run_config=config
+    )
+
+    mock_vector_store = Mock()
+    mock_vector_store.write_documents.side_effect = ValueError("Upload error")
+
+    with patch.object(
+        orchestrator, "_initialize_test_vector_store", return_value=(mock_vector_store, "test_collection")
+    ):
+        result = orchestrator.execute(sample_documents)
+
+    assert result.success is False
+    assert "Upload error" in result.error_message
+    assert result.cleanup_status["error_resources_preserved"] is True
 
 
 def test_execution_error_handling(mock_vector_store_cls, workflow_only_config):
@@ -524,6 +570,21 @@ def test_resource_tracker_functionality():
     tracker.clear()
     assert len(tracker.collections) == 0
     assert len(tracker.documents) == 0
+
+
+def test_resource_tracker_inspection_mode():
+    tracker = DryRunResourceTracker()
+    mock_vector_store = Mock()
+
+    tracker.register_collection("inspection_collection", mock_vector_store, DryRunMode.INSPECTION)
+    tracker.register_documents(["doc1", "doc2", "doc3"], mock_vector_store)
+
+    cleanup_result = tracker.cleanup(DryRunMode.INSPECTION)
+
+    assert cleanup_result["no_cleanup_required"] is True
+    assert len(tracker.collections) == 1
+    assert len(tracker.documents) == 1
+    assert tracker.get_document_count() == 3
 
 
 def test_weaviate_dry_run_collection_methods():
