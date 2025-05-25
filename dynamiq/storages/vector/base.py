@@ -3,7 +3,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from dynamiq.storages.vector.dry_run import DryRunConfig
 from dynamiq.storages.vector.utils import create_file_id_filter, create_file_ids_filter
 from dynamiq.utils.logger import logger
 
@@ -14,11 +13,9 @@ class BaseVectorStoreParams(BaseModel):
     Attributes:
         index_name (str): Name of the index. Defaults to "default".
         content_key (str): Key for content field. Defaults to "content".
-        dry_run_config (Optional[DryRunConfig]): Configuration for dry run operations.
     """
     index_name: str = "default"
     content_key: str = "content"
-    dry_run_config: DryRunConfig | None = None
 
 
 class BaseWriterVectorStoreParams(BaseVectorStoreParams):
