@@ -10,6 +10,7 @@ from weaviate.util import generate_uuid5
 
 from dynamiq.connections import Weaviate
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMode
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.types import Document
@@ -108,6 +109,7 @@ class WeaviateVectorStore(BaseVectorStore):
         content_key: str = "content",
         tenant_name: str | None = None,
         alpha: float = 0.5,
+        dry_run_config: DryRunConfig | None = None,
     ):
         """
         Initialize a new instance of WeaviateDocumentStore and connect to the
@@ -130,17 +132,21 @@ class WeaviateVectorStore(BaseVectorStore):
         index_name = self._fix_and_validate_index_name(index_name)
         collection_name = index_name
 
-        # Initialize client
         self.client = client
         if self.client is None:
             if connection is None:
                 connection = Weaviate()
             self.client = connection.connect()
-
-        # Store multi-tenancy configuration
         self._multi_tenancy_enabled = tenant_name is not None
         self.content_key = content_key
         self.alpha = alpha
+
+        self.dry_run_config = dry_run_config
+        self.original_index_name = index_name
+
+        if dry_run_config:
+            if dry_run_config.mode in [DryRunMode.TEMPORARY, DryRunMode.PERSISTENT, DryRunMode.INSPECTION]:
+                collection_name = self._generate_test_collection_name(index_name, dry_run_config)
 
         # Create collection if needed or validate existing collection
         if not self.client.collections.exists(collection_name):
@@ -159,6 +165,23 @@ class WeaviateVectorStore(BaseVectorStore):
 
         # Set up the collection - either with tenant context or without
         self._setup_collection(base_collection, collection_name, tenant_name)
+
+    def _generate_test_collection_name(self, original_name: str, config: DryRunConfig) -> str:
+        """Generate a test collection name based on the dry run configuration.
+
+        Args:
+            original_name: The original collection name
+            config: Dry run configuration
+
+        Returns:
+            str: Generated test collection name
+        """
+        if config.mode == DryRunMode.TEMPORARY:
+            import uuid
+
+            return f"{original_name}_dryrun_{uuid.uuid4().hex[:8]}"
+        else:
+            return f"{original_name}_{config.test_collection_suffix}"
 
     def _create_collection(
         self, collection_name: str, tenant_name: str | None, properties_to_define: list[str] | None = None
@@ -252,12 +275,10 @@ class WeaviateVectorStore(BaseVectorStore):
             if hasattr(collection_config, "multi_tenancy_config") and collection_config.multi_tenancy_config:
                 actual_multi_tenancy_enabled = collection_config.multi_tenancy_config.enabled
 
-            # Update instance variable to reflect actual configuration
             self._multi_tenancy_enabled = actual_multi_tenancy_enabled
 
         except Exception as e:
             logger.warning(f"Failed to retrieve multi-tenancy configuration: {str(e)}")
-            # Keep the inferred multi-tenancy setting as fallback
 
     def _setup_collection(self, base_collection, collection_name, tenant_name):
         """
@@ -268,13 +289,11 @@ class WeaviateVectorStore(BaseVectorStore):
             collection_name: Name of the collection
             tenant_name: Optional tenant name to use
         """
-        # No tenant specified - use the base collection
         if not tenant_name:
             self._collection = base_collection
             self._tenant_name = None
             return
 
-        # Tenant specified but multi-tenancy is disabled in the collection
         if not self._multi_tenancy_enabled:
             raise ValueError(
                 f"Collection '{collection_name}' has multi-tenancy disabled, "
@@ -282,7 +301,6 @@ class WeaviateVectorStore(BaseVectorStore):
                 f"To use a tenant, create the collection with a tenant_name parameter."
             )
 
-        # Tenant specified and multi-tenancy is enabled
         self._ensure_tenant_exists(base_collection, tenant_name)
         self._collection = base_collection.with_tenant(tenant_name)
         self._tenant_name = tenant_name
@@ -296,16 +314,12 @@ class WeaviateVectorStore(BaseVectorStore):
             tenant_name: Name of the tenant to check/create
         """
         try:
-            # Use get_by_name method from Weaviate client if available
             tenant = None
             try:
-                # Modern Weaviate client approach
                 tenant = collection.tenants.get_by_name(tenant_name)
             except AttributeError:
-                # Fallback for older clients - search in the list
                 tenants = collection.tenants.get()
 
-                # Handle different response formats
                 if isinstance(tenants, dict) and tenant_name in tenants:
                     tenant = tenants[tenant_name]
                 elif isinstance(tenants, list):
@@ -318,7 +332,6 @@ class WeaviateVectorStore(BaseVectorStore):
                             tenant = t
                             break
 
-            # Create tenant if it doesn't exist
             if not tenant:
                 logger.info(f"Creating new tenant '{tenant_name}' in collection")
                 collection.tenants.create(tenants=[Tenant(name=tenant_name)])
@@ -367,7 +380,6 @@ class WeaviateVectorStore(BaseVectorStore):
         data["_original_id"] = data.pop("id")
         metadata = data.get("metadata", {})
 
-        # Validate and add metadata properties
         for key, val in metadata.items():
             if not self.is_valid_property_name(key):
                 raise ValueError(
@@ -375,7 +387,6 @@ class WeaviateVectorStore(BaseVectorStore):
                 )
             data[key] = val
 
-        # Ensure all property names in the data object are valid
         invalid_props = []
         for key in data:
             if key not in ["_original_id", "embedding", "metadata"] and not self.is_valid_property_name(key):
@@ -495,21 +506,17 @@ class WeaviateVectorStore(BaseVectorStore):
             raise ValueError("Multi-tenancy is not enabled for this collection")
 
         try:
-            # Try using direct tenant lookup if available in the client version
             try:
                 return self._collection.tenants.get_by_name(tenant_name)
             except AttributeError:
-                # Fallback for older client versions
                 tenants = self.list_tenants()
 
-                # Search through the list of tenants
                 for tenant in tenants:
                     if isinstance(tenant, dict) and tenant.get("name") == tenant_name:
                         return tenant
                     elif hasattr(tenant, "name") and tenant.name == tenant_name:
                         return tenant
 
-                # Not found
                 return None
         except Exception as e:
             logger.warning(f"Error getting tenant '{tenant_name}': {str(e)}")
@@ -529,7 +536,6 @@ class WeaviateVectorStore(BaseVectorStore):
         if not self._multi_tenancy_enabled:
             raise ValueError("Multi-tenancy is not enabled for this collection")
 
-        # Check if tenant exists
         tenant = self.get_tenant(tenant_name)
         if not tenant:
             raise ValueError(f"Tenant '{tenant_name}' does not exist")
@@ -650,7 +656,6 @@ class WeaviateVectorStore(BaseVectorStore):
                     msg = f"Expected a Document, got '{type(doc)}' instead."
                     raise ValueError(msg)
 
-                # Create the batch add parameters
                 batch_params = {
                     "properties": self._to_data_object(doc, content_key=content_key),
                     "collection": self._collection.name,
@@ -658,11 +663,9 @@ class WeaviateVectorStore(BaseVectorStore):
                     "vector": doc.embedding,
                 }
 
-                # Add tenant parameter if multi-tenancy is enabled and tenant is specified
                 if self._multi_tenancy_enabled and self._tenant_name:
                     batch_params["tenant"] = self._tenant_name
 
-                # Add the object with the appropriate parameters
                 batch.add_object(**batch_params)
 
         if failed_objects := self.client.batch.failed_objects:
@@ -709,16 +712,12 @@ class WeaviateVectorStore(BaseVectorStore):
                 continue
 
             try:
-                # Create the insert parameters
                 insert_params = {
                     "uuid": generate_uuid5(doc.id),
                     "properties": self._to_data_object(doc, content_key=content_key),
                     "vector": doc.embedding,
                 }
 
-                # Add tenant parameter if multi-tenancy is enabled and tenant is specified
-                # Note: This shouldn't be necessary when using self._collection with tenant context,
-                # but added for consistency with _batch_write
                 if self._multi_tenancy_enabled and self._tenant_name:
                     insert_params["tenant"] = self._tenant_name
 
@@ -733,7 +732,11 @@ class WeaviateVectorStore(BaseVectorStore):
         return written
 
     def write_documents(
-        self, documents: list[Document], policy: DuplicatePolicy = DuplicatePolicy.NONE, content_key: str | None = None
+        self,
+        documents: list[Document],
+        policy: DuplicatePolicy = DuplicatePolicy.NONE,
+        content_key: str | None = None,
+        dry_run_config: DryRunConfig | None = None,
     ) -> int:
         """
         Write documents to Weaviate using the specified policy.
@@ -742,14 +745,64 @@ class WeaviateVectorStore(BaseVectorStore):
             documents (list[Document]): The list of documents to write.
             policy (DuplicatePolicy): The policy to use for handling duplicates.
             content_key (Optional[str]): The field used to store content in the storage.
+            dry_run_config (Optional[DryRunConfig]): Override dry run configuration.
 
         Returns:
             int: The number of documents written.
         """
+        active_dry_run = dry_run_config or self.dry_run_config
+
+        if active_dry_run:
+
+            if active_dry_run.mode == DryRunMode.WORKFLOW_ONLY:
+                logger.info(f"WORKFLOW_ONLY mode: Simulating write of {len(documents)} documents")
+                return len(documents)
+
+        if active_dry_run:
+            documents = self._prepare_dry_run_documents(documents, active_dry_run)
+
         if policy in [DuplicatePolicy.NONE, DuplicatePolicy.OVERWRITE]:
             return self._batch_write(documents, content_key=content_key)
 
         return self._write(documents, policy, content_key=content_key)
+
+    def _prepare_dry_run_documents(self, documents: list[Document], config: DryRunConfig) -> list[Document]:
+        """Prepare documents for dry run by adding ID prefixes and metadata.
+
+        Args:
+            documents: Documents to prepare
+            config: Dry run configuration
+
+        Returns:
+            list[Document]: Prepared documents with dry run modifications
+        """
+        prepared_docs = []
+
+        for doc in documents:
+            prepared_doc = Document(
+                id=f"{config.document_id_prefix}{doc.id}",
+                content=doc.content,
+                metadata=doc.metadata.copy() if doc.metadata else {},
+                embedding=doc.embedding,
+                score=doc.score,
+            )
+
+            if prepared_doc.metadata is None:
+                prepared_doc.metadata = {}
+
+            prepared_doc.metadata.update(
+                {
+                    "_dry_run": True,
+                    "_dry_run_mode": config.mode,
+                    "_original_id": doc.id,
+                    "_dry_run_timestamp": datetime.datetime.now().isoformat(),
+                }
+            )
+
+            prepared_docs.append(prepared_doc)
+
+        logger.debug(f"Prepared {len(prepared_docs)} documents with dry run metadata")
+        return prepared_docs
 
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """
@@ -900,3 +953,63 @@ class WeaviateVectorStore(BaseVectorStore):
         )
 
         return [self._to_document(doc) for doc in result.objects]
+
+    def collection_exists(self) -> bool:
+        """Check if the collection exists."""
+        try:
+            collection_name = self._collection.name if hasattr(self, "_collection") else self.original_index_name
+            return self.client.collections.exists(collection_name)
+        except Exception as e:
+            logger.warning(f"Failed to check collection existence: {str(e)}")
+            return False
+
+    def create_collection(self) -> bool:
+        """Create the collection if it doesn't exist using existing infrastructure."""
+        try:
+            collection_name = self._collection.name if hasattr(self, "_collection") else self.original_index_name
+
+            if self.collection_exists():
+                logger.debug(f"Collection {collection_name} already exists")
+                return True
+
+            tenant_name = self._tenant_name if hasattr(self, "_tenant_name") else None
+            self._create_collection(collection_name, tenant_name)
+            return True
+
+        except Exception as e:
+            collection_name = self._collection.name if hasattr(self, "_collection") else self.original_index_name
+            logger.error(f"Failed to create collection {collection_name}: {str(e)}")
+            return False
+
+    def delete_collection(self) -> bool:
+        """Delete the collection."""
+        try:
+            collection_name = self._collection.name if hasattr(self, "_collection") else self.original_index_name
+
+            if not self.collection_exists():
+                logger.debug(f"Collection {collection_name} doesn't exist, nothing to delete")
+                return True
+
+            self.client.collections.delete(collection_name)
+            logger.info(f"Deleted collection: {collection_name}")
+            return True
+
+        except Exception as e:
+            collection_name = self._collection.name if hasattr(self, "_collection") else self.original_index_name
+            logger.error(f"Failed to delete collection {collection_name}: {str(e)}")
+            return False
+
+    def health_check(self) -> dict[str, Any]:
+        """Perform a health check on the vector store."""
+        health_status = {"healthy": False, "collection_exists": False, "client_ready": False, "error": None}
+
+        try:
+            health_status["client_ready"] = True  # Assume ready if client exists
+            health_status["collection_exists"] = self.collection_exists()
+            health_status["healthy"] = health_status["client_ready"] and health_status["collection_exists"]
+
+        except Exception as e:
+            health_status["error"] = str(e)
+            logger.warning(f"Health check failed: {str(e)}")
+
+        return health_status
