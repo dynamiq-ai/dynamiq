@@ -24,8 +24,6 @@ load_dotenv(find_dotenv())
 
 # Please use your own docx file path
 DOCX_FILE_PATH = "../../data/file.docx"
-# DOCX_FILE_PATH = "../../../../test_document_all_features.docx"
-# DOCX_FILE_PATH = "../../data/file_formatted.docx"
 
 
 def docx_converter(docx_file: BytesIO):
