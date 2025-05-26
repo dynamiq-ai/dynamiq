@@ -6,7 +6,7 @@ from typing import Any, Sequence
 
 import filetype
 from lxml import etree as LET  # nosec: B410
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, ConfigDict
 
 from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError
 from dynamiq.prompts import (
@@ -678,7 +678,8 @@ class ToolCacheEntry(BaseModel):
     action: str
     action_input: str
 
-    model_config = {"frozen": True}
+    model_config = ConfigDict(frozen=True)
+
 
     @model_validator(mode="before")
     @classmethod
