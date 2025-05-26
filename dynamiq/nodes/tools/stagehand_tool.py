@@ -2,9 +2,9 @@ from enum import Enum
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
-from stagehand.sync import Stagehand
 
 from dynamiq.connections import Stagehand as StagehandConnection
+from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode
@@ -15,12 +15,6 @@ DESCRIPTION_STAGEHAND = """## Stagehand Tool
 ### Description
 A headless browser automation and observation tool designed to navigate, interact with,
 and extract structured data from web pages using natural language instructions.
-
-### Capabilities
-- Navigate to a given web page URL.
-- Observe and list candidate interactive elements on the page.
-- Extract structured information using natural language prompts.
-- Perform actions like clicks, selections, and form filling.
 
 ### Parameters
 - `action_type`: Must be one of the following:
@@ -69,8 +63,9 @@ and extract structured data from web pages using natural language instructions.
 
 ### Tips
 
-- Use clear, specific instructions for better extraction and action reliability.
-- Break down complex tasks into sequential steps.
+- !!! Always break actions into separate, individual steps. For example,
+typing into a field is one step, clicking a button is another.
+- Use clear, specific instructions.
 - `observe` is useful for debugging or when planning a follow-up action.
 """
 
@@ -119,19 +114,11 @@ class StagehandTool(ConnectionNode):
     model_name: str
 
     input_schema: ClassVar[type[StagehandInputSchema]] = StagehandInputSchema
-    session: Stagehand | None = None
 
-    def start_session(self):
-        """
-        Initializes a Stagehand session.
-
-        Raises:
-            ToolExecutionException: If a required API key is missing or the model is unknown.
-        """
-        stagehand = self.connection.connect()
-        stagehand.model_name = self.model_name
-        stagehand.init()
-        self.session = stagehand
+    def init_components(self, connection_manager: ConnectionManager | None = None):
+        super().init_components(connection_manager)
+        self.client.model_name = self.model_name
+        self.client.init()
 
     def execute(
         self, input_data: StagehandInputSchema, config: RunnableConfig | None = None, **kwargs
@@ -151,25 +138,23 @@ class StagehandTool(ConnectionNode):
             ToolExecutionException: If the input is invalid or execution fails.
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
-        if self.session is None:
-            self.start_session()
 
         try:
             if input_data.action_type == StagehandActionType.EXTRACT:
-                result = self.session.page.extract(input_data.instruction)
+                result = self.client.page.extract(input_data.instruction)
                 result = result.model_dump()
             elif input_data.action_type == StagehandActionType.OBSERVE:
-                result = self.session.page.observe(input_data.instruction)
+                result = self.client.page.observe(input_data.instruction)
                 result = [el.model_dump() for el in result]
             elif input_data.action_type == StagehandActionType.ACT:
-                result = self.session.page.act(input_data.instruction)
+                result = self.client.page.act(input_data.instruction)
                 result = result.model_dump()
             elif input_data.action_type == StagehandActionType.GOTO:
                 if input_data.url is None:
                     raise ToolExecutionException(
                         "Missing required URL for 'navigate' action. Please provide a valid URL.", recoverable=True
                     )
-                self.session.page.goto(input_data.url)
+                self.client.page.goto(input_data.url)
                 result = "Navigated to " + input_data.url
             else:
                 raise ToolExecutionException(f"Invalid action type: {input_data.action_type}", recoverable=True)
@@ -181,9 +166,9 @@ class StagehandTool(ConnectionNode):
 
         return {"content": result}
 
-    def __del__(self):
+    def close(self):
         """
         Cleans up the Stagehand session.
         """
-        if self.session is not None:
-            self.session.close()
+        if self.client is not None:
+            self.client.close()

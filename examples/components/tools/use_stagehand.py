@@ -48,5 +48,7 @@ if __name__ == "__main__":
         }
     )
 
+    wf.flow.nodes[0].tools[0].close()
+
     print("Agent result:")
     print(result.output.get("react-agent", {}).get("output", {}).get("content"))
