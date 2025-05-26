@@ -76,5 +76,5 @@ def test_search_with_custom_params(mock_requests):
 
     # Verify response contains agent-optimized format
     content = result.output["content"]
-    assert "<Sources with URLs>" in content
-    assert "<Search results>" in content
+    assert "## Sources with URLs" in content
+    assert "## Search results for" in content

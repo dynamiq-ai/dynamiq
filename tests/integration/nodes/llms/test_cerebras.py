@@ -75,7 +75,7 @@ def test_workflow_with_cerebras_llm(mock_llm_response_text, mock_llm_executor, m
         messages=wf_cerebras_ai.flow.nodes[0].prompt.format_messages(),
         stream=False,
         temperature=0.1,
-        max_tokens=1000,
+        max_tokens=None,
         stop=None,
         seed=None,
         frequency_penalty=None,

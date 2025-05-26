@@ -5,7 +5,7 @@ from typing import Any, AsyncIterator, Iterator
 
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_run_id
-from dynamiq.types.streaming import StreamingEventMessage
+from dynamiq.types.streaming import StreamingEntitySource, StreamingEventMessage
 from dynamiq.utils import format_value
 from dynamiq.utils.logger import logger
 
@@ -60,6 +60,11 @@ class StreamingQueueCallbackHandler(BaseCallbackHandler):
             entity_id=serialized.get("id"),
             data=format_value(chunk)[0],
             event=serialized.get("streaming", {}).get("event"),
+            source=StreamingEntitySource(
+                name=serialized.get("name", None),
+                group=serialized.get("group", None),
+                type=serialized.get("type", None),
+            ),
         )
         self.send_to_queue(event)
 
@@ -79,6 +84,11 @@ class StreamingQueueCallbackHandler(BaseCallbackHandler):
             entity_id=serialized.get("id"),
             data=format_value(output_data)[0],
             event=serialized.get("streaming", {}).get("event"),
+            source=StreamingEntitySource(
+                name=serialized.get("name", None),
+                group=serialized.get("group", None),
+                type=serialized.get("type", None),
+            ),
         )
         self.send_to_queue(event)
         self.done_event.set()

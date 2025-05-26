@@ -3,7 +3,6 @@ import json
 from pydantic import BaseModel, ValidationError
 
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
 
 
@@ -24,12 +23,8 @@ def validate_json_response(response: str) -> Document:
         return None
 
 
-def run_openai_node(prompt: Prompt, schema: dict, inference_mode: InferenceMode):
-    openai_node = OpenAI(
-        model="gpt-4o-mini",
-        schema=schema,
-        inference_mode=inference_mode,
-    )
+def run_openai_node(prompt: Prompt, response_format: dict):
+    openai_node = OpenAI(model="gpt-4o-mini", response_format=response_format)
     response = openai_node.run(input_data={}, prompt=prompt)
     return response
 
@@ -67,14 +62,12 @@ prompt_json = Prompt(
     ]
 )
 
-response = run_openai_node(prompt=prompt, schema=Document, inference_mode=InferenceMode.STRUCTURED_OUTPUT)
+response = run_openai_node(prompt=prompt, response_format=Document)
 
 if response and "content" in response.output:
     document = validate_json_response(response.output["content"])
 
-response_json = run_openai_node(
-    prompt=prompt_json, schema={"type": "json_object"}, inference_mode=InferenceMode.STRUCTURED_OUTPUT
-)
+response_json = run_openai_node(prompt=prompt_json, response_format={"type": "json_object"})
 
 if response_json and "content" in response_json.output:
     try:

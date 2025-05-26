@@ -1,11 +1,11 @@
 from typing import TYPE_CHECKING, Any, Optional
 
+from pydantic.types import PositiveInt
 from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker
 
 from dynamiq.connections import Milvus
-from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.milvus.filter import Filter
-from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -13,11 +13,15 @@ if TYPE_CHECKING:
     from pymilvus import MilvusClient
 
 
-class MilvusVectorStoreParams(BaseWriterVectorStoreParams):
+class MilvusVectorStoreParams(BaseVectorStoreParams):
     embedding_key: str = "embedding"
 
 
-class MilvusVectorStore:
+class MilvusWriterVectorStoreParams(MilvusVectorStoreParams, BaseWriterVectorStoreParams):
+    dimension: PositiveInt = 1536
+
+
+class MilvusVectorStore(BaseVectorStore):
     """
     Vector store using Milvus.
 
@@ -177,17 +181,6 @@ class MilvusVectorStore:
         delete_result = self.client.delete(collection_name=self.index_name, filter=filter_expression)
 
         logger.info(f"Deleted {len(delete_result)} entities from collection {self.index_name} based on filters.")
-
-    def delete_documents_by_file_id(self, file_id: str) -> None:
-        """
-        Delete documents from the vector store based on the provided file ID.
-            file_id should be located in the metadata of the document.
-
-        Args:
-            file_id (str): The file ID to filter by.
-        """
-        filters = create_file_id_filter(file_id)
-        self.delete_documents_by_filters(filters)
 
     def list_documents(
         self, limit: int = 1000, content_key: str | None = None, embedding_key: str | None = None

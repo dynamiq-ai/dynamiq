@@ -188,7 +188,7 @@ class MessageSenderInputSchema(BaseModel):
 
 class MessageSenderTool(Node):
     """
-    A tool for sending messsages.
+    A tool for sending messages.
 
     Attributes:
         group (Literal[NodeGroup.TOOLS]): The group the node belongs to.

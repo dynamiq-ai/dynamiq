@@ -4,7 +4,8 @@ from datetime import date, datetime
 from enum import Enum
 from io import BytesIO
 from json import JSONEncoder, loads
-from typing import Any
+from types import NoneType, UnionType
+from typing import Any, Union, get_args, get_origin
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, PydanticUserError, RootModel
@@ -252,3 +253,20 @@ def is_called_from_async_context() -> bool:
         return True
     except Exception:
         return False
+
+
+def clear_annotation(annotation: Any) -> Any:
+    """
+    Returns the first non-None type if the annotation allows multiple types;
+    otherwise, returns the annotation itself.
+
+    Args:
+        annotation (Any): Provided annotation.
+
+    Returns:
+        Any: Cleared annotation.
+    """
+    if get_origin(annotation) in (Union, UnionType):
+        first_non_none = next((t for t in get_args(annotation) if t is not NoneType), None)
+        return first_non_none
+    return annotation

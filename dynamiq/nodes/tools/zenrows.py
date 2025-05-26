@@ -92,10 +92,7 @@ class ZenRowsTool(ConnectionNode):
             )
 
         if self.is_optimized_for_agents:
-            result = (
-                f"<Source URL>\n{input_data.url}\n<\\Source URL>"
-                f"\n<Scraped result>\n{scrape_result}\n<\\Scraped result>"
-            )
+            result = f"## Source URL\n{input_data.url}\n\n## Scraped Result\n\n{scrape_result}\n"
         else:
             result = {"url": input_data.url, "content": scrape_result}
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
