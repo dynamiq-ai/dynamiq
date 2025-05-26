@@ -46,11 +46,11 @@ async def handle_event_data(websocket: WebSocket, event: StreamingEventMessage, 
 
     # Handle incoming message
     if event.source.type == "dynamiq.nodes.tools.MessageSenderTool":
-        logger.info(f"Client: {event.data["prompt"]}")
+        logger.info(f"Client: {event.data['prompt']}")
 
     # Handle feedback request
     if event.source.type == "dynamiq.nodes.tools.HumanFeedbackTool":
-        feedback = input(f"Client: {event.data["prompt"]}")
+        feedback = input(f"Client: {event.data['prompt']}")
         wf_run_event = StreamingEventMessage(
             entity_id=WF_ID,
             data={"content": feedback},

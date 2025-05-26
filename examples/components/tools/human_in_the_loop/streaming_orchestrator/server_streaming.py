@@ -45,7 +45,7 @@ def create_orchestrator() -> GraphOrchestrator:
     def process_feedback(context: dict[str, Any], **kwargs):
         feedback = context.get("history")[-1]["content"]
         if feedback == "SEND":
-            return {"result": "Email was send!", **context}
+            return {"result": "Email was sent!", **context}
         elif feedback == "CANCEL":
             return {"result": "Email was canceled!", **context}
         return {"result": "Unknown command", **context}

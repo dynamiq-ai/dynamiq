@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, ClassVar, Literal
 
 from jinja2 import Template
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
@@ -71,7 +71,6 @@ class OutputMethodCallable(ABC):
 
 
 class HumanFeedbackInputSchema(BaseModel):
-    input: str = Field(default="", description="Parameter to provide a question to the user.")
     model_config = ConfigDict(extra="allow")
 
 
@@ -99,6 +98,15 @@ class HumanFeedbackTool(Node):
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
     msg_template: str = "{{input}}"
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def update_description(self):
+        msg_template = self.msg_template
+        self.description += (
+            f"\nThis is the template of message to send: '{msg_template}'."
+            "Parameters will be substituted based on the provided input data."
+        )
+        return self
 
     def input_method_console(self, prompt: str) -> str:
         """
@@ -195,7 +203,6 @@ class HumanFeedbackTool(Node):
 
 
 class MessageSenderInputSchema(BaseModel):
-    input: str = Field(default="", description="Parameter to provide a message to the user.")
     model_config = ConfigDict(extra="allow")
 
 
@@ -218,6 +225,15 @@ class MessageSenderTool(Node):
     output_method: FeedbackMethod | OutputMethodCallable = FeedbackMethod.CONSOLE
     input_schema: ClassVar[type[MessageSenderInputSchema]] = MessageSenderInputSchema
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def update_description(self):
+        msg_template = self.msg_template
+        self.description += (
+            f"\nThis is the template of message to send: '{msg_template}'."
+            "Parameters will be substituted based on the provided input data."
+        )
+        return self
 
     def output_method_console(self, prompt: str) -> None:
         """
