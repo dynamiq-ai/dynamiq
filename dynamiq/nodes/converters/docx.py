@@ -53,7 +53,7 @@ class DOCXFileConverter(Node):
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
-        Initialize the components of the PPTXConverter.
+        Initialize the components of the DOCXConverter.
 
         Args:
             connection_manager (ConnectionManager, optional): The connection manager to use.
@@ -85,7 +85,7 @@ class DOCXFileConverter(Node):
 
         Example:
             input_data = {
-                "file_paths": ["/path/to/file1.pptx"],
+                "file_paths": ["/path/to/file1.docx"],
                 "files": [BytesIO(b"file content")],
                 "metadata": {"source": "user_upload"}
             }

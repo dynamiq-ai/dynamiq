@@ -77,6 +77,7 @@ class DOCXConverter(BaseConverter):
         else:
             raise TypeError("Expected a Path object or a BytesIO object.")
 
+        file_content.seek(0)
         elements = DocxDocument(file_content)
         return self._create_documents(
             filepath=file_path,
