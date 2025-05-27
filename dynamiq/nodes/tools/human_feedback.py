@@ -104,7 +104,7 @@ class HumanFeedbackTool(Node):
         msg_template = self.msg_template
         self.description += (
             f"\nThis is the template of message to send: '{msg_template}'."
-            "Parameters will be substituted based on the provided input data."
+            " Parameters will be substituted based on the provided input data."
         )
         return self
 
@@ -231,7 +231,7 @@ class MessageSenderTool(Node):
         msg_template = self.msg_template
         self.description += (
             f"\nThis is the template of message to send: '{msg_template}'."
-            "Parameters will be substituted based on the provided input data."
+            " Parameters will be substituted based on the provided input data."
         )
         return self
 
