@@ -30,7 +30,7 @@ class PostgreSQL(MemoryBackend):
 
     name: str = "PostgreSQL"
     connection: PostgreSQLConnection = Field(default_factory=PostgreSQLConnection)
-    index_name: str = Field(default="conversations")
+    table_name: str = Field(default="conversations")
     create_table_if_not_exists: bool = Field(default=True)
 
     message_id_col: str = Field(default="message_id")
@@ -44,7 +44,7 @@ class PostgreSQL(MemoryBackend):
     _CREATE_TABLE_SQL: ClassVar[
         str
     ] = """
-    CREATE TABLE IF NOT EXISTS "{index_name}" (
+    CREATE TABLE IF NOT EXISTS "{table_name}" (
         "{message_id_col}" UUID PRIMARY KEY,
         "{role_col}" TEXT NOT NULL,
         "{content_col}" TEXT,
@@ -55,41 +55,41 @@ class PostgreSQL(MemoryBackend):
     _CREATE_TIMESTAMP_INDEX_SQL: ClassVar[
         str
     ] = """
-    CREATE INDEX IF NOT EXISTS idx_{table_short_name}_timestamp ON "{index_name}" ("{timestamp_col}");
+    CREATE INDEX IF NOT EXISTS idx_{table_short_name}_timestamp ON "{table_name}" ("{timestamp_col}");
     """
     _CREATE_METADATA_INDEX_SQL: ClassVar[
         str
     ] = """
-    CREATE INDEX IF NOT EXISTS idx_{table_short_name}_metadata_gin ON "{index_name}" USING GIN ("{metadata_col}");
+    CREATE INDEX IF NOT EXISTS idx_{table_short_name}_metadata_gin ON "{table_name}" USING GIN ("{metadata_col}");
     """
     _INSERT_MESSAGE_SQL: ClassVar[
         str
     ] = """
-    INSERT INTO "{index_name}" ("{message_id_col}", "{role_col}", "{content_col}", "{metadata_col}", "{timestamp_col}")
+    INSERT INTO "{table_name}" ("{message_id_col}", "{role_col}", "{content_col}", "{metadata_col}", "{timestamp_col}")
     VALUES (%s, %s, %s, %s, %s);
     """
     _SELECT_ALL_SQL: ClassVar[
         str
     ] = """
     SELECT "{message_id_col}", "{role_col}", "{content_col}", "{metadata_col}", "{timestamp_col}"
-    FROM "{index_name}"
+    FROM "{table_name}"
     ORDER BY "{timestamp_col}" ASC
     """
     _SELECT_SEARCH_SQL: ClassVar[
         str
     ] = """
     SELECT "{message_id_col}", "{role_col}", "{content_col}", "{metadata_col}", "{timestamp_col}"
-    FROM "{index_name}"
+    FROM "{table_name}"
     """
     _IS_EMPTY_SQL: ClassVar[
         str
     ] = """
-    SELECT EXISTS (SELECT 1 FROM "{index_name}" LIMIT 1);
+    SELECT EXISTS (SELECT 1 FROM "{table_name}" LIMIT 1);
     """
     _CLEAR_SQL: ClassVar[
         str
     ] = """
-    TRUNCATE TABLE "{index_name}";
+    TRUNCATE TABLE "{table_name}";
     """
 
     @property
@@ -112,9 +112,9 @@ class PostgreSQL(MemoryBackend):
             self._conn = self.connection.connect()
             if self.create_table_if_not_exists:
                 self._create_table_and_indices()
-            logger.debug(f"PostgreSQL backend connected to table '{self.index_name}'.")
+            logger.debug(f"PostgreSQL backend connected to table '{self.table_name}'.")
         except psycopg.Error as e:
-            logger.error(f"Failed to initialize PostgreSQL connection or table '{self.index_name}': {e}")
+            logger.error(f"Failed to initialize PostgreSQL connection or table '{self.table_name}': {e}")
             raise PostgresMemoryError(f"Failed to initialize PostgreSQL connection or table: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected error initializing PostgreSQL backend: {e}")
@@ -143,9 +143,9 @@ class PostgreSQL(MemoryBackend):
 
     def _create_table_and_indices(self) -> None:
         """Creates the table and necessary indices if they don't exist."""
-        logger.debug(f"Ensuring table '{self.index_name}' and indices exist...")
+        logger.debug(f"Ensuring table '{self.table_name}' and indices exist...")
         table_sql = self._CREATE_TABLE_SQL.format(
-            index_name=self.index_name,
+            table_name=self.table_name,
             message_id_col=self.message_id_col,
             role_col=self.role_col,
             content_col=self.content_col,
@@ -154,18 +154,18 @@ class PostgreSQL(MemoryBackend):
         )
         self._execute_sql(table_sql)
 
-        table_short_name = "".join(filter(str.isalnum, self.index_name))[:10]
+        table_short_name = "".join(filter(str.isalnum, self.table_name))[:10]
 
         ts_index_sql = self._CREATE_TIMESTAMP_INDEX_SQL.format(
-            index_name=self.index_name, timestamp_col=self.timestamp_col, table_short_name=table_short_name
+            table_name=self.table_name, timestamp_col=self.timestamp_col, table_short_name=table_short_name
         )
         self._execute_sql(ts_index_sql)
 
         meta_index_sql = self._CREATE_METADATA_INDEX_SQL.format(
-            index_name=self.index_name, metadata_col=self.metadata_col, table_short_name=table_short_name
+            table_name=self.table_name, metadata_col=self.metadata_col, table_short_name=table_short_name
         )
         self._execute_sql(meta_index_sql)
-        logger.debug(f"Table '{self.index_name}' and indices checked/created.")
+        logger.debug(f"Table '{self.table_name}' and indices checked/created.")
 
     def _row_to_message(self, row: dict) -> Message:
         """Converts a database row (dict) to a Message object."""
@@ -189,7 +189,7 @@ class PostgreSQL(MemoryBackend):
             metadata_to_store = message.metadata or {}
 
             sql = self._INSERT_MESSAGE_SQL.format(
-                index_name=self.index_name,
+                table_name=self.table_name,
                 message_id_col=self.message_id_col,
                 role_col=self.role_col,
                 content_col=self.content_col,
@@ -204,7 +204,7 @@ class PostgreSQL(MemoryBackend):
                 timestamp,
             )
             self._execute_sql(sql, params)
-            logger.debug(f"PostgreSQL Memory ({self.index_name}): Added message {message_id}")
+            logger.debug(f"PostgreSQL Memory ({self.table_name}): Added message {message_id}")
 
         except (TypeError, ValueError) as e:
             logger.error(f"Error preparing message data for PostgreSQL: {e}")
@@ -213,7 +213,7 @@ class PostgreSQL(MemoryBackend):
     def get_all(self, limit: int | None = None) -> list[Message]:
         """Retrieves messages from PostgreSQL, sorted chronologically."""
         sql = self._SELECT_ALL_SQL.format(
-            index_name=self.index_name,
+            table_name=self.table_name,
             message_id_col=self.message_id_col,
             role_col=self.role_col,
             content_col=self.content_col,
@@ -227,7 +227,7 @@ class PostgreSQL(MemoryBackend):
 
         rows = self._execute_sql(sql, params, fetch="all")
         messages = [self._row_to_message(row) for row in rows]
-        logger.debug(f"PostgreSQL Memory ({self.index_name}): Retrieved {len(messages)} messages.")
+        logger.debug(f"PostgreSQL Memory ({self.table_name}): Retrieved {len(messages)} messages.")
         return messages
 
     def _build_where_clause(self, query: str | None, filters: dict | None) -> tuple[str, list]:
@@ -256,7 +256,7 @@ class PostgreSQL(MemoryBackend):
         where_clause, params = self._build_where_clause(query, filters)
 
         sql = self._SELECT_SEARCH_SQL.format(
-            index_name=self.index_name,
+            table_name=self.table_name,
             message_id_col=self.message_id_col,
             role_col=self.role_col,
             content_col=self.content_col,
@@ -277,23 +277,23 @@ class PostgreSQL(MemoryBackend):
         messages = [self._row_to_message(row) for row in rows]
 
         logger.debug(
-            f"PostgreSQL Memory ({self.index_name}): Found {len(messages)} search results "
+            f"PostgreSQL Memory ({self.table_name}): Found {len(messages)} search results "
             f"(Query: {'Yes' if query else 'No'}, Filters: {'Yes' if filters else 'No'}, Limit: {limit})"
         )
         return messages
 
     def is_empty(self) -> bool:
         """Checks if the PostgreSQL table is empty."""
-        sql = self._IS_EMPTY_SQL.format(index_name=self.index_name)
+        sql = self._IS_EMPTY_SQL.format(table_name=self.table_name)
         result = self._execute_sql(sql, fetch="one")
         return not (result and result.get("exists", False))
 
     def clear(self) -> None:
         """Clears the PostgreSQL table using TRUNCATE."""
-        logger.warning(f"Clearing all messages from PostgreSQL table '{self.index_name}' using TRUNCATE.")
-        sql = self._CLEAR_SQL.format(index_name=self.index_name)
+        logger.warning(f"Clearing all messages from PostgreSQL table '{self.table_name}' using TRUNCATE.")
+        sql = self._CLEAR_SQL.format(table_name=self.table_name)
         self._execute_sql(sql)
-        logger.info(f"PostgreSQL Memory ({self.index_name}): Cleared table.")
+        logger.info(f"PostgreSQL Memory ({self.table_name}): Cleared table.")
 
     def __del__(self):
         """Attempt to close the connection when the object is deleted."""
