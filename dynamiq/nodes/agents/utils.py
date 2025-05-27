@@ -694,13 +694,13 @@ class SummarizationConfig(BaseModel):
 
     Attributes:
         enabled (bool): Whether streaming is enabled. Defaults to False.
-        max_context_length (int | None): Maximum number of tokens in prompt after
+        max_token_context_length (int | None): Maximum number of tokens in prompt after
           which summarization will be applied. Defaults to None.
         context_usage_ratio (float): Relative percentage of tokens in prompt after which summarization will be applied.
         context_history_length (int): Number of history messages that will be prepended.
     """
 
     enabled: bool = False
-    max_context_length: int | None = None
+    max_token_context_length: int | None = None
     context_usage_ratio: float = 0.8
     context_history_length: int = 4

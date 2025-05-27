@@ -893,8 +893,8 @@ class ReActAgent(Agent):
             if self.summarization_config.enabled:
                 prompt_tokens = self._prompt.count_tokens(self.llm.model)
                 if (
-                    self.summarization_config.max_context_length
-                    and prompt_tokens > self.summarization_config.max_context_length
+                    self.summarization_config.max_token_context_length
+                    and prompt_tokens > self.summarization_config.max_token_context_length
                 ) or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio):
                     self.summarize_history(input_message, history_offset, summary_offset, config=config, **kwargs)
                     summary_offset = len(self._prompt.messages)

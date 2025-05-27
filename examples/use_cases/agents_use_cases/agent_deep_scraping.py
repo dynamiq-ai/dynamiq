@@ -32,7 +32,7 @@ if __name__ == "__main__":
         role=AGENT_ROLE,
         max_loops=30,
         inference_mode=InferenceMode.XML,
-        summarization_config=SummarizationConfig(enabled=True, max_context_length=10000),
+        summarization_config=SummarizationConfig(enabled=True, max_token_context_length=10000),
     )
 
     result = agent.run(input_data={"input": PROMPT2, "files": None})
