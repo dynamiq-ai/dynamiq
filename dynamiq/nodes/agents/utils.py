@@ -680,7 +680,6 @@ class ToolCacheEntry(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-
     @model_validator(mode="before")
     @classmethod
     def convert_to_str(cls, data):
