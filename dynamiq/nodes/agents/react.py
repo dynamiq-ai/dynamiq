@@ -549,7 +549,9 @@ class ReActAgent(Agent):
                 continue
 
             for index in summary_sections:
-                self._prompt.messages[index].content = parsed_data.get(f"tool_output{index}")
+                self._prompt.messages[index].content = (
+                    f"Observation (shortened): \n{parsed_data.get(f'tool_output{index}')}"
+                )
             logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output finished.")
             break
 
