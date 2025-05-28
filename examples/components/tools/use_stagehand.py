@@ -50,7 +50,7 @@ if __name__ == "__main__":
     with get_connection_manager() as cm:
         wf = set_wf_with_agent(cm)
 
-        result = wf.run_sync(
+        result = wf.run(
             input_data={
                 "input": (
                     "Use the Stagehand tool to open YouTube, search for 'Eurovision', "
