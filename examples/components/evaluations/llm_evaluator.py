@@ -160,7 +160,6 @@ def main():
     llm = OpenAI(
         name="OpenAI",
         model="gpt-4o-mini",
-        postponed_init=True,  # Corrected spelling from 'postponned' to 'postponed'
     )
 
     # Run the examples

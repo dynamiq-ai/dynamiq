@@ -2,7 +2,7 @@ import io
 from hashlib import sha256
 from typing import Any, ClassVar, Literal
 
-from e2b import Sandbox
+from e2b_code_interpreter import Sandbox
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dynamiq.connections import E2B as E2BConnection
@@ -167,7 +167,7 @@ class E2BInterpreterTool(ConnectionNode):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if self.persistent_sandbox:
+        if self.persistent_sandbox and self.connection.api_key:
             self._initialize_persistent_sandbox()
         else:
             logger.debug(f"Tool {self.name} - {self.id}: Will initialize sandbox on each execute")
@@ -215,7 +215,7 @@ class E2BInterpreterTool(ConnectionNode):
         """Installs the specified packages in the given sandbox."""
         if packages:
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
-            sandbox.process.start_and_wait(f"pip install -qq {' '.join(packages.split(','))}")
+            sandbox.commands.run(f"pip install -qq {' '.join(packages.split(','))}")
 
     def _upload_files(self, files: list[FileData], sandbox: Sandbox) -> str:
         """Uploads multiple files to the sandbox and returns details for each file."""
@@ -242,10 +242,10 @@ class E2BInterpreterTool(ConnectionNode):
         file_like_object.name = file.name
 
         # Upload the file to the sandbox
-        uploaded_path = sandbox.upload_file(file=file_like_object)
-        logger.debug(f"Tool {self.name} - {self.id}: Uploaded file to {uploaded_path}")
+        uploaded_info = sandbox.files.write(f"/home/user/{file.name}", file_like_object)
+        logger.debug(f"Tool {self.name} - {self.id}: Uploaded file info: {uploaded_info}")
 
-        return uploaded_path
+        return uploaded_info.path
 
     def _update_description_with_files(self, upload_details: list[dict]) -> None:
         """Updates the tool description with detailed information about the uploaded files."""
@@ -266,8 +266,8 @@ class E2BInterpreterTool(ConnectionNode):
             raise ValueError("Sandbox instance is required for code execution.")
         code_hash = sha256(code.encode()).hexdigest()
         filename = f"/home/user/{code_hash}.py"
-        sandbox.filesystem.write(filename, code)
-        process = sandbox.process.start_and_wait(f"python3 {filename}")
+        sandbox.files.write(filename, code)
+        process = sandbox.commands.run(f"python3 {filename}")
         if not (process.stdout or process.stderr):
             raise ToolExecutionException(
                 "Error: No output. Please use 'print()' to display the result of your Python code.",
@@ -282,9 +282,9 @@ class E2BInterpreterTool(ConnectionNode):
         if not sandbox:
             raise ValueError("Sandbox instance is required for command execution.")
 
-        process = sandbox.process.start(command)
+        process = sandbox.commands.run(command, background=True)
         output = process.wait()
-        if process.exit_code != 0:
+        if output.exit_code != 0:
             raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
         return output.stdout
 
@@ -324,18 +324,18 @@ class E2BInterpreterTool(ConnectionNode):
         finally:
             if not self.persistent_sandbox:
                 logger.debug(f"Tool {self.name} - {self.id}: Closing Sandbox")
-                sandbox.close()
+                sandbox.kill()
 
         if self.is_optimized_for_agents:
             result = ""
             if files_installation := content.get("files_installation"):
-                result += "<Files installation>\n" + files_installation + "\n</Files installation>"
+                result += "## Files Installation\n\n" + files_installation + "\n\n"
             if packages_installation := content.get("packages_installation"):
-                result += "<Package installation>\n" + packages_installation + "\n</Package installation>"
+                result += "## Package Installation\n\n" + packages_installation + "\n\n"
             if shell_command_execution := content.get("shell_command_execution"):
-                result += "<Shell command execution>\n" + shell_command_execution + "\n</Shell command execution>"
+                result += "## Shell Command Execution\n\n" + shell_command_execution + "\n\n"
             if code_execution := content.get("code_execution"):
-                result += "<Code execution>\n" + code_execution + "\n</Code execution>"
+                result += "## Code Execution\n\n" + code_execution + "\n\n"
             content = result
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
@@ -345,5 +345,5 @@ class E2BInterpreterTool(ConnectionNode):
         """Closes the persistent sandbox if it exists."""
         if self._sandbox and self.persistent_sandbox:
             logger.debug(f"Tool {self.name} - {self.id}: Closing Sandbox")
-            self._sandbox.close()
+            self._sandbox.kill()
             self._sandbox = None

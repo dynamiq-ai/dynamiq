@@ -18,16 +18,17 @@ from dynamiq.nodes.agents.exceptions import (
     XMLParsingError,
 )
 from dynamiq.nodes.agents.utils import XMLParser
+from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
-from dynamiq.prompts import Message, MessageRole, VisionMessage
+from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 from dynamiq.nodes.llms.gemini import Gemini
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
-
 Thought: [Your detailed reasoning about what to do next]
 Action: [Tool name from ONLY [{tools_name}]]
 Action Input: [JSON input for the tool]
@@ -199,6 +200,17 @@ Start with the minimum number of tools needed and scale up based on the task's r
 - If initial results are comprehensive, don't add unnecessary calls
 - For coding: balance between documentation, examples, and best practices
 - Always consider user's implicit needs beyond explicit request
+</output>
+
+IMPORTANT RULES:
+- ALWAYS include <thought> tags with detailed reasoning
+- For tool use, include action and action_input tags
+- For direct answers, only include thought and answer tags
+- Ensure action_input contains valid JSON with double quotes
+- Properly close all XML tags
+- For all tags other than <answer>, text content should ideally be XML-escaped.
+- Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
+- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
 """  # noqa: E501
 
 
@@ -434,6 +446,35 @@ IMPORTANT RULES:
 - Do not mention tools or actions since you don't have access to any
 """
 
+
+REACT_BLOCK_OUTPUT_FORMAT = (
+    "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
+)
+
+
+REACT_MAX_LOOPS_PROMPT = """
+You are tasked with providing a final answer for initial user question based on information gathered during a process that has reached its maximum number of loops.
+Your goal is to analyze the given context and formulate a clear, concise response.
+First, carefully review the information gathered during the process, tool calls and their outputs.
+
+Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
+Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
+1. Fully supported by the information found in the context
+2. Clear and concise
+3. Directly addressing the original question or task, if possible
+If you cannot provide a full answer based on the given context, explain that due to limitations in the number of steps or potential issues with the tools used, you are unable to fully answer the question. In this case, suggest one or more of the following:
+1. Increasing the maximum number of loops for the agent setup
+2. Reviewing the tools settings
+3. Revising the input task description
+Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
+Provide your final answer or explanation within <answer> tags.
+Your response should be clear, concise, and professional.
+<answer>
+[Your final answer or explanation goes here]
+</answer>
+"""  # noqa: E501
+
+
 final_answer_function_schema = {
     "type": "function",
     "strict": True,
@@ -479,6 +520,8 @@ class ReActAgent(Agent):
         "When True, the agent can call multiple tools in parallel.",
     )
     format_schema: list = []
+    _tools: list[Tool] = []
+    _response_format: dict[str, Any] | None = None
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -698,10 +741,10 @@ class ReActAgent(Agent):
         for loop_num in range(1, self.max_loops + 1):
             try:
                 llm_result = self._run_llm(
-                    self._prompt.messages,
+                    messages=self._prompt.messages,
+                    tools=self._tools,
+                    response_format=self._response_format,
                     config=config,
-                    schema=self.format_schema,
-                    inference_mode=self.inference_mode,
                     **kwargs,
                 )
                 action, action_input = None, None
@@ -1067,6 +1110,36 @@ class ReActAgent(Agent):
 
                     observation = f"\nObservation: {tool_result}\n"
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
+                    if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                        self.stream_content(
+                            content={"name": tool.name, "input": action_input, "result": tool_result},
+                            source=tool.name if tool else action,
+                            step="tool",
+                            config=config,
+                            by_tokens=False,
+                            **kwargs,
+                        )
+
+                    self._intermediate_steps[loop_num]["model_observation"].update(
+                        AgentIntermediateStepModelObservation(
+                            tool_using=action,
+                            tool_input=action_input,
+                            tool_output=tool_result,
+                            updated=llm_generated_output,
+                        ).model_dump()
+                    )
+                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
+                else:
+                    self.stream_reasoning(
+                        {
+                            "thought": thought,
+                            "action": action,
+                            "action_input": action_input,
+                            "loop_num": loop_num,
+                        },
+                        config,
+                        **kwargs,
+                    )
             except ActionParsingException as e:
                 self._prompt.messages.append(
                     Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output)
@@ -1094,7 +1167,7 @@ class ReActAgent(Agent):
             )
             raise MaxLoopsExceededException(message=error_message)
         else:
-            max_loop_final_answer = self._handle_max_loops_exceeded(config, **kwargs)
+            max_loop_final_answer = self._handle_max_loops_exceeded(input_message, config, **kwargs)
             if self.streaming.enabled:
                 self.stream_content(
                     content=max_loop_final_answer,
@@ -1105,13 +1178,54 @@ class ReActAgent(Agent):
                 )
             return max_loop_final_answer
 
-    def _handle_max_loops_exceeded(self, config: RunnableConfig | None = None, **kwargs) -> str:
+    def aggregate_history(self, messages: list[Message, VisionMessage]) -> str:
+        """
+        Concatenates multiple history messages into one unified string.
+
+        Args:
+            messages (list[Message, VisionMessage]): List of messages to aggregate.
+
+        Returns:
+            str: Aggregated content.
+        """
+
+        history = ""
+
+        for message in messages:
+            if isinstance(message, VisionMessage):
+                for content in message.content:
+                    if isinstance(content, VisionMessageTextContent):
+                        history += content.text
+            else:
+                if message.role == MessageRole.ASSISTANT:
+                    history += f"-TOOL DESCRIPTION START-\n{message.content}\n-TOOL DESCRIPTION END-\n"
+                elif message.role == MessageRole.USER:
+                    history += f"-TOOL OUTPUT START-\n{message.content}\n-TOOL OUTPUT END-\n"
+
+        return history
+
+    def _handle_max_loops_exceeded(
+        self, input_message: Message | VisionMessage, config: RunnableConfig | None = None, **kwargs
+    ) -> str:
         """
         Handle the case where max loops are exceeded by crafting a thoughtful response.
         Uses XMLParser to extract the final answer from the LLM's last attempt.
+
+        Args:
+            input_message (Message | VisionMessage): Initial user message.
+            config (RunnableConfig | None): Configuration for the agent run.
+            **kwargs: Additional parameters for running the agent.
+
+        Returns:
+            str: Final answer provided by the agent.
         """
-        self._prompt.messages.append(Message(role=MessageRole.USER, content=REACT_MAX_LOOPS_PROMPT))
-        llm_final_attempt_result = self._run_llm(self._prompt.messages, config=config, **kwargs)
+        system_message = Message(content=REACT_MAX_LOOPS_PROMPT, role=MessageRole.SYSTEM)
+        conversation_history = Message(
+            content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True
+        )
+        llm_final_attempt_result = self._run_llm(
+            [system_message, input_message, conversation_history], config=config, **kwargs
+        )
         llm_final_attempt = llm_final_attempt_result.output["content"]
         self._run_depends = [NodeDependency(node=self.llm).to_dict()]
 
@@ -1181,7 +1295,7 @@ class ReActAgent(Agent):
             },
         }
 
-        self.format_schema = schema
+        self._response_format = schema
 
     @staticmethod
     def filter_format_type(param_annotation: Any) -> list[str]:
@@ -1228,7 +1342,7 @@ class ReActAgent(Agent):
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
-        self.format_schema.append(final_answer_function_schema)
+        self._tools.append(final_answer_function_schema)
         for tool in self.tools:
             properties = {}
             input_params = tool.input_schema.model_fields.items()
@@ -1263,7 +1377,7 @@ class ReActAgent(Agent):
                     },
                 }
 
-                self.format_schema.append(schema)
+                self._tools.append(schema)
 
             else:
                 schema = {
@@ -1290,7 +1404,7 @@ class ReActAgent(Agent):
                     },
                 }
 
-                self.format_schema.append(schema)
+                self._tools.append(schema)
 
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""

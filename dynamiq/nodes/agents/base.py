@@ -13,9 +13,11 @@ from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_input, process_tool_output_for_agent
+from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
-from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
 
@@ -279,7 +281,7 @@ class Agent(Node):
 
     AGENT_PROMPT_TEMPLATE: ClassVar[str] = AGENT_PROMPT_TEMPLATE
 
-    llm: Node = Field(..., description="LLM used by the agent.")
+    llm: BaseLLM = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     tools: list[Node] = []
@@ -298,15 +300,70 @@ class Agent(Node):
     role: str | None = ""
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
+    _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
+    _json_schema_fields: ClassVar[list[str]] = ["role"]
+
+    @classmethod
+    def _generate_json_schema(
+        cls, llms: dict[type[BaseLLM], list[str]] = {}, tools=list[type[Node]], **kwargs
+    ) -> dict[str, Any]:
+        """
+        Generates full json schema for Agent with provided llms and tools.
+        This schema is designed for compatibility with the WorkflowYamlParser,
+        containing enough partial information to instantiate an Agent.
+        Parameters name to be included in the schema are either defined in the _json_schema_fields class variable or
+        passed via the fields parameter.
+
+        It generates a schema using the provided LLMs and tools.
+
+        Args:
+            llms (dict[type[BaseLLM], list[str]]): Available llm providers and models.
+            tools (list[type[Node]]): List of tools.
+
+        Returns:
+            dict[str, Any]: Generated json schema.
+        """
+        schema = super()._generate_json_schema(**kwargs)
+        schema["properties"]["llm"] = {
+            "anyOf": [
+                {
+                    "type": "object",
+                    **llm._generate_json_schema(models=models, fields=["model", "temperature", "max_tokens"]),
+                }
+                for llm, models in llms.items()
+            ],
+            "additionalProperties": False,
+        }
+
+        schema["properties"]["tools"] = {
+            "type": "array",
+            "items": {"anyOf": [{"type": "object", **tool._generate_json_schema()} for tool in tools]},
+        }
+
+        schema["required"] += ["tools", "llm"]
+        return schema
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._intermediate_steps: dict[int, dict] = {}
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
+
+        expanded_tools = []
+        for tool in self.tools:
+            if isinstance(tool, MCPServer):
+                self._mcp_servers.append(tool)
+                subtools = tool.get_mcp_tools()
+                expanded_tools.extend(subtools)
+                self._mcp_server_tool_ids.extend([subtool.id for subtool in subtools])
+            else:
+                expanded_tools.append(tool)
+        self.tools = expanded_tools
+
         self._init_prompt_blocks()
 
     @model_validator(mode="after")
@@ -334,7 +391,10 @@ class Agent(Node):
         """Converts the instance to a dictionary."""
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
-        data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools]
+
+        data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools if tool.id not in self._mcp_server_tool_ids]
+        data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_servers]
+
         data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
         if self.files:
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
@@ -559,8 +619,19 @@ class Agent(Node):
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
         return history_messages
 
-    def _run_llm(self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs) -> str:
-        """Runs the LLM with a given prompt and handles streaming or full responses."""
+    def _run_llm(
+        self, messages: list[Message | VisionMessage], config: RunnableConfig | None = None, **kwargs
+    ) -> RunnableResult:
+        """Runs the LLM with a given prompt and handles streaming or full responses.
+
+        Args:
+            messages (list[Message | VisionMessage]): Input messages for llm.
+            config (Optional[RunnableConfig]): Configuration for the runnable.
+            kwargs: Additional keyword arguments.
+
+        Returns:
+            RunnableResult: Generated response.
+        """
         try:
             llm_result = self.llm.run(
                 input_data={},

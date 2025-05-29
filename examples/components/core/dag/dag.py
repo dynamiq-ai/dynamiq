@@ -6,10 +6,10 @@ from dynamiq import Workflow, prompts, runnables
 from dynamiq.connections import connections
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import Flow
-from dynamiq.nodes import InputTransformer
 from dynamiq.nodes.llms import Anthropic, OpenAI
-from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.operators import Choice, ChoiceCondition, ChoiceOption, ConditionOperator
+from dynamiq.nodes.node import InputTransformer, NodeDependency
+from dynamiq.nodes.operators import Choice, ChoiceOption
+from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
 from dynamiq.types.streaming import StreamingConfig
 
 logging.basicConfig(level=logging.INFO)

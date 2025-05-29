@@ -341,15 +341,15 @@ class WorkflowYAMLLoader:
         )
         for param_name, param_data in node_init_data.items():
             # TODO: dummy fix, revisit this!
-            # We had to add this condition because both input and output nodes have a `schema` param,
-            # which has a `type` field that contains types supported by JSON schema (e.g., string, object).
-            if param_name == "schema":
+            # We had to add this condition because some nodes have a `schema`/`response_format` params,
+            # that have a `type` field that contains types supported by JSON schema (e.g., string, object).
+            if param_name in ("schema", "response_format"):
                 updated_node_init_data[param_name] = param_data
 
             elif isinstance(param_data, dict):
                 updated_param_data = {}
                 for param_name_inner, param_data_inner in param_data.items():
-                    if param_name_inner == "prompt":
+                    if param_name_inner in ("prompt", "schema", "response_format"):
                         updated_param_data[param_name_inner] = param_data_inner
                     elif isinstance(param_data_inner, (dict, list)):
                         param_id = None

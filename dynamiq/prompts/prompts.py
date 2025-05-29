@@ -8,7 +8,7 @@ from typing import Any
 import filetype
 from jinja2 import Environment, meta
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-
+from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
 
 
@@ -56,10 +56,12 @@ class Message(BaseModel):
         content (str): The content of the message.
         role (MessageRole): The role of the message sender.
         metadata (dict | None): Additional metadata for the message, default is None.
+        static (bool): Determines whether it is possible to pass parameters via this message.
     """
     content: str
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
+    static: bool = Field(default=False, exclude=True)
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -233,23 +235,6 @@ class VisionMessage(BaseModel):
         return self.model_dump(**kwargs)
 
 
-class ToolFunctionParameters(BaseModel):
-    type: str
-    properties: dict[str, dict]
-    required: list[str]
-
-
-class ToolFunction(BaseModel):
-    name: str
-    description: str
-    parameters: ToolFunctionParameters
-
-
-class Tool(BaseModel):
-    type: str = "function"
-    function: ToolFunction
-
-
 class BasePrompt(ABC, BaseModel):
     """
     Abstract base class for prompts.
@@ -296,11 +281,13 @@ class Prompt(BasePrompt):
     Attributes:
         messages (list[Message | VisionMessage]): List of Message or VisionMessage objects
         representing the prompt.
-        tools (list[dict[str, Any]]): List of functions for which the model may generate JSON inputs.
+        tools (list[Tool]): List of functions for which the model may generate JSON inputs.
+        response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output.
     """
 
     messages: list[Message | VisionMessage]
     tools: list[Tool] | None = None
+    response_format: dict[str, Any] | None = None
     _Template: Any = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
@@ -317,10 +304,10 @@ class Prompt(BasePrompt):
         parameters = set()
 
         env = Environment(autoescape=True)
-
         for msg in self.messages:
             if isinstance(msg, Message):
-                parameters |= get_parameters_for_template(msg.content, env=env)
+                if not msg.static:
+                    parameters |= get_parameters_for_template(msg.content, env=env)
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
@@ -347,7 +334,9 @@ class Prompt(BasePrompt):
         out: list[dict] = []
         for msg in self.messages:
             if isinstance(msg, Message):
-                out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
+                if not msg.static:
+                    msg = msg.format_message(**kwargs)
+                out.append(msg.model_dump(exclude={"metadata"}))
             elif isinstance(msg, VisionMessage):
                 out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
             else:
