@@ -26,57 +26,47 @@ from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 from dynamiq.nodes.llms.gemini import Gemini
 
+REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 
-REACT_BLOCK_TOOLS = """
-You have access to a variety of tools,
-and you are responsible for using them in any order you choose to complete the task:\n
-{tool_description}
+Thought: [Your detailed reasoning about what to do next]
+Action: [Tool name from ONLY [{tools_name}]]
+Action Input: [JSON input for the tool]
 
-Input formats for tools:
-{input_formats}
+After each action, you'll receive:
+Observation: [Result from the tool]
 
-Note: For tools not listed in the input formats section,
-refer to their descriptions in the AVAILABLE TOOLS section for usage instructions.
-"""
-
-REACT_BLOCK_TOOLS_NO_FORMATS = """
-You have access to a variety of tools,
-and you are responsible for using them in any order you choose to complete the task:\n
-{tool_description}
-"""
-
-REACT_BLOCK_NO_TOOLS = """Always follow this exact format in your responses:
-
-Thought: [Your detailed reasoning about the user's question]
+When you have enough information to provide a final answer:
+Thought: [Your reasoning for the final answer]
 Answer: [Your complete answer to the user's question]
 
+For questions that don't require tools:
+Thought: [Your reasoning about the question]
+Answer: [Your direct response]
+
 IMPORTANT RULES:
-- ALWAYS start with "Thought:" to explain your reasoning process
-- Provide a clear, direct answer after your thought
-- If you cannot fully answer, explain why in your thought
-- Be thorough and helpful in your response
-- Do not mention tools or actions since you don't have access to any
-"""
+- ALWAYS start with "Thought:" even for simple responses
+- Ensure Action Input is valid JSON without markdown formatting
+- Use proper JSON syntax with double quotes for keys and string values
+- Never use markdown code blocks (```) around your JSON
+- JSON must be properly formatted with correct commas and brackets
+- Only use tools from the provided list
+- If you can answer directly, use only Thought followed by Answer"""  # noqa: E501
 
-REACT_BLOCK_XML_INSTRUCTIONS = """Always use one of these exact XML formats in your responses:
-
-**Format for Tool Usage (Single or Multiple):**
+REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
 <output>
     <thought>
         [Your detailed reasoning about what to do next]
     </thought>
-    <tool_calls>
-        <tool>
-            <name>[Tool name from ONLY [{tools_name}]]</name>
-            <input>[JSON input for the tool]</input>
-        </tool>
-        <!-- Add more tool elements for multiple tools -->
-        <tool>
-            <name>[Tool name from ONLY [{tools_name}]]</name>
-            <input>[JSON input for tool]</input>
-        </tool>
-    </tool_calls>
+    <action>
+        [Tool name from ONLY [{tools_name}]]
+    </action>
+    <action_input>
+        [JSON input for the tool]
+    </action_input>
 </output>
+
+After each action, you'll receive:
+Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
 <output>
@@ -96,54 +86,128 @@ For questions that don't require tools:
     <answer>
         [Your direct response]
     </answer>
-</output>
+</output>"""  # noqa: E501
 
-After each tool usage, you'll receive:
-Observation: [Result(s) from the tool(s)]
+REACT_BLOCK_MULTI_TOOL_PLANNING = """
+MULTI-TOOL PLANNING AND STRATEGY:
 
-MANDATORY MULTI-TOOL REQUIREMENTS:
-Efficiency in Tool Calls: For research tasks, prioritize making multiple independent
-tool calls in parallel within a single `<tool_calls>` block whenever possible,
-to gather all required information efficiently.
-Use sequential tool calls across multiple iterations only when later queries depend
-on the results of earlier ones (e.g., refining a query based on initial findings).
+**Core Principle: Scale tool usage to match task complexity**
+Start with the minimum number of tools needed and scale up based on the task's requirements.
 
-1. Research Tasks (MINIMUM 3 tool calls required):
-   - FIRST CALL: Use a broad query to get general information on the topic
-   - SECOND CALL: Use a more specific query focused on benefits, advantages, or key features
-   - THIRD CALL: Use a query focused on limitations, challenges, requirements, or comparison
-   ... go deeper if needed
-   - Structure queries to cover complementary aspects of the same topic
-   - Use different parameters (e.g., category filters) when appropriate
-   - Plan your tool calls to cover all required aspects in a single `<tool_calls>`
-     block when the queries are independent. Include reasoning in `<thought>`
-     about how each call contributes to a complete answer.
+**Decision Framework:**
+1. **Zero Tools** - Answer directly when:
+   - Question is within your knowledge base
+   - No real-time data needed
+   - Simple explanations or general concepts
 
-2. Data Collection/Scraping
-   - When scraping websites, ALWAYS gather data from different sources in parallel
-   - Use the same tool multiple times with different targets (URLs, parameters)
-   - Break down large scraping tasks into parallel subtasks for efficiency
+2. **Single Tool** - Use one tool when:
+   - Single fact verification needed
+   - One specific data point required
+   - Simple lookup or calculation
 
-3. Complex Analysis
-   - ALWAYS decompose problems into smaller independent subproblems if applicable
-   - Use specialized parameters for different aspects of the same problem
-   - Collect preliminary data across multiple dimensions before final analysis
+3. **Multiple Tools (2-4)** - Use parallel tools when:
+   - Comparing information from different sources
+   - Gathering complementary data points
+   - Cross-referencing or validation needed
 
-IMPLEMENTATION REQUIREMENTS:
-- For research tasks, NEVER provide a final answer after just one tool call
-- For any question seeking detailed information, ALWAYS use multiple tool calls
-- Structure multiple tools in a single `<tool_calls>` block
-- Include detailed reasoning in the <thought> tags explaining your multi-tool strategy
-- Ensure diversity in your queries when using the same tool multiple times
-- If a tool call fails or provides insufficient data, note this in `<thought>` and include additional
-  tool calls in the same or a subsequent `<tool_calls>` block to compensate,
-  targeting alternative sources or adjusted parameters.
-"""
+4. **Comprehensive Research (5+)** - Use extensive tooling when:
+   - Deep analysis requested ("comprehensive", "detailed", "thorough")
+   - Multiple aspects of complex topic
+   - Creating reports or extensive documentation
+
+**MANDATORY MULTI-TOOL PATTERNS:**
+
+1. **Research Tasks (Adaptive Scaling):**
+   - START: Analyze query complexity
+   - IF simple fact: 1-2 tool calls
+   - IF moderate complexity: 3-4 tool calls with complementary queries
+   - IF comprehensive research: 5+ tool calls covering:
+     * Broad overview query
+     * Specific benefits/advantages/features
+     * Limitations/challenges/drawbacks
+     * Comparisons/alternatives
+     * Recent developments/updates
+
+   Example progression:
+   - Query 1: General topic overview
+   - Query 2: Specific aspect (benefits, use cases)
+   - Query 3: Challenges or limitations
+   - Query 4+: Deep dives on critical aspects
+
+2. **Coding and Technical Tasks:**
+   - Documentation lookup: 1-2 tools (official docs + examples)
+   - Debugging: 2-3 tools (error search + solution patterns)
+   - Architecture decisions: 3-5 tools (best practices + comparisons + examples)
+   - Full implementation: 5+ tools (docs + patterns + edge cases + optimization)
+
+3. **Data Collection/Analysis:**
+   - Single source: 1 tool
+   - Multiple sources: Use parallel calls for efficiency
+   - Comparative analysis: Minimum 3 sources
+   - Market research: 5+ diverse sources
+
+4. **Verification and Fact-Checking:**
+   - Simple facts: 1-2 authoritative sources
+   - Controversial topics: 3+ diverse sources
+   - Critical information: Cross-reference with 3+ sources
+
+**EFFICIENCY GUIDELINES:**
+
+1. **Parallel vs Sequential:**
+   - Use PARALLEL calls when queries are independent
+   - Use SEQUENTIAL only when later queries depend on earlier results
+   - Group related queries in single tool_calls block
+
+2. **Query Optimization:**
+   - Start broad, then narrow based on results
+   - Use different search parameters for variety
+   - Avoid redundant or overlapping queries
+   - Each tool call should add unique value
+
+3. **Smart Scaling:**
+   - Begin with essential queries
+   - Add detail queries based on initial results
+   - Stop when sufficient information gathered
+   - Don't over-research simple questions
+
+**TASK-SPECIFIC STRATEGIES:**
+
+1. **Current Events/News:**
+   - Recent headlines: 2-3 news sources
+   - In-depth coverage: 5+ sources including analysis
+   - Fact verification: Cross-reference 3+ sources
+
+2. **Technical Documentation:**
+   - Quick reference: 1-2 official sources
+   - Implementation guide: 3-4 sources (docs + examples + gotchas)
+   - Comprehensive tutorial: 5+ sources covering all aspects
+
+3. **Product/Service Research:**
+   - Basic info: 1-2 sources
+   - Comparison shopping: 3-5 sources
+   - Detailed analysis: 5+ including reviews, specs, alternatives
+
+4. **Scientific/Academic Topics:**
+   - Basic concepts: 1-2 authoritative sources
+   - Current research: 3-5 recent papers/articles
+   - Comprehensive review: 5+ sources spanning fundamentals to cutting-edge
+
+**IMPORTANT RULES:**
+- Quality over quantity - each tool call must serve a purpose
+- Explain your multi-tool strategy in your thought process
+- Adapt the number of tools based on result quality
+- If initial results are comprehensive, don't add unnecessary calls
+- For coding: balance between documentation, examples, and best practices
+- Always consider user's implicit needs beyond explicit request
+"""  # noqa: E501
 
 
-REACT_BLOCK_INSTRUCTIONS = """Always follow this exact format in your responses:
+REACT_BLOCK_INSTRUCTIONS_MULTI = (
+    REACT_BLOCK_MULTI_TOOL_PLANNING
+    + """\nAlways follow this exact format in your responses:
+**RESPONSE FORMAT:**
 
-Thought: [Your detailed reasoning about what to do next]
+Thought: [Your detailed reasoning about what to do next, including your multi-tool strategy if applicable]
 Action: [Tool name from ONLY [{tools_name}]]
 Action Input: [JSON input for the tool]
 
@@ -151,33 +215,146 @@ After each action, you'll receive:
 Observation: [Result from the tool]
 
 When you need to use multiple tools in parallel, list them sequentially:
-Thought: [Your detailed reasoning about why multiple tools are needed]
-Action: [Tool name from ONLY [{tools_name}]]
-Action Input: [JSON input for the tool]
-Action: [Another tool name from ONLY [{tools_name}]]
-Action Input: [JSON input for another tool]
+Thought: [Explain your multi-tool strategy and why each tool is needed]
+Action: [Tool name]
+Action Input: [JSON input]
+Action: [Another tool name]
+Action Input: [JSON input]
 ... (repeat for each tool)
 
 When you have enough information to provide a final answer:
-Thought: [Your reasoning for the final answer]
-Answer: [Your complete answer to the user's question]
+Thought: [Your reasoning for the final answer based on all gathered information]
+Answer: [Your complete, well-structured answer synthesizing all tool results]
 
 For questions that don't require tools:
-Thought: [Your reasoning about the question]
+Thought: [Your reasoning why tools aren't needed]
 Answer: [Your direct response]
 
-IMPORTANT RULES:
-- ALWAYS start with "Thought:" even for simple responses
-- Ensure Action Input is valid JSON without markdown formatting
-- Use proper JSON syntax with double quotes for keys and string values
-- Never use markdown code blocks (```) around your JSON
-- JSON must be properly formatted with correct commas and brackets
+**FORMAT RULES:**
+- ALWAYS start with "Thought:" explaining your approach
+- Valid JSON only - no markdown formatting
+- Double quotes for JSON keys and string values
+- No code blocks (```) around JSON
+- Proper JSON syntax with commas and brackets
+- List each Action and Action Input separately
 - Only use tools from the provided list
-- If you can answer directly, use only Thought followed by Answer
-- For multi-tool calls, list each Action and Action Input separately, one after another
-- For research tasks, always use at least 3 different tool calls to gather comprehensive information
-- When researching a topic, use complementary queries across your tools to cover different aspects
+"""  # noqa: E501
+)
+
+REACT_BLOCK_XML_INSTRUCTIONS_MULTI = (
+    REACT_BLOCK_MULTI_TOOL_PLANNING
+    + """\nAlways use one of these exact XML formats in your responses:
+**XML RESPONSE FORMATS:**
+
+For Tool Usage (Single or Multiple):
+<output>
+    <thought>
+        [Explain your strategy, including multi-tool planning if applicable]
+    </thought>
+    <tool_calls>
+        <tool>
+            <name>[Tool name from ONLY [{tools_name}]]</name>
+            <input>[JSON input for the tool]</input>
+        </tool>
+        <!-- Add more tool elements as needed based on your strategy -->
+        <tool>
+            <name>[Tool name]</name>
+            <input>[JSON input]</input>
+        </tool>
+    </tool_calls>
+</output>
+
+When you have enough information to provide a final answer:
+<output>
+    <thought>
+        [Synthesize findings and explain your final reasoning]
+    </thought>
+    <answer>
+        [Complete, well-structured answer based on all gathered information]
+    </answer>
+</output>
+
+For questions that don't require tools:
+<output>
+    <thought>
+        [Explain why tools aren't needed for this query]
+    </thought>
+    <answer>
+        [Your direct response]
+    </answer>
+</output>
+
+After each tool usage, you'll receive:
+Observation: [Result(s) from the tool(s)]
+
+**XML FORMAT RULES:**
+- Always include strategic thinking in <thought> tags
+- Group parallel tool calls in single <tool_calls> block
+- Use sequential outputs only when dependencies exist
+- Ensure valid JSON in <input> tags
+- Synthesize all results in final answer
+"""  # noqa: E501
+)
+
+
+# Common blocks
+REACT_BLOCK_TOOLS = """
+You have access to a variety of tools,
+and you are responsible for using
+them in any order you choose to complete the task:\n
+{tool_description}
+
+Input formats for tools:
+{input_formats}
+
+Note: For tools not listed in the input formats section,
+refer to their descriptions in the
+AVAILABLE TOOLS section for usage instructions.
 """
+
+REACT_BLOCK_TOOLS_NO_FORMATS = """
+You have access to a variety of tools,
+and you are responsible for using
+them in any order you choose to complete the task:\n
+{tool_description}
+"""
+
+REACT_BLOCK_NO_TOOLS = """Always follow this exact format in your responses:
+
+Thought: [Your detailed reasoning about the user's question]
+Answer: [Your complete answer to the user's question]
+
+IMPORTANT RULES:
+- ALWAYS start with "Thought:" to explain your reasoning process
+- Provide a clear, direct answer after your thought
+- If you cannot fully answer, explain why in your thought
+- Be thorough and helpful in your response
+- Do not mention tools or actions since you don't have access to any
+"""
+
+REACT_BLOCK_OUTPUT_FORMAT = "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
+
+REACT_MAX_LOOPS_PROMPT = """
+You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
+Your goal is to analyze the given context and formulate a clear, concise response.
+First, carefully review the history, which contains thoughts and information gathered during the process.
+
+Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
+Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
+1. Fully supported by the information found in the context
+2. Clear and concise
+3. Directly addressing the original question or task, if possible
+If you cannot provide a full answer based on the given context, explain that due to limitations in the number of steps or potential issues with the tools used, you are unable to fully answer the question. In this case, suggest one or more of the following:
+1. Increasing the maximum number of loops for the agent setup
+2. Reviewing the tools settings
+3. Revising the input task description
+Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
+Provide your final answer or explanation within <answer> tags.
+Your response should be clear, concise, and professional.
+<answer>
+[Your final answer or explanation goes here]
+</answer>
+"""  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
 Always structure your responses in this JSON format:
@@ -208,13 +385,12 @@ IMPORTANT RULES:
 - Never keep action_input empty.
 """  # noqa: E501
 
-
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
 You need to use the right functions based on what the user asks.
 
 Use the function `provide_final_answer` when you can give a clear answer to the user's first question,
  and no extra steps, tools, or work are needed.
-Call this function if the user's input is simple and doesn’t require additional help or tools.
+Call this function if the user's input is simple and doesn't require additional help or tools.
 
 If the user's request requires the use of specific tools, such as [{tools_name}],
  you must first call the appropriate function to invoke those tools.
@@ -223,7 +399,6 @@ Only after utilizing the necessary tools and gathering the required information 
 
 Make sure to check each request carefully to see if you can answer it right away or if you need to use tools to help.
 """  # noqa: E501
-
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
 Always structure your responses in this exact format:
@@ -259,35 +434,6 @@ IMPORTANT RULES:
 - Do not mention tools or actions since you don't have access to any
 """
 
-
-REACT_BLOCK_OUTPUT_FORMAT = (
-    "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
-)
-
-
-REACT_MAX_LOOPS_PROMPT = """
-You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
-Your goal is to analyze the given context and formulate a clear, concise response.
-First, carefully review the history, which contains thoughts and information gathered during the process.
-
-Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
-Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
-1. Fully supported by the information found in the context
-2. Clear and concise
-3. Directly addressing the original question or task, if possible
-If you cannot provide a full answer based on the given context, explain that due to limitations in the number of steps or potential issues with the tools used, you are unable to fully answer the question. In this case, suggest one or more of the following:
-1. Increasing the maximum number of loops for the agent setup
-2. Reviewing the tools settings
-3. Revising the input task description
-Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
-Provide your final answer or explanation within <answer> tags.
-Your response should be clear, concise, and professional.
-<answer>
-[Your final answer or explanation goes here]
-</answer>
-"""  # noqa: E501
-
-
 final_answer_function_schema = {
     "type": "function",
     "strict": True,
@@ -309,7 +455,6 @@ final_answer_function_schema = {
     },
 }
 
-
 TYPE_MAPPING = {
     int: "integer",
     float: "float",
@@ -327,6 +472,11 @@ class ReActAgent(Agent):
     behaviour_on_max_loops: Behavior = Field(
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
+    )
+    enable_multi_tool: bool = Field(
+        default=False,
+        description="Enable multi-tool execution in a single step. "
+        "When True, the agent can call multiple tools in parallel.",
     )
     format_schema: list = []
 
@@ -395,8 +545,10 @@ class ReActAgent(Agent):
 
     def _parse_action(self, output: str) -> tuple[str | None, str | None, dict | list | None]:
         """
-        Parses the action(s), input(s), and thought from the output string.
-        Supports both single tool actions and multiple sequential tool calls.
+        Parses the action(s), input(s),
+        and thought from the output string.
+        Supports both single tool actions
+        and multiple sequential tool calls when multi-tool is enabled.
 
         Args:
             output (str): The output string from the LLM containing Thought, Action, and Action Input.
@@ -446,7 +598,7 @@ class ReActAgent(Agent):
                     recoverable=True,
                 )
 
-            if len(actions) == 1:
+            if not self.enable_multi_tool or len(actions) == 1:
                 action = actions[0]["tool_name"]
                 action_input = actions[0]["tool_input"]
                 return thought, action, action_input
@@ -460,7 +612,7 @@ class ReActAgent(Agent):
                 f"Error parsing action(s): {str(e)}. "
                 f"Please ensure the output follows the format 'Thought: <text> "
                 f"Action: <action> Action Input: <valid JSON>' "
-                f"with possible multiple Action/Action Input pairs.",
+                f"{'with possible multiple Action/Action Input pairs.' if self.enable_multi_tool else ''}",
                 recoverable=True,
             )
 
@@ -574,7 +726,6 @@ class ReActAgent(Agent):
 
                             if self.streaming.enabled:
                                 if self.streaming.mode == StreamingMode.ALL:
-
                                     self.stream_content(
                                         content={"thought": thought, "loop_num": loop_num},
                                         source=self.name,
@@ -698,16 +849,84 @@ class ReActAgent(Agent):
 
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
-                        try:
-                            parsed_result = XMLParser.parse_unified_xml_format(llm_generated_output)
 
-                            thought = parsed_result.get("thought", "")
+                        if self.enable_multi_tool:
+                            try:
+                                parsed_result = XMLParser.parse_unified_xml_format(llm_generated_output)
 
-                            if parsed_result.get("is_final", False):
-                                final_answer = parsed_result.get("answer", "")
+                                thought = parsed_result.get("thought", "")
+
+                                if parsed_result.get("is_final", False):
+                                    final_answer = parsed_result.get("answer", "")
+                                    self.log_final_output(thought, final_answer, loop_num)
+                                    self.tracing_final(loop_num, final_answer, config, kwargs)
+
+                                    if self.streaming.enabled:
+                                        if self.streaming.mode == StreamingMode.ALL:
+                                            self.stream_content(
+                                                content={"thought": thought, "loop_num": loop_num},
+                                                source=self.name,
+                                                step="reasoning",
+                                                config=config,
+                                                **kwargs,
+                                            )
+                                        self.stream_content(
+                                            content=final_answer,
+                                            source=self.name,
+                                            step="answer",
+                                            config=config,
+                                            **kwargs,
+                                        )
+                                    return final_answer
+
+                                tools_data = parsed_result.get("tools", [])
+                                action = tools_data
+
+                                if len(tools_data) == 1:
+                                    self.log_reasoning(
+                                        thought,
+                                        tools_data[0].get("name", "unknown_tool"),
+                                        tools_data[0].get("input", {}),
+                                        loop_num,
+                                    )
+                                else:
+                                    self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
+
+                                self.stream_reasoning(
+                                    {
+                                        "thought": thought,
+                                        "tools": tools_data,
+                                        "loop_num": loop_num,
+                                    },
+                                    config,
+                                    **kwargs,
+                                )
+
+                            except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
+                                self._prompt.messages.append(
+                                    Message(role=MessageRole.ASSISTANT, content=llm_generated_output)
+                                )
+                                self._prompt.messages.append(
+                                    Message(
+                                        role=MessageRole.SYSTEM,
+                                        content=f"Correction Instruction: "
+                                        f"The previous response could not be parsed due to "
+                                        f"the following error: '{type(e).__name__}: {e}'. "
+                                        f"Please regenerate the response strictly following the "
+                                        f"required XML format, ensuring all tags are present and "
+                                        f"correctly structured, and that any JSON content is valid.",
+                                    )
+                                )
+                                continue
+                        else:
+                            try:
+                                parsed_data = XMLParser.parse(
+                                    llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
+                                )
+                                thought = parsed_data.get("thought")
+                                final_answer = parsed_data.get("answer")
                                 self.log_final_output(thought, final_answer, loop_num)
                                 self.tracing_final(loop_num, final_answer, config, kwargs)
-
                                 if self.streaming.enabled:
                                     if self.streaming.mode == StreamingMode.ALL:
                                         self.stream_content(
@@ -726,52 +945,34 @@ class ReActAgent(Agent):
                                     )
                                 return final_answer
 
-                            tools_data = parsed_result.get("tools", [])
-                            action = tools_data
+                            except TagNotFoundError:
+                                logger.debug("XMLParser: Not a final answer structure, trying action structure.")
+                                try:
+                                    parsed_data = XMLParser.parse(
+                                        llm_generated_output,
+                                        required_tags=["thought", "action", "action_input"],
+                                        optional_tags=["output"],
+                                        json_fields=["action_input"],
+                                    )
+                                    thought = parsed_data.get("thought")
+                                    action = parsed_data.get("action")
+                                    action_input = parsed_data.get("action_input")
+                                    self.log_reasoning(thought, action, action_input, loop_num)
+                                except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
+                                    logger.error(f"XMLParser: Failed to parse XML for action or answer: {e}")
+                                    raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
 
-                            if len(tools_data) == 1:
-                                self.log_reasoning(
-                                    thought,
-                                    tools_data[0].get("name", "unknown_tool"),
-                                    tools_data[0].get("input", {}),
-                                    loop_num,
-                                )
-                            else:
-                                self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
-
-                            self.stream_reasoning(
-                                {
-                                    "thought": thought,
-                                    "tools": tools_data,
-                                    "loop_num": loop_num,
-                                },
-                                config,
-                                **kwargs,
-                            )
-
-                        except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
-                            self._prompt.messages.append(
-                                Message(role=MessageRole.ASSISTANT, content=llm_generated_output)
-                            )
-                            self._prompt.messages.append(
-                                Message(
-                                    role=MessageRole.SYSTEM,
-                                    content=f"Correction Instruction: The previous response could not be parsed due to "
-                                    f"the following error: '{type(e).__name__}: {e}'. "
-                                    f"Please regenerate the response strictly following the "
-                                    f"required XML format, ensuring all tags are present and "
-                                    f"correctly structured, and that any JSON content is valid.",
-                                )
-                            )
-                            continue
+                            except (XMLParsingError, JSONParsingError) as e:
+                                logger.error(f"XMLParser: Error parsing potential final answer XML: {e}")
+                                raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
 
                 self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
 
                 if action and self.tools:
-                    if self.inference_mode == InferenceMode.XML:
+                    if self.inference_mode == InferenceMode.XML and self.enable_multi_tool:
                         tool_result = self._execute_tools(tools_data, config, **kwargs)
 
-                    elif self.inference_mode == InferenceMode.DEFAULT:
+                    elif self.inference_mode == InferenceMode.DEFAULT and self.enable_multi_tool:
                         if action == "multiple_tools":
                             tools_data = []
                             for tool_call in action_input:
@@ -811,9 +1012,6 @@ class ReActAgent(Agent):
                                     updated=llm_generated_output,
                                 ).model_dump()
                             )
-
-                            # observation = f"\nObservation: {tool_result}\n"
-                            # self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
                         else:
                             try:
                                 tool = self.tool_by_names.get(self.sanitize_tool_name(action))
@@ -840,6 +1038,32 @@ class ReActAgent(Agent):
                                 tool_result = self._run_tool(tool, action_input, config, **kwargs)
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
+                    else:
+                        try:
+                            tool = self.tool_by_names.get(self.sanitize_tool_name(action))
+                            if not tool:
+                                raise AgentUnknownToolException(
+                                    f"Unknown tool: {action}."
+                                    "Use only available tools and provide "
+                                    "only the tool's name in the action field. "
+                                    "Do not include any additional reasoning. "
+                                    "Please correct the action field or state that you cannot answer the question. "
+                                )
+                            self.stream_reasoning(
+                                {
+                                    "thought": thought,
+                                    "action": action,
+                                    "tool": tool,
+                                    "action_input": action_input,
+                                    "loop_num": loop_num,
+                                },
+                                config,
+                                **kwargs,
+                            )
+
+                            tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                        except RecoverableAgentException as e:
+                            tool_result = f"{type(e).__name__}: {e}"
 
                     observation = f"\nObservation: {tool_result}\n"
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
@@ -861,9 +1085,12 @@ class ReActAgent(Agent):
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
-                f"Agent {self.name} (ID: {self.id}) has reached the maximum loop limit of {self.max_loops} without finding a final answer. "  # noqa: E501
+                f"Agent {self.name} (ID: {self.id}) "
+                f"has reached the maximum loop limit of {self.max_loops} "
+                f"without finding a final answer. "
                 f"Last response: {self._prompt.messages[-1].content}\n"
-                f"Consider increasing the maximum number of loops or reviewing the task complexity to ensure completion."  # noqa: E501
+                f"Consider increasing the maximum number of loops or "
+                f"reviewing the task complexity to ensure completion."
             )
             raise MaxLoopsExceededException(message=error_message)
         else:
@@ -1069,9 +1296,16 @@ class ReActAgent(Agent):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
 
+        if self.enable_multi_tool:
+            instructions_default = REACT_BLOCK_INSTRUCTIONS_MULTI
+            instructions_xml = REACT_BLOCK_XML_INSTRUCTIONS_MULTI
+        else:
+            instructions_default = REACT_BLOCK_INSTRUCTIONS_SINGLE
+            instructions_xml = REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
+
         prompt_blocks = {
             "tools": "" if not self.tools else REACT_BLOCK_TOOLS,
-            "instructions": REACT_BLOCK_INSTRUCTIONS_NO_TOOLS if not self.tools else REACT_BLOCK_INSTRUCTIONS,
+            "instructions": REACT_BLOCK_INSTRUCTIONS_NO_TOOLS if not self.tools else instructions_default,
             "output_format": REACT_BLOCK_OUTPUT_FORMAT,
         }
 
@@ -1088,7 +1322,7 @@ class ReActAgent(Agent):
 
             case InferenceMode.XML:
                 prompt_blocks["instructions"] = (
-                    REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS if not self.tools else REACT_BLOCK_XML_INSTRUCTIONS
+                    REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS if not self.tools else instructions_xml
                 )
 
         self._prompt_blocks.update(prompt_blocks)

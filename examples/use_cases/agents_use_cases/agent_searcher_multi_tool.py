@@ -1,31 +1,56 @@
-from dynamiq.connections import Exa, Tavily
+from dynamiq.connections import E2B, Exa
 from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.exa_search import ExaTool
-from dynamiq.nodes.tools.tavily import TavilyTool
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
+AGENT_ROLE = (
+    "You are a versatile AI assistant:\n"
+    "  1. Plan your approach in a clear reasoning step.\n"
+    "  2. Search  for any documentation or data you need.\n"
+    "  3. Code: write a snippet that solves the user’s request, use code interpreter\n"
+    "  4. Execute & Validate:\n"
+    "     - Run your code in the sandbox.\n"
+    "     - Inspect stdout/stderr and the data structures returned.\n"
+    "     - If there are errors or unexpected results, fix them.\n"
+    "     - Optionally add simple assertions or checks to prove correctness.\n"
+    "     - Repeat until the code runs cleanly and meets the spec.\n"
+    "  5. Report: Return a concise Markdown‐formatted answer or code block,\n"
+    "     including any tables or plots if relevant.\n\n"
+    "Always think in terms of tool use: plan → search → code → test → refine → answer."
+)
+
+
 if __name__ == "__main__":
-    connection_exa = Exa()
-    connection_tavily = Tavily()
-    tool_tavily = TavilyTool(connection=connection_tavily)
-    tool_search = ExaTool(connection=connection_exa)
-    llm = setup_llm(model_provider="gpt", model_name="o3-mini", temperature=1)
+    conn_code = E2B()
+    conn_search = Exa()
+
+    tool_code = E2BInterpreterTool(connection=conn_code)
+    tool_search = ExaTool(connection=conn_search)
+
+    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.2)
+
     agent = ReActAgent(
-        name="Agent",
-        id="Agent",
+        name="MultiToolAgent",
+        id="MultiToolAgent",
         llm=llm,
-        tools=[tool_search, tool_tavily],
+        tools=[tool_search, tool_code],
+        role=AGENT_ROLE,
         inference_mode=InferenceMode.DEFAULT,
-        role="",
+        enable_multi_tool=True,
     )
-    result = agent.run(
-        input_data={
-            "input": "Please research Dynamiq AI and provide well-structured information "
-            "along with a summary in markdown format. "
-            "Include use cases, competitors, potential, future outlook, and recent news "
-            # "USE parallel multi tool calling"
-        }
-    )
-    output_content = result.output.get("content")
-    print("Agent response:", output_content)
+
+    example_input = {
+        "input": (
+            """Find the official documentation for the OpenWeatherMap API.
+            Generate a Python snippet that fetches the 7-day forecast for Warsaw, Poland,
+            parses the JSON, and prints a table of date vs. temperature.
+    """
+        ),
+        "files": None,
+    }
+    result = agent.run(input_data=example_input)
+    logger.info("=== AGENT OUTPUT ===")
+    logger.info(result.output.get("content"))
