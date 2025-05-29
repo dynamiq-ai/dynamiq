@@ -44,10 +44,9 @@ if __name__ == "__main__":
 
     example_input = {
         "input": (
-            """Find the official documentation for the OpenWeatherMap API.
-            Generate a Python snippet that fetches the 7-day forecast for Warsaw, Poland,
-            parses the JSON, and prints a table of date vs. temperature.
-    """
+            "Find the official documentation for the OpenWeatherMap API."
+            "Generate a Python snippet that fetches the 7-day forecast for Warsaw, Poland,"
+            "parses the JSON, and prints a table of date vs. temperature."
         ),
         "files": None,
     }

@@ -18,7 +18,6 @@ from dynamiq.nodes.agents.exceptions import (
     XMLParsingError,
 )
 from dynamiq.nodes.agents.utils import XMLParser
-from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent

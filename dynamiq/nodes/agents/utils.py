@@ -7,7 +7,7 @@ from typing import Any, Sequence
 import filetype
 from lxml import etree as LET  # nosec: B410
 
-from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError
+from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
 from dynamiq.prompts import (
     Message,
     MessageRole,
@@ -918,6 +918,7 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
             content = str(content)
 
     max_len_in_char: int = max_tokens * 4  # This assumes an average of 4 characters per token.
+    content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", content)
 
     if len(content) > max_len_in_char and truncate:
         half_length: int = (max_len_in_char - 100) // 2
