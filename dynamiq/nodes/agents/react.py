@@ -537,12 +537,9 @@ class ReActAgent(Agent):
         )
 
         summary_messages = [
-            Message(
-                content=HISTORY_SUMMARIZATION_PROMPT,
-                role=MessageRole.SYSTEM,
-            ),
+            Message(content=HISTORY_SUMMARIZATION_PROMPT, role=MessageRole.SYSTEM, static=True),
             input_message,
-            Message(content=messages_history, role=MessageRole.USER),  # History to summarize
+            Message(content=messages_history, role=MessageRole.USER, static=True),  # History to summarize
         ]
 
         summary_tags = [f"tool_output{index}" for index in summary_sections]
@@ -555,7 +552,7 @@ class ReActAgent(Agent):
             )
 
             output = llm_result.output["content"]
-            summary_messages.append(Message(content=output, role=MessageRole.ASSISTANT))
+            summary_messages.append(Message(content=output, role=MessageRole.ASSISTANT, static=True))
             try:
                 parsed_data = XMLParser.parse(
                     f"<root>{output}</root>",
@@ -564,7 +561,7 @@ class ReActAgent(Agent):
                 )
             except ParsingError as e:
                 logger.error(f"Error: {e}. Make sure you have provided all tags: {summary_tags}")
-                summary_messages.append(Message(content=str(e), role=MessageRole.USER))
+                summary_messages.append(Message(content=str(e), role=MessageRole.USER, static=True))
                 continue
 
             for summary_index, message_index in enumerate(summary_sections[:-1]):
@@ -609,6 +606,7 @@ class ReActAgent(Agent):
             content=self.generate_prompt(
                 tools_name=self.tool_names, input_formats=self.generate_input_formats(self.tools)
             ),
+            static=True,
         )
 
         if history_messages:
@@ -825,7 +823,9 @@ class ReActAgent(Agent):
                             logger.error(f"XMLParser: Error parsing potential final answer XML: {e}")
                             raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
 
-                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
+                self._prompt.messages.append(
+                    Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True)
+                )
 
                 if action and self.tools:
                     try:
@@ -891,7 +891,9 @@ class ReActAgent(Agent):
                             updated=llm_generated_output,
                         ).model_dump()
                     )
-                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
+                    self._prompt.messages.append(
+                        Message(role=MessageRole.USER, content=observation, static=True, static=True)
+                    )
                 else:
                     self.stream_reasoning(
                         {
@@ -906,7 +908,7 @@ class ReActAgent(Agent):
 
             except ActionParsingException as e:
                 self._prompt.messages.append(
-                    Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output)
+                    Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output, static=True)
                 )
                 self._prompt.messages.append(
                     Message(
@@ -916,6 +918,7 @@ class ReActAgent(Agent):
                         f"Please regenerate the response strictly following the "
                         f"required XML format, ensuring all tags are present and "
                         f"correctly structured, and that any JSON content (like action_input) is valid.",
+                        static=True,
                     )
                 )
                 continue
@@ -985,7 +988,7 @@ class ReActAgent(Agent):
         Returns:
             str: Final answer provided by the agent.
         """
-        system_message = Message(content=REACT_MAX_LOOPS_PROMPT, role=MessageRole.SYSTEM)
+        system_message = Message(content=REACT_MAX_LOOPS_PROMPT, role=MessageRole.SYSTEM, static=True)
         conversation_history = Message(
             content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True
         )
