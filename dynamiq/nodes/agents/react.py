@@ -891,9 +891,7 @@ class ReActAgent(Agent):
                             updated=llm_generated_output,
                         ).model_dump()
                     )
-                    self._prompt.messages.append(
-                        Message(role=MessageRole.USER, content=observation, static=True, static=True)
-                    )
+                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
                 else:
                     self.stream_reasoning(
                         {
