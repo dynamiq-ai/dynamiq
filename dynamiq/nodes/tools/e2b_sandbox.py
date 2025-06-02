@@ -215,7 +215,13 @@ class E2BInterpreterTool(ConnectionNode):
         """Installs the specified packages in the given sandbox."""
         if packages:
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
-            sandbox.commands.run(f"pip install -qq {' '.join(packages.split(','))}")
+            try:
+                process = sandbox.commands.run(f"pip install -qq {' '.join(packages.split(','))}")
+            except Exception as e:
+                raise ToolExecutionException(f"Error during package installation: {e}", recoverable=True)
+
+            if process.exit_code != 0:
+                raise ToolExecutionException(f"Error during package installation: {process.stderr}", recoverable=True)
 
     def _upload_files(self, files: list[FileData], sandbox: Sandbox) -> str:
         """Uploads multiple files to the sandbox and returns details for each file."""
@@ -267,7 +273,11 @@ class E2BInterpreterTool(ConnectionNode):
         code_hash = sha256(code.encode()).hexdigest()
         filename = f"/home/user/{code_hash}.py"
         sandbox.files.write(filename, code)
-        process = sandbox.commands.run(f"python3 {filename}")
+        try:
+            process = sandbox.commands.run(f"python3 {filename}")
+        except Exception as e:
+            raise ToolExecutionException(f"Error during Python code execution: {e}", recoverable=True)
+
         if not (process.stdout or process.stderr):
             raise ToolExecutionException(
                 "Error: No output. Please use 'print()' to display the result of your Python code.",
@@ -282,7 +292,11 @@ class E2BInterpreterTool(ConnectionNode):
         if not sandbox:
             raise ValueError("Sandbox instance is required for command execution.")
 
-        process = sandbox.commands.run(command, background=True)
+        try:
+            process = sandbox.commands.run(command, background=True)
+        except Exception as e:
+            raise ToolExecutionException(f"Error during shell command execution: {e}", recoverable=True)
+
         output = process.wait()
         if output.exit_code != 0:
             raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
