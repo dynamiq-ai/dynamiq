@@ -186,16 +186,16 @@ class ThinkingTool(Node):
 
         prompt_content = self.prompt_template.format(thought=thought, context_section=context_section)
 
-        print(f"Tool {self.name} - {self.id}: prompt content:\n{prompt_content}")
+        logger.debug(f"Tool {self.name} - {self.id}: prompt content:\n{prompt_content}")
 
         result = self.llm.run(
             input_data={},
-            prompt=Prompt(messages=[Message(role="user", content=prompt_content)]),
+            prompt=Prompt(messages=[Message(role="user", content=prompt_content, static=True)]),
             config=config,
             **(kwargs | {"parent_run_id": kwargs.get("run_id")}),
         )
 
-        print(f"Tool {self.name} - {self.id}: result status: {result.output}")
+        logger.debug(f"Tool {self.name} - {self.id}: result status: {result.output}")
 
         self._run_depends = [NodeDependency(node=self.llm).to_dict()]
 
