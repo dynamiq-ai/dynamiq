@@ -30,6 +30,11 @@ def huggingface_model():
 
 
 @pytest.fixture
+def huggingface_api_base(huggingface_model):
+    return f"https://api-inference.huggingface.co/models/{huggingface_model}"
+
+
+@pytest.fixture
 def huggingface_text_embedder(huggingface_connection, huggingface_model):
     return HuggingFaceTextEmbedder(
         id="text_embedder", name="HuggingFaceTextEmbedder", connection=huggingface_connection, model=huggingface_model
@@ -57,7 +62,7 @@ def huggingface_document_embedder_workflow(huggingface_document_embedder):
 
 
 def test_workflow_with_huggingface_text_embedder(
-    mock_embedding_executor, huggingface_text_embedder_workflow, query_input, huggingface_model
+    mock_embedding_executor, huggingface_text_embedder_workflow, query_input, huggingface_model, huggingface_api_base
 ):
     workflow, embedder, output_node = huggingface_text_embedder_workflow
 
@@ -68,14 +73,19 @@ def test_workflow_with_huggingface_text_embedder(
 
     assert_embedder_success(response, embedder, output_node)
     mock_embedding_executor.assert_called_once_with(
-        input=[query_input["query"]],
+        input=query_input["query"],
         model=huggingface_model,
         api_key="api_key",
+        api_base=huggingface_api_base,
     )
 
 
 def test_workflow_with_huggingface_document_embedder(
-    mock_embedding_executor, huggingface_document_embedder_workflow, document_input, huggingface_model
+    mock_embedding_executor,
+    huggingface_document_embedder_workflow,
+    document_input,
+    huggingface_model,
+    huggingface_api_base,
 ):
     workflow, embedder, output_node = huggingface_document_embedder_workflow
 
@@ -86,9 +96,10 @@ def test_workflow_with_huggingface_document_embedder(
 
     assert_embedder_success(response, embedder, output_node)
     mock_embedding_executor.assert_called_once_with(
-        input=[document_input["documents"][0].content],
+        input=document_input["documents"][0].content,
         model=huggingface_model,
         api_key="api_key",
+        api_base=huggingface_api_base,
     )
 
 
@@ -98,11 +109,16 @@ def test_workflow_with_huggingface_document_embedder(
         (AuthenticationError, "Invalid API key", ["huggingface", "BAAI/bge-base-en-v1.5"], "AuthenticationError"),
         (RateLimitError, "Rate limit exceeded", ["huggingface", "BAAI/bge-base-en-v1.5"], "RateLimitError"),
         (APIError, "Service unavailable", [500, "huggingface", "BAAI/bge-base-en-v1.5"], "APIError"),
-        (BadRequestError, "Invalid embedding model", ["non-existent-model", "huggingface"], "BadRequestError"),
+        (BadRequestError, "Invalid embedding model", ["huggingface", "BAAI/bge-base-en-v1.5"], "BadRequestError"),
     ],
 )
 def test_text_embedder_api_errors(
-    huggingface_text_embedder_workflow, error_class, error_msg, error_args, expected_type
+    huggingface_text_embedder_workflow,
+    huggingface_api_base,
+    error_class,
+    error_msg,
+    error_args,
+    expected_type,
 ):
     workflow, embedder, output_node = huggingface_text_embedder_workflow
 
@@ -119,7 +135,10 @@ def test_text_embedder_api_errors(
 
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
         mock_embedding.assert_called_once_with(
-            model=embedder.model, input=["Test query"], api_key=embedder.connection.api_key
+            model=embedder.model,
+            input="Test query",
+            api_key=embedder.connection.api_key,
+            api_base=huggingface_api_base,
         )
 
 
@@ -141,11 +160,17 @@ def test_text_embedder_empty_input(huggingface_text_embedder_workflow, empty_que
         (AuthenticationError, "Invalid API key", ["huggingface", "BAAI/bge-base-en-v1.5"], "AuthenticationError"),
         (RateLimitError, "Rate limit exceeded", ["huggingface", "BAAI/bge-base-en-v1.5"], "RateLimitError"),
         (APIError, "Service unavailable", [500, "huggingface", "BAAI/bge-base-en-v1.5"], "APIError"),
-        (BadRequestError, "Invalid embedding model", ["non-existent-model", "huggingface"], "BadRequestError"),
+        (BadRequestError, "Invalid embedding model", ["huggingface", "BAAI/bge-base-en-v1.5"], "BadRequestError"),
     ],
 )
 def test_document_embedder_api_errors(
-    huggingface_document_embedder_workflow, document_input, error_class, error_msg, error_args, expected_type
+    huggingface_document_embedder_workflow,
+    document_input,
+    huggingface_api_base,
+    error_class,
+    error_msg,
+    error_args,
+    expected_type,
 ):
     workflow, embedder, output_node = huggingface_document_embedder_workflow
 
@@ -159,7 +184,10 @@ def test_document_embedder_api_errors(
         response = workflow.run(input_data=document_input)
         assert_embedder_failure(response, embedder, output_node, expected_type, error_msg)
         mock_embedding.assert_called_once_with(
-            model=embedder.model, input=[document_input["documents"][0].content], api_key=embedder.connection.api_key
+            model=embedder.model,
+            input=document_input["documents"][0].content,
+            api_key=embedder.connection.api_key,
+            api_base=huggingface_api_base,
         )
 
 
