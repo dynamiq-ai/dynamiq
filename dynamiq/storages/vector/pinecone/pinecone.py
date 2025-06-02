@@ -354,7 +354,7 @@ class PineconeVectorStore(BaseVectorStore):
             doc_for_pinecone = {
                 "id": document.id,
                 "values": embedding,
-                "metadata": dict(document.metadata),
+                "metadata": dict(document.metadata or {}),
             }
 
             if document.content is not None:
