@@ -513,7 +513,7 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
-    enable_multi_tool: bool = Field(
+    parallel_tool_calls_enabled: bool = Field(
         default=False,
         description="Enable multi-tool execution in a single step. "
         "When True, the agent can call multiple tools in parallel.",
@@ -640,7 +640,7 @@ class ReActAgent(Agent):
                     recoverable=True,
                 )
 
-            if not self.enable_multi_tool or len(actions) == 1:
+            if not self.parallel_tool_calls_enabled or len(actions) == 1:
                 action = actions[0]["tool_name"]
                 action_input = actions[0]["tool_input"]
                 return thought, action, action_input
@@ -654,7 +654,7 @@ class ReActAgent(Agent):
                 f"Error parsing action(s): {str(e)}. "
                 f"Please ensure the output follows the format 'Thought: <text> "
                 f"Action: <action> Action Input: <valid JSON>' "
-                f"{'with possible multiple Action/Action Input pairs.' if self.enable_multi_tool else ''}",
+                f"{'with possible multiple Action/Action Input pairs.' if self.parallel_tool_calls_enabled else ''}",
                 recoverable=True,
             )
 
@@ -892,7 +892,7 @@ class ReActAgent(Agent):
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
 
-                        if self.enable_multi_tool:
+                        if self.parallel_tool_calls_enabled:
                             try:
                                 parsed_result = XMLParser.parse_unified_xml_format(llm_generated_output)
 
@@ -1011,10 +1011,10 @@ class ReActAgent(Agent):
                 self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
 
                 if action and self.tools:
-                    if self.inference_mode == InferenceMode.XML and self.enable_multi_tool:
+                    if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled:
                         tool_result = self._execute_tools(tools_data, config, **kwargs)
 
-                    elif self.inference_mode == InferenceMode.DEFAULT and self.enable_multi_tool:
+                    elif self.inference_mode == InferenceMode.DEFAULT and self.parallel_tool_calls_enabled:
                         if action == "multiple_tools":
                             tools_data = []
                             for tool_call in action_input:
@@ -1409,7 +1409,7 @@ class ReActAgent(Agent):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
 
-        if self.enable_multi_tool:
+        if self.parallel_tool_calls_enabled:
             instructions_default = REACT_BLOCK_INSTRUCTIONS_MULTI
             instructions_xml = REACT_BLOCK_XML_INSTRUCTIONS_MULTI
         else:

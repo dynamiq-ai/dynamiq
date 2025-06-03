@@ -39,7 +39,7 @@ if __name__ == "__main__":
         tools=[tool_search, tool_code],
         role=AGENT_ROLE,
         inference_mode=InferenceMode.DEFAULT,
-        enable_multi_tool=True,
+        parallel_tool_calls_enabled=True,
     )
 
     example_input = {
