@@ -161,10 +161,8 @@ class ScaleSerpTool(ConnectionNode):
         url = input_data.url or self.url
         limit = input_data.limit or self.limit
         search_type = input_data.search_type or self.search_type
-        output_format = input_data.output or self.output  # Use input parameter
-        include_html = (
-            input_data.include_html if input_data.include_html is not None else self.include_html
-        )  # Use input parameter
+        output_format = input_data.output or self.output
+        include_html = input_data.include_html if input_data.include_html is not None else self.include_html
 
         if not query and not url:
             raise ToolExecutionException(
