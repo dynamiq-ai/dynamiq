@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -102,6 +103,14 @@ class ThinkingTool(Node):
     memory_enabled: bool = Field(
         default=False, description="Whether to maintain memory of previous thoughts in this session"
     )
+    max_thoughts_in_memory: int = Field(
+        default=3,
+        description="Number of recent thoughts to keep in memory when memory is enabled",
+    )
+    max_thought_chars: int = Field(
+        default=300,
+        description="Maximum characters of each thought to display in memory when memory is enabled",
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ThinkingInputSchema]] = ThinkingInputSchema
@@ -144,10 +153,10 @@ class ThinkingTool(Node):
             sections.append(f"Focus area: {focus}")
 
         if self.memory_enabled and self._thought_history:
-            recent_thoughts = self._thought_history[-3:]
+            recent_thoughts = self._thought_history[-self.max_thoughts_in_memory :]
             history_text = "\n".join(
                 [
-                    f"- {i + 1}. {thought['thought'][:100]}{'...' if len(thought['thought']) > 100 else ''}"
+                    f"- {i + 1}. {thought['thought'][:self.max_thought_chars]}{'...' if len(thought['thought']) > self.max_thought_chars else ''}"  # noqa E501
                     for i, thought in enumerate(recent_thoughts)
                 ]
             )
@@ -234,4 +243,4 @@ class ThinkingTool(Node):
 
     def get_thought_history(self) -> list[dict]:
         """Get the current thought history."""
-        return self._thought_history.copy() if self.memory_enabled else []
+        return deepcopy(self._thought_history) if self.memory_enabled else []
