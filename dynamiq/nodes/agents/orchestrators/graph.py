@@ -38,7 +38,7 @@ class GraphOrchestrator(Orchestrator):
         initial_state (str): State to start from.
         objective (Optional[str]): The main objective of the orchestration.
         max_loops (Optional[int]): Maximum number of transition between states.
-        enable_input_analysis (bool): Enables initial input analysis.
+        input_analysis_enabled (bool): Enables initial input analysis.
     """
 
     name: str | None = "GraphOrchestrator"
@@ -47,7 +47,7 @@ class GraphOrchestrator(Orchestrator):
     context: dict[str, Any] = {}
     states: list[GraphState] = []
     max_loops: int = 15
-    enable_input_analysis: bool = False
+    input_analysis_enabled: bool = False
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
@@ -327,7 +327,7 @@ class GraphOrchestrator(Orchestrator):
         Returns:
             dict[str, Any]: The final output generated after processing the task and inner context of orchestrator.
         """
-        if self.enable_input_analysis:
+        if self.input_analysis_enabled:
             analysis = self._analyze_user_input(
                 input_task, self.states_descriptions(list(self._state_by_id.keys())), config=config, **kwargs
             )
