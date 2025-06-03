@@ -99,7 +99,7 @@ class ThinkingTool(Node):
         default=THINKING_PROMPT_TEMPLATE, description="The prompt template for the thinking process"
     )
 
-    enable_memory: bool = Field(
+    memory_enabled: bool = Field(
         default=False, description="Whether to maintain memory of previous thoughts in this session"
     )
 
@@ -143,7 +143,7 @@ class ThinkingTool(Node):
         if focus and focus != "general":
             sections.append(f"Focus area: {focus}")
 
-        if self.enable_memory and self._thought_history:
+        if self.memory_enabled and self._thought_history:
             recent_thoughts = self._thought_history[-3:]
             history_text = "\n".join(
                 [
@@ -204,7 +204,7 @@ class ThinkingTool(Node):
 
         analysis = result.output["content"]
 
-        if self.enable_memory:
+        if self.memory_enabled:
             self._thought_history.append(
                 {
                     "thought": thought,
@@ -224,7 +224,7 @@ class ThinkingTool(Node):
             "original_thought": thought,
             "context_used": context,
             "focus_area": focus,
-            "thinking_session_count": len(self._thought_history) if self.enable_memory else None,
+            "thinking_session_count": len(self._thought_history) if self.memory_enabled else None,
         }
 
     def clear_memory(self) -> None:
@@ -234,4 +234,4 @@ class ThinkingTool(Node):
 
     def get_thought_history(self) -> list[dict]:
         """Get the current thought history."""
-        return self._thought_history.copy() if self.enable_memory else []
+        return self._thought_history.copy() if self.memory_enabled else []
