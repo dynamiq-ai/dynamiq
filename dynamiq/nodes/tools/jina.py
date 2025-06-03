@@ -141,43 +141,35 @@ class JinaScrapeTool(ConnectionNode):
             "X-Timeout": str(self.timeout),
         }
 
-        # Response format
         if self.response_format != JinaResponseFormat.DEFAULT:
             headers["X-Return-Format"] = self.response_format.value
 
-        # Engine selection
         engine = input_data.engine or self.engine
         if engine in ["browser", "direct", "cf-browser-rendering"]:
             headers["X-Engine"] = engine
 
-        # Target specific elements
         target_selector = input_data.target_selector or self.target_selector
         if target_selector:
             headers["X-Target-Selector"] = target_selector
 
-        # Remove unwanted elements
         remove_selector = input_data.remove_selector or self.remove_selector
         if remove_selector:
             headers["X-Remove-Selector"] = remove_selector
 
-        # Links summary
         include_links = input_data.include_links if input_data.include_links is not None else self.include_links
         if include_links:
             headers["X-With-Links-Summary"] = "true"
 
-        # Images summary
         include_images = input_data.include_images if input_data.include_images is not None else self.include_images
         if include_images:
             headers["X-With-Images-Summary"] = "true"
 
-        # Generate alt text
         generate_alt = (
             input_data.generate_alt_text if input_data.generate_alt_text is not None else self.generate_alt_text
         )
         if generate_alt:
             headers["X-With-Generated-Alt"] = "true"
 
-        # Cache control
         if self.no_cache:
             headers["X-No-Cache"] = "true"
 
@@ -230,7 +222,6 @@ class JinaScrapeTool(ConnectionNode):
         request_body = self._build_request_body(input_data)
 
         try:
-            # Use POST method with JSON body as specified in Jina Reader API
             response = self.client.request(
                 method="POST",
                 url=self.SCRAPE_PATH,
@@ -239,7 +230,6 @@ class JinaScrapeTool(ConnectionNode):
             )
             response.raise_for_status()
 
-            # Handle different response types
             if self.response_format in [JinaResponseFormat.PAGESHOT, JinaResponseFormat.SCREENSHOT]:
                 scrape_result = response.content
                 links, images = {}, {}
