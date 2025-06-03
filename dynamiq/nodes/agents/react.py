@@ -314,12 +314,9 @@ class ReActAgent(Agent):
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
-    tool_cache: dict[ToolCacheEntry, Any] = {}
+    _tool_cache: dict[ToolCacheEntry, Any] = {}
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -862,10 +859,10 @@ class ReActAgent(Agent):
                         )
 
                         tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
-                        tool_result = self.tool_cache.get(tool_cache_entry, None)
+                        tool_result = self._tool_cache.get(tool_cache_entry, None)
                         if not tool_result:
                             tool_result = self._run_tool(tool, action_input, config, **kwargs)
-                            self.tool_cache[tool_cache_entry] = tool_result
+                            self._tool_cache[tool_cache_entry] = tool_result
                         else:
                             logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
 
