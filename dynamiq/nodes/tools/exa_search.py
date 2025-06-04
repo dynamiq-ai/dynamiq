@@ -60,6 +60,18 @@ class QueryType(str, Enum):
     auto = "auto"
 
 
+class CategoryType(str, Enum):
+    company = "company"
+    research_paper = "research paper"
+    news = "news"
+    pdf = "pdf"
+    github = "github"
+    tweet = "tweet"
+    personal_site = "personal site"
+    linkedin_profile = "linkedin profile"
+    financial_report = "financial report"
+
+
 class ExaInputSchema(BaseModel):
     """Schema for Exa search input parameters."""
 
@@ -82,7 +94,7 @@ class ExaInputSchema(BaseModel):
         "Default is auto, which automatically decides between keyword and neural.",
         json_schema_extra={"is_accessible_to_agent": False},
     )
-    category: str | None = Field(
+    category: CategoryType | None = Field(
         default=None,
         description="A data category to focus on."
         "Options are company, research paper, news, pdf,"
@@ -133,7 +145,7 @@ class ExaTool(ConnectionNode):
         include_full_content (bool): If true, retrieve full content, highlights, and summaries.
         use_autoprompt (bool): If true, query will be converted to a Exa query.
         query_type (QueryType): Type of query to be used.
-        category (str, optional): A data category to focus on.
+        category (CategoryType): A data category to focus on.
         limit (int): Number of search results to return.
         include_domains (list[str], optional): List of domains to include.
         exclude_domains (list[str], optional): List of domains to exclude.
@@ -151,7 +163,7 @@ class ExaTool(ConnectionNode):
     )
     use_autoprompt: bool = Field(default=False, description="If true, query will be converted to a Exa query.")
     query_type: QueryType = Field(default=QueryType.auto, description="Type of query to be used.")
-    category: str | None = Field(default=None, description="A data category to focus on.")
+    category: CategoryType | None = Field(default=None, description="A data category to focus on.")
     limit: int = Field(default=10, ge=1, le=100, description="Number of search results to return.")
     include_domains: list[str] | None = Field(default=None, description="List of domains to include in the search.")
     exclude_domains: list[str] | None = Field(default=None, description="List of domains to exclude from the search.")
