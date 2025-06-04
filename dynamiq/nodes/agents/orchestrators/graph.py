@@ -372,5 +372,4 @@ class GraphOrchestrator(Orchestrator):
         self.manager.streaming = self.streaming
         for state in self.states:
             for task in state.tasks:
-                if isinstance(task, Agent):
-                    task.streaming = self.streaming
+                task.streaming = self.streaming

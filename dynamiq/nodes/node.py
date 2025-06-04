@@ -236,7 +236,7 @@ class Node(BaseModel, Runnable, ABC):
     _output_references: NodeOutputReferences = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    input_schema: ClassVar[type[BaseModel] | None] = None
+    input_schema: type[BaseModel] | None = None
     callbacks: list[NodeCallbackHandler] = []
     _json_schema_fields: ClassVar[list[str]] = []
 
