@@ -86,38 +86,49 @@ For questions that don't require tools:
     <answer>
         [Your direct response]
     </answer>
-</output>"""  # noqa: E501
+</output>
+
+IMPORTANT RULES:
+- ALWAYS include <thought> tags with detailed reasoning
+- For tool use, include action and action_input tags
+- For direct answers, only include thought and answer tags
+- Ensure action_input contains valid JSON with double quotes
+- Properly close all XML tags
+- For all tags other than <answer>, text content should ideally be XML-escaped.
+- Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
+- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
+"""  # noqa: E501
 
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
 MULTI-TOOL PLANNING AND STRATEGY:
 
-**Core Principle: Scale tool usage to match task complexity**
+Core Principle: Scale tool usage to match task complexity
 Start with the minimum number of tools needed and scale up based on the task's requirements.
 
-**Decision Framework:**
-1. **Zero Tools** - Answer directly when:
+Decision Framework:
+1. Zero Tools - Answer directly when:
    - Question is within your knowledge base
    - No real-time data needed
    - Simple explanations or general concepts
 
-2. **Single Tool** - Use one tool when:
+2. Single Tool - Use one tool when:
    - Single fact verification needed
    - One specific data point required
    - Simple lookup or calculation
 
-3. **Multiple Tools (2-4)** - Use parallel tools when:
+3. Multiple Tools (2-4) - Use parallel tools when:
    - Comparing information from different sources
    - Gathering complementary data points
    - Cross-referencing or validation needed
 
-4. **Comprehensive Research (5+)** - Use extensive tooling when:
+4. Comprehensive Research (5+) - Use extensive tooling when:
    - Deep analysis requested ("comprehensive", "detailed", "thorough")
    - Multiple aspects of complex topic
    - Creating reports or extensive documentation
 
-**MANDATORY MULTI-TOOL PATTERNS:**
+MANDATORY MULTI-TOOL PATTERNS:
 
-1. **Research Tasks (Adaptive Scaling):**
+1. Research Tasks (Adaptive Scaling):
    - START: Analyze query complexity
    - IF simple fact: 1-2 tool calls
    - IF moderate complexity: 3-4 tool calls with complementary queries
@@ -134,82 +145,93 @@ Start with the minimum number of tools needed and scale up based on the task's r
    - Query 3: Challenges or limitations
    - Query 4+: Deep dives on critical aspects
 
-2. **Coding and Technical Tasks:**
+2. Coding and Technical Tasks:
    - Documentation lookup: 1-2 tools (official docs + examples)
    - Debugging: 2-3 tools (error search + solution patterns)
    - Architecture decisions: 3-5 tools (best practices + comparisons + examples)
    - Full implementation: 5+ tools (docs + patterns + edge cases + optimization)
 
-3. **Data Collection/Analysis:**
+3. Data Collection/Analysis:
    - Single source: 1 tool
    - Multiple sources: Use parallel calls for efficiency
    - Comparative analysis: Minimum 3 sources
    - Market research: 5+ diverse sources
 
-4. **Verification and Fact-Checking:**
+4. Verification and Fact-Checking:
    - Simple facts: 1-2 authoritative sources
    - Controversial topics: 3+ diverse sources
    - Critical information: Cross-reference with 3+ sources
 
-**EFFICIENCY GUIDELINES:**
+EFFICIENCY GUIDELINES:
 
-1. **Parallel vs Sequential:**
+1. Parallel vs Sequential:
    - Use PARALLEL calls when queries are independent
    - Use SEQUENTIAL only when later queries depend on earlier results
    - Group related queries in single tool_calls block
 
-2. **Query Optimization:**
+2. Query Optimization:
    - Start broad, then narrow based on results
    - Use different search parameters for variety
    - Avoid redundant or overlapping queries
    - Each tool call should add unique value
 
-3. **Smart Scaling:**
+3. Smart Scaling:
    - Begin with essential queries
    - Add detail queries based on initial results
    - Stop when sufficient information gathered
    - Don't over-research simple questions
 
-**TASK-SPECIFIC STRATEGIES:**
+TASK-SPECIFIC STRATEGIES:
 
-1. **Current Events/News:**
+1. Current Events/News:
    - Recent headlines: 2-3 news sources
    - In-depth coverage: 5+ sources including analysis
    - Fact verification: Cross-reference 3+ sources
 
-2. **Technical Documentation:**
+2. Technical Documentation:
    - Quick reference: 1-2 official sources
    - Implementation guide: 3-4 sources (docs + examples + gotchas)
    - Comprehensive tutorial: 5+ sources covering all aspects
 
-3. **Product/Service Research:**
+3. Product/Service Research:
    - Basic info: 1-2 sources
    - Comparison shopping: 3-5 sources
    - Detailed analysis: 5+ including reviews, specs, alternatives
 
-4. **Scientific/Academic Topics:**
+4. Scientific/Academic Topics:
    - Basic concepts: 1-2 authoritative sources
    - Current research: 3-5 recent papers/articles
    - Comprehensive review: 5+ sources spanning fundamentals to cutting-edge
 
-**IMPORTANT RULES:**
+MULTIPLE ENTITIES PATTERN:
+When researching multiple distinct entities (companies, products, people, locations):
+- BAD: "Report about Company A, Company B, Company C"
+- GOOD: Separate queries for each entity
+  - Query 1: "Company A financial performance"
+  - Query 2: "Company B market position"
+  - Query 3: "Company C recent developments"
+- REASON: Each entity gets full search attention, avoiding diluted results
+
+QUERY FORMULATION BEST PRACTICES:
+1. Entity Separation: Search distinct subjects individually
+2. Perspective Variation: Use different angles for same topic
+   - "benefits of X" → "advantages of X" → "X success stories"
+3. Temporal Layering: Mix timeframes
+   - "latest developments in X"
+   - "X trends 2024-2025"
+   - "future of X"
+4. Source Diversification: Target different source types
+   - Official documentation
+   - Independent reviews/analysis
+   - Case studies/examples
+
+IMPORTANT RULES:
 - Quality over quantity - each tool call must serve a purpose
 - Explain your multi-tool strategy in your thought process
 - Adapt the number of tools based on result quality
 - If initial results are comprehensive, don't add unnecessary calls
 - For coding: balance between documentation, examples, and best practices
 - Always consider user's implicit needs beyond explicit request
-</output>
-
-IMPORTANT RULES:
-- ALWAYS include <thought> tags with detailed reasoning
-- For tool use, include action and action_input tags
-- For direct answers, only include thought and answer tags
-- Ensure action_input contains valid JSON with double quotes
-- Properly close all XML tags
-- For all tags other than <answer>, text content should ideally be XML-escaped.
-- Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
-- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
 """  # noqa: E501
 
 
@@ -298,11 +320,10 @@ For questions that don't require tools:
 After each tool usage, you'll receive:
 Observation: [Result(s) from the tool(s)]
 
-**XML FORMAT RULES:**
+XML FORMAT RULES:
 - Always include strategic thinking in <thought> tags
 - Group parallel tool calls in single <tool_calls> block
 - Use sequential outputs only when dependencies exist
-- Ensure valid JSON in <input> tags
 - Synthesize all results in final answer
 """  # noqa: E501
 )

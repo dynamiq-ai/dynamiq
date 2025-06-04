@@ -489,55 +489,50 @@ class XMLParser:
         if not actions_xml:
             raise XMLParsingError("Actions block is empty")
 
+        tool_calls = []
         try:
             wrapped_actions = f"<root>{actions_xml}</root>"
             root = XMLParser._parse_with_lxml(wrapped_actions)
 
-            if root is None:
-                raise XMLParsingError("Failed to parse actions XML")
+            if root is not None:
+                for tool_call_elem in root.xpath(".//tool_call"):
+                    tool_name_elem = tool_call_elem.find(".//tool_name")
+                    tool_input_elem = tool_call_elem.find(".//tool_input")
 
-            tool_calls = []
-            for tool_call_elem in root.xpath(".//tool_call"):
-                tool_name_elem = tool_call_elem.find(".//tool_name")
-                tool_input_elem = tool_call_elem.find(".//tool_input")
+                    if tool_name_elem is None or tool_input_elem is None:
+                        logger.warning("XMLParser: Missing tool_name or tool_input in tool_call")
+                        continue
 
-                if tool_name_elem is None or tool_input_elem is None:
-                    logger.warning("XMLParser: Missing tool_name or tool_input in tool_call")
-                    continue
+                    tool_name = "".join(tool_name_elem.itertext()).strip()
+                    tool_input_raw = "".join(tool_input_elem.itertext()).strip()
 
-                tool_name = "".join(tool_name_elem.itertext()).strip()
-                tool_input_raw = "".join(tool_input_elem.itertext()).strip()
+                    if not tool_name:
+                        logger.warning("XMLParser: Empty tool_name in tool_call")
+                        continue
 
-                if not tool_name:
-                    logger.warning("XMLParser: Empty tool_name in tool_call")
-                    continue
+                    try:
+                        tool_input_raw = re.sub(r"^```(?:json)?\s*|```$", "", tool_input_raw.strip())
+                        tool_input = json.loads(tool_input_raw)
+                    except json.JSONDecodeError as e:
+                        error_message = f"Failed to parse JSON in tool_input for {tool_name}: {e}"
+                        raise JSONParsingError(error_message)
 
-                try:
-                    tool_input_raw = re.sub(r"^```(?:json)?\s*|```$", "", tool_input_raw.strip())
-                    tool_input = json.loads(tool_input_raw)
-                except json.JSONDecodeError as e:
-                    error_message = f"Failed to parse JSON in tool_input for {tool_name}: {e}"
-                    raise JSONParsingError(error_message)
+                    tool_calls.append({"tool_name": tool_name, "tool_input": tool_input})
 
-                tool_calls.append({"tool_name": tool_name, "tool_input": tool_input})
+                if tool_calls:
+                    return thought, tool_calls
 
-            if not tool_calls:
-                raise TagNotFoundError("No valid tool_call elements found in actions")
-
-            return thought, tool_calls
-
+        except JSONParsingError:
+            raise
         except Exception as e:
-            if isinstance(e, (XMLParsingError, TagNotFoundError, JSONParsingError)):
-                raise
-            raise XMLParsingError(f"Error parsing multiple tool calls: {e}")
+            logger.warning(f"XMLParser: lxml parsing failed, falling back to regex: {e}")
 
         tool_call_pattern = r"<tool_call>\s*(.*?)\s*</tool_call>"
         tool_call_matches = re.findall(tool_call_pattern, actions_xml, re.DOTALL)
 
         if not tool_call_matches:
-            raise XMLParsingError("No tool_call elements found in actions with regex fallback")
+            raise XMLParsingError("No tool_call elements found in actions")
 
-        tool_calls = []
         for tool_call in tool_call_matches:
             tool_name_match = re.search(r"<tool_name>\s*(.*?)\s*</tool_name>", tool_call, re.DOTALL)
             tool_input_match = re.search(r"<tool_input>\s*(.*?)\s*</tool_input>", tool_call, re.DOTALL)
@@ -561,7 +556,7 @@ class XMLParser:
             tool_calls.append({"tool_name": tool_name, "tool_input": tool_input})
 
         if not tool_calls:
-            raise TagNotFoundError("No valid tool_call elements found in actions with regex")
+            raise TagNotFoundError("No valid tool_call elements found in actions")
 
         return thought, tool_calls
 
