@@ -235,13 +235,17 @@ class GraphState(Node):
             raise OrchestratorError(f"Failed to execute {task.name} with Error: {error_msg}")
 
         context = response.output.get("content")
-        if not isinstance(context, dict):
-            raise OrchestratorError(
-                f"Error: Task returned invalid data format. Expected a dictionary got {type(context)}"
-            )
 
-        if "result" not in context:
-            raise OrchestratorError("Error: Task returned dictionary with no 'result' key in it.")
+        if isinstance(task, FunctionTool) or isinstance(task, Python):
+            if not isinstance(context, dict):
+                raise OrchestratorError(
+                    f"Error: Task returned invalid data format. Expected a dictionary got {type(context)}"
+                )
+
+            if "result" not in context:
+                raise OrchestratorError("Error: Task returned dictionary with no 'result' key in it.")
+        else:
+            return context, {}
 
         context.pop("history", None)
 
