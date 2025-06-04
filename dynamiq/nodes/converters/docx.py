@@ -29,16 +29,6 @@ class DOCXFileConverterInputSchema(BaseModel):
 class DOCXFileConverter(Node):
     """
     A component for converting files to Documents using the docx converter.
-
-    Args:
-        document_creation_mode (Literal["one-doc-per-file", "one-doc-per-page", "one-doc-per-element"],
-            optional): Determines how to create Documents from the elements returned by PdfReader.
-            Options are:
-            - "one-doc-per-file": Creates one Document per file.
-                All elements are concatenated into one text field.
-            - "one-doc-per-page": Creates one Document per page.
-                All elements on a page are concatenated into one text field.
-            Defaults to "one-doc-per-file".
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
