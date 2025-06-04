@@ -6,7 +6,6 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import Flow
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.prompts import Message, Prompt
-from dynamiq.prompts.prompts import Tool, ToolFunction, ToolFunctionParameters
 
 
 def get_current_time(location: str) -> str:
@@ -34,23 +33,20 @@ def main():
     cm = ConnectionManager()
 
     tools = [
-        Tool(
-            function=ToolFunction(
-                name="get_current_time",
-                description="Get the current time in a given location",
-                parameters=ToolFunctionParameters(
-                    type="object",
-                    required=["location"],
-                    properties={
-                        "location": {
-                            "type": "string",
-                            "description": "The city, e.g. San Francisco",
-                        }
-                    },
-                ),
-            ),
-        )
+        {
+            "type": "function",
+            "function": {
+                "name": "get_current_time",
+                "description": "Get the current time in a given location",
+                "parameters": {
+                    "type": "object",
+                    "required": ["location"],
+                    "properties": {"location": {"type": "string", "description": "The city, e.g. San Francisco"}},
+                },
+            },
+        }
     ]
+
     openai_node = OpenAI(
         name="openAI",
         model="gpt-3.5-turbo-1106",
