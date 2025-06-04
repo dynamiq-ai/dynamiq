@@ -21,7 +21,6 @@ class Pinecone(MemoryBackend):
     """Pinecone memory backend implementation."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
     name: str = "Pinecone"
     connection: PineconeConnection
     embedder: DocumentEmbedder

@@ -1,6 +1,7 @@
 from dynamiq.nodes.agents import ReActAgent
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool, MessageSenderTool
 from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
 from examples.llm_setup import setup_llm
 
@@ -47,6 +48,7 @@ def run_agent(query) -> dict:
             "You are a helpful assistant that has access to the internet using Tavily Tool."
             "You can request some clarifications using HumanFeedbackTool and send messages using MessageSenderTool "
         ),
+        inference_mode=InferenceMode.XML,
         llm=llm,
         tools=[email_sender_tool, human_feedback_tool, message_sender_tool],
     )
