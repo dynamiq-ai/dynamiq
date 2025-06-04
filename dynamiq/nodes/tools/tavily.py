@@ -24,8 +24,11 @@ A web search tool that delivers relevant results from trusted internet sources, 
 ### Parameters
 - `query`: Your search query (e.g., "latest quantum computing advances").
 - `search_depth`: Must be either `basic` or `advanced` (default: `basic`).
+- `chunks_per_source`: Number of chunks to return per source (default: 3, range: 1-3).
 - `topic`: Must be either `general` (default) or `news`.
 - `max_results`: Number of results (default: 5, range: 1-20).
+- `time_range`:The time range back from the current date to filter results. Useful when looking for sources that have published data.
+Available options are only one of: `day`, `week`, `month`, `year`, `d`, `w`, `m`, `y`.
 - `include_raw_content`: Include full page content (default: false).
 
 ### Usage Examples
@@ -57,6 +60,20 @@ class TavilyInputSchema(BaseModel):
     topic: str | None = Field(
         default=None,
         description="The topic to search for; must be either `general` or `news`.",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    chunks_per_source: int | None = Field(
+        default=3,
+        ge=1,
+        le=3,
+        description="The number of chunks to return per source (default: 3, range: 1-3).",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+    time_range: str | None = Field(
+        default=None,
+        description="The time range back from the current date to filter results. "
+        "Useful when looking for sources that have published data. "
+        "Available options are only one of: `day`, `week`, `month`, `year`, `d`, `w`, `m`, `y`.",
         json_schema_extra={"is_accessible_to_agent": False},
     )
     max_results: int | None = Field(
@@ -109,6 +126,18 @@ class TavilyTool(ConnectionNode):
         ge=1,
         le=100,
         description="The maximum number of search results to return.",
+    )
+    chunks_per_source: int | None = Field(
+        default=3,
+        ge=1,
+        le=3,
+        description="The number of chunks to return per source (default: 3, range: 1-3).",
+    )
+    time_range: str | None = Field(
+        default=None,
+        description="The time range back from the current date to filter results. "
+        "Useful when looking for sources that have published data. "
+        "Available options are only one of: `day`, `week`, `month`, `year`, `d`, `w`, `m`, `y`.",
     )
     include_images: bool = Field(default=False, description="Include images in search results.")
     include_answer: bool = Field(default=False, description="Include answer in search results.")
@@ -175,6 +204,8 @@ class TavilyTool(ConnectionNode):
             "include_domains": self.include_domains,
             "exclude_domains": self.exclude_domains,
             "use_cache": self.use_cache,
+            "chunks_per_source": self.chunks_per_source,
+            "time_range": self.time_range,
         }
 
         input_dict = input_data.model_dump(exclude_unset=True)
