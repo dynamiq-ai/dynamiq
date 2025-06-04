@@ -286,7 +286,7 @@ class Prompt(BasePrompt):
     """
 
     messages: list[Message | VisionMessage]
-    tools: list[Tool] | None = None
+    tools: list[Tool | dict] | None = None
     response_format: dict[str, Any] | None = None
     _Template: Any = PrivateAttr()
 
@@ -345,7 +345,4 @@ class Prompt(BasePrompt):
         return out
 
     def format_tools(self, **kwargs) -> list[dict] | None:
-        out = None
-        if self.tools:
-            out = [tool.model_dump() for tool in self.tools]
-        return out
+        pass
