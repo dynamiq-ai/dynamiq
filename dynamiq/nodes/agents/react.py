@@ -13,11 +13,12 @@ from dynamiq.nodes.agents.exceptions import (
     AgentUnknownToolException,
     JSONParsingError,
     MaxLoopsExceededException,
+    ParsingError,
     RecoverableAgentException,
     TagNotFoundError,
     XMLParsingError,
 )
-from dynamiq.nodes.agents.utils import XMLParser
+from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
@@ -103,6 +104,7 @@ IMPORTANT RULES:
 - For all tags other than <answer>, text content should ideally be XML-escaped.
 - Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
 - Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
+- You can get "Observation (shortened)" this indicates that output from this tool is shortened.
 """  # noqa: E501
 
 
@@ -241,6 +243,35 @@ Your response should be clear, concise, and professional.
 </answer>
 """  # noqa: E501
 
+HISTORY_SUMMARIZATION_PROMPT = """
+Task: Extract valuable information from tool outputs.
+
+Each tool output that needs to be processed is clearly marked using the following format:
+=== TOOL_OUTPUT [tool_number] ===
+
+Instructions:
+
+For each marked section, extract the relevant and valuable information.
+Wrap the extracted content in a custom tag that corresponds to the section number.
+Tag Format:
+Use <tool_outputX>, where X is the tool number.
+Example: If the tool output is labeled with the number 4, wrap your extracted content as follows:
+    <tool_output4>...extracted content...</tool_output4>
+
+You may encounter multiple tool outputs within the history.
+Ensure each extracted section is enclosed in its corresponding tag based on its tool number.
+
+Information that will not be included in extracted part will be removed.
+
+Guidelines:
+* In output provide only tags and extracted information inside.
+* Try to keep information which responds for initial user request and is consistent with previous extracted information.
+* Preserve as much important details as possible.
+* Do not merge or combine content from different sections.
+* Maintain the numbering to match the original section order.
+
+Input request:
+"""
 
 final_answer_function_schema = {
     "type": "function",
@@ -282,6 +313,8 @@ class ReActAgent(Agent):
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
     )
+    summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
+    _tool_cache: dict[ToolCacheEntry, Any] = {}
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
 
@@ -445,6 +478,105 @@ class ReActAgent(Agent):
                 **kwargs,
             )
 
+    def is_token_limit_exceeded(self) -> bool:
+        """Check whether token limit for summarization is exceeded.
+
+        Returns:
+            bool: Whether token limit is exceeded.
+        """
+        prompt_tokens = self._prompt.count_tokens(self.llm.model)
+
+        return (
+            self.summarization_config.max_token_context_length
+            and prompt_tokens > self.summarization_config.max_token_context_length
+        ) or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
+
+    def summarize_history(
+        self,
+        input_message,
+        history_offset: int,
+        summary_offset: int,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> None:
+        """
+        Summarizes history and saves relevant information in the context
+
+        Args:
+            input_message (Message | VisionMessage): User request message.
+            history_offset (int): Offset to the first message in the conversation history within the prompt.
+            summary_offset (int): Offset to the position of the first message in prompt that was not summarized.
+            config (RunnableConfig | None): Configuration for the agent run.
+            **kwargs: Additional parameters for running the agent.
+
+        Returns:
+            int: Number of summarized messages.
+        """
+
+        logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output started.")
+        messages_history = "\nHistory to extract information from: \n"
+        summary_sections = []
+
+        offset = max(history_offset, summary_offset - self.summarization_config.context_history_length)
+        for index, message in enumerate(self._prompt.messages[offset:]):
+            if message.role == MessageRole.USER:
+                if index + offset >= summary_offset:
+                    messages_history += (
+                        f"=== TOOL_OUTPUT: {index + offset} === \n {message.content}"
+                        f"\n === TOOL_OUTPUT: {index + offset} === \n"
+                    )
+                    summary_sections.append(index + offset)
+            else:
+                messages_history += f"\n{message.content}\n"
+
+        messages_history = (
+            messages_history + f"\n Required tags in the output {[f"tool_output{index}" for index in summary_sections]}"
+        )
+
+        summary_messages = [
+            Message(content=HISTORY_SUMMARIZATION_PROMPT, role=MessageRole.SYSTEM, static=True),
+            input_message,
+            Message(content=messages_history, role=MessageRole.USER, static=True),  # History to summarize
+        ]
+
+        summary_tags = [f"tool_output{index}" for index in summary_sections]
+
+        for _ in range(self.max_loops):
+            llm_result = self._run_llm(
+                messages=summary_messages,
+                config=config,
+                **kwargs,
+            )
+
+            output = llm_result.output["content"]
+            summary_messages.append(Message(content=output, role=MessageRole.ASSISTANT, static=True))
+            try:
+                parsed_data = XMLParser.parse(
+                    f"<root>{output}</root>",
+                    required_tags=summary_tags,
+                    optional_tags=[],
+                )
+            except ParsingError as e:
+                logger.error(f"Error: {e}. Make sure you have provided all tags: {summary_tags}")
+                summary_messages.append(Message(content=str(e), role=MessageRole.USER, static=True))
+                continue
+
+            for summary_index, message_index in enumerate(summary_sections[:-1]):
+                self._prompt.messages[message_index].content = (
+                    f"Observation (shortened): \n{parsed_data.get(summary_tags[summary_index])}"
+                )
+
+            if self.is_token_limit_exceeded():
+                self._prompt.messages[summary_sections[-1]].content = (
+                    f"Observation (shortened): \n{parsed_data.get(summary_tags[-1])}"
+                )
+                summary_offset = len(self._prompt.messages)
+            else:
+                summary_offset = len(self._prompt.messages) - 2
+
+            logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output finished.")
+            return summary_offset
+
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
@@ -469,9 +601,9 @@ class ReActAgent(Agent):
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(
-                tools_name=self.tool_names,
-                input_formats=self.generate_input_formats(self.tools),
+                tools_name=self.tool_names, input_formats=self.generate_input_formats(self.tools)
             ),
+            static=True,
         )
 
         if history_messages:
@@ -479,6 +611,7 @@ class ReActAgent(Agent):
         else:
             self._prompt.messages = [system_message, input_message]
 
+        summary_offset = history_offset = len(self._prompt.messages)
         stop_sequences = []
         if self.inference_mode in [InferenceMode.XML, InferenceMode.DEFAULT]:
             stop_sequences.extend(["Observation: ", "\nObservation:"])
@@ -687,7 +820,9 @@ class ReActAgent(Agent):
                             logger.error(f"XMLParser: Error parsing potential final answer XML: {e}")
                             raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
 
-                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
+                self._prompt.messages.append(
+                    Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True)
+                )
 
                 if action and self.tools:
                     try:
@@ -723,7 +858,13 @@ class ReActAgent(Agent):
                             **kwargs,
                         )
 
-                        tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                        tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
+                        tool_result = self._tool_cache.get(tool_cache_entry, None)
+                        if not tool_result:
+                            tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                            self._tool_cache[tool_cache_entry] = tool_result
+                        else:
+                            logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
 
                     except RecoverableAgentException as e:
                         tool_result = f"{type(e).__name__}: {e}"
@@ -762,7 +903,7 @@ class ReActAgent(Agent):
 
             except ActionParsingException as e:
                 self._prompt.messages.append(
-                    Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output)
+                    Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output, static=True)
                 )
                 self._prompt.messages.append(
                     Message(
@@ -772,10 +913,16 @@ class ReActAgent(Agent):
                         f"Please regenerate the response strictly following the "
                         f"required XML format, ensuring all tags are present and "
                         f"correctly structured, and that any JSON content (like action_input) is valid.",
+                        static=True,
                     )
                 )
                 continue
 
+            if self.summarization_config.enabled:
+                if self.is_token_limit_exceeded():
+                    summary_offset = self.summarize_history(
+                        input_message, history_offset, summary_offset, config=config, **kwargs
+                    )
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
                 f"Agent {self.name} (ID: {self.id}) has reached the maximum loop limit of {self.max_loops} without finding a final answer. "  # noqa: E501
@@ -836,7 +983,7 @@ class ReActAgent(Agent):
         Returns:
             str: Final answer provided by the agent.
         """
-        system_message = Message(content=REACT_MAX_LOOPS_PROMPT, role=MessageRole.SYSTEM)
+        system_message = Message(content=REACT_MAX_LOOPS_PROMPT, role=MessageRole.SYSTEM, static=True)
         conversation_history = Message(
             content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True
         )
