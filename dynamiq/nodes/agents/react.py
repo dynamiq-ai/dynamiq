@@ -19,9 +19,7 @@ from dynamiq.nodes.agents.exceptions import (
     XMLParsingError,
 )
 
-from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
-from dynamiq.nodes.llms.gemini import Gemini
 
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
@@ -808,7 +806,7 @@ class ReActAgent(Agent):
                 messages_history += f"\n{message.content}\n"
 
         messages_history = (
-            messages_history + f"\n Required tags in the output {[f"tool_output{index}" for index in summary_sections]}"
+            messages_history + f"\n Required tags in the output {[f'tool_output{index}' for index in summary_sections]}"
         )
 
         summary_messages = [
@@ -1166,19 +1164,13 @@ class ReActAgent(Agent):
                                 logger.error(f"XMLParser: Error parsing potential final answer XML: {e}")
                                 raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
 
-
-                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output))
-
-                        except (XMLParsingError, JSONParsingError) as e:
-                            logger.error(f"XMLParser: Error parsing potential final answer XML: {e}")
-                            raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
-
                 self._prompt.messages.append(
                     Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True)
                 )
 
-
                 if action and self.tools:
+                    tool_result = None
+
                     if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled:
                         tool_result = self._execute_tools(tools_data, config, **kwargs)
 
@@ -1199,16 +1191,16 @@ class ReActAgent(Agent):
 
                                 tools_data.append({"name": tool_call["tool_name"], "input": tool_call["tool_input"]})
 
-                                self.stream_reasoning(
-                                    {
-                                        "thought": thought,
-                                        "action": "multiple_tools",
-                                        "tools": tools_data,
-                                        "loop_num": loop_num,
-                                    },
-                                    config,
-                                    **kwargs,
-                                )
+                            self.stream_reasoning(
+                                {
+                                    "thought": thought,
+                                    "action": "multiple_tools",
+                                    "tools": tools_data,
+                                    "loop_num": loop_num,
+                                },
+                                config,
+                                **kwargs,
+                            )
 
                             tool_result = self._execute_tools(tools_data, config, **kwargs)
 
@@ -1233,6 +1225,7 @@ class ReActAgent(Agent):
                                         "Do not include any additional reasoning. "
                                         "Please correct the action field or state that you cannot answer the question. "
                                     )
+
                                 self.stream_reasoning(
                                     {
                                         "thought": thought,
@@ -1249,16 +1242,17 @@ class ReActAgent(Agent):
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
                     else:
+                        # Handle single tool execution
                         try:
                             tool = self.tool_by_names.get(self.sanitize_tool_name(action))
                             if not tool:
                                 raise AgentUnknownToolException(
                                     f"Unknown tool: {action}."
-                                    "Use only available tools and provide "
-                                    "only the tool's name in the action field. "
+                                    "Use only available tools and provide only the tool's name in the action field. "
                                     "Do not include any additional reasoning. "
-                                    "Please correct the action field or state that you cannot answer the question. "
+                                    "Please correct the action field or state that you cannot answer the question."
                                 )
+
                             self.stream_reasoning(
                                 {
                                     "thought": thought,
@@ -1271,48 +1265,30 @@ class ReActAgent(Agent):
                                 **kwargs,
                             )
 
+                            # Check tool cache first
+                            tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
+                            tool_result = self._tool_cache.get(tool_cache_entry, None)
+                            if not tool_result:
+                                tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                                self._tool_cache[tool_cache_entry] = tool_result
+                            else:
+                                logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
 
-                            tool_result = self._run_tool(tool, action_input, config, **kwargs)
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
 
-                            raise AgentUnknownToolException(
-                                f"Unknown tool: {action}."
-                                "Use only available tools and provide only the tool's name in the action field. "
-                                "Do not include any additional reasoning. "
-                                "Please correct the action field or state that you cannot answer the question."
-                            )
-
-                        self.stream_reasoning(
-                            {
-                                "thought": thought,
-                                "action": action,
-                                "tool": tool,
-                                "action_input": action_input,
-                                "loop_num": loop_num,
-                            },
-                            config,
-                            **kwargs,
-                        )
-
-                        tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
-                        tool_result = self._tool_cache.get(tool_cache_entry, None)
-                        if not tool_result:
-                            tool_result = self._run_tool(tool, action_input, config, **kwargs)
-                            self._tool_cache[tool_cache_entry] = tool_result
-                        else:
-                            logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
-
-                    except RecoverableAgentException as e:
-                        tool_result = f"{type(e).__name__}: {e}"
-
-
+                    # Add observation to prompt
                     observation = f"\nObservation: {tool_result}\n"
-                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation))
+                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
+
                     if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                         self.stream_content(
-                            content={"name": tool.name, "input": action_input, "result": tool_result},
-                            source=tool.name if tool else action,
+                            content={
+                                "name": tool.name if "tool" in locals() else action,
+                                "input": action_input,
+                                "result": tool_result,
+                            },
+                            source=tool.name if "tool" in locals() else action,
                             step="tool",
                             config=config,
                             by_tokens=False,
@@ -1327,7 +1303,6 @@ class ReActAgent(Agent):
                             updated=llm_generated_output,
                         ).model_dump()
                     )
-                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
                 else:
                     self.stream_reasoning(
                         {
@@ -1361,6 +1336,7 @@ class ReActAgent(Agent):
                     summary_offset = self.summarize_history(
                         input_message, history_offset, summary_offset, config=config, **kwargs
                     )
+
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
                 f"Agent {self.name} (ID: {self.id}) "
