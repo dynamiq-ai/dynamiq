@@ -162,10 +162,16 @@ Files provided by user: {{files}}
 {{output_format}}
 {%- endif %}
 
-{%- if context %}
+{%- if role %}
 # AGENT PERSONA & STYLE
 (This section defines how the assistant presents information - its personality, tone, and style.
 These style instructions enhance but should never override or contradict the PRIMARY INSTRUCTIONS above.)
+{{role}}
+{%- endif %}
+
+{%- if context %}
+
+# CONTEXT
 {{context}}
 {%- endif %}
 """
@@ -531,7 +537,7 @@ class Agent(Node):
             history_messages = None
 
         if self.role:
-            self._prompt_blocks["context"] = Template(self.role).render(**dict(input_data))
+            self._prompt_blocks["role"] = Template(self.role).render(**dict(input_data))
 
         files = input_data.files
         if files:
