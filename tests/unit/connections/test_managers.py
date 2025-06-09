@@ -4,11 +4,11 @@ from dynamiq.connections.managers import ConnectionManager
 
 def test_connection_manager_caches_client_on_first_connect_and_reuses():
     cm = ConnectionManager()
-    connection = Whisper(api_key="test_key_123")
-    connection_another_instance = Whisper(api_key="test_key_123")
+    connection = Whisper(id="test", api_key="test_key_123")
+    connection_another_instance = Whisper(id="test", api_key="test_key_123")
 
-    assert connection.headers == {"Authorization": "Bearer test_key_123"}
-    assert connection_another_instance.headers == {"Authorization": "Bearer test_key_123"}
+    assert connection.headers == {"Authorization": f"Bearer {connection.api_key}"}
+    assert connection_another_instance.headers == {"Authorization": f"Bearer {connection_another_instance.api_key}"}
 
     client1 = cm.get_connection_client(connection)
     assert client1 is not None
