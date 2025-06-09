@@ -288,7 +288,7 @@ class Prompt(BasePrompt):
     """
 
     messages: list[Message | VisionMessage]
-    tools: list[Tool] | None = None
+    tools: list[Tool | dict] | None = None
     response_format: dict[str, Any] | None = None
     _Template: Any = PrivateAttr()
 
