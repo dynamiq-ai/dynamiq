@@ -328,7 +328,7 @@ class BaseLLM(ConnectionNode):
                     tools = tools or schema
 
         if tools:
-            tools = [tool.model_dump() if hasattr(tool, "model_dump") else tool for tool in tools]
+            tools = [tool.model_dump() if isinstance(tool, Tool) else tool for tool in tools]
 
         return response_format, tools
 

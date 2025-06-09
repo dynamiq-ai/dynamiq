@@ -345,4 +345,7 @@ class Prompt(BasePrompt):
         return out
 
     def format_tools(self, **kwargs) -> list[dict] | None:
-        pass
+        out = None
+        if self.tools:
+            out = [tool.model_dump() for tool in self.tools]
+        return out
