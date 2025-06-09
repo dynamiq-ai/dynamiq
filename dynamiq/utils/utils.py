@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import inspect
 from datetime import date, datetime
 from enum import Enum
 from io import BytesIO
@@ -250,7 +251,12 @@ def is_called_from_async_context() -> bool:
     """
     try:
         asyncio.get_running_loop()
-        return True
+        frame = inspect.currentframe()
+        while frame:
+            if frame.f_code.co_flags & inspect.CO_COROUTINE:
+                return True
+            frame = frame.f_back
+        return False
     except Exception:
         return False
 

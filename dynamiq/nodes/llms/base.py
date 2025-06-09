@@ -3,6 +3,7 @@ import json
 import warnings
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
+from litellm import get_max_tokens
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.connections import BaseConnection, HttpApiKey
@@ -174,6 +175,14 @@ class BaseLLM(ConnectionNode):
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
         return {"instance_prompt": self.prompt}
+
+    def get_token_limit(self) -> int:
+        """Returns token limits of a llm.
+
+        Returns:
+            int: Number of tokens.
+        """
+        return get_max_tokens(self.model)
 
     def get_messages(
         self,
