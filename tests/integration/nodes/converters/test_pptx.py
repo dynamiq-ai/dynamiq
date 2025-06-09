@@ -6,7 +6,7 @@ from pptx import Presentation
 
 from dynamiq import Workflow
 from dynamiq.flows import Flow
-from dynamiq.nodes.converters.pptx import PPTXFileConverter
+from dynamiq.nodes.converters.pptx import PPTXFileConverter, PPTXFileConverterInputSchema
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableResult, RunnableStatus
@@ -173,7 +173,7 @@ def test_workflow_with_pptx_converter(request, input_type, input_fixture):
 
     pptx_converter_expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
-        input=input_data,
+        input=dict(PPTXFileConverterInputSchema(**input_data)),
         output={"documents": [Document(id=document_id, content=content, metadata={"file_path": expected_file_path})]},
     ).to_dict(skip_format_types={BytesIO, bytes})
 

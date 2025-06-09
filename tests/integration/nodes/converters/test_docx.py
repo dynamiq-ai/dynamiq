@@ -4,7 +4,7 @@ from docx import Document as DocxDocument
 
 from dynamiq import Workflow
 from dynamiq.flows import Flow
-from dynamiq.nodes.converters.docx import DOCXFileConverter
+from dynamiq.nodes.converters.docx import DOCXFileConverter, DOCXFileConverterInputSchema
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.types import Document
 
@@ -26,7 +26,7 @@ def test_workflow_with_docx_converter():
     document_id = response.output[next(iter(response.output))]["output"]["documents"][0]["id"]
     docx_converter_expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
-        input=input_data,
+        input=dict(DOCXFileConverterInputSchema(**input_data)),
         output={"documents": [Document(id=document_id, content=content, metadata={"file_path": file.name})]},
     ).to_dict(skip_format_types={BytesIO, bytes})
 
