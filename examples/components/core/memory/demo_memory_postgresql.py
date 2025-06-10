@@ -49,7 +49,7 @@ def setup_agent():
         pg_backend = PostgreSQLMemoryBackend(
             connection=pg_connection,
             table_name=POSTGRES_TABLE_NAME,
-            create_table_if_not_exists=True,
+            create_if_not_exist=True,
         )
         print(f"PostgreSQL memory backend initialized for table '{POSTGRES_TABLE_NAME}'.")
 
