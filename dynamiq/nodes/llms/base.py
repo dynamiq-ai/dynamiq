@@ -99,7 +99,7 @@ class BaseLLM(ConnectionNode):
     thinking_enabled: bool | None = None
     budget_tokens: int = 1024
     response_format: dict[str, Any] | None = None
-    tools: list[Tool] | None = None
+    tools: list[Tool | dict] | None = None
     input_schema: ClassVar[type[BaseLLMInputSchema]] = BaseLLMInputSchema
     inference_mode: InferenceMode = Field(
         default=InferenceMode.DEFAULT,
@@ -301,9 +301,8 @@ class BaseLLM(ConnectionNode):
 
     def _get_response_format_and_tools(
         self,
-        input_data: BaseLLMInputSchema,
         prompt: Prompt | None = None,
-        tools: list[Tool] | None = None,
+        tools: list[Tool | dict] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """Get response format and tools
@@ -318,7 +317,7 @@ class BaseLLM(ConnectionNode):
             ValueError: If schema is None when using STRUCTURED_OUTPUT or FUNCTION_CALLING modes.
         """
         response_format = response_format or self.response_format or prompt.response_format
-        tools = tools or self.tools or prompt.format_tools(**dict(input_data))
+        tools = tools or self.tools or prompt.tools
 
         # Suppress DeprecationWarning if deprecated parameters are not set
         with warnings.catch_warnings():
@@ -336,6 +335,9 @@ class BaseLLM(ConnectionNode):
                     if schema is None:
                         raise ValueError("Schema must be provided when using FUNCTION_CALLING inference mode")
                     tools = tools or schema
+
+        if tools:
+            tools = [tool.model_dump() if isinstance(tool, Tool) else tool for tool in tools]
 
         return response_format, tools
 
@@ -362,7 +364,7 @@ class BaseLLM(ConnectionNode):
         input_data: BaseLLMInputSchema,
         config: RunnableConfig = None,
         prompt: Prompt | None = None,
-        tools: list[Tool] | None = None,
+        tools: list[Tool | dict] | None = None,
         response_format: dict[str, Any] | None = None,
         **kwargs,
     ):
@@ -375,7 +377,7 @@ class BaseLLM(ConnectionNode):
             input_data (BaseLLMInputSchema): The input data for the LLM.
             config (RunnableConfig, optional): The configuration for the execution. Defaults to None.
             prompt (Prompt, optional): The prompt to use for this execution. Defaults to None.
-            tools list[Tool]: List of tools that llm can call.
+            tools (list[Tool|dict]): List of tools that llm can call.
             response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output
             **kwargs: Additional keyword arguments.
 
@@ -397,7 +399,6 @@ class BaseLLM(ConnectionNode):
             params.update(extra)
 
         response_format, tools = self._get_response_format_and_tools(
-            input_data=input_data,
             prompt=prompt,
             tools=tools,
             response_format=response_format,
