@@ -31,7 +31,7 @@ class PostgreSQL(MemoryBackend):
     name: str = "PostgreSQL"
     connection: PostgreSQLConnection = Field(default_factory=PostgreSQLConnection)
     table_name: str = Field(default="conversations")
-    create_table_if_not_exists: bool = Field(default=True)
+    create_if_not_exist: bool = Field(default=True)
 
     message_id_col: str = Field(default="message_id")
     role_col: str = Field(default="role")
@@ -110,7 +110,7 @@ class PostgreSQL(MemoryBackend):
         """Initialize the PostgreSQL connection and ensure table exists."""
         try:
             self._conn = self.connection.connect()
-            if self.create_table_if_not_exists:
+            if self.create_if_not_exist:
                 self._create_table_and_indices()
             logger.debug(f"PostgreSQL backend connected to table '{self.table_name}'.")
         except psycopg.Error as e:
