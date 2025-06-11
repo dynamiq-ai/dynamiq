@@ -27,6 +27,7 @@ class OpenAI(BaseLLM):
     connection: OpenAIConnection | None = None
     reasoning_effort: ReasoningEffort | None = ReasoningEffort.MEDIUM
     O_SERIES_MODEL_PREFIXES: ClassVar[tuple[str, ...]] = ("o1", "o3", "o4")
+    O_SERIES_MODEL_WITHOUT_STOP: ClassVar[tuple[str, ...]] = ("o3", "o4-mini", "o1-pro")
 
     def __init__(self, **kwargs):
         """Initialize the OpenAI LLM node.
@@ -59,6 +60,9 @@ class OpenAI(BaseLLM):
             new_params["max_completion_tokens"] = self.max_tokens
             if self.model.lower().startswith("o3") or self.model.lower().startswith("o4"):
                 new_params["reasoning_effort"] = self.reasoning_effort
+
+            if self.model.lower() in self.O_SERIES_MODEL_WITHOUT_STOP:
+                new_params.pop("stop", None)
             new_params.pop("max_tokens", None)
             new_params.pop("temperature", None)
         return new_params
