@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -23,9 +23,15 @@ class MemoryRetrievalStrategy(str, Enum):
     BOTH = "both"
 
 
+class TTLMode(str, Enum):
+    """Enum for TTL (Time To Live) mode."""
+
+    ENABLED = "enabled"
+    DISABLED = "disabled"
+
+
 class MemoryError(Exception):
     """Base exception for Memory errors."""
-
     pass
 
 
@@ -35,10 +41,16 @@ class Memory(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     DEFAULT_LIMIT: ClassVar[int] = 1000
+    DEFAULT_TTL_DAYS: ClassVar[int] = 30
 
     message_limit: int = Field(default=DEFAULT_LIMIT, gt=0, description="Default limit for message retrieval")
     backend: MemoryBackend = Field(default_factory=InMemory, description="Backend storage implementation")
     filters: dict[str, Any] = Field(default_factory=dict, description="Default filters to apply to searches")
+
+    ttl_mode: TTLMode = Field(default=TTLMode.DISABLED, description="Enable or disable TTL filtering")
+    ttl_days: int = Field(
+        default=DEFAULT_TTL_DAYS, gt=0, description="Number of days to keep messages when TTL is enabled"
+    )
 
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
@@ -51,6 +63,48 @@ class Memory(BaseModel):
         data = self.model_dump(exclude=kwargs.pop("exclude", self.to_dict_exclude_params), **kwargs)
         data["backend"] = self.backend.to_dict(include_secure_params=include_secure_params, **kwargs)
         return data
+
+    def _apply_ttl_filter(self, messages: list[Message], user_filters: dict[str, Any] | None = None) -> list[Message]:
+        """
+        Applies TTL filtering to messages if enabled.
+
+        Args:
+            messages: List of messages to filter
+            user_filters: Optional user/session filters to consider
+
+        Returns:
+            Filtered list of messages based on TTL settings
+        """
+        if self.ttl_mode == TTLMode.DISABLED:
+            return messages
+
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.ttl_days)
+        cutoff_timestamp = cutoff_date.timestamp()
+
+        filtered_messages = []
+        for msg in messages:
+            msg_timestamp = msg.metadata.get("timestamp", 0)
+
+            if user_filters:
+                matches_context = True
+                for key, value in user_filters.items():
+                    if key in ["user_id", "session_id"] and msg.metadata.get(key) != value:
+                        matches_context = False
+                        break
+
+                if not matches_context:
+                    filtered_messages.append(msg)
+                    continue
+
+            if msg_timestamp >= cutoff_timestamp:
+                filtered_messages.append(msg)
+            else:
+                logger.debug(
+                    f"Memory {self.backend.name}: Filtered out message older than {self.ttl_days} days "
+                    f"(timestamp: {msg_timestamp}, cutoff: {cutoff_timestamp})"
+                )
+
+        return filtered_messages
 
     def add(self, role: MessageRole, content: str, metadata: dict[str, Any] | None = None) -> None:
         """
@@ -103,6 +157,9 @@ class Memory(BaseModel):
 
             messages = self.backend.get_all(limit=effective_limit)
             retrieved_messages = [Message(**msg.model_dump()) for msg in messages]
+
+            retrieved_messages = self._apply_ttl_filter(retrieved_messages)
+
             logger.debug(f"Memory {self.backend.name}: Retrieved {len(retrieved_messages)} messages")
             return retrieved_messages
         except Exception as e:
@@ -152,6 +209,9 @@ class Memory(BaseModel):
             results = self.backend.search(query=query, filters=effective_filters, limit=effective_limit)
 
             retrieved_messages = [Message(**msg.model_dump()) for msg in results]
+
+            retrieved_messages = self._apply_ttl_filter(retrieved_messages, effective_filters)
+
             logger.debug(
                 f"Memory {self.backend.name}: Found {len(retrieved_messages)} search results for query: {query}, "
                 f"filters: {effective_filters}"

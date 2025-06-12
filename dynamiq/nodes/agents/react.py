@@ -530,7 +530,7 @@ class ReActAgent(Agent):
                 messages_history += f"\n{message.content}\n"
 
         messages_history = (
-            messages_history + f"\n Required tags in the output {[f"tool_output{index}" for index in summary_sections]}"
+            messages_history + f"\n Required tags in the output {[f'tool_output{index}' for index in summary_sections]}"
         )
 
         summary_messages = [
