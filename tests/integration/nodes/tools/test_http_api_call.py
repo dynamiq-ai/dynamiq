@@ -5,6 +5,7 @@ import pytest
 from dynamiq import Workflow, connections
 from dynamiq.flows import Flow
 from dynamiq.nodes.tools import HttpApiCall, ResponseType
+from dynamiq.nodes.tools.http_api_call import HttpApiCallInputSchema
 from dynamiq.runnables import RunnableResult, RunnableStatus
 
 
@@ -48,7 +49,7 @@ def test_workflow_with_httpapicall(
 
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
-        input={},
+        input=dict(HttpApiCallInputSchema(**{})),
         output={"content": result, "status_code": 200},
     ).to_dict(skip_format_types={bytes})
 

@@ -6,6 +6,7 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Qdrant as QdrantConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.retrievers import QdrantDocumentRetriever
+from dynamiq.nodes.retrievers.base import RetrieverInputSchema
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore
 
@@ -79,7 +80,7 @@ def test_retrieve_workflow(
 
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
-        input=input_data,
+        input=dict(RetrieverInputSchema(**input_data)),
         output={"documents": [doc.to_dict() for doc in mock_documents]},
     ).to_dict()
     expected_output = {node_id: expected_result}

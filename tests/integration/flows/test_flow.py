@@ -988,7 +988,10 @@ def run(input_data):
     )
     expected_result_python = RunnableResult(
         status=RunnableStatus.SUCCESS,
-        input={choice_node.id: expected_result_choice.to_tracing_depend_dict()},
+        input={
+            openai_node_with_return_behavior.id: expected_result_openai.to_tracing_depend_dict(),
+            choice_node.id: expected_result_choice.to_tracing_depend_dict(),
+        },
         output={"content": python_return_if_openai_failed_or_skipped},
     )
 

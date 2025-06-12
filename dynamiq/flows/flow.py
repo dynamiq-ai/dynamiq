@@ -126,23 +126,24 @@ class Flow(BaseFlow):
         """
         ready_ts_nodes = self._ts.get_ready()
         ready_nodes = []
+
+        completed_result = {
+            node_id: result for node_id, result in self._results.items() if result.status != RunnableStatus.UNDEFINED
+        }
+
         for node_id in ready_ts_nodes:
             node = self._node_by_id[node_id]
-            depends_result = {}
             is_ready = True
             for dep in node.depends:
-                if (
-                    dep_result := self._results.get(dep.node.id)
-                ) and dep_result.status != RunnableStatus.UNDEFINED:
-                    depends_result[dep.node.id] = dep_result
-                else:
+                if dep.node.id not in completed_result:
                     is_ready = False
+                    break
 
             ready_node = NodeReadyToRun(
                 node=node,
                 is_ready=is_ready,
                 input_data=input_data,
-                depends_result=depends_result,
+                depends_result=completed_result,
             )
             ready_nodes.append(ready_node)
 
