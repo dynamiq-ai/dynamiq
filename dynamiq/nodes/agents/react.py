@@ -530,13 +530,13 @@ class ReActAgent(Agent):
                 messages_history += f"\n{message.content}\n"
 
         messages_history = (
-            messages_history + f"\n Required tags in the output {[f"tool_output{index}" for index in summary_sections]}"
+            messages_history + f"\n Required tags in the output {[f'tool_output{index}' for index in summary_sections]}"
         )
 
         summary_messages = [
             Message(content=HISTORY_SUMMARIZATION_PROMPT, role=MessageRole.SYSTEM, static=True),
             input_message,
-            Message(content=messages_history, role=MessageRole.USER, static=True),  # History to summarize
+            Message(content=messages_history, role=MessageRole.USER, static=True),
         ]
 
         summary_tags = [f"tool_output{index}" for index in summary_sections]
