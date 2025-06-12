@@ -536,7 +536,7 @@ class ReActAgent(Agent):
         summary_messages = [
             Message(content=HISTORY_SUMMARIZATION_PROMPT, role=MessageRole.SYSTEM, static=True),
             input_message,
-            Message(content=messages_history, role=MessageRole.USER, static=True),  # History to summarize
+            Message(content=messages_history, role=MessageRole.USER, static=True),
         ]
 
         summary_tags = [f"tool_output{index}" for index in summary_sections]
