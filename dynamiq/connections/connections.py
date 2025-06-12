@@ -7,7 +7,7 @@ from functools import cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -401,15 +401,12 @@ class Whisper(Http):
     method: str = HTTPMethod.POST
     api_key: str = Field(default_factory=partial(get_env_var, "OPENAI_API_KEY"))
 
-    def connect(self):
-        """
-        Configures the request authorization header with the API key for authentication
-
-        Returns:
-            requests: The `requests` module for making HTTP requests.
-        """
-        self.headers.update({"Authorization": f"Bearer {self.api_key}"})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation."""
+        if self.api_key:
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return self
 
 
 class ElevenLabs(Http):
@@ -432,15 +429,12 @@ class ElevenLabs(Http):
     method: str = HTTPMethod.POST
     api_key: str = Field(default_factory=partial(get_env_var, "ELEVENLABS_API_KEY"))
 
-    def connect(self):
-        """
-        Connects to the ElevenLabs API.
-
-        Returns:
-            requests: The `requests` module for making HTTP requests.
-        """
-        self.headers.update({"xi-api-key": self.api_key})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation."""
+        if self.api_key:
+            self.headers.update({"xi-api-key": self.api_key})
+        return self
 
 
 class Pinecone(BaseApiKeyConnection):
@@ -654,12 +648,12 @@ class Tavily(Http):
     api_key: str = Field(default_factory=partial(get_env_var, "TAVILY_API_KEY"))
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
 
-    def connect(self):
-        """
-        Returns the requests module for making HTTP requests.
-        """
-        self.data.update({"api_key": self.api_key})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_data(self):
+        """Setup data after model validation."""
+        if self.api_key:
+            self.data.update({"api_key": self.api_key})
+        return self
 
 
 class ScaleSerp(Http):
@@ -673,12 +667,12 @@ class ScaleSerp(Http):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def connect(self):
-        """
-        Returns the requests module for making HTTP requests.
-        """
-        self.params.update({"api_key": self.api_key})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_params(self):
+        """Setup params after model validation."""
+        if self.api_key:
+            self.params.update({"api_key": self.api_key})
+        return self
 
 
 class ZenRows(Http):
@@ -690,12 +684,12 @@ class ZenRows(Http):
     api_key: str = Field(default_factory=partial(get_env_var, "ZENROWS_API_KEY"))
     method: str = HTTPMethod.GET
 
-    def connect(self):
-        """
-        Returns the requests module for making HTTP requests.
-        """
-        self.params.update({"apikey": self.api_key})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_params(self):
+        """Setup params after model validation."""
+        if self.api_key:
+            self.params.update({"apikey": self.api_key})
+        return self
 
 
 class Groq(BaseApiKeyConnection):
@@ -724,12 +718,12 @@ class Firecrawl(Http):
     api_key: str = Field(default_factory=lambda: get_env_var("FIRECRAWL_API_KEY"))
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
 
-    def connect(self):
-        """
-        Returns the requests module for making HTTP requests.
-        """
-        self.headers.update({"Authorization": f"Bearer {self.api_key}"})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup authorization headers after model validation."""
+        if self.api_key:
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return self
 
 
 class E2B(BaseApiKeyConnection):
@@ -963,15 +957,12 @@ class Exa(Http):
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
     api_key: str = Field(default_factory=partial(get_env_var, "EXA_API_KEY"))
 
-    def connect(self):
-        """
-        Configures the request headers with the API key for authentication.
-
-        Returns:
-            requests: The requests module for making HTTP requests.
-        """
-        self.headers.update({"x-api-key": self.api_key, "Content-Type": "application/json"})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation."""
+        if self.api_key:
+            self.headers.update({"x-api-key": self.api_key, "Content-Type": "application/json"})
+        return self
 
 
 class Ollama(BaseConnection):
@@ -1013,12 +1004,12 @@ class Jina(Http):
     api_key: str = Field(default_factory=partial(get_env_var, "JINA_API_KEY"))
     method: Literal[HTTPMethod.GET] = HTTPMethod.GET
 
-    def connect(self):
-        """
-        Returns the requests module for making HTTP requests.
-        """
-        self.headers.update({"Authorization": f"Bearer {self.api_key}"})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation."""
+        if self.api_key:
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return self
 
 
 class MySQL(BaseConnection):
