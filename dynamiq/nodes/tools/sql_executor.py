@@ -2,7 +2,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from dynamiq.connections import AWSRedshift, MySQL, PostgreSQL, Snowflake
+from dynamiq.connections import AWSRedshift, DataBricksSQL, MySQL, PostgreSQL, Snowflake
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
@@ -96,6 +96,8 @@ class SQLExecutor(ConnectionNode):
             )
             cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []
+            if isinstance(self.connection, DataBricksSQL):
+                output = [row.asDict() for row in output]
             cursor.close()
             if self.is_optimized_for_agents:
                 output = self.format_results(output, query)
