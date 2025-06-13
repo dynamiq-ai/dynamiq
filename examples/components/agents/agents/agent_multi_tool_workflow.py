@@ -88,7 +88,6 @@ def run_workflow(agent: ReActAgent = setup_multi_tool_agent(), input_prompt: str
             input_data={"input": input_prompt},
             config=RunnableConfig(callbacks=[tracing]),
         )
-        # Verify that traces can be serialized to JSON
         json.dumps(
             {"runs": [run.to_dict() for run in tracing.runs.values()]},
             cls=JsonWorkflowEncoder,
@@ -96,7 +95,7 @@ def run_workflow(agent: ReActAgent = setup_multi_tool_agent(), input_prompt: str
 
         return result.output[agent.id]["output"]["content"], tracing.runs
     except Exception as e:
-        logger.error(f"An error occurred: {e}")
+        logger.exception(f"An error occurred: {e}")
         return "", {}
 
 
