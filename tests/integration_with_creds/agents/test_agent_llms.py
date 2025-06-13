@@ -9,7 +9,6 @@ from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
 from dynamiq.nodes.agents.utils import extract_thought_from_intermediate_steps
 from dynamiq.nodes.llms import Anthropic, Gemini, OpenAI
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.utils.logger import logger
 
 OPENAI_MODELS = [
     "o4-mini",
@@ -124,25 +123,16 @@ def check_for_emoji(text):
 
 def run_and_assert_agent(agent: ReActAgent, agent_input, expected_answer, run_config):
     """Helper function to run agent and perform common assertions."""
-    llm_type = agent.llm.__class__.__name__
-    model_name = getattr(agent.llm, "model", "unknown")
-    logger.info(
-        f"\n--- Running Agent: {agent.name} "
-        f"(Mode: {agent.inference_mode.value}, LLM: {llm_type}, Model: {model_name}) ---"
-    )
-
     agent_output = None
     intermediate_steps = None
 
     try:
         result = agent.run(input_data=agent_input, config=run_config)
-        logger.info(f"Agent run completed with status: {result.status}")
 
         if result.status != RunnableStatus.SUCCESS:
             intermediate_steps = (
                 result.output.get("intermediate_steps", "N/A") if isinstance(result.output, dict) else "N/A"
             )
-            logger.info(f"Intermediate Steps on Failure: {intermediate_steps}")
             pytest.fail(f"Agent run failed with status '{result.status}'. Output: {result.output}.")
 
         if isinstance(result.output, dict):
@@ -152,19 +142,14 @@ def run_and_assert_agent(agent: ReActAgent, agent_input, expected_answer, run_co
                 intermediate_steps = result.output["intermediate_steps"]
         else:
             agent_output = result.output
-            logger.info(f"Warning: Agent output structure unexpected: {type(result.output)}")
-
-        logger.info(f"Agent final output content: {agent_output}")
 
         thought = None
         if intermediate_steps:
             thought = extract_thought_from_intermediate_steps(intermediate_steps)
-            logger.info(f"Extracted thought: {thought}")
 
     except Exception as e:
         pytest.fail(f"Agent run failed with exception: {e}")
 
-    logger.info("Asserting results...")
     assert agent_output is not None, "Agent output content should not be None"
     assert isinstance(agent_output, str), f"Agent output content should be a string, got {type(agent_output)}"
 
@@ -177,10 +162,6 @@ def run_and_assert_agent(agent: ReActAgent, agent_input, expected_answer, run_co
         assert has_emoji, f"Expected emoji in agent output, but none found: '{agent_output}'"
     else:
         has_emoji = check_for_emoji(agent_output)
-        if has_emoji:
-            logger.info(f"Note: Found emoji in output even though not required: '{agent_output}'")
-        else:
-            logger.info(f"Note: No emoji in output (as expected for this role configuration): '{agent_output}'")
 
     if agent.inference_mode == InferenceMode.DEFAULT:
         thought_found = thought is not None or "Thought:" in str(intermediate_steps)
@@ -189,8 +170,6 @@ def run_and_assert_agent(agent: ReActAgent, agent_input, expected_answer, run_co
     elif agent.inference_mode == InferenceMode.XML:
         thought_found = thought is not None or "<thought>" in str(intermediate_steps)
         assert thought_found, "Expected <thought> tags to be present in XML mode"
-
-    logger.info(f"--- Test Passed for Mode: {agent.inference_mode.value}, LLM: {llm_type}, Model: {model_name} ---")
 
 
 @pytest.mark.integration
