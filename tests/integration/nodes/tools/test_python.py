@@ -1,10 +1,11 @@
 import json
 from io import BytesIO
 
+import pytest
 from pydantic import ConfigDict
 
 from dynamiq import Workflow
-from dynamiq.callbacks import TracingCallbackHandler
+from dynamiq.callbacks.tracing import TracingCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.tools.python import Python
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -220,3 +221,98 @@ def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mo
     assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
     assert mock_llm_executor.call_count == 2
     assert json.dumps({"runs": [run.to_dict() for run in tracing.runs.values()]}, cls=JsonWorkflowEncoder)
+
+
+@pytest.mark.parametrize(
+    ("attack_name", "attack_code", "expected_security_indicator"),
+    [
+        (
+            "decorator_exec_attack",
+            '@exec("raise Exception(__import__(\\"subprocess\\").check_output(\\"env\\"))")\n'
+            "def run(input_data):\n    pass",
+            "exec calls are not allowed",
+        ),
+        (
+            "default_argument_exec_attack",
+            'def run(cmd=exec("raise Exception(__import__(\\"subprocess\\").' 'check_output(\\"env\\"))")): pass',
+            "exec calls are not allowed",
+        ),
+        (
+            "builtins_import_attack",
+            '@__import__("builtins").print(__import__("os").environ)\n' "def run():\n    pass",
+            'invalid variable name because it starts with "_"',
+        ),
+        (
+            "metaclass_attack",
+            'class Exploit(metaclass=type("M", (), '
+            '{"__init__": lambda cls,*a,**k: __import__("builtins")'
+            '.print(__import__("os").environ)})):\n'
+            "    pass\n\n"
+            "def run(input_data):\n"
+            "    return {}",
+            'keyword argument "metaclass" is not allowed',
+        ),
+        (
+            "lambda_default_attack",
+            'def run(x=(lambda: __import__("builtins").print(__import__("os").environ))()):\n' "    pass",
+            'invalid variable name because it starts with "_"',
+        ),
+        (
+            "builtins_array_access_attack",
+            '@__builtins__["print"](__builtins__["open"]("/proc/self/environ").read())\n' "def run():\n    pass",
+            'invalid variable name because it starts with "_"',
+        ),
+        (
+            "decorator_print_open_attack",
+            '@print(open("/proc/self/environ").read())\n' "def run():\n    pass",
+            "name '_print' is not defined",
+        ),
+        (
+            "default_arg_print_open_attack",
+            'def run(a=print(open("/proc/self/environ").read())):\n    pass',
+            "name '_print' is not defined",
+        ),
+        (
+            "function_body_open_attack",
+            'def run(input_data): return {"documents": open("/proc/self/environ").read()}',
+            "name 'open' is not defined",
+        ),
+        (
+            "subprocess_import_attack",
+            "import subprocess\n" "def run(input_data):\n" '    return subprocess.check_output("env", shell=True)',
+            "import of 'subprocess' is not allowed",
+        ),
+        (
+            "os_import_attack",
+            "import os\n" "def run(input_data):\n" '    return os.system("env")',
+            "import of 'os' is not allowed",
+        ),
+        (
+            "eval_function_attack",
+            "def run(input_data):\n" "    return eval(\"__import__('os').system('env')\")",
+            "eval calls are not allowed",
+        ),
+        (
+            "exec_in_function_attack",
+            "def run(input_data):\n" "    exec(\"__import__('os').system('env')\")\n" "    return {}",
+            "exec calls are not allowed",
+        ),
+        (
+            "compile_function_attack",
+            "def run(input_data):\n"
+            '    code = compile("__import__(\'os\').system(\'env\')", "<string>", "exec")\n'
+            "    exec(code)\n"
+            "    return {}",
+            "exec calls are not allowed",
+        ),
+    ],
+)
+def test_python_node_security_attacks_blocked(attack_name, attack_code, expected_security_indicator):
+    python_node = Python(code=attack_code, model_config=ConfigDict())
+
+    result = python_node.run({}, None)
+
+    assert result.status == RunnableStatus.FAILURE
+
+    error_message = str(result.error).lower()
+    assert expected_security_indicator in error_message

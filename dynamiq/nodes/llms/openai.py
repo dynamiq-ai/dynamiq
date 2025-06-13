@@ -59,6 +59,8 @@ class OpenAI(BaseLLM):
             new_params["max_completion_tokens"] = self.max_tokens
             if self.model.lower().startswith("o3") or self.model.lower().startswith("o4"):
                 new_params["reasoning_effort"] = self.reasoning_effort
+            if self.model.lower() not in ["o3-mini"]:
+                new_params.pop("stop", None)
             new_params.pop("max_tokens", None)
             new_params.pop("temperature", None)
         return new_params

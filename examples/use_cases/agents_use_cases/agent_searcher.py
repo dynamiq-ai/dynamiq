@@ -7,7 +7,7 @@ from examples.llm_setup import setup_llm
 if __name__ == "__main__":
     connection_exa = Exa()
     tool_search = ExaTool(connection=connection_exa)
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=1)
+    llm = setup_llm(model_provider="gpt", model_name="o4-mini", temperature=1)
     agent = ReActAgent(
         name="Agent",
         id="Agent",
