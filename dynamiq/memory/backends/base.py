@@ -104,6 +104,19 @@ class MemoryBackend(ABC, BaseModel):
         """
         raise NotImplementedError
 
+    @abstractmethod
+    def delete_expired(self, cutoff_timestamp: float) -> None:
+        """
+        Deletes messages older than the cutoff timestamp from the storage.
+
+        Args:
+            cutoff_timestamp: Unix timestamp before which messages should be deleted
+
+        Raises:
+            MemoryBackendError: If the deletion operation fails
+        """
+        raise NotImplementedError
+
     def _prepare_filters(self, filters: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """
         Default implementation for preparing filters. Override in backend-specific implementations.

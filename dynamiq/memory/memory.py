@@ -23,13 +23,6 @@ class MemoryRetrievalStrategy(str, Enum):
     BOTH = "both"
 
 
-class TTLMode(str, Enum):
-    """Enum for TTL (Time To Live) mode."""
-
-    ENABLED = "enabled"
-    DISABLED = "disabled"
-
-
 class MemoryError(Exception):
     """Base exception for Memory errors."""
     pass
@@ -41,15 +34,15 @@ class Memory(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     DEFAULT_LIMIT: ClassVar[int] = 1000
-    DEFAULT_TTL_DAYS: ClassVar[int] = 30
+    DEFAULT_TTL_HOURS: ClassVar[int] = 720  # 30 days in hours
 
     message_limit: int = Field(default=DEFAULT_LIMIT, gt=0, description="Default limit for message retrieval")
     backend: MemoryBackend = Field(default_factory=InMemory, description="Backend storage implementation")
     filters: dict[str, Any] = Field(default_factory=dict, description="Default filters to apply to searches")
 
-    ttl_mode: TTLMode = Field(default=TTLMode.DISABLED, description="Enable or disable TTL filtering")
-    ttl_days: int = Field(
-        default=DEFAULT_TTL_DAYS, gt=0, description="Number of days to keep messages when TTL is enabled"
+    ttl_enabled: bool = Field(default=False, description="Enable or disable TTL")
+    ttl_hours: int = Field(
+        default=DEFAULT_TTL_HOURS, gt=0, description="Number of hours to keep messages when TTL is enabled"
     )
 
     @property
@@ -75,10 +68,10 @@ class Memory(BaseModel):
         Returns:
             Filtered list of messages based on TTL settings
         """
-        if self.ttl_mode == TTLMode.DISABLED:
+        if not self.ttl_enabled:
             return messages
 
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.ttl_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(hours=self.ttl_hours)
         cutoff_timestamp = cutoff_date.timestamp()
 
         filtered_messages = []
@@ -100,7 +93,7 @@ class Memory(BaseModel):
                 filtered_messages.append(msg)
             else:
                 logger.debug(
-                    f"Memory {self.backend.name}: Filtered out message older than {self.ttl_days} days "
+                    f"Memory {self.backend.name}: Filtered out message older than {self.ttl_hours} hours "
                     f"(timestamp: {msg_timestamp}, cutoff: {cutoff_timestamp})"
                 )
 
@@ -430,3 +423,24 @@ class Memory(BaseModel):
                     f"last {len(limited_messages)} messages. Returning empty history."
                 )
                 return []
+
+    def delete_expired_messages(self) -> None:
+        """
+        Deletes expired messages from the backend storage.
+        This is the preferred way to handle TTL as it actually removes old messages.
+
+        Raises:
+            MemoryError: If the deletion operation fails
+        """
+        if not self.ttl_enabled:
+            return
+
+        try:
+            cutoff_date = datetime.now(timezone.utc) - timedelta(hours=self.ttl_hours)
+            cutoff_timestamp = cutoff_date.timestamp()
+
+            self.backend.delete_expired(cutoff_timestamp)
+            logger.debug(f"Memory {self.backend.name}: Deleted messages older than {self.ttl_hours} hours")
+        except Exception as e:
+            logger.error(f"Unexpected error deleting expired messages: {e}")
+            raise MemoryError(f"Unexpected error deleting expired messages: {e}") from e

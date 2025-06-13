@@ -8,6 +8,12 @@ from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.prompts import Message
 
 
+class InMemoryError(Exception):
+    """Base exception class for InMemory Backend errors."""
+
+    pass
+
+
 class BM25DocumentRanker(BaseModel):
     """BM25 implementation for scoring documents."""
 
@@ -195,3 +201,18 @@ class InMemory(MemoryBackend):
             MemoryBackendError: If the memory cannot be cleared
         """
         self.messages = []
+
+    def delete_expired(self, cutoff_timestamp: float) -> None:
+        """
+        Deletes messages older than the cutoff timestamp from the in-memory list.
+
+        Args:
+            cutoff_timestamp: Unix timestamp before which messages should be deleted
+
+        Raises:
+            MemoryBackendError: If the deletion operation fails
+        """
+        try:
+            self.messages = [msg for msg in self.messages if msg.metadata.get("timestamp", 0) >= cutoff_timestamp]
+        except Exception as e:
+            raise InMemoryError(f"Error deleting expired messages: {e}") from e

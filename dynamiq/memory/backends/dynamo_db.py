@@ -447,3 +447,51 @@ class DynamoDB(MemoryBackend):
         except Exception as e:
             logger.error(f"Unexpected error clearing DynamoDB memory: {e}")
             raise DynamoDBMemoryError(f"Unexpected error clearing DynamoDB memory: {e}") from e
+
+    def delete_expired(self, cutoff_timestamp: float) -> None:
+        """
+        Deletes messages older than the cutoff timestamp from DynamoDB.
+        Uses a scan operation with a filter expression to find expired items,
+        then deletes them in batches.
+
+        Args:
+            cutoff_timestamp: Unix timestamp before which messages should be deleted
+
+        Raises:
+            DynamoDBMemoryError: If the deletion operation fails
+        """
+        if self._dynamodb_table is None:
+            raise DynamoDBMemoryError("DynamoDB table not initialized.")
+
+        try:
+            scan_params = {
+                "FilterExpression": "timestamp < :cutoff",
+                "ExpressionAttributeValues": {":cutoff": cutoff_timestamp},
+                "ProjectionExpression": f"{self.partition_key_name}, {self.sort_key_name}",
+            }
+
+            with self._dynamodb_table.batch_writer() as batch:
+                while True:
+                    response = self._dynamodb_table.scan(**scan_params)
+                    items = response.get("Items", [])
+
+                    if not items:
+                        break
+
+                    for item in items:
+                        batch.delete_item(
+                            Key={
+                                self.partition_key_name: item[self.partition_key_name],
+                                self.sort_key_name: item[self.sort_key_name],
+                            }
+                        )
+
+                    if "LastEvaluatedKey" in response:
+                        scan_params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+                    else:
+                        break
+
+        except ClientError as e:
+            raise DynamoDBMemoryError(f"Error deleting expired messages from DynamoDB: {e}") from e
+        except Exception as e:
+            raise DynamoDBMemoryError(f"Unexpected error deleting expired messages: {e}") from e

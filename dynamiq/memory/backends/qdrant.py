@@ -174,7 +174,25 @@ class Qdrant(MemoryBackend):
         try:
             self.vector_store.delete_documents(delete_all=True)
         except Exception as e:
-            raise QdrantError(f"Failed to clear Qdrant collection: {e}") from e
+            raise QdrantError(f"Error clearing Qdrant collection: {e}") from e
+
+    def delete_expired(self, cutoff_timestamp: float) -> None:
+        """
+        Deletes messages older than the cutoff timestamp from the Qdrant collection.
+
+        Args:
+            cutoff_timestamp: Unix timestamp before which messages should be deleted
+
+        Raises:
+            QdrantError: If the deletion operation fails
+        """
+        try:
+            # Qdrant supports filtering in delete operations
+            filter_condition = {"must": [{"range": {"timestamp": {"lt": cutoff_timestamp}}}]}
+
+            self.vector_store.delete_documents(filter_condition=filter_condition)
+        except Exception as e:
+            raise QdrantError(f"Error deleting expired messages: {e}") from e
 
     def _collection_exists(self) -> bool:
         """Check if the collection exists in Qdrant."""

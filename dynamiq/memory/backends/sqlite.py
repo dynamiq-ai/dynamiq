@@ -190,6 +190,25 @@ class SQLite(MemoryBackend):
         except sqlite3.Error as e:
             raise SQLiteError(f"Error clearing database: {e}") from e
 
+    def delete_expired(self, cutoff_timestamp: float) -> None:
+        """
+        Deletes messages older than the cutoff timestamp from the SQLite database.
+
+        Args:
+            cutoff_timestamp: Unix timestamp before which messages should be deleted
+
+        Raises:
+            SQLiteError: If the deletion operation fails
+        """
+        try:
+            query = "DELETE FROM {self.index_name} WHERE timestamp < ?"  # nosec B608
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (cutoff_timestamp,))
+                conn.commit()
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Error deleting expired messages: {e}") from e
+
     def search(self, query: str | None = None, limit: int = 10, filters: dict | None = None) -> list[Message]:
         """Searches for messages in SQLite based on the query and/or filters."""
         try:
