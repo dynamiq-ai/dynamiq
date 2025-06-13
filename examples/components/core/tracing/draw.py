@@ -162,8 +162,8 @@ def draw_graph_orchestrator_graph_in_png(
     draw_graph_in_png(graph, output_path)
 
 
-def draw_reflexion_agent_graph_in_png(
-    output_path: str = os.path.join(os.path.dirname(__file__), "reflexion_agent_graph.png")
+def draw_reflection_agent_graph_in_png(
+    output_path: str = os.path.join(os.path.dirname(__file__), "reflection_agent_graph.png")
 ) -> None:
     from examples.components.agents.agents.reflection_agent_wf import run_workflow
 
@@ -179,16 +179,6 @@ def draw_react_agent_graph_in_png(
 
     _, traces = run_workflow()
 
-    graph = get_graph_by_traces([run for _, run in traces.items()])
-    draw_graph_in_png(graph, output_path)
-
-
-def draw_simple_agent_with_memory_graph_in_png(
-    output_path: str = os.path.join(os.path.dirname(__file__), "simple_agent__with_memory_graph.png")
-) -> None:
-    from examples.components.core.memory.demo_memory_agent_wf import run_simple_workflow
-
-    _, traces = run_simple_workflow()
     graph = get_graph_by_traces([run for _, run in traces.items()])
     draw_graph_in_png(graph, output_path)
 
@@ -223,13 +213,28 @@ def draw_adaptive_coding_react_agent_graph_in_png(
     draw_graph_in_png(graph, output_path)
 
 
+def draw_multi_tool_workflow_graph_in_png(
+    output_path: str = os.path.join(os.path.dirname(__file__), "multi_tool_workflow_graph.png")
+) -> None:
+    from examples.components.agents.agents.agent_multi_tool_workflow import run_workflow
+
+    """Draw the execution graph of the multi-tool workflow."""
+    output, traces = run_workflow()
+
+    graph = get_graph_by_traces([run for _, run in traces.items()])
+    draw_graph_in_png(graph, output_path)
+
+    logger.info(f"Graph saved to {output_path}")
+    return output
+
+
 if __name__ == "__main__":
     draw_simple_agent_graph_in_png()
-    draw_simple_agent_with_memory_graph_in_png()
-    draw_reflexion_agent_graph_in_png()
+    draw_reflection_agent_graph_in_png()
     draw_react_agent_graph_in_png()
     draw_job_posting_linear_agent_graph_in_png()
     draw_literature_overview_adaptive_agent_graph_in_png()
     draw_adaptive_coding_react_agent_graph_in_png()
     draw_simple_graph_orchestrator_graph_in_png()
     draw_graph_orchestrator_graph_in_png()
+    draw_multi_tool_workflow_graph_in_png()
