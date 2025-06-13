@@ -163,7 +163,7 @@ def draw_graph_orchestrator_graph_in_png(
 
 
 def draw_reflection_agent_graph_in_png(
-    output_path: str = os.path.join(os.path.dirname(__file__), "reflexion_agent_graph.png")
+    output_path: str = os.path.join(os.path.dirname(__file__), "reflection_agent_graph.png")
 ) -> None:
     from examples.components.agents.agents.reflection_agent_wf import run_workflow
 

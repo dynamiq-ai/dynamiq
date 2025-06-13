@@ -29,8 +29,8 @@ AGENT_ROLE = (
 )
 
 EXAMPLE_QUERY = (
-    "Find the best conferences in europe for AI in 2025"
-    "You have to use parallel tool calls, to perform search from different directions."
+    "Find the best AI conferences in Europe for 2025. "
+    "You should use parallel tool calls to search from different angles."
 )
 
 
