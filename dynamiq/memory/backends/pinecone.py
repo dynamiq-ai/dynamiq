@@ -167,3 +167,24 @@ class Pinecone(MemoryBackend):
             self.vector_store.delete_documents(delete_all=True)
         except Exception as e:
             raise PineconeError(f"Error clearing Pinecone index: {e}") from e
+
+    def delete_expired(self, cutoff_timestamp: float) -> None:
+        """
+        Deletes messages older than the cutoff timestamp from the Pinecone index.
+
+        Args:
+            cutoff_timestamp: Unix timestamp before which messages should be deleted
+
+        Raises:
+            PineconeError: If the deletion operation fails
+        """
+        try:
+            # Pinecone doesn't support direct timestamp filtering in delete operations
+            # We need to fetch all documents, filter by timestamp, then delete matching IDs
+            all_documents = self.vector_store.get_documents()
+            expired_ids = [doc.id for doc in all_documents if doc.metadata.get("timestamp", 0) < cutoff_timestamp]
+
+            if expired_ids:
+                self.vector_store.delete_documents(document_ids=expired_ids)
+        except Exception as e:
+            raise PineconeError(f"Error deleting expired messages: {e}") from e

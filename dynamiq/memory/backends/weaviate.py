@@ -374,3 +374,25 @@ class Weaviate(MemoryBackend):
         except Exception as e:
             logger.error(f"Error clearing Weaviate memory: {e}")
             raise WeaviateMemoryError(f"Error clearing Weaviate memory: {e}") from e
+
+    def delete_expired(self, cutoff_timestamp: float) -> None:
+        """
+        Deletes messages older than the cutoff timestamp from Weaviate.
+        Uses Weaviate's where filter to find and delete expired documents.
+
+        Args:
+            cutoff_timestamp: Unix timestamp before which messages should be deleted
+
+        Raises:
+            WeaviateMemoryError: If the deletion operation fails
+        """
+        if self._vector_store is None:
+            raise WeaviateMemoryError("Weaviate vector store not initialized.")
+
+        try:
+            where_filter = {"path": ["timestamp"], "operator": "LessThan", "valueNumber": cutoff_timestamp}
+
+            self._vector_store.delete_documents(where_filter=where_filter)
+
+        except Exception as e:
+            raise WeaviateMemoryError(f"Error deleting expired messages from Weaviate: {e}") from e
