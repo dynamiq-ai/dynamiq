@@ -465,7 +465,7 @@ class DynamoDB(MemoryBackend):
 
         try:
             scan_params = {
-                "FilterExpression": "timestamp < :cutoff",
+                "FilterExpression": f"{self.sort_key_name} < :cutoff",
                 "ExpressionAttributeValues": {":cutoff": cutoff_timestamp},
                 "ProjectionExpression": f"{self.partition_key_name}, {self.sort_key_name}",
             }
