@@ -390,7 +390,7 @@ class Weaviate(MemoryBackend):
             raise WeaviateMemoryError("Weaviate vector store not initialized.")
 
         try:
-            where_filter = {"path": ["timestamp"], "operator": "LessThan", "valueNumber": cutoff_timestamp}
+            where_filter = {"path": ["message_timestamp"], "operator": "LessThan", "valueNumber": cutoff_timestamp}
 
             self._vector_store.delete_documents(where_filter=where_filter)
 
