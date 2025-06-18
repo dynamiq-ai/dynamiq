@@ -201,7 +201,7 @@ class SQLite(MemoryBackend):
             SQLiteError: If the deletion operation fails
         """
         try:
-            query = "DELETE FROM {self.index_name} WHERE timestamp < ?"  # nosec B608
+            query = f"DELETE FROM {self.index_name} WHERE timestamp < ?"  # nosec B608
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(query, (cutoff_timestamp,))
