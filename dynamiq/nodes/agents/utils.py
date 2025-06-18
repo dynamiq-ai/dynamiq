@@ -8,7 +8,7 @@ import filetype
 from lxml import etree as LET  # nosec: B410
 from pydantic import BaseModel, model_validator, ConfigDict
 
-from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError
+from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
 from dynamiq.prompts import (
     Message,
     MessageRole,
@@ -458,6 +458,120 @@ class XMLParser:
                     return content
         return None
 
+    @staticmethod
+    def parse_unified_xml_format(text: str) -> dict[str, Any]:
+        """
+        Parse XML content using a unified structure for both tool calls and final answers.
+
+        Args:
+            text (str): The XML content to parse
+
+        Returns:
+            dict: A dictionary containing parsed data with the following structure:
+                For tool calls:
+                {
+                    "is_final": False,
+                    "thought": "extracted thought text",
+                    "tools": [
+                        {"name": "tool name", "input": parsed_json_input},
+                        {"name": "tool name", "input": parsed_json_input},
+                        ...
+                    ]
+                }
+
+                For final answer:
+                {
+                    "is_final": True,
+                    "thought": "extracted thought text",
+                    "answer": "final answer text"
+                }
+
+        Raises:
+            XMLParsingError: If the XML cannot be parsed
+            TagNotFoundError: If required tags are missing
+        """
+        try:
+            cleaned_text = XMLParser._clean_content(text)
+            if not cleaned_text:
+                raise XMLParsingError("Empty or invalid XML content")
+
+            try:
+                parsed_data = XMLParser.parse(cleaned_text, required_tags=["thought", "answer"], optional_tags=["o"])
+                return {"is_final": True, "thought": parsed_data.get("thought"), "answer": parsed_data.get("answer")}
+            except TagNotFoundError:
+                pass
+
+            root = XMLParser._parse_with_lxml(cleaned_text)
+            if root is None:
+
+                wrapped_text = f"<root>{cleaned_text}</root>"
+                root = XMLParser._parse_with_lxml(wrapped_text)
+
+            if root is None:
+                raise XMLParsingError("Failed to parse XML content with lxml")
+
+            thought_elems = root.xpath(".//thought")
+            if not thought_elems:
+                raise TagNotFoundError("Required tag <thought> not found")
+
+            thought = "".join(thought_elems[0].itertext()).strip()
+
+            tool_calls_elem = None
+            for tag_name in ["tool_calls", "tools"]:
+                elems = root.xpath(f".//{tag_name}")
+                if elems:
+                    tool_calls_elem = elems[0]
+                    break
+
+            if tool_calls_elem is None:
+                raise TagNotFoundError("Required tag <tool_calls> or <tools> not found")
+
+            tools = []
+            for tool_elem in tool_calls_elem.xpath(".//tool"):
+
+                name_elem = None
+                for name_tag in ["n", "name", "tool_name"]:
+                    name_elems = tool_elem.xpath(f".//{name_tag}")
+                    if name_elems:
+                        name_elem = name_elems[0]
+                        break
+
+                if name_elem is None:
+                    continue
+
+                input_elem = None
+                for input_tag in ["input", "tool_input"]:
+                    input_elems = tool_elem.xpath(f".//{input_tag}")
+                    if input_elems:
+                        input_elem = input_elems[0]
+                        break
+
+                if input_elem is None:
+                    continue
+
+                tool_name = "".join(name_elem.itertext()).strip()
+                input_json_str = "".join(input_elem.itertext()).strip()
+
+                try:
+
+                    input_json_str = re.sub(r"^```(?:json)?\s*|```$", "", input_json_str.strip())
+                    tool_input = json.loads(input_json_str)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse JSON for tool {tool_name}: {e}")
+                    continue
+
+                tools.append({"name": tool_name, "input": tool_input})
+
+            if not tools:
+                raise TagNotFoundError("No valid tool elements found with both name and input tags")
+
+            return {"is_final": False, "thought": thought, "tools": tools}
+
+        except (XMLParsingError, TagNotFoundError):
+            raise
+        except Exception as e:
+            raise XMLParsingError(f"Error parsing XML: {str(e)}")
+
 
 def create_message_from_input(input_data: dict) -> Message | VisionMessage:
     """
@@ -630,6 +744,7 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
             content = str(content)
 
     max_len_in_char: int = max_tokens * 4  # This assumes an average of 4 characters per token.
+    content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", content)
 
     if len(content) > max_len_in_char and truncate:
         half_length: int = (max_len_in_char - 100) // 2

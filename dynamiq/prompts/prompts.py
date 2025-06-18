@@ -125,10 +125,12 @@ class VisionMessage(BaseModel):
     Attributes:
         content (list[VisionTextMessage | VisionImageMessage]): The content of the message.
         role (MessageRole): The role of the message sender.
+        static (bool): Determines whether it is possible to pass parameters via this message.
     """
 
     content: list[VisionMessageTextContent | VisionMessageImageContent]
     role: MessageRole = MessageRole.USER
+    static: bool = Field(default=False, exclude=True)
 
     def parse_bytes_to_base64(self, file_bytes: bytes) -> str:
         """
@@ -197,11 +199,14 @@ class VisionMessage(BaseModel):
         out_msg_content = []
         for content in self.content:
             if isinstance(content, VisionMessageTextContent):
-                out_msg_content.append(
-                    VisionMessageTextContent(
-                        text=self._Template(content.text).render(**kwargs),
+                if not self.static:
+                    out_msg_content.append(
+                        VisionMessageTextContent(
+                            text=self._Template(content.text).render(**kwargs),
+                        )
                     )
-                )
+                else:
+                    out_msg_content.append(content)
             elif isinstance(content, VisionMessageImageContent):
                 self.parse_image_url_parameters(content.image_url.url, kwargs)
                 out_msg_content.append(
@@ -325,7 +330,8 @@ class Prompt(BasePrompt):
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
-                        parameters |= get_parameters_for_template(content.text, env=env)
+                        if not msg.static:
+                            parameters |= get_parameters_for_template(content.text, env=env)
                     elif isinstance(content, VisionMessageImageContent):
                         parameters |= get_parameters_for_template(content.image_url.url, env=env)
                     else:
