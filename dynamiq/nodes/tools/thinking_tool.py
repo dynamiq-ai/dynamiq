@@ -74,23 +74,78 @@ class ThinkingTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Thinking Tool"
-    description: str = (
-        "## Using the thinking tool\n"
-        "Before taking any action or responding to "
-        "the user after receiving tool results, use the thinking tool as a scratchpad to:\n"
-        "- List the specific rules that apply to the current request\n"
-        "- Check if all required information is collected\n"
-        "- Verify that the planned action complies with all policies\n"
-        "- Iterate over tool results for correctness\n"
-        "- Break down complex problems into manageable components\n"
-        "- Analyze assumptions and identify potential gaps\n"
-        "- Plan next steps and validate reasoning logic\n\n"
-        "## Rules\n"
-        "- Use the thinking tool generously to jot down thoughts and ideas\n"
-        "- Always think before acting on tool results or making final responses\n"
-        "- Structure your thoughts clearly using the tool's analysis framework\n"
-        "- Use the tool for complex reasoning, planning, and problem-solving scenarios"
-    )
+    description: str = """## Structured Reasoning Tool
+### Purpose
+Process thoughts and reasoning in a structured way to improve decision-making and problem-solving clarity.
+
+### When to Use
+- Before making important decisions or taking actions
+- When analyzing complex problems or multi-step processes
+- To organize thoughts and validate reasoning logic
+- When reviewing tool results for accuracy and completeness
+- For planning next steps in complex workflows
+- To identify assumptions and potential gaps in thinking
+
+### Key Capabilities
+- Structured thought analysis and organization
+- Break down complex problems into manageable components
+- Identify key insights, assumptions, and knowledge gaps
+- Plan sequential reasoning and action steps
+- Validate logic and decision pathways
+- Maintain thinking context across sessions (when memory enabled)
+
+### Required Parameters
+- **thought** (string): The idea, reasoning, or problem to analyze
+
+### Optional Parameters
+- **context** (string): Additional background information or constraints
+- **focus** (string): Specific analysis area (planning, analysis, problem-solving, etc.)
+
+### Usage Examples
+#### Problem Analysis
+```json
+{
+  "thought": "I need to decide between two database solutions for handling user data",
+  "context": "We expect 100k users initially, growing to 1M+ users",
+  "focus": "decision-making"
+}
+```
+
+#### Action Planning
+```json
+{
+  "thought": "The API integration failed with a 401 error, need to troubleshoot",
+  "context": "Using OAuth2 authentication, worked yesterday",
+  "focus": "problem-solving"
+}
+```
+
+#### Requirement Validation
+```json
+{
+  "thought": "User wants to export data but hasn't specified format or scope",
+  "context": "They mentioned 'all customer data' but that could mean different things",
+  "focus": "requirement-gathering"
+}
+```
+
+### Analysis Framework
+The tool provides structured output including:
+- **Analysis**: Clarification and organization of the main thought
+- **Key Components**: Breakdown of complex aspects
+- **Insights & Observations**: Important patterns, assumptions, or gaps
+- **Next Steps**: Concrete actions or further considerations
+- **Summary**: Clear, actionable conclusion
+
+### Best Practices
+1. **Use before major decisions** to validate reasoning
+2. **Break down complex thoughts** into smaller components
+3. **Include relevant context** for better analysis
+4. **Specify focus areas** for targeted analysis
+5. **Review assumptions** and identify potential biases
+6. **Use iteratively** for multi-step problem solving
+7. **Document insights** for future reference
+"""
 
     llm: BaseLLM = Field(..., description="LLM to use for thinking processes")
 

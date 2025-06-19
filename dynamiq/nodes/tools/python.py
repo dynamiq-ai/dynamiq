@@ -145,10 +145,110 @@ class Python(Node):
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Python Code Executor Tool"
-    description: str = (
-        "The tool that executes Python code in a secure sandbox environment. "
-        "All arguments are passed as a dictionary to the 'run' main function."
-    )
+    description: str = """## Secure Code Execution Tool
+### Purpose
+Execute Python code in a controlled sandbox environment for data processing, calculations, and analysis.
+
+### When to Use
+- Perform complex mathematical calculations and data analysis
+- Process and transform data using Python libraries
+- Generate visualizations and charts
+- Validate algorithms and computational logic
+- Parse and manipulate structured data (JSON, CSV, etc.)
+- Implement custom business logic and transformations
+
+### Key Capabilities
+- Execute Python code with access to approved libraries
+- Secure sandbox environment prevents system access
+- Support for popular libraries: pandas, numpy, matplotlib, requests, etc.
+- Automatic result capture and formatting
+- Error handling with detailed traceback information
+- Memory and execution time limitations for safety
+
+### Required Parameters
+- **code** (string): Python code to execute with a required 'run' function
+
+### Code Structure Requirements
+```python
+def run(input_data):
+    # Your code logic here
+    # Access input parameters via input_data dictionary
+    result = process_data(input_data)
+    return result  # This will be returned as the tool output
+```
+
+### Usage Examples
+#### Data Analysis
+```json
+{
+  "numbers": [1, 2, 3, 4, 5],
+  "operation": "statistics"
+}
+```
+```python
+def run(input_data):
+    import statistics
+    numbers = input_data['numbers']
+    return {
+        'mean': statistics.mean(numbers),
+        'median': statistics.median(numbers),
+        'std_dev': statistics.stdev(numbers)
+    }
+```
+
+#### Text Processing
+```json
+{
+  "text": "Hello World Python",
+  "action": "analyze"
+}
+```
+```python
+def run(input_data):
+    text = input_data['text']
+    return {
+        'length': len(text),
+        'words': len(text.split()),
+        'uppercase': text.upper(),
+        'word_count': {word: text.split().count(word) for word in set(text.split())}
+    }
+```
+
+#### API Data Processing
+```json
+{
+  "api_url": "https://api.example.com/data",
+  "process_type": "extract_names"
+}
+```
+```python
+def run(input_data):
+    import requests
+    import json
+
+    response = requests.get(input_data['api_url'])
+    data = response.json()
+
+    names = [item['name'] for item in data if 'name' in item]
+    return {'extracted_names': names, 'count': len(names)}
+```
+
+### Security Guidelines
+1. **Only approved libraries** are available for import
+2. **No file system access** beyond temporary processing
+3. **No network access** except through approved libraries
+4. **Memory limits** prevent excessive resource usage
+5. **Execution timeout** prevents infinite loops
+6. **All code runs in isolation** from the main system
+
+### Best Practices
+1. **Always include a 'run' function** as the entry point
+2. **Use print statements** to debug and show intermediate results
+3. **Handle exceptions** gracefully within your code
+4. **Return structured data** (dicts, lists) when possible
+5. **Keep code focused** on single, specific tasks
+6. **Test with simple inputs** before complex operations
+"""
     code: str
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
 

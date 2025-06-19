@@ -9,15 +9,58 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SQL = """# SQL Executor Tool
-A tool that executes SQL queries against databases like PostgreSQL, MySQL, Snowflake, and AWS Redshift.
-**Functionality:**
-- Executes SQL queries provided through input parameters or pre-configured in the tool
-- Returns query results in a formatted structure or confirmation messages
-- Handles execution errors with clear error messages
-**Usage:**
-Provide a SQL query string to execute against the configured database connection.
-The tool will return the query results or appropriate status messages.
+DESCRIPTION_SQL = """## Database Query Tool
+### Purpose
+Execute SQL queries against relational databases to retrieve, insert, update, or delete data.
+
+### When to Use
+- Retrieve specific data from database tables
+- Perform data analysis and aggregation queries
+- Execute database maintenance operations
+- Generate reports from structured data
+- Verify data integrity and relationships
+
+### Key Capabilities
+- Execute SELECT queries to retrieve data
+- Perform INSERT, UPDATE, DELETE operations
+- Run complex joins and aggregations
+- Execute stored procedures and functions
+- Support for PostgreSQL, MySQL, Snowflake, and AWS Redshift
+- Automatic result formatting for readability
+- Error handling with clear diagnostics
+
+### Required Parameters
+- query (string): The SQL statement to execute
+
+### Usage Examples
+#### Data Retrieval
+```json
+{
+  "query": "SELECT name, email, created_at FROM users WHERE status = 'active' LIMIT 10"
+}
+```
+
+#### Data Aggregation
+```json
+{
+  "query": "SELECT department, COUNT(*) as employee_count, AVG(salary) as avg_salary FROM employees GROUP BY department"
+}
+```
+
+#### Data Modification
+```json
+{
+  "query": "UPDATE products SET price = price * 1.1 WHERE category = 'electronics'"
+}
+```
+
+### Best Practices
+1. Use specific column names instead of SELECT * for better performance
+2. Include LIMIT clauses for large datasets to avoid overwhelming results
+3. Use parameterized queries when possible to prevent SQL injection
+4. Test queries carefully as modifications cannot be undone
+5. Use transactions for multiple related operations
+6. Check query execution time for performance optimization
 """  # noqa: E501
 
 
@@ -78,7 +121,7 @@ class SQLExecutor(ConnectionNode):
             if not query:
                 raise ValueError("Query cannot be empty")
             cursor = self.client.cursor(
-                **self.connection.cursor_params if not isinstance(self.connection, (PostgreSQL, AWSRedshift)) else {}
+                self.connection.cursor_params if not isinstance(self.connection, (PostgreSQL, AWSRedshift)) else {}
             )
             cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []

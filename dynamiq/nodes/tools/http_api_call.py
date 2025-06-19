@@ -12,7 +12,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_HTTP = """## HTTP API Call Tool
+DESCRIPTION_HTTP = """## API Request Tool
 ### Overview
 Make web requests to external APIs and services with support for various HTTP methods, payload formats, and response types.
 ### Capabilities

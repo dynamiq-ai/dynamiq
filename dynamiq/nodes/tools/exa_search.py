@@ -11,7 +11,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_EXA = """## Exa Search Tool
+DESCRIPTION_EXA = """## Search Tool
 ### Overview
 Exa Search Tool provides web search capabilities powered by Exa AI's semantic search technology.
 Search the internet for current information with powerful filtering options and retrieve full webpage content when needed.

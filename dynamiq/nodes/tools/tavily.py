@@ -10,7 +10,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_TAVILY = """## Tavily Search Tool
+DESCRIPTION_TAVILY = """## Web Search Tool
 ### Description
 A web search tool that delivers relevant results from trusted internet sources, specializing in factual information, current events, and topic-specific knowledge.
 

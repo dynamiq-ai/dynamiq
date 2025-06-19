@@ -71,9 +71,7 @@ class SummarizerTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Summarizer Tool"
-    description: str = (
-        "A tool for summarizing and cleaning up text extracted from HTML. "
-    )
+    description: str = "A tool for summarizing and cleaning up text extracted from HTML. "
     llm: Node
     chunk_size: int = Field(default=4000, description="The maximum number of words in each chunk")
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))

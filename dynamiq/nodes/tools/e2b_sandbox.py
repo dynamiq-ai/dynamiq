@@ -12,7 +12,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_E2B = """## E2B Code Interpreter
+DESCRIPTION_E2B = """## Code Execution
 ### Description
 A secure sandbox environment for code execution, file management, and external resource interaction.
 ### Capabilities
