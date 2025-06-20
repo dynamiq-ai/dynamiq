@@ -14,6 +14,57 @@ from pydantic import BaseModel, PydanticUserError, RootModel
 TRUNCATE_LIMIT = 20
 
 
+class TruncationMethod(str, Enum):
+    """Enum for text truncation methods."""
+
+    START = "START"
+    END = "END"
+    MIDDLE = "MIDDLE"
+
+
+def truncate_text_for_embedding(
+    text: str,
+    max_tokens: int = 8192,
+    truncate_method: TruncationMethod | str = TruncationMethod.MIDDLE,
+    truncation_message: str = "...[truncated for embedding]...",
+) -> str:
+    """
+    Truncate text for embedding models to prevent token limit exceeded errors.
+
+    Args:
+        text: The text to potentially truncate
+        max_tokens: Maximum allowed token count (default: 8192 for most embedding models)
+        truncate_method: Method to use for truncation (TruncationMethod.START/END/MIDDLE)
+        truncation_message: Message to insert when truncating
+
+    Returns:
+        Truncated text that should fit within the embedding model's token limits
+    """
+    if not text:
+        return text
+
+    max_chars = max_tokens * 4
+
+    if len(text) <= max_chars:
+        return text
+
+    truncation_msg_len = len(truncation_message)
+
+    if max_chars <= truncation_msg_len:
+        simple_msg = "...[truncated]..."
+        if max_chars <= len(simple_msg):
+            return text[:max_chars]
+        return simple_msg
+
+    if truncate_method == TruncationMethod.START or truncate_method == "START":
+        return truncation_message + text[-(max_chars - truncation_msg_len) :]
+    elif truncate_method == TruncationMethod.END or truncate_method == "END":
+        return text[: max_chars - truncation_msg_len] + truncation_message
+    else:
+        half_length = (max_chars - truncation_msg_len) // 2
+        return text[:half_length] + truncation_message + text[-half_length:]
+
+
 def generate_uuid() -> str:
     """
     Generate a UUID4 string.
