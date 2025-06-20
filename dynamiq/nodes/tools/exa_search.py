@@ -11,47 +11,32 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_EXA = """## Search Tool
-### Overview
-Exa Search Tool provides web search capabilities powered by Exa AI's semantic search technology.
-Search the internet for current information with powerful filtering options and retrieve full webpage content when needed.
-### Capabilities
-- Perform keyword and semantic searches across the web
-- Filter results by domains, text content, and categories
-- Retrieve highlights, summaries, and full content from webpages
-- Access metadata including titles, URLs, dates, and authors
-### Input Parameters
-- **query** (string, required): Search query text
-- **include_full_content** (boolean, optional, default: false): Retrieves complete content when true
-- **use_autoprompt** (boolean, optional, default: false): Enhances query automatically when true. Enabled by default for auto search, optional for neural search, and not available for keyword search.
-- **query_type** (string, optional, default: "auto"): "keyword" (exact match), "neural" (semantic), or "auto"
-- **category** (string, optional): Focus on specific data types (only company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report)
-- **limit** (integer, optional, default: 10): Number of results to return (1-100)
-### Examples of action input for tool usage
-#### Basic Search
-{
-  "query": "renewable energy advancements 2024"
-}
-#### Filtered Domain Search
-{
-  "query": "machine learning applications",
-  "category": "research paper",
-  "limit": 15
-}
-#### Comprehensive Research
-{
-  "query": "climate change policy",
-  "query_type": "neural",
-  "include_full_content": true,
-  "category": "research paper"
-}
-### Best Practices
-1. Use specific queries with key terms and context
-2. Combine domain and text filters for improved relevance
-3. Use "neural" for concept searches, "keyword" for exact matches
-4. Request fewer results (5-15) for higher quality information
-5. Use include_full_content sparingly to maintain response speed
-"""  # noqa E501
+DESCRIPTION_EXA = """Semantic search tool for high-quality web results with advanced filtering capabilities.
+Core Purpose: Search the internet using semantic understanding for current information with precision filtering.
+Key Capabilities:
+- Keyword, semantic (neural), and automatic search modes
+- Category filtering (research papers, news, companies, PDFs, etc.)
+- Full content retrieval with highlights and summaries
+- Metadata access (titles, URLs, dates, authors)
+When to Use:
+- High-quality research requiring semantic understanding
+- Academic and professional content discovery
+- Specific domain or content type searches
+- Comprehensive content analysis needs
+Required Input:
+- `query` (string): Search query text
+Optional Parameters:
+- `query_type`: "keyword", "neural", or "auto" (default: auto)
+- `category`: Content type filter (research paper, news, company, etc.)
+- `include_full_content`: Retrieve complete webpage content
+- `limit`: Number of results (1-100, default: 10)
+Usage Examples:
+```json
+{"query": "renewable energy advancements 2024"}
+{"query": "machine learning applications", "category": "research paper", "limit": 15}
+{"query": "climate change policy", "query_type": "neural", "include_full_content": true}
+```
+Best Practices: Use specific queries with context, leverage category filters for precision, consider neural mode for semantic searches."""  # noqa E501
 
 
 class QueryType(str, Enum):

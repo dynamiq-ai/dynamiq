@@ -9,59 +9,26 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SQL = """## Database Query Tool
-### Purpose
-Execute SQL queries against relational databases to retrieve, insert, update, or delete data.
-
-### When to Use
-- Retrieve specific data from database tables
-- Perform data analysis and aggregation queries
-- Execute database maintenance operations
-- Generate reports from structured data
-- Verify data integrity and relationships
-
-### Key Capabilities
-- Execute SELECT queries to retrieve data
-- Perform INSERT, UPDATE, DELETE operations
-- Run complex joins and aggregations
-- Execute stored procedures and functions
-- Support for PostgreSQL, MySQL, Snowflake, and AWS Redshift
-- Automatic result formatting for readability
-- Error handling with clear diagnostics
-
-### Required Parameters
-- query (string): The SQL statement to execute
-
-### Usage Examples
-#### Data Retrieval
+DESCRIPTION_SQL = """Execute SQL queries on databases (PostgreSQL, MySQL, Snowflake, AWS Redshift).
+Core Purpose: Retrieve, insert, update, or delete data from relational databases.
+Key Capabilities:
+- SELECT queries for data retrieval and analysis
+- INSERT/UPDATE/DELETE for data modifications
+- Complex joins, aggregations, and stored procedures
+- Automatic result formatting and error handling
+When to Use:
+- Database queries and data analysis
+- Generating reports from structured data
+- Data integrity verification and maintenance operations
+Required Input:
+- `query` (string): SQL statement to execute
+Usage Examples:
 ```json
-{
-  "query": "SELECT name, email, created_at FROM users WHERE status = 'active' LIMIT 10"
-}
+{"query": "SELECT name, email FROM users WHERE status = 'active' LIMIT 10"}
+{"query": "SELECT department, COUNT(*) as count, AVG(salary) as avg_salary FROM employees GROUP BY department"}
 ```
-
-#### Data Aggregation
-```json
-{
-  "query": "SELECT department, COUNT(*) as employee_count, AVG(salary) as avg_salary FROM employees GROUP BY department"
-}
-```
-
-#### Data Modification
-```json
-{
-  "query": "UPDATE products SET price = price * 1.1 WHERE category = 'electronics'"
-}
-```
-
-### Best Practices
-1. Use specific column names instead of SELECT * for better performance
-2. Include LIMIT clauses for large datasets to avoid overwhelming results
-3. Use parameterized queries when possible to prevent SQL injection
-4. Test queries carefully as modifications cannot be undone
-5. Use transactions for multiple related operations
-6. Check query execution time for performance optimization
-"""  # noqa: E501
+Best Practices:
+- Use specific columns over SELECT *, include LIMIT for large datasets"""  # noqa: E501
 
 
 class SQLInputSchema(BaseModel):
@@ -121,7 +88,7 @@ class SQLExecutor(ConnectionNode):
             if not query:
                 raise ValueError("Query cannot be empty")
             cursor = self.client.cursor(
-                self.connection.cursor_params if not isinstance(self.connection, (PostgreSQL, AWSRedshift)) else {}
+                **self.connection.cursor_params if not isinstance(self.connection, (PostgreSQL, AWSRedshift)) else {}
             )
             cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []

@@ -10,46 +10,32 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_TAVILY = """## Web Search Tool
-### Description
-A web search tool that delivers relevant results from trusted internet sources, specializing in factual information, current events, and topic-specific knowledge.
-
-### Capabilities
-- Perform natural language web searches with adjustable depth and focus.
-- Filter by topic categories and specific domains.
-- Control result quantity and quality.
-- Include optional image content, summarized answers, and raw page data.
-- Access current information beyond your knowledge base.
-
-### Parameters
-- `query`: Your search query (e.g., "latest quantum computing advances").
-- `search_depth`: Must be either `basic` or `advanced` (default: `basic`).
-- `chunks_per_source`: Number of chunks to return per source (default: 3, range: 1-3).
-- `topic`: Must be either `general` (default) or `news`.
-- `max_results`: Number of results (default: 5, range: 1-20).
-- `time_range`:The time range back from the current date to filter results. Useful when looking for sources that have published data.
-Available options are only one of: `day`, `week`, `month`, `year`, `d`, `w`, `m`, `y`.
-- `include_raw_content`: Include full page content (default: false).
-
-### Usage Examples
-1. Basic search:
-   {
-     "query": "effects of climate change on coral reefs"
-   }
-2. Advanced topic-specific search:
-   {
-     "query": "breakthrough Alzheimer's treatments",
-     "search_depth": "advanced",
-     "include_raw_content": true
-   }
-
-### Tips
-- More specific queries yield more relevant results.
-- `search_depth: advanced` improves quality but increases response time.
-- `include_raw_content` significantly increases response size.
-- Topic-specific searches filter out irrelevant content.
-- Relevance scores help identify authoritative sources.
-"""  # noqa E501
+DESCRIPTION_TAVILY = """Web search tool for accessing current information from trusted internet sources.
+Core Purpose: Search the web for factual information, current events, and up-to-date knowledge.
+Key Capabilities:
+- Natural language web searches with adjustable depth
+- Topic filtering (general/news) and domain control
+- Relevance scoring and result quality optimization
+- Optional raw content and summarized answers
+When to Use:
+- Current events and recent developments
+- Fact-checking and verification
+- Information beyond knowledge cutoff
+- Research requiring multiple authoritative sources
+Required Input:
+- `query` (string): Search query
+Optional Parameters:
+- `search_depth`: "basic" or "advanced" (default: basic)
+- `max_results`: 1-20 results (default: 5)
+- `include_raw_content`: Include full page content
+- `time_range`: Filter by timeframe (day/week/month/year)
+Usage Examples:
+```json
+{"query": "latest quantum computing advances"}
+{"query": "COVID-19 variants 2024", "search_depth": "advanced", "time_range": "month"}
+```
+Best Practices:
+Use specific queries, consider advanced mode for complex topics, include time range for recent events."""  # noqa E501
 
 
 class TavilyInputSchema(BaseModel):
