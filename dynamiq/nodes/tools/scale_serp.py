@@ -11,7 +11,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SERP = """## Scale SERP Search Tool
+DESCRIPTION_SERP = """## Search Tool
 ### Overview
 A web search tool that retrieves current information from the internet using Scale SERP API.
 Access search results including web pages, news, images, and videos with organized titles, links, and descriptive snippets.

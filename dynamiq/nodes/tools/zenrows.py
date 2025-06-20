@@ -9,21 +9,60 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_ZENROWS = """## ZenRows Web Scraper Tool
-### Description
-A powerful web scraping tool that extracts content from any web page.
-### Capabilities
-- Extracts complete text from web pages
+DESCRIPTION_ZENROWS = """## Web Content Extraction Tool
+### Purpose
+Extract and convert web page content into readable text format for analysis and processing.
+
 ### When to Use
-- To access specific web content not in your knowledge base or requiring up-to-date information.
-- To extract information from articles, documentation, or product pages.
-- When you need detailed content from a known URL rather than general search results.
-### Input Parameters
-- `url` (required): The complete URL of the web page to scrape (e.g., "https://www.example.com/article/12345").
+- Extract content from specific articles, blogs, or documentation pages
+- Retrieve up-to-date information not available in your knowledge base
+- Parse content from complex web applications or dynamic pages
+- Convert web content to structured text for further processing
+- Access content behind forms or interactive elements
+
+### Key Capabilities
+- Extract clean text content from any accessible webpage
+- Handle JavaScript-heavy sites and dynamic content
+- Convert HTML to readable markdown format
+- Bypass common anti-scraping measures
+- Process single-page applications (SPAs)
+- Extract content from password-protected or geo-restricted sites
+
+### Required Parameters
+- **url** (string): Complete URL of the webpage to extract content from
+
+### Optional Parameters
+- **markdown_response** (boolean): Return content in markdown format (default: true)
+
 ### Usage Examples
-{"url": "https://www.bbc.com/news/science-environment-12345678"}
-### Notes
-- Always provide the complete URL including the protocol (http:// or https://).
+#### Extract Article Content
+```json
+{
+  "url": "https://www.example.com/blog/latest-technology-trends"
+}
+```
+
+#### Extract Documentation
+```json
+{
+  "url": "https://docs.example.com/api/authentication"
+}
+```
+
+#### Extract Product Information
+```json
+{
+  "url": "https://shop.example.com/products/laptop-model-xyz"
+}
+```
+
+### Best Practices
+1. **Use complete URLs** including protocol (https:// or http://)
+2. **Verify URL accessibility** before extraction attempts
+3. **Respect robots.txt** and website terms of service
+4. **Use sparingly** to avoid overwhelming target servers
+5. **Prefer official APIs** when available over scraping
+6. **Handle sensitive content** with appropriate data protection measures
 """
 
 

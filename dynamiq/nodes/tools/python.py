@@ -145,10 +145,27 @@ class Python(Node):
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Python Code Executor Tool"
-    description: str = (
-        "The tool that executes Python code in a secure sandbox environment. "
-        "All arguments are passed as a dictionary to the 'run' main function."
-    )
+    description: str = """Execute Python code in a secure sandbox environment
+    for calculations, data analysis, and processing.
+Required Code Structure:
+Must include a `run` function that accepts input_data and returns results.
+
+Usage Examples:
+```python
+def run(input_data):
+    import statistics
+    numbers = input_data['numbers']
+    return {'mean': statistics.mean(numbers), 'median': statistics.median(numbers)}
+```
+
+```python
+def run(input_data):
+    import requests
+    response = requests.get(input_data['url'])
+    return {'status': response.status_code, 'data': response.json()}
+```
+Best Practices: Include error handling,
+return structured data, use print() for debugging, keep code focused on  single tasks."""
     code: str
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
 

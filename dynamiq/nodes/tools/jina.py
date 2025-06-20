@@ -10,7 +10,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SCRAPE = """## Jina Scrape Tool
+DESCRIPTION_SCRAPE = """## Web Scraping Tool
 ### Overview
 The Jina Scrape Tool extracts content from web pages.
 ### Capabilities
@@ -29,7 +29,7 @@ The Jina Scrape Tool extracts content from web pages.
 - **engine** (string, optional): Use 'browser' for JS-heavy sites, 'direct' for speed
 """  # noqa: E501
 
-DESCRIPTION_SEARCH = """## Jina Search Tool
+DESCRIPTION_SEARCH = """## Web Search Tool
 ### Overview
 The Jina Search Tool enables comprehensive web searches using Jina AI's search engine,
 delivering structured results with extensive customization options.

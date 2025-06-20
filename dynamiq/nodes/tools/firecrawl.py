@@ -9,7 +9,7 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_FIRECRAWL = """## Firecrawl Web Scraping Tool
+DESCRIPTION_FIRECRAWL = """## Web Scraping Tool
 ### Overview
 The Firecrawl Tool is a powerful web scraping utility that extracts high-fidelity content from websites.
 ### Capabilities
