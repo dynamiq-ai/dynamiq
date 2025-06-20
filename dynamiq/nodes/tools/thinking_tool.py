@@ -74,7 +74,7 @@ class ThinkingTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Thinking Tool"
-    description: str = """Structured reasoning tool for analyzing thoughts, validating decisions, and organizing complex 
+    description: str = """Structured reasoning tool for analyzing thoughts, validating decisions, and organizing complex
 problem-solving processes.
 
 **Core Purpose:** Process and organize thoughts to improve decision-making clarity and identify reasoning gaps.
@@ -102,15 +102,15 @@ problem-solving processes.
 
 **Usage Examples:**
 ```json
-{"thought": "Need to choose between two database solutions", "context": "100k initial users, scaling to 1M+", 
+{"thought": "Need to choose between two database solutions", "context": "100k initial users, scaling to 1M+",
 "focus": "decision-making"}
-{"thought": "API integration failed with 401 error", "context": "OAuth2 auth, worked yesterday", 
+{"thought": "API integration failed with 401 error", "context": "OAuth2 auth, worked yesterday",
 "focus": "problem-solving"}
 ```
 
 **Output Framework:** Analysis, key components, insights & observations, next steps, actionable summary.
 
-**Best Practices:** Use before major decisions, include relevant context, specify focus areas, review assumptions 
+**Best Practices:** Use before major decisions, include relevant context, specify focus areas, review assumptions
 iteratively."""
 
     llm: BaseLLM = Field(..., description="LLM to use for thinking processes")

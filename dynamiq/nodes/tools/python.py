@@ -145,7 +145,8 @@ class Python(Node):
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Python Code Executor Tool"
-    description: str = """Execute Python code in a secure sandbox environment for calculations, data analysis, and processing.
+    description: str = """Execute Python code in a secure sandbox environment
+    for calculations, data analysis, and processing.
 Required Code Structure:
 Must include a `run` function that accepts input_data and returns results.
 
@@ -163,8 +164,8 @@ def run(input_data):
     response = requests.get(input_data['url'])
     return {'status': response.status_code, 'data': response.json()}
 ```
-
-Best Practices:Include error handling, return structured data, use print() for debugging, keep code focused on  single tasks."""
+Best Practices: Include error handling,
+return structured data, use print() for debugging, keep code focused on  single tasks."""
     code: str
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
 
