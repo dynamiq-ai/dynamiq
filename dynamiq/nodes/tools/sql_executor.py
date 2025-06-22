@@ -9,26 +9,30 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SQL = """Execute SQL queries on databases (PostgreSQL, MySQL, Snowflake, AWS Redshift).
-Core Purpose: Retrieve, insert, update, or delete data from relational databases.
+DESCRIPTION_SQL = """Executes SQL queries on multiple database systems including PostgreSQL,
+MySQL, Snowflake, and AWS Redshift.
+
 Key Capabilities:
-- SELECT queries for data retrieval and analysis
-- INSERT/UPDATE/DELETE for data modifications
-- Complex joins, aggregations, and stored procedures
+- Full SQL operations: SELECT, INSERT, UPDATE, DELETE, DDL
+- Multi-database support with automatic connection handling
+- Complex query execution with joins, aggregations, subqueries
 - Automatic result formatting and error handling
-When to Use:
-- Database queries and data analysis
-- Generating reports from structured data
-- Data integrity verification and maintenance operations
-Required Input:
-- `query` (string): SQL statement to execute
-Usage Examples:
-```json
-{"query": "SELECT name, email FROM users WHERE status = 'active' LIMIT 10"}
-{"query": "SELECT department, COUNT(*) as count, AVG(salary) as avg_salary FROM employees GROUP BY department"}
-```
-Best Practices:
-- Use specific columns over SELECT *, include LIMIT for large datasets"""  # noqa: E501
+
+Usage Strategy:
+- Use specific columns instead of SELECT * for performance
+- Include LIMIT clauses for large datasets
+- Leverage database-specific features for optimization
+- Handle transactions appropriately for data modifications
+
+Parameter Guide:
+- query: SQL statement to execute (required)
+- Database connection configured at tool initialization
+- Supports parameterized queries for security
+
+Examples:
+- {"query": "SELECT name, email FROM users WHERE status = 'active' LIMIT 10"}
+- {"query": "SELECT department, COUNT(*) FROM employees GROUP BY department"}
+- {"query": "INSERT INTO products (name, price) VALUES ('Widget', 29.99)"}"""
 
 
 class SQLInputSchema(BaseModel):

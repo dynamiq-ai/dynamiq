@@ -74,44 +74,30 @@ class ThinkingTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Thinking Tool"
-    description: str = """Structured reasoning tool for analyzing thoughts, validating decisions, and organizing complex
-problem-solving processes.
+    description: str = """Analyzes thoughts and reasoning processes to improve decision-making clarity and identify gaps in logic.
 
-**Core Purpose:** Process and organize thoughts to improve decision-making clarity and identify reasoning gaps.
+Key Capabilities:
+- Structured analysis of complex thoughts and problems
+- Component breakdown with insights and next steps
+- Context-aware analysis with optional memory support
+- Sequential reasoning validation and action planning
 
-**Key Capabilities:**
-• Structured analysis of complex thoughts and problems
-• Breakdown of multi-step processes into components
-• Identification of assumptions, insights, and knowledge gaps
-• Sequential reasoning validation and action planning
-• Context-aware analysis with memory support
+Usage Strategy:
+- Use before making important decisions or actions
+- Analyze complex multi-step problems systematically
+- Validate reasoning logic and identify assumptions
+- Plan next steps in complex workflows with clarity
 
-**When to Use:**
-✓ Before making important decisions or actions
-✓ Analyzing complex multi-step problems
-✓ Validating reasoning logic and assumptions
-✓ Planning next steps in complex workflows
-✓ Reviewing tool results for completeness
+Parameter Guide:
+- thought: The idea, reasoning, or problem to analyze (required)
+- context: Background information or constraints
+- focus: Analysis area (planning, problem-solving, decision-making)
+- memory_enabled: Maintain history of previous thoughts
 
-**Required Input:**
-- `thought` (string): The idea, reasoning, or problem to analyze
-
-**Optional Parameters:**
-- `context` (string): Background information or constraints
-- `focus` (string): Analysis area (planning, problem-solving, decision-making)
-
-**Usage Examples:**
-```json
-{"thought": "Need to choose between two database solutions", "context": "100k initial users, scaling to 1M+",
-"focus": "decision-making"}
-{"thought": "API integration failed with 401 error", "context": "OAuth2 auth, worked yesterday",
-"focus": "problem-solving"}
-```
-
-**Output Framework:** Analysis, key components, insights & observations, next steps, actionable summary.
-
-**Best Practices:** Use before major decisions, include relevant context, specify focus areas, review assumptions
-iteratively."""
+Examples:
+- {"thought": "Should we implement feature X?", "focus": "decision-making"}
+- {"thought": "API integration failed with 401 error", "context": "OAuth2 auth"}
+- {"thought": "Choose database solutions", "context": "100k users, scaling"}"""  # noqa E501
 
     llm: BaseLLM = Field(..., description="LLM to use for thinking processes")
 

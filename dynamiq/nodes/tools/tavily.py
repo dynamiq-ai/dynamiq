@@ -10,32 +10,29 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_TAVILY = """Web search tool for accessing current information from trusted internet sources.
-Core Purpose: Search the web for factual information, current events, and up-to-date knowledge.
+DESCRIPTION_TAVILY = """Searches the web using Tavily with natural language queries and adjustable search depth.
+
 Key Capabilities:
-- Natural language web searches with adjustable depth
-- Topic filtering (general/news) and domain control
-- Relevance scoring and result quality optimization
-- Optional raw content and summarized answers
-When to Use:
-- Current events and recent developments
-- Fact-checking and verification
-- Information beyond knowledge cutoff
-- Research requiring multiple authoritative sources
-Required Input:
-- `query` (string): Search query
-Optional Parameters:
-- `search_depth`: "basic" or "advanced" (default: basic)
-- `max_results`: 1-20 results (default: 5)
-- `include_raw_content`: Include full page content
-- `time_range`: Filter by timeframe (day/week/month/year)
-Usage Examples:
-```json
-{"query": "latest quantum computing advances"}
-{"query": "COVID-19 variants 2024", "search_depth": "advanced", "time_range": "month"}
-```
-Best Practices:
-Use specific queries, consider advanced mode for complex topics, include time range for recent events."""  # noqa E501
+- Basic/advanced search modes for speed vs thoroughness balance
+- Natural language processing for complex questions
+- Topic-specific searches (general, news) with domain filtering
+- AI-generated summaries and full content extraction
+
+Usage Strategy:
+- Basic: Quick factual queries, current events
+- Advanced: Complex research topics, comprehensive analysis
+- Use include_answer for summaries, time_range for recent results
+
+Parameter Guide:
+- search_depth: basic (fast) vs advanced (thorough)
+- topic: general vs news for content type
+- include_answer: AI summary alongside sources
+- include_raw_content: Full page text for analysis
+
+Examples:
+- {"query": "React performance 2024", "search_depth": "advanced"}
+- {"query": "GPT-4 news", "topic": "news", "time_range": "week"}
+- {"query": "ML tutorials", "include_domains": ["coursera.org"]}"""
 
 
 class TavilyInputSchema(BaseModel):

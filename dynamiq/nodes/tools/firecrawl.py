@@ -9,24 +9,31 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_FIRECRAWL = """## Web Scraping Tool
-### Overview
-The Firecrawl Tool is a powerful web scraping utility that extracts high-fidelity content from websites.
-### Capabilities
-- Extract content from any accessible webpage.
-### When to Use
-- When you need to extract information from a specific webpage.
-- When you require content in a structured, readable format.
-- When parsing complex web applications or content behind user interactions.
-### Input Parameters
-- **url** (string, required): URL of the webpage to scrape.
-Must be a valid, accessible URL including protocol (http/https).
-### Usage Examples
-#### Basic Scraping
-{
-  "url": "https://example.com/article/123"
-}
-"""
+DESCRIPTION_FIRECRAWL = """Scrapes web content from URLs using Firecrawl
+with high-fidelity extraction and structured output.
+
+Key Capabilities:
+- High-quality content extraction with JavaScript support
+- Multiple output formats (markdown, HTML, screenshots)
+- Custom JSON schemas for structured data extraction
+- Main content filtering and selective tag extraction
+
+Usage Strategy:
+- Use markdown format for clean, readable content
+- Enable only_main_content to filter navigation/ads
+- Use JSON schemas for structured data extraction
+- Combine formats for comprehensive content analysis
+
+Parameter Guide:
+- formats: Output types (["markdown", "html", "screenshot"])
+- only_main_content: Filter to main article content
+- include_tags: Specific HTML elements to extract
+- json_options: Custom schemas for structured extraction
+
+Examples:
+- {"url": "https://example.com", "formats": ["markdown"]}
+- {"url": "https://news.com", "only_main_content": true}
+- {"url": "https://store.com", "json_options": {"schema": {"products": "array"}}}"""
 
 
 class JsonOptions(BaseModel):

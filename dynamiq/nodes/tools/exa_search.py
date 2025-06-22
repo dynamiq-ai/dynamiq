@@ -11,32 +11,29 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_EXA = """Semantic search tool for high-quality web results with advanced filtering capabilities.
-Core Purpose: Search the internet using semantic understanding for current information with precision filtering.
+DESCRIPTION_EXA = """Searches the web using Exa with semantic understanding and advanced filtering capabilities.
+
 Key Capabilities:
-- Keyword, semantic (neural), and automatic search modes
-- Category filtering (research papers, news, companies, PDFs, etc.)
-- Full content retrieval with highlights and summaries
-- Metadata access (titles, URLs, dates, authors)
-When to Use:
-- High-quality research requiring semantic understanding
-- Academic and professional content discovery
-- Specific domain or content type searches
-- Comprehensive content analysis needs
-Required Input:
-- `query` (string): Search query text
-Optional Parameters:
-- `query_type`: "keyword", "neural", or "auto" (default: auto)
-- `category`: Content type filter (research paper, news, company, etc.)
-- `include_full_content`: Retrieve complete webpage content
-- `limit`: Number of results (1-100, default: 10)
-Usage Examples:
-```json
-{"query": "renewable energy advancements 2024"}
-{"query": "machine learning applications", "category": "research paper", "limit": 15}
-{"query": "climate change policy", "query_type": "neural", "include_full_content": true}
-```
-Best Practices: Use specific queries with context, leverage category filters for precision, consider neural mode for semantic searches."""  # noqa E501
+- Neural search for conceptual queries, keyword search for exact matches
+- Domain filtering and date range targeting for quality control
+- Full content extraction and category-based filtering
+- Auto-prompt optimization for enhanced result relevance
+
+Usage Strategy:
+- Neural: Abstract concepts ("AI safety research", "sustainable energy solutions")
+- Keyword: Specific terms ("Python pandas documentation", "OpenAI API key")
+- Use domain filters for authoritative sources, date filters for current research
+
+Parameter Guide:
+- type: neural/keyword/auto for search optimization
+- include_domains/exclude_domains: Source quality control
+- start_published_date: Recent results ("2024-01-01")
+- contents: Full text extraction for analysis
+
+Examples:
+- {"query": "AI research papers", "type": "neural", "num_results": 10}
+- {"query": "pandas tutorial", "include_domains": ["medium.com"], "contents": true}
+- {"query": "climate change", "start_published_date": "2024-01-01"}"""
 
 
 class QueryType(str, Enum):

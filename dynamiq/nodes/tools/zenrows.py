@@ -9,61 +9,26 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_ZENROWS = """## Web Content Extraction Tool
-### Purpose
-Extract and convert web page content into readable text format for analysis and processing.
+DESCRIPTION_ZENROWS = """Scrapes web content from URLs using ZenRows with advanced anti-bot protection and JavaScript rendering. Handles complex websites with proxy rotation, CAPTCHA solving, and browser automation for reliable data extraction.
 
-### When to Use
-- Extract content from specific articles, blogs, or documentation pages
-- Retrieve up-to-date information not available in your knowledge base
-- Parse content from complex web applications or dynamic pages
-- Convert web content to structured text for further processing
-- Access content behind forms or interactive elements
+Key Capabilities:
+- Bypass anti-bot protection and access blocked websites
+- JavaScript rendering for dynamic content and SPAs
+- Automatic proxy rotation and CAPTCHA solving
+- Convert HTML to clean Markdown format for easy processing
 
-### Key Capabilities
-- Extract clean text content from any accessible webpage
-- Handle JavaScript-heavy sites and dynamic content
-- Convert HTML to readable markdown format
-- Bypass common anti-scraping measures
-- Process single-page applications (SPAs)
-- Extract content from password-protected or geo-restricted sites
+Usage Strategy:
+Use for websites that block standard scrapers or require JavaScript execution. Enable markdown_response for cleaner text extraction. Handles rate limiting and proxy management automatically.
 
-### Required Parameters
-- **url** (string): Complete URL of the webpage to extract content from
+Parameter Guide:
+- url: Target website URL to scrape
+- markdown_response: Convert HTML to Markdown (default: true)
+- Additional parameters passed through connection configuration
 
-### Optional Parameters
-- **markdown_response** (boolean): Return content in markdown format (default: true)
-
-### Usage Examples
-#### Extract Article Content
-```json
-{
-  "url": "https://www.example.com/blog/latest-technology-trends"
-}
-```
-
-#### Extract Documentation
-```json
-{
-  "url": "https://docs.example.com/api/authentication"
-}
-```
-
-#### Extract Product Information
-```json
-{
-  "url": "https://shop.example.com/products/laptop-model-xyz"
-}
-```
-
-### Best Practices
-1. **Use complete URLs** including protocol (https:// or http://)
-2. **Verify URL accessibility** before extraction attempts
-3. **Respect robots.txt** and website terms of service
-4. **Use sparingly** to avoid overwhelming target servers
-5. **Prefer official APIs** when available over scraping
-6. **Handle sensitive content** with appropriate data protection measures
-"""
+Examples:
+- Basic scraping: {"url": "https://example.com"}
+- E-commerce data: {"url": "https://shop.example.com/products"}
+- News articles: {"url": "https://news.example.com/article/123"}"""  # noqa: E501
 
 
 class ZenRowsInputSchema(BaseModel):
@@ -98,7 +63,7 @@ class ZenRowsTool(ConnectionNode):
         Args:
             input_data (dict[str, Any]): A dictionary containing 'input' key with the URL to scrape.
             config (RunnableConfig, optional): Configuration for the runnable, including callbacks.
-            **kwargs: Additional arguments passed to the execution context.
+            kwargs: Additional arguments passed to the execution context.
 
         Returns:
             dict[str, Any]: A dictionary containing the URL and the scraped content.
@@ -107,7 +72,7 @@ class ZenRowsTool(ConnectionNode):
 
         # Ensure the config is set up correctly
         config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
+        self.run_on_node_execute_run(config.callbacks, kwargs)
 
         params = {
             "url": input_data.url,
@@ -118,7 +83,7 @@ class ZenRowsTool(ConnectionNode):
             response = self.client.request(
                 method=self.connection.method,
                 url=self.connection.url,
-                params={**self.connection.params, **params},
+                params={self.connection.params, params},
             )
             response.raise_for_status()
             scrape_result = response.text

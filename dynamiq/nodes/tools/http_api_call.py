@@ -12,36 +12,30 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_HTTP = """Make web requests to external APIs and services with comprehensive HTTP method support.
-Core Purpose: Execute HTTP requests to external APIs for data retrieval, submission, and integration.
+DESCRIPTION_HTTP = """Makes HTTP API requests with support for all methods and configurable parameters.
+
 Key Capabilities:
-- All HTTP methods (GET, POST, PUT, DELETE, PATCH)
-- Configurable headers, query parameters, and request body
-- Multiple payload formats (raw/JSON) and response types
-- Timeout control and success criteria customization
-When to Use:
-- Fetch data from external web services
-- Submit data to external systems and APIs
-- Interact with RESTful and HTTP-based services
-- Access authenticated third-party services
+- All HTTP methods: GET, POST, PUT, DELETE, PATCH
+- Custom headers, authentication, and request/response handling
+- JSON, form data, and file upload support
+- Automatic response parsing and error handling
 
-Required Input:
-- `url` (string): API endpoint URL
+Usage Strategy:
+- Use GET for data retrieval, POST for creation
+- Include authentication headers for secured APIs
+- Handle different content types with appropriate parameters
+- Configure timeouts and retries for reliability
 
-Optional Parameters:
-- `data` (object): Request body payload
-- `headers` (object): HTTP request headers
-- `params` (object): URL query parameters
-- `payload_type`: "raw" or "json" format
+Parameter Guide:
+- url: Target API endpoint (required)
+- method: HTTP method (GET, POST, PUT, DELETE)
+- headers: Custom headers including authentication
+- body/files: Request payload for POST/PUT operations
 
-Usage Examples:
-```json
-{"url": "https://api.example.com/data"}
-{"url": "https://api.example.com/submit", "data": {"name": "John", "email": "john@example.com"}, "payload_type": "json"}
-{"url": "https://api.example.com/search", "params": {"q": "search term", "limit": 10}}
-```
-
-Best Practices: Set appropriate timeouts, include authentication in headers, use proper response types for different content formats."""  # noqa: E501
+Examples:
+- {"url": "https://api.example.com/data", "method": "GET", "headers": {"Authorization": "Bearer token"}}
+- {"url": "https://api.com/users", "method": "POST", "body": {"name": "John"}}
+- {"url": "https://api.com/upload", "method": "PUT", "files": {"file": "data.csv"}}"""
 
 
 class ResponseType(str, enum.Enum):

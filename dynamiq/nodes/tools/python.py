@@ -145,27 +145,20 @@ class Python(Node):
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Python Code Executor Tool"
-    description: str = """Execute Python code in a secure sandbox environment
-    for calculations, data analysis, and processing.
-Required Code Structure:
-Must include a `run` function that accepts input_data and returns results.
+    description: str = """Executes Python code in a secure sandbox with restricted imports for calculations, data processing, and API interactions.
 
-Usage Examples:
-```python
-def run(input_data):
-    import statistics
-    numbers = input_data['numbers']
-    return {'mean': statistics.mean(numbers), 'median': statistics.median(numbers)}
-```
+Key Capabilities:
+- Secure code execution with restricted module access
+- Math/stats operations, data processing, API requests
+- Error handling with try-except blocks and descriptive messages
+- Must define run(input_data) function and use print() for output
 
-```python
-def run(input_data):
-    import requests
-    response = requests.get(input_data['url'])
-    return {'status': response.status_code, 'data': response.json()}
-```
-Best Practices: Include error handling,
-return structured data, use print() for debugging, keep code focused on  single tasks."""
+Usage Strategy:
+- Always use print() statements to display results
+- Define run(input_data) function that returns structured data
+- Handle errors gracefully with try-except blocks
+- Available modules: math, statistics, json, requests, datetime, re
+"""  # noqa: E501
     code: str
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
 
