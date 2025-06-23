@@ -3,5 +3,7 @@ from .adaptive_manager import AdaptiveAgentManager
 from .graph import GraphOrchestrator
 from .graph_manager import GraphAgentManager
 from .graph_state import GraphState
+from .intelligent_parallel import IntelligentParallelOrchestrator
+from .intelligent_parallel_manager import IntelligentParallelAgentManager
 from .linear import LinearOrchestrator
 from .linear_manager import LinearAgentManager
