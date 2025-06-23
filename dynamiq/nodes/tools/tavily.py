@@ -24,10 +24,19 @@ Usage Strategy:
 - Use include_answer for summaries, time_range for recent results
 
 Parameter Guide:
+- query: Search query to find relevant information
 - search_depth: basic (fast) vs advanced (thorough)
 - topic: general vs news for content type
 - include_answer: AI summary alongside sources
 - include_raw_content: Full page text for analysis
+- time_range: Filter results by recency (day, week, month, year)
+- max_results: Limit results (default: 5, range: 1-20)
+- include_images: Include images in results
+- include_domains: Specific domains to include
+- exclude_domains: Domains to exclude from results
+- use_cache: Use cached results when available
+- chunks_per_source: Number of chunks to return per source (default: 3, range: 1-3)
+
 
 Examples:
 - {"query": "React performance 2024", "search_depth": "advanced"}

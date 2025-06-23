@@ -106,14 +106,10 @@ Usage Strategy:
 - Collect user preferences and customization inputs
 
 Parameter Guide:
-- input_method: console vs streaming feedback collection
 - msg_template: Jinja2 template for message formatting
-- Dynamic parameters: Substituted into message template
 
 Examples:
-- {"input": "Please review this email draft before sending"}
-- {"content": "Generated summary", "action": "approve"}
-- {"decision": "database migration", "context": "100k users"}"""
+- {"msg_template": "Please review this email draft before sending}"""
     input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
     msg_template: str = "{{input}}"
@@ -255,14 +251,12 @@ Usage Strategy:
 - Broadcast information to connected clients
 
 Parameter Guide:
-- output_method: console vs streaming message delivery
 - msg_template: Jinja2 template for message formatting
 - Dynamic parameters: Content substituted into template
 
 Examples:
-- {"input": "Process completed successfully"}
-- {"status": "Processing", "progress": "50%"}
-- {"message": "Error occurred", "details": "Connection timeout"}"""
+- {"msg_template": "Process completed successfully"}
+"""
     msg_template: str = "{{input}}"
     output_method: FeedbackMethod | OutputMethodCallable = FeedbackMethod.CONSOLE
     input_schema: ClassVar[type[MessageSenderInputSchema]] = MessageSenderInputSchema

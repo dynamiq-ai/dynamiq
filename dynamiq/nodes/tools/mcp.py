@@ -188,7 +188,7 @@ class MCPServer(ConnectionNode):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "MCP Tool"
-    description: str = """Model Context Protocol server integration for
+    description: str = """Model Context Server integration for
     dynamic tool discovery and external service connectivity.
 
 Key Capabilities:
@@ -204,14 +204,9 @@ Usage Strategy:
 - Extend workflow capabilities with external service tools
 
 Parameter Guide:
-- connection: MCP connection (MCPSse, MCPStdio, MCPStreamableHTTP)
 - include_tools: Specific tool names to include (default: all)
 - exclude_tools: Tool names to exclude from initialization
-
-Examples:
-- {"connection": "stdio", "command": ["python", "server.py"]}
-- {"connection": "sse", "url": "http://localhost:8000/sse"}
-- {"include_tools": ["weather", "search"], "exclude_tools": ["admin"]}"""
+"""
     connection: MCPSse | MCPStdio | MCPStreamableHTTP
 
     include_tools: list[str] = field(default_factory=list)

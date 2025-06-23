@@ -25,15 +25,19 @@ Usage Strategy:
 - Use domain filters for authoritative sources, date filters for current research
 
 Parameter Guide:
+- query: The search query string (e.g., "latest AI research")
 - type: neural/keyword/auto for search optimization
 - include_domains/exclude_domains: Source quality control
 - start_published_date: Recent results ("2024-01-01")
 - contents: Full text extraction for analysis
+- limit: Number of results to return (1-100)
+- include_text/exclude_text: Text filters for relevance
+- category: Focus on specific data types (options are only company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report.
 
 Examples:
 - {"query": "AI research papers", "type": "neural", "num_results": 10}
 - {"query": "pandas tutorial", "include_domains": ["medium.com"], "contents": true}
-- {"query": "climate change", "start_published_date": "2024-01-01"}"""
+- {"query": "climate change", "start_published_date": "2024-01-01"}"""  # noqa: E501
 
 
 class QueryType(str, Enum):

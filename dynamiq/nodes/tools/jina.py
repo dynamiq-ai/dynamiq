@@ -24,9 +24,11 @@ Usage Strategy:
 - Enable include_links/include_images based on analysis needs
 
 Parameter Guide:
+- url: URL to scrape (e.g., "https://example.com")
 - target_selector: CSS selector for specific content (".content", "#main")
 - remove_selector: Filter unwanted elements (".ads", ".nav")
 - include_links/include_images: Additional content extraction
+- engine: "browser" for JS-heavy sites, "direct" for speed
 
 Examples:
 - {"url": "https://example.com", "target_selector": ".content"}
@@ -47,9 +49,19 @@ Usage Strategy:
 - Analysis: Adjust count based on comprehensiveness needed
 
 Parameter Guide:
-- count: Result volume (1-100) based on analysis depth
-- site: Domain targeting for authoritative sources
-- Query with location context for geographic results
+- query: Search query text (e.g., "restaurants near me")
+- max_results: Maximum results (1-100)
+- country: Two-letter country code (e.g., "US", "GB")
+- location: Geographic location for search origin (e.g., "New York")
+- language: Two-letter language code (e.g., "en", "es")
+- return_format: Response format (markdown, html, text, screenshot, pageshot)
+- include_full_content: Include full content of search results
+- site: Limit search to specific domain (e.g., "example.com")
+- include_images: Include images in search results
+- include_links: Include link summaries in results
+- include_favicons: Include SERP favicons
+- include_favicon: Include individual page favicon
+
 
 Examples:
 - {"query": "restaurants near downtown", "site": "yelp.com"}
