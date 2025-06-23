@@ -1329,9 +1329,9 @@ class MCPStdio(BaseConnection):
 
 
 class DataBricksSQL(BaseConnection):
-    server_hostname: str = Field(default_factory=partial(get_env_var, "DATABRICKS_SERVER_HOSTNAME", "snowflake"))
-    http_path: str = Field(default_factory=partial(get_env_var, "DATABRICKS_HTTP_PATH", "password"))
-    access_token: str = Field(default_factory=partial(get_env_var, "DATABRICKS_TOKEN", "account"))
+    server_hostname: str = Field(default_factory=partial(get_env_var, "DATABRICKS_SERVER_HOSTNAME"))
+    http_path: str = Field(default_factory=partial(get_env_var, "DATABRICKS_HTTP_PATH"))
+    access_token: str = Field(default_factory=partial(get_env_var, "DATABRICKS_TOKEN"))
 
     def connect(self):
         try:
@@ -1343,9 +1343,8 @@ class DataBricksSQL(BaseConnection):
                 access_token=self.access_token,
             )
             logger.debug(
-                f"Connected to Snowflake using account={self.account}, "
-                f"warehouse={str(self.warehouse)}, user={self.user}, "
-                f"database={self.database}, schema={self.snowflake_schema}."
+                f"Connected to DataBricks using server hostname={self.server_hostname}, "
+                f"http path={str(self.http_path)}"
             )
             return conn
         except Exception as e:
