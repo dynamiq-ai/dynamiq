@@ -72,7 +72,7 @@ class ZenRowsTool(ConnectionNode):
 
         # Ensure the config is set up correctly
         config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, kwargs)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         params = {
             "url": input_data.url,
@@ -83,7 +83,7 @@ class ZenRowsTool(ConnectionNode):
             response = self.client.request(
                 method=self.connection.method,
                 url=self.connection.url,
-                params={self.connection.params, params},
+                params={**self.connection.params, **params},
             )
             response.raise_for_status()
             scrape_result = response.text
