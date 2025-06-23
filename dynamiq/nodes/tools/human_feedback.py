@@ -109,7 +109,7 @@ Parameter Guide:
 - msg_template: Jinja2 template for message formatting
 
 Examples:
-- {"msg_template": "Please review this email draft before sending}"""
+- {"msg_template": "Please review this email draft before sending"}"""
     input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
     msg_template: str = "{{input}}"
