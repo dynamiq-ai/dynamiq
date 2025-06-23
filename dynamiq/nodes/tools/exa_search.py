@@ -32,7 +32,7 @@ Parameter Guide:
 - contents: Full text extraction for analysis
 - limit: Number of results to return (1-100)
 - include_text/exclude_text: Text filters for relevance
-- category: Focus on specific data types (options are only company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report.
+- category: Focus on specific data types (options are only company, research paper, news, pdf, github, tweet, personal site, linkedin profile, financial report).
 
 Examples:
 - {"query": "AI research papers", "type": "neural", "num_results": 10}
