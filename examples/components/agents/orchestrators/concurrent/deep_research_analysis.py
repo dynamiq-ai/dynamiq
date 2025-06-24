@@ -2,8 +2,8 @@ from dynamiq.connections import E2B as E2BConnection
 from dynamiq.connections import Exa
 from dynamiq.connections import Tavily as TavilyConnection
 from dynamiq.connections import ZenRows as ZenRowsConnection
-from dynamiq.nodes.agents.orchestrators.intelligent_parallel import IntelligentParallelOrchestrator
-from dynamiq.nodes.agents.orchestrators.intelligent_parallel_manager import IntelligentParallelAgentManager
+from dynamiq.nodes.agents.orchestrators.concurrent import ConcurrentOrchestrator
+from dynamiq.nodes.agents.orchestrators.concurrent_manager import ConcurrentAgentManager
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
@@ -45,7 +45,7 @@ ALTERNATIVE_TASKS = [
 
 
 def create_research_orchestrator():
-    """Create and configure the IntelligentParallelOrchestrator for research tasks."""
+    """Create and configure the ConcurrentOrchestrator for research tasks."""
 
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0.1, max_tokens=4000)
 
@@ -128,12 +128,12 @@ def create_research_orchestrator():
         ),
     )
 
-    manager = IntelligentParallelAgentManager(
+    manager = ConcurrentAgentManager(
         llm=llm,
         name="Research Coordination Manager",
     )
 
-    orchestrator = IntelligentParallelOrchestrator(
+    orchestrator = ConcurrentOrchestrator(
         name="Deep Research Orchestrator",
         manager=manager,
         agents=[literature_agent, market_agent, data_agent, policy_agent, synthesis_agent],
@@ -149,7 +149,7 @@ def create_research_orchestrator():
 
 def run_research_example():
     """Run the deep research analysis example."""
-    print("=== Deep Research Analysis with IntelligentParallelOrchestrator ===\n")
+    print("=== Deep Research Analysis with ConcurrentOrchestrator ===\n")
 
     orchestrator = create_research_orchestrator()
 
@@ -275,7 +275,7 @@ if __name__ == "__main__":
     # demonstrate_parallel_capabilities()
 
     print("\n" + "=" * 60)
-    print("Example completed. The IntelligentParallelOrchestrator demonstrated:")
+    print("Example completed. The ConcurrentOrchestrator demonstrated:")
     print("✓ Complex task decomposition and parallel planning")
     print("✓ Intelligent agent and tool coordination")
     print("✓ Context sharing across parallel research streams")

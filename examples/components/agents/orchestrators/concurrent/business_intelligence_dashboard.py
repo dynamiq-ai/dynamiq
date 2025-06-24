@@ -2,8 +2,8 @@ from dynamiq.connections import E2B as E2BConnection
 from dynamiq.connections import Exa
 from dynamiq.connections import Tavily as TavilyConnection
 from dynamiq.connections import ZenRows as ZenRowsConnection
-from dynamiq.nodes.agents.orchestrators.intelligent_parallel import IntelligentParallelOrchestrator
-from dynamiq.nodes.agents.orchestrators.intelligent_parallel_manager import IntelligentParallelAgentManager
+from dynamiq.nodes.agents.orchestrators.concurrent import ConcurrentOrchestrator
+from dynamiq.nodes.agents.orchestrators.concurrent_manager import ConcurrentAgentManager
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
@@ -46,7 +46,7 @@ ALTERNATIVE_TASKS = [
 
 
 def create_bi_orchestrator():
-    """Create the IntelligentParallelOrchestrator for business intelligence tasks."""
+    """Create the ConcurrentOrchestrator for business intelligence tasks."""
 
     llm = setup_llm(model_provider="gpt", model_name="o4-mini", temperature=0.1, max_tokens=4000)
 
@@ -142,12 +142,12 @@ def create_bi_orchestrator():
         ),
     )
 
-    manager = IntelligentParallelAgentManager(
+    manager = ConcurrentAgentManager(
         llm=llm,
         name="BI Dashboard Manager",
     )
 
-    orchestrator = IntelligentParallelOrchestrator(
+    orchestrator = ConcurrentOrchestrator(
         name="Business Intelligence Orchestrator",
         manager=manager,
         agents=[
@@ -170,7 +170,7 @@ def create_bi_orchestrator():
 
 def run_bi_dashboard_example():
     """Run the main business intelligence dashboard example."""
-    print("=== Business Intelligence Dashboard with IntelligentParallelOrchestrator ===\n")
+    print("=== Business Intelligence Dashboard with ConcurrentOrchestrator ===\n")
 
     orchestrator = create_bi_orchestrator()
 
@@ -340,7 +340,7 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 60)
     print("Business Intelligence example completed!")
-    print("The IntelligentParallelOrchestrator demonstrated:")
+    print("The ConcurrentOrchestrator demonstrated:")
     print("✓ Parallel data collection from multiple sources")
     print("✓ Specialized financial and market analysis")
     print("✓ Competitive intelligence gathering")

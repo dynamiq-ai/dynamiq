@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.base import Agent
-from dynamiq.nodes.agents.orchestrators.intelligent_parallel_manager import IntelligentParallelAgentManager
+from dynamiq.nodes.agents.orchestrators.concurrent_manager import ConcurrentAgentManager
 from dynamiq.nodes.agents.orchestrators.orchestrator import Decision, Orchestrator, OrchestratorError
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -88,7 +88,7 @@ class ParallelExecutionPlan(BaseModel):
     timeout: int = 300
 
 
-class IntelligentParallelOrchestrator(Orchestrator):
+class ConcurrentOrchestrator(Orchestrator):
     """
     Advanced orchestrator that combines natural conversation with intelligent parallel task execution.
 
@@ -108,9 +108,9 @@ class IntelligentParallelOrchestrator(Orchestrator):
     - Comprehensive error handling and recovery
     """
 
-    name: str | None = "IntelligentParallelOrchestrator"
+    name: str | None = "ConcurrentOrchestrator"
     group: NodeGroup = NodeGroup.AGENTS
-    manager: IntelligentParallelAgentManager
+    manager: ConcurrentAgentManager
     agents: list[Agent] = []
     tools: list[Node] = []
     max_loops: int = 10

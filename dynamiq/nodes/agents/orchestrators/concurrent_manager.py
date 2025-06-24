@@ -184,7 +184,7 @@ Guidelines:
 Provide a helpful clarification response.
 """
 
-PROMPT_TEMPLATE_INTELLIGENT_PARALLEL_PLAN = """
+PROMPT_TEMPLATE_CONCURRENT_PLAN = """
 You are the Intelligent Parallel Manager, an advanced AI coordinator capable of creating sophisticated execution plans for complex tasks. Your role is to analyze tasks, determine optimal parallel execution strategies, and coordinate multiple agents and tools to achieve the best results.
 
 Here is the main task you need to analyze and plan:
@@ -297,7 +297,7 @@ Example scenarios:
 Ensure your plan maximizes efficiency while maintaining logical dependencies and resource constraints.
 """  # noqa: E501
 
-PROMPT_TEMPLATE_INTELLIGENT_PARALLEL_FINAL = """
+PROMPT_TEMPLATE_CONCURRENT_FINAL = """
 You are the Intelligent Parallel Manager responsible for synthesizing the results of a complex parallel execution into a comprehensive final answer.
 
 Original task:
@@ -367,7 +367,7 @@ Guidelines for the final answer:
 - Maintain a professional, helpful tone throughout
 """  # noqa: E501
 
-PROMPT_TEMPLATE_INTELLIGENT_PARALLEL_RESPOND = """
+PROMPT_TEMPLATE_CONCURRENT_RESPOND = """
 You are the Intelligent Parallel Manager. Your role is to handle user requests that don't require complex parallel processing.
 
 Available resources:
@@ -405,16 +405,16 @@ Instructions:
 """  # noqa: E501
 
 
-class IntelligentParallelAgentManager(AgentManager):
+class ConcurrentAgentManager(AgentManager):
     """
-    Specialized manager for the IntelligentParallelOrchestrator that handles
+    Specialized manager for the ConcurrentOrchestrator that handles
     complex planning, parallel coordination, and result synthesis.
     """
 
-    name: str = "Intelligent Parallel Manager"
+    name: str = "Concurrent Manager"
 
     def __init__(self, **kwargs):
-        """Initialize the IntelligentParallelAgentManager."""
+        """Initialize the ConcurrentAgentManager."""
         super().__init__(**kwargs)
         self._init_prompt_blocks()
 
@@ -435,11 +435,11 @@ class IntelligentParallelAgentManager(AgentManager):
         self._prompt_blocks.update(
             {
                 "analyze": self._get_conversational_analysis_prompt(),
-                "plan": self._get_intelligent_parallel_plan_prompt(),
-                "final": self._get_intelligent_parallel_final_prompt(),
+                "plan": self._get_concurrent_plan_prompt(),
+                "final": self._get_concurrent_final_prompt(),
                 "respond": self._get_simple_response_prompt(),
                 "clarify": self._get_clarification_prompt(),
-                "handle_input": self._get_intelligent_parallel_handle_input_prompt(),
+                "handle_input": self._get_concurrent_handle_input_prompt(),
             }
         )
 
@@ -449,14 +449,14 @@ class IntelligentParallelAgentManager(AgentManager):
         return PROMPT_TEMPLATE_CONVERSATIONAL_ANALYSIS
 
     @staticmethod
-    def _get_intelligent_parallel_plan_prompt() -> str:
-        """Return the intelligent parallel planning prompt template."""
-        return PROMPT_TEMPLATE_INTELLIGENT_PARALLEL_PLAN
+    def _get_concurrent_plan_prompt() -> str:
+        """Return the concurrent planning prompt template."""
+        return PROMPT_TEMPLATE_CONCURRENT_PLAN
 
     @staticmethod
-    def _get_intelligent_parallel_final_prompt() -> str:
-        """Return the intelligent parallel final synthesis prompt template."""
-        return PROMPT_TEMPLATE_INTELLIGENT_PARALLEL_FINAL
+    def _get_concurrent_final_prompt() -> str:
+        """Return the concurrent final synthesis prompt template."""
+        return PROMPT_TEMPLATE_CONCURRENT_FINAL
 
     @staticmethod
     def _get_simple_response_prompt() -> str:
@@ -469,7 +469,7 @@ class IntelligentParallelAgentManager(AgentManager):
         return PROMPT_TEMPLATE_CLARIFICATION
 
     @staticmethod
-    def _get_intelligent_parallel_handle_input_prompt() -> str:
+    def _get_concurrent_handle_input_prompt() -> str:
         """Return the handle input prompt template."""
         return PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT
 
