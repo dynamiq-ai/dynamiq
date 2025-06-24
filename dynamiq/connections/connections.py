@@ -1328,7 +1328,7 @@ class MCPStdio(BaseConnection):
         )
 
 
-class DataBricksSQL(BaseConnection):
+class DatabricksSQL(BaseConnection):
     server_hostname: str = Field(default_factory=partial(get_env_var, "DATABRICKS_SERVER_HOSTNAME"))
     http_path: str = Field(default_factory=partial(get_env_var, "DATABRICKS_HTTP_PATH"))
     access_token: str = Field(default_factory=partial(get_env_var, "DATABRICKS_TOKEN"))
@@ -1348,4 +1348,4 @@ class DataBricksSQL(BaseConnection):
             )
             return conn
         except Exception as e:
-            raise ConnectionError(f"Failed to connect to Snowflake: {str(e)}")
+            raise ConnectionError(f"Failed to connect to Databricks: {str(e)}")

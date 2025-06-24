@@ -120,7 +120,7 @@ def mock_databricks_cursor_with_select(mocker, mock_fetchall_sql_response, mock_
 def test_databricks_select_execute(
     mock_fetchall_databricks_sql_response, mock_databricks_cursor_with_select, mock_databricks_sql_response
 ):
-    connection = connections.DataBricksSQL(
+    connection = connections.DatabricksSQL(
         server_hostname="server_hostname", http_path="http_path", access_token="access_token"
     )
     sql_tool = SQLExecutor(connection=connection)
@@ -165,7 +165,7 @@ def mock_cursor_with_none_description(mocker):
             user="user", password="password", database="db", account="account", warehouse="warehouse", schema="schema"
         ),
         connections.AWSRedshift(user="user", host="test_host", port=5439, database="db", password="password"),
-        connections.DataBricksSQL(
+        connections.DatabricksSQL(
             server_hostname="server_hostname", http_path="http_path", access_token="access_token"
         ),
     ],
