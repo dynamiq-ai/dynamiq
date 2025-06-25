@@ -329,3 +329,40 @@ class PostgreSQL(MemoryBackend):
         sql = SQL("TRUNCATE TABLE {table_name};").format(table_name=Identifier(self.table_name))
         self._execute_sql(sql)
         logger.info(f"PostgreSQL Memory ({self.table_name}): Cleared table.")
+
+    def delete_expired(self, cutoff_timestamp: float) -> None:
+        """
+        Deletes messages older than the cutoff timestamp from the PostgreSQL table.
+
+        Args:
+            cutoff_timestamp: Unix timestamp before which messages should be deleted
+
+        Raises:
+            PostgresMemoryError: If the deletion operation fails
+        """
+        try:
+            sql = SQL(
+                "DELETE FROM {table_name} WHERE {timestamp_col} < %s"
+            ).format(
+                table_name=Identifier(self.table_name),
+                timestamp_col=Identifier(self.timestamp_col)
+            )
+            
+            rows_before = self._execute_sql(
+                SQL("SELECT COUNT(*) as count FROM {table_name}").format(table_name=Identifier(self.table_name)),
+                fetch=FetchMode.ONE
+            )
+            
+            self._execute_sql(sql, (cutoff_timestamp,))
+            
+            rows_after = self._execute_sql(
+                SQL("SELECT COUNT(*) as count FROM {table_name}").format(table_name=Identifier(self.table_name)),
+                fetch=FetchMode.ONE
+            )
+            
+            deleted_count = rows_before.get("count", 0) - rows_after.get("count", 0)
+            logger.debug(f"PostgreSQL Memory ({self.table_name}): Deleted {deleted_count} expired messages")
+            
+        except Exception as e:
+            logger.error(f"Error deleting expired messages from PostgreSQL: {e}")
+            raise PostgresMemoryError(f"Error deleting expired messages: {e}") from e

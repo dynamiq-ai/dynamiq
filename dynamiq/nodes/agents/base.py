@@ -611,7 +611,15 @@ class Agent(Node):
     def _retrieve_memory(self, input_data: dict) -> list[Message]:
         """
         Retrieves memory messages when user_id and/or session_id are provided.
+        Also performs TTL cleanup if enabled.
         """
+        if self.memory and self.memory.ttl_enabled:
+            try:
+                self.memory.delete_expired_messages()
+                logger.debug("Agent %s - %s: performed TTL cleanup before memory retrieval", self.name, self.id)
+            except Exception as e:
+                logger.warning("Agent %s - %s: TTL cleanup failed: %s", self.name, self.id, e)
+        
         user_id = input_data.get("user_id")
         session_id = input_data.get("session_id")
 
