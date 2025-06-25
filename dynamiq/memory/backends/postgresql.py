@@ -347,22 +347,22 @@ class PostgreSQL(MemoryBackend):
                 table_name=Identifier(self.table_name),
                 timestamp_col=Identifier(self.timestamp_col)
             )
-            
+
             rows_before = self._execute_sql(
                 SQL("SELECT COUNT(*) as count FROM {table_name}").format(table_name=Identifier(self.table_name)),
                 fetch=FetchMode.ONE
             )
-            
+
             self._execute_sql(sql, (cutoff_timestamp,))
-            
+
             rows_after = self._execute_sql(
                 SQL("SELECT COUNT(*) as count FROM {table_name}").format(table_name=Identifier(self.table_name)),
                 fetch=FetchMode.ONE
             )
-            
+
             deleted_count = rows_before.get("count", 0) - rows_after.get("count", 0)
             logger.debug(f"PostgreSQL Memory ({self.table_name}): Deleted {deleted_count} expired messages")
-            
+
         except Exception as e:
             logger.error(f"Error deleting expired messages from PostgreSQL: {e}")
             raise PostgresMemoryError(f"Error deleting expired messages: {e}") from e
