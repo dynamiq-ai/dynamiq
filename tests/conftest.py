@@ -24,7 +24,7 @@ def mock_llm_response_text():
 
 
 @pytest.fixture
-def mock_whisper_response_text():
+def mock_audio_transcribing_response_text():
     return "Welcome."
 
 
@@ -214,3 +214,14 @@ def mock_filters():
             {"field": "companies", "operator": "in", "value": ["BMW", "Mercedes"]},
         ],
     }
+
+
+@pytest.fixture
+def mock_gemini_transcript_response(mocker, mock_audio_transcribing_response_text):
+    def response(*args, **kwargs):
+        model_r = ModelResponse()
+        model_r["choices"][0]["message"]["content"] = mock_audio_transcribing_response_text
+        return model_r
+
+    mock_llm = mocker.patch("dynamiq.nodes.audio.gemini.GeminiSTT._completion", side_effect=response)
+    yield mock_llm
