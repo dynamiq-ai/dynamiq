@@ -145,20 +145,8 @@ class Python(Node):
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Python Code Executor Tool"
-    description: str = """Executes Python code in a secure sandbox with restricted imports for calculations, data processing, and API interactions.
-
-Key Capabilities:
-- Secure code execution with restricted module access
-- Math/stats operations, data processing, API requests
-- Error handling with try-except blocks and descriptive messages
-- Must define run(input_data) function and use print() for output
-
-Usage Strategy:
-- Always use print() statements to display results
-- Define run(input_data) function that returns structured data
-- Handle errors gracefully with try-except blocks
-- Available modules: math, statistics, json, requests, datetime, re
-"""  # noqa: E501
+    description: str = """Executes Python code in a secure sandbox with restricted imports for calculations,
+    data processing, and API interactions."""  # noqa: E501
     code: str
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
 

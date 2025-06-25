@@ -25,15 +25,13 @@ Usage Strategy:
 - Combine formats for comprehensive content analysis
 
 Parameter Guide:
+- url: Target website URL to scrape
 - formats: Output types (["markdown", "html", "screenshot"])
 - only_main_content: Filter to main article content
 - include_tags: Specific HTML elements to extract
-- json_options: Custom schemas for structured extraction
 
 Examples:
-- {"url": "https://example.com", "formats": ["markdown"]}
-- {"url": "https://news.com", "only_main_content": true}
-- {"url": "https://store.com", "json_options": {"schema": {"products": "array"}}}"""
+- {"url": "https://example.com", "formats": ["markdown"]}"""
 
 
 class JsonOptions(BaseModel):
@@ -61,6 +59,18 @@ class Action(BaseModel):
 
 class FirecrawlInputSchema(BaseModel):
     url: str = Field(default="", description="Parameter to specify the url of the page to be scraped.")
+    only_main_content: bool = Field(
+        default=True,
+        description="If True, only the main content of the page will be extracted, excluding navigation and ads.",
+    )
+    formats = Field(
+        default_factory=lambda: ["markdown"],
+        description="List of output formats to return. Supported formats: markdown, html, screenshot.",
+    )
+    include_tags: list[str] | None = Field(
+        default=None,
+        description="List of HTML tags to include in the extraction. If None, all tags are included.",
+    )
 
 
 class FirecrawlTool(ConnectionNode):

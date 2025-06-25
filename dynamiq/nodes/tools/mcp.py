@@ -202,11 +202,7 @@ Usage Strategy:
 - Access remote tools and APIs through standardized interface
 - Build distributed tool ecosystems across services
 - Extend workflow capabilities with external service tools
-
-Parameter Guide:
-- include_tools: Specific tool names to include (default: all)
-- exclude_tools: Tool names to exclude from initialization
-"""
+"""  # noqa: E501
     connection: MCPSse | MCPStdio | MCPStreamableHTTP
 
     include_tools: list[str] = field(default_factory=list)

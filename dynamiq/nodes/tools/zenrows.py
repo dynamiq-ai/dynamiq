@@ -18,12 +18,10 @@ Key Capabilities:
 - Convert HTML to clean Markdown format for easy processing
 
 Usage Strategy:
-Use for websites that block standard scrapers or require JavaScript execution. Enable markdown_response for cleaner text extraction. Handles rate limiting and proxy management automatically.
+Use for websites that block standard scrapers or require JavaScript execution.
 
 Parameter Guide:
 - url: Target website URL to scrape
-- markdown_response: Convert HTML to Markdown (default: true)
-- Additional parameters passed through connection configuration
 
 Examples:
 - Basic scraping: {"url": "https://example.com"}

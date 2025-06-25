@@ -65,8 +65,8 @@ Parameter Guide:
 
 Examples:
 - {"query": "restaurants near downtown", "site": "yelp.com"}
-- {"query": "ML papers", "site": "arxiv.org", "count": 20}
-- {"query": "Tokyo weather", "count": 5}"""
+- {"query": "ML papers", "site": "arxiv.org", "max_results": 20}
+- {"query": "Tokyo weather", "max_results": 5}"""
 
 
 class JinaScrapeInputSchema(BaseModel):
