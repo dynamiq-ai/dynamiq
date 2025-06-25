@@ -63,7 +63,7 @@ class FirecrawlInputSchema(BaseModel):
         default=True,
         description="If True, only the main content of the page will be extracted, excluding navigation and ads.",
     )
-    formats = Field(
+    formats: list[str] = Field(
         default_factory=lambda: ["markdown"],
         description="List of output formats to return. Supported formats: markdown, html, screenshot.",
     )
