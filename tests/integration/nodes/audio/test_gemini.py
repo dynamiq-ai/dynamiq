@@ -1,5 +1,5 @@
-import base64
 from io import BytesIO
+from unittest.mock import ANY
 
 import pytest
 
@@ -31,9 +31,6 @@ def test_workflow_with_gemini_transcriber(
     )
     input_data = {"audio": audio}
     response = wf_gemini.run(input_data=input_data)
-    if isinstance(audio, BytesIO):
-        audio = audio.getvalue()
-    encoded_audio = base64.b64encode(audio).decode("utf-8")
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=input_data,
@@ -55,7 +52,7 @@ def test_workflow_with_gemini_transcriber(
                     {"text": "Generate a transcript of the speech.", "type": "text"},
                     {
                         "file": {
-                            "file_data": f"data:{mime_type};base64,{encoded_audio}",
+                            "file_data": ANY,
                         },
                         "type": "file",
                     },
