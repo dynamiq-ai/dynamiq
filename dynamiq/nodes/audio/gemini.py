@@ -12,6 +12,8 @@ from dynamiq.nodes.audio.whisper import DEFAULT_CONTENT_TYPE
 from dynamiq.nodes.node import ConnectionNode, ErrorHandling, ensure_config
 from dynamiq.runnables import RunnableConfig
 
+DEFAULT_AUDIO_TRANSCRIPTION_PROMPT = "Generate a transcript of the speech."
+
 
 class GeminiSTTInputSchema(BaseModel):
     audio: io.BytesIO | bytes = Field(..., description="Parameter to provide audio for transcribing.")
@@ -28,6 +30,7 @@ class GeminiSTT(ConnectionNode):
         connection (GeminiConnection | None): The connection to the Gemini API.A new connection
             is created if none is provided.
         model (str): The model name to use for transcribing.
+        prompt (str): The prompt to use for audio processing.
         error_handling (ErrorHandling): Error handling configuration.
     """
 
@@ -37,6 +40,7 @@ class GeminiSTT(ConnectionNode):
     connection: GeminiConnection | None = None
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     default_content_type: str = DEFAULT_CONTENT_TYPE
+    prompt: str = DEFAULT_AUDIO_TRANSCRIPTION_PROMPT
     input_schema: ClassVar[type[GeminiSTTInputSchema]] = GeminiSTTInputSchema
     MODEL_PREFIX: ClassVar[str] = "gemini/"
 
@@ -111,7 +115,7 @@ class GeminiSTT(ConnectionNode):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Generate a transcript of the speech."},
+                        {"type": "text", "text": self.prompt},
                         {
                             "type": "file",
                             "file": {
