@@ -87,7 +87,7 @@ class GeminiSTT(ConnectionNode):
             **kwargs: Additional keyword arguments.
 
         Returns:
-            str: A string containing the transcribe result.
+            content: A string containing the transcribe result.
         """
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
