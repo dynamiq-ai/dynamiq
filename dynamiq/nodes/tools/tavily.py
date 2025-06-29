@@ -10,46 +10,38 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_TAVILY = """## Tavily Search Tool
-### Description
-A web search tool that delivers relevant results from trusted internet sources, specializing in factual information, current events, and topic-specific knowledge.
+DESCRIPTION_TAVILY = """Searches the web using Tavily with natural language queries and adjustable search depth.
 
-### Capabilities
-- Perform natural language web searches with adjustable depth and focus.
-- Filter by topic categories and specific domains.
-- Control result quantity and quality.
-- Include optional image content, summarized answers, and raw page data.
-- Access current information beyond your knowledge base.
+Key Capabilities:
+- Basic/advanced search modes for speed vs thoroughness balance
+- Natural language processing for complex questions
+- Topic-specific searches (general, news) with domain filtering
+- AI-generated summaries and full content extraction
 
-### Parameters
-- `query`: Your search query (e.g., "latest quantum computing advances").
-- `search_depth`: Must be either `basic` or `advanced` (default: `basic`).
-- `chunks_per_source`: Number of chunks to return per source (default: 3, range: 1-3).
-- `topic`: Must be either `general` (default) or `news`.
-- `max_results`: Number of results (default: 5, range: 1-20).
-- `time_range`:The time range back from the current date to filter results. Useful when looking for sources that have published data.
-Available options are only one of: `day`, `week`, `month`, `year`, `d`, `w`, `m`, `y`.
-- `include_raw_content`: Include full page content (default: false).
+Usage Strategy:
+- Basic: Quick factual queries, current events
+- Advanced: Complex research topics, comprehensive analysis
+- Use include_answer for summaries, time_range for recent results
 
-### Usage Examples
-1. Basic search:
-   {
-     "query": "effects of climate change on coral reefs"
-   }
-2. Advanced topic-specific search:
-   {
-     "query": "breakthrough Alzheimer's treatments",
-     "search_depth": "advanced",
-     "include_raw_content": true
-   }
+Parameter Guide:
+- query: Search query to find relevant information
+- search_depth: basic (fast) vs advanced (thorough)
+- topic: general vs news for content type
+- include_answer: AI summary alongside sources
+- include_raw_content: Full page text for analysis
+- time_range: Filter results by recency (day, week, month, year)
+- max_results: Limit results (default: 5, range: 1-20)
+- include_images: Include images in results
+- include_domains: Specific domains to include
+- exclude_domains: Domains to exclude from results
+- use_cache: Use cached results when available
+- chunks_per_source: Number of chunks to return per source (default: 3, range: 1-3)
 
-### Tips
-- More specific queries yield more relevant results.
-- `search_depth: advanced` improves quality but increases response time.
-- `include_raw_content` significantly increases response size.
-- Topic-specific searches filter out irrelevant content.
-- Relevance scores help identify authoritative sources.
-"""  # noqa E501
+
+Examples:
+- {"query": "React performance 2024", "search_depth": "advanced"}
+- {"query": "GPT-4 news", "topic": "news", "time_range": "week"}
+- {"query": "ML tutorials", "include_domains": ["coursera.org"]}"""
 
 
 class TavilyInputSchema(BaseModel):
