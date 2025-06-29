@@ -145,10 +145,8 @@ class Python(Node):
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Python Code Executor Tool"
-    description: str = (
-        "The tool that executes Python code in a secure sandbox environment. "
-        "All arguments are passed as a dictionary to the 'run' main function."
-    )
+    description: str = """Executes Python code in a secure sandbox with restricted imports for calculations,
+    data processing, and API interactions."""  # noqa: E501
     code: str
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
 

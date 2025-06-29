@@ -71,9 +71,23 @@ class SummarizerTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Summarizer Tool"
-    description: str = (
-        "A tool for summarizing and cleaning up text extracted from HTML. "
-    )
+    description: str = """Summarizes and cleans up text content using LLM with automatic chunking and noise removal.
+
+Key Capabilities:
+- Intelligent text cleanup removing navigation, buttons, footers
+- Automatic chunking for large documents (4000 words default)
+- LLM-powered summarization with customizable prompts
+- Content structuring with proper headings and formatting
+
+Usage Strategy:
+- Process scraped web content for analysis
+- Clean up extracted HTML text for readability
+- Generate structured summaries from unformatted content
+- Remove noise and irrelevant elements from text data
+
+Parameter Guide:
+- input: Raw text content to be summarized and cleaned
+"""
     llm: Node
     chunk_size: int = Field(default=4000, description="The maximum number of words in each chunk")
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))

@@ -9,16 +9,30 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SQL = """# SQL Executor Tool
-A tool that executes SQL queries against databases like PostgreSQL, MySQL, Snowflake, and AWS Redshift.
-**Functionality:**
-- Executes SQL queries provided through input parameters or pre-configured in the tool
-- Returns query results in a formatted structure or confirmation messages
-- Handles execution errors with clear error messages
-**Usage:**
-Provide a SQL query string to execute against the configured database connection.
-The tool will return the query results or appropriate status messages.
-"""  # noqa: E501
+DESCRIPTION_SQL = """Executes SQL queries on multiple database systems including PostgreSQL,
+MySQL, Snowflake, and AWS Redshift.
+
+Key Capabilities:
+- Full SQL operations: SELECT, INSERT, UPDATE, DELETE, DDL
+- Multi-database support with automatic connection handling
+- Complex query execution with joins, aggregations, subqueries
+- Automatic result formatting and error handling
+
+Usage Strategy:
+- Use specific columns instead of SELECT * for performance
+- Include LIMIT clauses for large datasets
+- Leverage database-specific features for optimization
+- Handle transactions appropriately for data modifications
+
+Parameter Guide:
+- query: SQL statement to execute (required)
+- Database connection configured at tool initialization
+- Supports parameterized queries for security
+
+Examples:
+- {"query": "SELECT name, email FROM users WHERE status = 'active' LIMIT 10"}
+- {"query": "SELECT department, COUNT(*) FROM employees GROUP BY department"}
+- {"query": "INSERT INTO products (name, price) VALUES ('Widget', 29.99)"}"""
 
 
 class SQLInputSchema(BaseModel):
