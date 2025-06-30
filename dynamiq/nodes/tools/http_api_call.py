@@ -12,58 +12,30 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_HTTP = """## HTTP API Call Tool
-### Overview
-Make web requests to external APIs and services with support for various HTTP methods, payload formats, and response types.
-### Capabilities
-- Execute all standard HTTP methods (GET, POST, PUT, DELETE, PATCH)
-- Configure headers, query parameters, and request body
-- Handle multiple payload formats (raw or JSON) and response types
-- Customize timeout and success response criteria
-### When to Use
-- Fetch data from external web services
-- Submit data to external systems
-- Interact with HTTP-based APIs including RESTful services
-- Access authenticated third-party services
-### Parameters
-- **url** (string): Required endpoint URL if not configured in tool settings
-- **data** (object, optional): Request body payload (JSON-serializable)
-- **headers** (object, optional): HTTP request headers
-- **params** (object, optional): URL query parameters
-- **payload_type** (string, optional): Format of payload ("raw" or "json", default: "raw")
-### Configuration
-- **method** (string): HTTP method (GET, POST, PUT, DELETE, etc.)
-- **timeout** (number): Request timeout in seconds (default: 30)
-- **success_codes** (array): HTTP status codes considered successful (default: [200])
-- **response_type** (string): Response format ("text", "raw", "json", default: "raw")
-  - "text": Returns response as string
-  - "raw": Returns raw response content as bytes
-  - "json": Parses response as JSON object
-  - Responses with "application/json" content-type automatically parse as JSON
-### Examples
-#### Basic GET Request
-{"url": "https://api.example.com/data"}
-#### POST with JSON Payload
-{
-  "url": "https://api.example.com/submit",
-  "data": {"name": "John Doe", "email": "john@example.com"},
-  "payload_type": "json",
-  "headers": {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer token123"
-  }
-}
-#### GET with Query Parameters
-{
-  "url": "https://api.example.com/search",
-  "params": {"q": "search term", "limit": 10}
-}
-### Best Practices
-1. Set appropriate timeouts based on expected response times
-2. Include authentication in headers rather than URLs
-3. Use "json" response type for JSON APIs, "text" for HTML/plain text
-4. The tool handles URL encoding for query parameters
-"""  # noqa: E501
+DESCRIPTION_HTTP = """Makes HTTP API requests with support for all methods and configurable parameters.
+
+Key Capabilities:
+- All HTTP methods: GET, POST, PUT, DELETE, PATCH
+- Custom headers, authentication, and request/response handling
+- JSON, form data, and file upload support
+- Automatic response parsing and error handling
+
+Usage Strategy:
+- Use GET for data retrieval, POST for creation
+- Include authentication headers for secured APIs
+- Handle different content types with appropriate parameters
+- Configure timeouts and retries for reliability
+
+Parameter Guide:
+- url: Target API endpoint (required)
+- method: HTTP method (GET, POST, PUT, DELETE)
+- headers: Custom headers including authentication
+- body/files: Request payload for POST/PUT operations
+
+Examples:
+- {"url": "https://api.example.com/data", "method": "GET", "headers": {"Authorization": "Bearer token"}}
+- {"url": "https://api.com/users", "method": "POST", "body": {"name": "John"}}
+- {"url": "https://api.com/upload", "method": "PUT", "files": {"file": "data.csv"}}"""
 
 
 class ResponseType(str, enum.Enum):

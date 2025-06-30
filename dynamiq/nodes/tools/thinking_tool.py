@@ -74,23 +74,30 @@ class ThinkingTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Thinking Tool"
-    description: str = (
-        "## Using the thinking tool\n"
-        "Before taking any action or responding to "
-        "the user after receiving tool results, use the thinking tool as a scratchpad to:\n"
-        "- List the specific rules that apply to the current request\n"
-        "- Check if all required information is collected\n"
-        "- Verify that the planned action complies with all policies\n"
-        "- Iterate over tool results for correctness\n"
-        "- Break down complex problems into manageable components\n"
-        "- Analyze assumptions and identify potential gaps\n"
-        "- Plan next steps and validate reasoning logic\n\n"
-        "## Rules\n"
-        "- Use the thinking tool generously to jot down thoughts and ideas\n"
-        "- Always think before acting on tool results or making final responses\n"
-        "- Structure your thoughts clearly using the tool's analysis framework\n"
-        "- Use the tool for complex reasoning, planning, and problem-solving scenarios"
-    )
+    description: str = """Analyzes thoughts and reasoning processes to improve decision-making clarity and identify gaps in logic.
+
+Key Capabilities:
+- Structured analysis of complex thoughts and problems
+- Component breakdown with insights and next steps
+- Context-aware analysis with optional memory support
+- Sequential reasoning validation and action planning
+
+Usage Strategy:
+- Use before making important decisions or actions
+- Analyze complex multi-step problems systematically
+- Validate reasoning logic and identify assumptions
+- Plan next steps in complex workflows with clarity
+
+Parameter Guide:
+- thought: The idea, reasoning, or problem to analyze (required)
+- context: Background information or constraints
+- focus: Analysis area (planning, problem-solving, decision-making)
+- memory_enabled: Maintain history of previous thoughts
+
+Examples:
+- {"thought": "Should we implement feature X?", "focus": "decision-making"}
+- {"thought": "API integration failed with 401 error", "context": "OAuth2 auth"}
+- {"thought": "Choose database solutions", "context": "100k users, scaling"}"""  # noqa E501
 
     llm: BaseLLM = Field(..., description="LLM to use for thinking processes")
 
