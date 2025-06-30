@@ -102,7 +102,7 @@ class SQLExecutor(ConnectionNode):
             cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []
             if isinstance(self.connection, DatabricksSQL):
-                output = [row.asDict() for row in output]
+                output = [row.asDict(True) for row in output]
             cursor.close()
             if self.is_optimized_for_agents:
                 output = self.format_results(output, query)
