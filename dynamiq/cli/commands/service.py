@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import tempfile
@@ -75,7 +76,6 @@ def _archive_directory(path: Path) -> str:
     with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as temp_file:
         archive_path = temp_file.name
     shutil.make_archive(archive_path[:-7], "gztar", root_dir=path)
-    print(archive_path)
     return archive_path
 
 
@@ -123,7 +123,6 @@ def deploy_service(
         api_endpoint = f"/v1/services/{service_id}/deploy"
 
         data = {
-            "data": {
                 "docker": {"file": str(docker_file), "context": str(docker_context)},
                 "resources": {
                     "requests": {
@@ -133,7 +132,6 @@ def deploy_service(
                     "limits": {"cpu": str(cpu_limits), "memory": str(memory_limits)},
                 },
             }
-        }
         if env:
             for i, (name, value) in enumerate(env):
                 data[f"env.{i}.name"] = name
@@ -142,9 +140,7 @@ def deploy_service(
         try:
             with open(archive_path, "rb") as archive_file:
                 files = {"source": ("archive.tar.gz", archive_file, "application/x-tar")}
-                response = api.post(
-                    api_endpoint, data=data, files=files, headers={"Content-Type": "multipart/form-data"}
-                )
+                response = api.post(api_endpoint, data={"data": json.dumps(data)}, files=files)
                 print("Deployment successfully started.")
                 return True if response.status_code == 200 else False
         except Exception:
