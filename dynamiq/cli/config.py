@@ -18,7 +18,7 @@ class Settings(BaseModel):
     project_id: str | None = Field(default=None)
 
     api_host: str | None = Field(default=DYNAMIQ_BASE_URL)
-    api_token: str | None = Field(default=None)
+    api_key: str | None = Field(default=None)
 
     model_config = dict(extra="forbid")
 
@@ -36,7 +36,7 @@ def _from_env() -> dict[str, Any]:
         k: v
         for k, v in {
             "api_host": os.getenv("DYNAMIQ_API_HOST"),
-            "api_token": os.getenv("DYNAMIQ_API_TOKEN"),
+            "api_key": os.getenv("DYNAMIQ_API_KEY"),
         }.items()
         if v is not None
     }
@@ -69,5 +69,5 @@ def save_settings(settings: Settings) -> None:
     _CFG_PATH.write_text(json.dumps(payload, indent=2))
 
     _CREDS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = settings.model_dump(include={"api_token", "api_host"})
+    payload = settings.model_dump(include={"api_key", "api_host"})
     _CREDS_PATH.write_text(json.dumps(payload, indent=2))

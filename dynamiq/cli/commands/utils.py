@@ -17,9 +17,12 @@ def cli(dctx: DynamiqCtx, verbose: bool) -> None:
     pass
 
 
-cli.add_command(org)
-cli.add_command(project)
-cli.add_command(service)
+cli.add_command(org, name="org")
+cli.add_command(org, name="orgs")
+cli.add_command(project, name="project")
+cli.add_command(project, name="projects")
+cli.add_command(service, name="service")
+cli.add_command(service, name="services")
 cli.add_command(config)
 
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
+from urllib.parse import urljoin
 
 import requests
 
@@ -52,10 +54,10 @@ class ApiClient:
         files: dict[str, Any] | None = None,
         timeout: float = 30.0,
     ) -> Any:
-        url = f"{self._settings.api_host}{path}"
+        url = urljoin(self._settings.api_host, path.lstrip("/"))
         if headers is None:
             headers = {}
-        headers["Authorization"] = f"Bearer {self._settings.api_token}"
+        headers["Authorization"] = f"Bearer {self._settings.api_key}"
         for attempt, backoff in enumerate((*_RETRY_BACKOFF, None), start=1):
             try:
                 with self._client.request(
@@ -77,5 +79,6 @@ class ApiClient:
 
                     raise HTTPError(f"{method} {path} failed with {resp.status_code}: {resp.text.strip()}")
             except HTTPError as e:
-                print(e)
+                logging.error({str(e)})
+                raise e
         raise HTTPError("Exhausted retries")

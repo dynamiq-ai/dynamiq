@@ -3,37 +3,33 @@ import click
 from dynamiq.cli.config import load_settings, save_settings
 
 
-@click.group()
-def config():
-    """Manage CLI configurations"""
-    pass
+@click.group(help="Manage configuration", invoke_without_command=True)
+@click.pass_context
+def config(ctx: click.Context):
+    if ctx.invoked_subcommand is None:
+        host = click.prompt("Enter API host (e.g. https://api.example.com)")
+        token = click.prompt("Enter API token")
 
+        settings = load_settings()
+        settings.api_host = host
+        settings.api_key = token
+        save_settings(settings)
 
-@config.command()
-def configure():
-    host = input("Enter API host (e.g. https://api.example.com): ")
-    token = input("Enter API token: ")
-
-    config = load_settings()
-    config.api_host = host
-    config.api_token = token
-    save_settings(config)
-
-    print("\n✅ Configuration saved to .dynamiq/config.json")
-    print("These values will be used automatically when you run Dynamiq commands.")
+        click.echo("\n✅ Configuration saved to .dynamiq/config.json")
+        click.echo("These values will be used automatically when you run Dynamiq commands.")
 
 
 @config.command("show")
-def show_creds():
-    config = load_settings()
-    host = config.api_host or "<not set>"
-    token = config.api_token or "<not set>"
-    org_id = config.org_id or "<not set>"
-    project_id = config.project_id or "<not set>"
-    masked_token = token[:4] + "..." if token != "<not set>" else token  # nosec B105
+def show_config():
+    settings = load_settings()
+    host = settings.api_host or "<not set>"
+    api_key = settings.api_key or "<not set>"
+    org_id = settings.org_id or "<not set>"
+    project_id = settings.project_id or "<not set>"
+    masked_key = api_key[:4] + "..." if api_key != "<not set>" else api_key  # nosec B105
 
-    print("\nCurrent Dynamiq CLI configuration:")
-    print(f"DYNAMIQ API HOST: {host}")
-    print(f"DYNAMIQ API TOKEN: {masked_token}")
-    print(f"DYNAMIQ ORG ID: {org_id}")
-    print(f"DYNAMIQ PROJECT ID: {project_id}")
+    click.echo("\nCurrent Dynamiq CLI configuration:")
+    click.echo(f"DYNAMIQ API HOST: {host}")
+    click.echo(f"DYNAMIQ API KEY: {masked_key}")
+    click.echo(f"DYNAMIQ ORG ID: {org_id}")
+    click.echo(f"DYNAMIQ PROJECT ID: {project_id}")

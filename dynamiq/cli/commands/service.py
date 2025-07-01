@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -10,10 +11,7 @@ from dynamiq.cli.client import ApiClient
 from dynamiq.cli.commands.context import with_api
 from dynamiq.cli.config import Settings, load_settings
 
-
-@click.group()
-def service() -> None:
-    """Manage services"""
+service = click.Group(name="service", help="Manage services")
 
 
 @service.command("list")
@@ -21,31 +19,31 @@ def service() -> None:
 def list_services(*, api: ApiClient, settings: Settings):
     project_id = settings.project_id
     if not project_id:
-        print("No project ID found. Please set the current project ID.")
+        click.echo("No project ID found. Please set the current project ID.")
         return
 
     response = api.get(f"/v1/services?project_id={project_id}")
     if response.status_code == 200:
-        orgs = response.json().get("data", [])
-        for org in orgs:
-            print(f"ID: {org['id']}, Name: {org['name']}")
+        services = response.json().get("data", [])
+        click.echo(f"{'ID':<40} {'Name'}")
+        for service in services:
+            click.echo(f"{service['id']:<40} {service['name']}")
     else:
-        print("Failed to list services.")
+        click.echo("Failed to list services.")
 
 
 @service.command("get")
 @click.option("--id", "service_id", prompt=True)
 @with_api
 def get_service(*, api: ApiClient, settings: Settings, service_id: str):
-    service_id = service_id
     response = api.get(f"/v1/services/{service_id}")
     if response.status_code == 200:
         service_info = response.json().get("data", [])
         for key, value in service_info.items():
             if not isinstance(value, dict):
-                print(f"{key}: {value}")
+                click.echo(f"{key}: {value}")
     else:
-        print(f"Failed to find service ID {service_id}.")
+        click.echo(f"Failed to find service ID {service_id}.")
 
 
 @service.command("create")
@@ -55,21 +53,19 @@ def create_service(*, api: ApiClient, settings: Settings, name: str):
     project_id = settings.project_id
 
     if not project_id:
-        print("No project ID found. Please set the current project ID.")
+        click.echo("No project ID found. Please set the current project ID.")
         return
 
-    service_name = name or input("Enter the name of the service: ")
-
-    payload = {"name": service_name, "project_id": project_id}
+    payload = {"name": name, "project_id": project_id}
     try:
         _require_project()
         response = api.post(
             "/v1/services",
             json=payload,
         )
-        print(f"Service '{service_name}' created successfully: {response.json()}")
+        click.echo(f"Service '{name}' created successfully: {response.json()}")
     except Exception as e:
-        print(f"Failed to create service. Details:{str(e)}")
+        click.echo(f"Failed to create service. Details:{str(e)}")
 
 
 def _archive_directory(path: Path) -> str:
@@ -116,7 +112,7 @@ def deploy_service(
         archive_path = _archive_directory(source)
         project_id = settings.project_id
         if not project_id:
-            print("No project ID found. Please set the current project ID.")
+            click.echo("No project ID found. Please set the current project ID.")
             return False
 
         service_id = service_id
@@ -141,14 +137,14 @@ def deploy_service(
             with open(archive_path, "rb") as archive_file:
                 files = {"source": ("archive.tar.gz", archive_file, "application/x-tar")}
                 response = api.post(api_endpoint, data={"data": json.dumps(data)}, files=files)
-                print("Deployment successfully started.")
-                return True if response.status_code == 200 else False
+                click.echo("Deployment successfully started.")
+                return response.status_code == 200
         except Exception:
-            print("Deployment failed.")
+            logging.error("Deployment failed.")
             return False
 
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
+        logging.error(f"Unexpected error: {str(e)}")
     finally:
         if archive_path and os.path.exists(archive_path):
             os.remove(archive_path)
