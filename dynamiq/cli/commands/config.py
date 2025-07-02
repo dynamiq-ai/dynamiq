@@ -1,6 +1,8 @@
 import click
 
-from dynamiq.cli.config import DYNAMIQ_BASE_URL, load_settings, save_settings
+from dynamiq.cli.client import ApiClient
+from dynamiq.cli.commands.context import with_api_and_settings
+from dynamiq.cli.config import DYNAMIQ_BASE_URL, Settings
 
 
 @click.group(help="Manage configuration", invoke_without_command=True)
@@ -8,20 +10,20 @@ from dynamiq.cli.config import DYNAMIQ_BASE_URL, load_settings, save_settings
 def config(ctx: click.Context):
     if ctx.invoked_subcommand is None:
         host = click.prompt("Enter API host (press Enter to use default)", default=DYNAMIQ_BASE_URL, show_default=True)
-        token = click.prompt("Enter API key")
+        api_key = click.prompt("Enter API key", default="", show_default=False)
 
-        settings = load_settings()
-        settings.api_host = host
-        settings.api_key = token
-        save_settings(settings)
+        settings = Settings.load_settings()
+        settings.api_host = host or settings.api_host
+        settings.api_key = api_key or settings.api_key
+        settings.save_settings()
 
         click.echo("\n✅ Configuration saved to .dynamiq/config.json")
         click.echo("These values will be used automatically when you run Dynamiq commands.")
 
 
 @config.command("show")
-def show_config():
-    settings = load_settings()
+@with_api_and_settings
+def show_config(api: ApiClient, settings: Settings):
     host = settings.api_host or "<not set>"
     api_key = settings.api_key or "<not set>"
     org_id = settings.org_id or "<not set>"

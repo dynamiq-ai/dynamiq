@@ -8,14 +8,14 @@ from pathlib import Path
 import click
 
 from dynamiq.cli.client import ApiClient
-from dynamiq.cli.commands.context import with_api
-from dynamiq.cli.config import Settings, load_settings
+from dynamiq.cli.commands.context import with_api_and_settings
+from dynamiq.cli.config import Settings
 
 service = click.Group(name="service", help="Manage services")
 
 
 @service.command("list")
-@with_api
+@with_api_and_settings
 def list_services(*, api: ApiClient, settings: Settings):
     project_id = settings.project_id
     if not project_id:
@@ -25,16 +25,17 @@ def list_services(*, api: ApiClient, settings: Settings):
     response = api.get(f"/v1/services?project_id={project_id}")
     if response.status_code == 200:
         services = response.json().get("data", [])
-        click.echo(f"{'ID':<40} {'Name'}")
+        max_name_len = max(len(s["name"]) for s in services) + 2 if services else 40
+        click.echo(f"{'ID':<40} {'Name':<{max_name_len}} {'Host'}")
         for service in services:
-            click.echo(f"{service['id']:<40} {service['name']}")
+            click.echo(f"{service['id']:<40} {service['name']:<{max_name_len}} {service['hostname']}")
     else:
         click.echo("Failed to list services.")
 
 
 @service.command("get")
 @click.option("--id", "service_id", prompt=True)
-@with_api
+@with_api_and_settings
 def get_service(*, api: ApiClient, settings: Settings, service_id: str):
     response = api.get(f"/v1/services/{service_id}")
     if response.status_code == 200:
@@ -48,7 +49,7 @@ def get_service(*, api: ApiClient, settings: Settings, service_id: str):
 
 @service.command("create")
 @click.option("--name", prompt=True)
-@with_api
+@with_api_and_settings
 def create_service(*, api: ApiClient, settings: Settings, name: str):
     project_id = settings.project_id
 
@@ -81,9 +82,9 @@ def _archive_directory(path: Path) -> str:
 @click.option("--docker-context", default=".", show_default=True)
 @click.option("--docker-file", default="Dockerfile", show_default=True)
 @click.option("--cpu-requests", default="100m", show_default=True)
-@click.option("--memory-requests", default="100Mi", show_default=True)
-@click.option("--cpu-limits", default="500m", show_default=True)
-@click.option("--memory-limits", default="200Mi", show_default=True)
+@click.option("--memory-requests", default="256Mi", show_default=True)
+@click.option("--cpu-limits", default="200m", show_default=True)
+@click.option("--memory-limits", default="512Mi", show_default=True)
 @click.option(
     "--env",
     multiple=True,
@@ -91,7 +92,7 @@ def _archive_directory(path: Path) -> str:
     metavar="NAME VALUE",
     help="Environment variables (repeatable)",
 )
-@with_api
+@with_api_and_settings
 def deploy_service(
     *,
     api: ApiClient,
@@ -129,9 +130,9 @@ def deploy_service(
                 },
             }
         if env:
+            data["env"] = []
             for i, (name, value) in enumerate(env):
-                data[f"env.{i}.name"] = name
-                data[f"env.{i}.value"] = value
+                data["env"].append({"name": name, "value": value})
 
         try:
             with open(archive_path, "rb") as archive_file:
@@ -151,7 +152,21 @@ def deploy_service(
 
 
 def _require_project() -> None:
-    settings = load_settings()
+    settings = Settings.load_settings()
     if not settings.project_id:
         click.echo("❌ No project selected. Run `dynamiq project set` first.", err=True)
         click.get_current_context().exit(1)
+
+
+@service.command("status")
+@click.option("--id", "service_id", prompt=True)
+@with_api_and_settings
+def get_service_status(*, api: ApiClient, settings: Settings, service_id: str):
+    response = api.get(f"/v1/services/{service_id}/deployments")
+    if response.status_code == 200:
+        service_info = response.json().get("data", [])
+        for key, value in service_info[0].items():
+            if not isinstance(value, dict):
+                click.echo(f"{key}: {value}")
+    else:
+        click.echo(f"Failed to find service ID {service_id}.")

@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 from urllib.parse import urljoin
 
 import requests
+from tenacity import retry, retry_if_exception_type, retry_if_result, stop_after_attempt, wait_exponential
+
+from dynamiq.connections import HTTPMethod
 
 from .config import Settings
-
-__all__ = ["ApiClient", "HTTPError"]
-
-from ..connections import HTTPMethod
 
 
 class HTTPError(RuntimeError):
@@ -19,7 +17,6 @@ class HTTPError(RuntimeError):
 
 
 _RETRY_STATUS = {502, 503, 504}
-_RETRY_BACKOFF = (0.25, 1.0, 2.0, 4.0)  # seconds
 
 
 class ApiClient:
@@ -42,6 +39,15 @@ class ApiClient:
     ) -> Any:
         return self._request("POST", path, headers=headers, json=json, data=data, files=files)
 
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=0.25, min=0.25, max=4),
+        retry=(
+            retry_if_exception_type(requests.RequestException)
+            | retry_if_result(lambda r: r is not None and r.status_code in _RETRY_STATUS)
+        ),
+        reraise=True,
+    )
     def _request(
         self,
         method: str | HTTPMethod,
@@ -58,26 +64,20 @@ class ApiClient:
         if headers is None:
             headers = {}
         headers["Authorization"] = f"Bearer {self._settings.api_key}"
-        for attempt, backoff in enumerate((*_RETRY_BACKOFF, None), start=1):
-            try:
-                with self._client.request(
-                    method,
-                    url,
-                    params=params,
-                    json=json,
-                    data=data,
-                    files=files,
-                    headers=headers,
-                    timeout=timeout,
-                ) as resp:
-                    if resp.status_code in _RETRY_STATUS and backoff is not None:
-                        time.sleep(backoff)
-                        continue
-
-                    if resp.status_code != 200:
-                        logging.error(f"{method} {path} failed with {resp.status_code}: {resp.text.strip()}")
-                    return resp
-            except Exception as e:
-                logging.error(str(e))
-                raise e
-        raise HTTPError("Exhausted retries")
+        try:
+            response = self._client.request(
+                method,
+                url,
+                params=params,
+                json=json,
+                data=data,
+                files=files,
+                headers=headers,
+                timeout=timeout,
+            )
+            if response.status_code != 200:
+                logging.error(f"{method} {path} failed with {response.status_code}: {response.text.strip()}")
+            return response
+        except Exception as e:
+            logging.error(str(e))
+            raise

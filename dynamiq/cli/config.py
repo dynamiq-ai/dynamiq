@@ -5,12 +5,23 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-__all__ = ["Settings", "load_settings", "save_settings", "DYNAMIQ_BASE_URL"]
+__all__ = ["Settings", "DYNAMIQ_BASE_URL"]
 
-_XDG_CONFIG_HOME = Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config"))
-_CFG_PATH = _XDG_CONFIG_HOME / "dynamiq" / "config.json"
-_CREDS_PATH = _XDG_CONFIG_HOME / "dynamiq" / "credentials.json"
+_XDG_CONFIG_HOME = Path(os.getenv("XDG_CONFIG_HOME", os.path.join(Path.home(), ".config")))
+_CONFIG_FILE_PATH = Path(os.path.join(_XDG_CONFIG_HOME, "dynamiq", "config.json"))
+_CREDS_FILE_PATH = Path(os.path.join(_XDG_CONFIG_HOME, "dynamiq", "credentials.json"))
 DYNAMIQ_BASE_URL = "https://api.us-east-1.aws.getdynamiq.ai"
+# Expected structure of `.dynamiq/config.json`:
+# {
+#   "org_id": "your-org-id",
+#   "project_id": "your-project-id"
+# }
+
+# Expected structure of `.dynamiq/credentials.json`:
+# {
+#   "api_key": "your-api-key-here",
+#   "api_host": "https://api.us-east-1.aws.getdynamiq.ai"
+# }
 
 
 class Settings(BaseModel):
@@ -29,45 +40,44 @@ class Settings(BaseModel):
     def __str__(self) -> str:
         return f"Settings(org={self.org_id}, project={self.project_id}, host={self.api_host})"
 
+    @classmethod
+    def _from_env(cls) -> dict[str, Any]:
+        """Pick just the env-vars we care about."""
+        return {
+            k: v
+            for k, v in {
+                "api_host": os.getenv("DYNAMIQ_API_HOST"),
+                "api_key": os.getenv("DYNAMIQ_API_KEY"),
+            }.items()
+            if v is not None
+        }
 
-def _from_env() -> dict[str, Any]:
-    """Pick just the env-vars we care about."""
-    return {
-        k: v
-        for k, v in {
-            "api_host": os.getenv("DYNAMIQ_API_HOST"),
-            "api_key": os.getenv("DYNAMIQ_API_KEY"),
-        }.items()
-        if v is not None
-    }
+    @staticmethod
+    def load_settings():
+        disk: dict[str, Any] = {}
+        env: dict = Settings._from_env()
+        if _CONFIG_FILE_PATH.exists():
+            try:
+                disk = json.loads(_CONFIG_FILE_PATH.read_text())
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"❌ Corrupted config file at {_CONFIG_FILE_PATH}: {exc}") from exc
+        if _CREDS_FILE_PATH.exists():
+            try:
+                env = json.loads(_CREDS_FILE_PATH.read_text())
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"❌ Corrupted credentials file at {_CREDS_FILE_PATH}: {exc}") from exc
 
-
-def load_settings() -> Settings:
-    disk: dict[str, Any] = {}
-    env: dict = _from_env()
-    if _CFG_PATH.exists():
+        merged = {**disk, **env}
         try:
-            disk = json.loads(_CFG_PATH.read_text())
-        except json.JSONDecodeError as exc:
-            raise SystemExit(f"❌ Corrupted config file at {_CFG_PATH}: {exc}") from exc
-    if _CREDS_PATH.exists():
-        try:
-            env = json.loads(_CREDS_PATH.read_text())
-        except json.JSONDecodeError as exc:
-            raise SystemExit(f"❌ Corrupted credentials file at {_CREDS_PATH}: {exc}") from exc
+            return Settings.model_validate(merged)
+        except ValidationError as exc:
+            raise SystemExit(f"❌ Invalid configuration: {exc}") from exc
 
-    merged = {**disk, **env}
-    try:
-        return Settings.model_validate(merged)
-    except ValidationError as exc:
-        raise SystemExit(f"❌ Invalid configuration: {exc}") from exc
+    def save_settings(self) -> None:
+        _CONFIG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.model_dump(include={"org_id", "project_id"})
+        _CONFIG_FILE_PATH.write_text(json.dumps(payload, indent=2))
 
-
-def save_settings(settings: Settings) -> None:
-    _CFG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = settings.model_dump(include={"org_id", "project_id"})
-    _CFG_PATH.write_text(json.dumps(payload, indent=2))
-
-    _CREDS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = settings.model_dump(include={"api_key", "api_host"})
-    _CREDS_PATH.write_text(json.dumps(payload, indent=2))
+        _CREDS_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.model_dump(include={"api_key", "api_host"})
+        _CREDS_FILE_PATH.write_text(json.dumps(payload, indent=2))

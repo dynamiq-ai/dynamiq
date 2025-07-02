@@ -1,14 +1,14 @@
 import click
 
 from dynamiq.cli.client import ApiClient
-from dynamiq.cli.commands.context import with_api
-from dynamiq.cli.config import Settings, save_settings
+from dynamiq.cli.commands.context import with_api_and_settings
+from dynamiq.cli.config import Settings
 
 project = click.Group(name="project", help="Manage projects")
 
 
 @project.command("list")
-@with_api
+@with_api_and_settings
 def list_projects(*, api: ApiClient, settings: Settings):
     org_id = settings.org_id
     if not org_id:
@@ -26,7 +26,7 @@ def list_projects(*, api: ApiClient, settings: Settings):
 
 @project.command("set")
 @click.option("--id", "proj_id", prompt=True, help="Project ID")
-@with_api
+@with_api_and_settings
 def set_project(*, api: ApiClient, settings: Settings, proj_id: str):
     org_id = settings.org_id
     if not org_id:
@@ -36,7 +36,7 @@ def set_project(*, api: ApiClient, settings: Settings, proj_id: str):
     response = api.get(f"/v1/projects/{proj_id}?org_id={org_id}")
     if response.status_code == 200:
         settings.project_id = proj_id
-        save_settings(settings)
+        settings.save_settings()
         click.echo(f"Current project set to: {proj_id}")
     else:
         click.echo(f"Project ID {proj_id} was not found.")

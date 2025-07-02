@@ -1,7 +1,7 @@
 import click
 
 from dynamiq.cli.client import ApiClient
-from dynamiq.cli.config import Settings, load_settings
+from dynamiq.cli.config import Settings
 
 
 class DynamiqCtx:
@@ -13,13 +13,13 @@ class DynamiqCtx:
 pass_dctx = click.make_pass_decorator(DynamiqCtx, ensure=True)
 
 
-def with_api(fn):
+def with_api_and_settings(fn):
     """Decorator to inject `api` kwarg after verifying settings."""
 
     @pass_dctx
     def _wrapper(dctx: DynamiqCtx, *args, **kwargs):
         if dctx.settings is None:
-            dctx.settings = load_settings()
+            dctx.settings = Settings.load_settings()
             dctx.api = ApiClient(dctx.settings)
         return fn(*args, api=dctx.api, settings=dctx.settings, **kwargs)
 
