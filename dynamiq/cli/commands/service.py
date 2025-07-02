@@ -64,7 +64,10 @@ def create_service(*, api: ApiClient, settings: Settings, name: str):
             "/v1/services",
             json=payload,
         )
-        click.echo(f"Service '{name}' created successfully: {response.json()}")
+        if response.status_code == 200:
+            click.echo(f"Service '{name}' created successfully: {response.json()}")
+        else:
+            click.echo("Failed to create service.")
     except Exception as e:
         click.echo(f"Failed to create service. Details:{str(e)}")
 
@@ -138,8 +141,10 @@ def deploy_service(
             with open(archive_path, "rb") as archive_file:
                 files = {"source": ("archive.tar.gz", archive_file, "application/x-tar")}
                 response = api.post(api_endpoint, data={"data": json.dumps(data)}, files=files)
-                click.echo("Deployment successfully started.")
-                return response.status_code == 200
+                if response.status_code == 200:
+                    click.echo("Deployment successfully started.")
+                else:
+                    click.echo("Failed to deploy service.")
         except Exception:
             logging.error("Deployment failed.")
             return False
@@ -165,7 +170,7 @@ def get_service_status(*, api: ApiClient, settings: Settings, service_id: str):
     response = api.get(f"/v1/services/{service_id}/deployments")
     if response.status_code == 200:
         service_info = response.json().get("data", [])
-        for key, value in service_info[0].items():
+        for key, value in service_info[0].items() if service_info else []:
             if not isinstance(value, dict):
                 click.echo(f"{key}: {value}")
     else:

@@ -52,10 +52,10 @@ class Settings(BaseModel):
             if v is not None
         }
 
-    @staticmethod
-    def load_settings():
+    @classmethod
+    def load_settings(cls):
         disk: dict[str, Any] = {}
-        env: dict = Settings._from_env()
+        env: dict = cls._from_env()
         if _CONFIG_FILE_PATH.exists():
             try:
                 disk = json.loads(_CONFIG_FILE_PATH.read_text())
@@ -69,7 +69,7 @@ class Settings(BaseModel):
 
         merged = {**disk, **env}
         try:
-            return Settings.model_validate(merged)
+            return cls.model_validate(merged)
         except ValidationError as exc:
             raise SystemExit(f"❌ Invalid configuration: {exc}") from exc
 
