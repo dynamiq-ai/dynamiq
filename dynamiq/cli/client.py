@@ -70,15 +70,14 @@ class ApiClient:
                     headers=headers,
                     timeout=timeout,
                 ) as resp:
-                    if resp.status_code < 400:
-                        return resp
-
                     if resp.status_code in _RETRY_STATUS and backoff is not None:
                         time.sleep(backoff)
                         continue
 
-                    raise HTTPError(f"{method} {path} failed with {resp.status_code}: {resp.text.strip()}")
-            except HTTPError as e:
-                logging.error({str(e)})
+                    if resp.status_code != 200:
+                        logging.error(f"{method} {path} failed with {resp.status_code}: {resp.text.strip()}")
+                    return resp
+            except Exception as e:
+                logging.error(str(e))
                 raise e
         raise HTTPError("Exhausted retries")

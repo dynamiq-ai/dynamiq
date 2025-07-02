@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-__all__ = ["Settings", "load_settings", "save_settings"]
+__all__ = ["Settings", "load_settings", "save_settings", "DYNAMIQ_BASE_URL"]
 
 _XDG_CONFIG_HOME = Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config"))
 _CFG_PATH = _XDG_CONFIG_HOME / "dynamiq" / "config.json"

@@ -1,14 +1,14 @@
 import click
 
-from dynamiq.cli.config import load_settings, save_settings
+from dynamiq.cli.config import DYNAMIQ_BASE_URL, load_settings, save_settings
 
 
 @click.group(help="Manage configuration", invoke_without_command=True)
 @click.pass_context
 def config(ctx: click.Context):
     if ctx.invoked_subcommand is None:
-        host = click.prompt("Enter API host (e.g. https://api.example.com)")
-        token = click.prompt("Enter API token")
+        host = click.prompt("Enter API host (press Enter to use default)", default=DYNAMIQ_BASE_URL, show_default=True)
+        token = click.prompt("Enter API key")
 
         settings = load_settings()
         settings.api_host = host
