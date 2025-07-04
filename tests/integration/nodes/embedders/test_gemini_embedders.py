@@ -84,10 +84,11 @@ def test_workflow_with_gemini_document_embedder(
     mock_embedding_executor, gemini_document_embedder_workflow, document_input, gemini_model
 ):
     workflow, embedder, output_node = gemini_document_embedder_workflow
+    tracing = TracingCallbackHandler()
 
     response = workflow.run(
         input_data=document_input,
-        config=RunnableConfig(callbacks=[TracingCallbackHandler()]),
+        config=RunnableConfig(callbacks=[tracing]),
     )
 
     assert_embedder_success(response, embedder, output_node)
