@@ -5,9 +5,13 @@ Before running the workflow, ensure you have the necessary API keys.
 
 Add the following environment variables:
    - `OPENAI_API_KEY`: Your OpenAI API key.
-   - `TAVILY_API_KEY`: Your Tavily  API key.
+   - `TAVILY_API_KEY`: Your Tavily API key.
+   - `ZENROWS_API_KEY`: Your ZenRows API key.
+
+For serverless Pinecone connection:
    - `PINECONE_API_KEY`: Your Pinecone API key.
-   - `PINECONE_ENVIRONMENT`: Your Pinecone environment.
+   - `PINECONE_CLOUD`: Your Pinecone  cloud.
+   - `PINECONE_REGION`: Your Pinecone region.
 
 
 ### 2. **Run the Workflow**
