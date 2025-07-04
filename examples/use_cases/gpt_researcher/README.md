@@ -10,7 +10,7 @@ Add the following environment variables:
 
 For serverless Pinecone connection:
    - `PINECONE_API_KEY`: Your Pinecone API key.
-   - `PINECONE_CLOUD`: Your Pinecone  cloud.
+   - `PINECONE_CLOUD`: Your Pinecone cloud.
    - `PINECONE_REGION`: Your Pinecone region.
 
 
