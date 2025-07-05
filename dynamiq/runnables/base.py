@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 from io import BytesIO
-from typing import Any, Awaitable, Self
+from typing import Any, Awaitable
 
 from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import Self
 
 from dynamiq.cache.config import CacheConfig
 from dynamiq.callbacks import BaseCallbackHandler

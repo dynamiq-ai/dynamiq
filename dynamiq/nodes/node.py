@@ -6,11 +6,12 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
-from typing import Any, Callable, ClassVar, Self, Union
+from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, create_model, model_validator
+from typing_extensions import Self
 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler
