@@ -185,7 +185,7 @@ class Python(Node):
             restricted_globals = compile_and_execute(self.code, restricted_globals)
             if "run" not in restricted_globals:
                 raise ValueError("The 'run' function is not defined in the provided code.")
-            result = restricted_globals["run"](dict(input_data))
+            result = restricted_globals["run"](**dict(input_data))
             if self.is_optimized_for_agents:
                 result = str(result)
         except Exception as e:

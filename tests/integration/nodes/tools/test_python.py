@@ -26,7 +26,7 @@ def run(input_data):
     }
 """
     python_node = Python(code=python_code)
-    input_data = {"name": "Alice", "age": 30}
+    input_data = {"input_data": {"name": "Alice", "age": 30}}
 
     result = python_node.run(input_data, None)
     expected_output = {"greeting": "Hello, Alice!", "message": "You were born around 1994.", "age_in_months": 360}
@@ -40,7 +40,7 @@ def run(input_data):
 def test_python_node_with_default_values():
     """Test Python node with missing input data to verify default values."""
     python_code = """
-def run(input_data):
+def run(input_data: dict):
     name = input_data.get('name', 'World')
     age = input_data.get('age', 0)
     birth_year = 2024 - age
@@ -51,7 +51,7 @@ def run(input_data):
     }
 """
     python_node = Python(code=python_code)
-    input_data = {}  # Empty input to trigger default values
+    input_data = {"input_data": {}}  # Empty input to trigger default values
 
     result = python_node.run(input_data, None)
     expected_output = {"greeting": "Hello, World!", "message": "You were born around 2024.", "age_in_months": 0}
@@ -65,7 +65,7 @@ def run(input_data):
 def test_python_node_without_input():
     """Test Python node functionality without specific input data."""
     python_code = """
-def run(input_data):
+def run(input_data={}):
     pseudo_random = hash(str(input_data)) % 100 + 1
     return {
         'pseudo_random_number': pseudo_random,
@@ -87,8 +87,7 @@ def test_python_node_with_math_import():
     python_code = """
 import math
 
-def run(input_data):
-    radius = input_data.get('radius', 1)
+def run(radius:int):
     area = math.pi * radius ** 2
     circumference = 2 * math.pi * radius
     return {
@@ -115,13 +114,11 @@ def test_python_node_with_random_import():
     python_code = """
 import random
 
-def run(input_data):
-    min_value = input_data.get('min', 1)
-    max_value = input_data.get('max', 100)
-    random_number = random.randint(min_value, max_value)
+def run(min:int, max:int):
+    random_number = random.randint(min, max)
     return {
         'random_number': random_number,
-        'range': f'{min_value} to {max_value}',
+        'range': f'{min} to {max}',
         'message': f'The generated random number is {random_number}.'
     }
 """
@@ -141,10 +138,8 @@ def run(input_data):
 def test_python_node_with_dynamiq_import():
     """Test Python node importing dynamiq to create Document objects."""
     python_code = """
-def run(input_data):
+def run(content:str,metadata:dict):
     from dynamiq.types import Document
-    content = input_data.get('content')
-    metadata = input_data.get('metadata', {})
     document = Document(content=content, metadata=metadata)
     return {
         'documents': [document]
@@ -174,16 +169,17 @@ def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mo
     """Test Workflow integration with multiple nodes and dependencies."""
     file = BytesIO(b"test")
     file.name = "test.txt"
-    input_data = {"question": "What is LLM?", "files": [file]}
+    input_data = {"inputs": {"question": "What is LLM?", "files": [file]}}
     python_node_extra_output = {"test_python": "test_python"}
 
     python_node = (
         Python(
-            code=f"def run(inputs): return inputs | {python_node_extra_output}",
+            # Updated to accept **kwargs to prevent error on unexpected keys
+            code=f"def run(inputs, **kwargs): return inputs | {python_node_extra_output}",
         )
         .inputs(
-            question_lowercase=lambda inputs, outputs: inputs["question"].lower(),
-            file=lambda inputs, outputs: inputs["files"][0],
+            question_lowercase=lambda inputs, outputs: inputs["inputs"]["question"].lower(),
+            file=lambda inputs, outputs: inputs["inputs"]["files"][0],
         )
         .depends_on([openai_node, anthropic_node])
     )
@@ -198,13 +194,19 @@ def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mo
         input=input_data,
         output=expected_output_openai_anthropic,
     )
-    expected_input_python = input_data | {
+    expected_input_python = {
+        **input_data,  # preserve original inputs
         openai_node.id: expected_result_openai_anthropic.to_tracing_depend_dict(),
         anthropic_node.id: expected_result_openai_anthropic.to_tracing_depend_dict(),
-        "question_lowercase": input_data["question"].lower(),
+        "question_lowercase": input_data["inputs"]["question"].lower(),
         "file": file,
     }
-    expected_output_python = {"content": expected_input_python | python_node_extra_output}
+    expected_output_python = {
+        "content": {
+            **input_data["inputs"],
+            **python_node_extra_output,
+        }
+    }
     expected_result_python = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=expected_input_python,
@@ -273,7 +275,7 @@ def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mo
         ),
         (
             "function_body_open_attack",
-            'def run(input_data): return {"documents": open("/proc/self/environ").read()}',
+            'def run(): return {"documents": open("/proc/self/environ").read()}',
             "name 'open' is not defined",
         ),
         (
