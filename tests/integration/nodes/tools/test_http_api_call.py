@@ -16,9 +16,7 @@ from dynamiq.runnables import RunnableResult, RunnableStatus
         (ResponseType.JSON, {"a": "1"}),
     ],
 )
-def test_workflow_with_httpapicall(
-    mock_whisper_response_text, requests_mock, response_type, result
-):
+def test_workflow_with_httpapicall(mock_audio_transcribing_response_text, requests_mock, response_type, result):
     url = "https://api.elevenlabs.io/v1/shared-voices"
     connection = connections.Http(
         method=connections.HTTPMethod.GET,
