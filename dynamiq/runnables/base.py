@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 from io import BytesIO
-from typing import Any, Awaitable, Self
+from typing import Any, Awaitable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -57,7 +57,7 @@ class RunnableResultError(BaseModel):
     recoverable: bool = False
 
     @classmethod
-    def from_exception(cls, exception: Exception, recoverable: bool = False) -> Self:
+    def from_exception(cls, exception: Exception, recoverable: bool = False) -> "RunnableResultError":
         return cls(
             type=type(exception),
             message=str(exception),
