@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 __all__ = ["Settings", "DYNAMIQ_BASE_URL"]
 
@@ -31,7 +31,7 @@ class Settings(BaseModel):
     api_host: str | None = Field(default=DYNAMIQ_BASE_URL)
     api_key: str | None = Field(default=None)
 
-    model_config = dict(extra="forbid")
+    model_config = ConfigDict(extra="forbid")
 
     @property
     def base_url(self) -> str:

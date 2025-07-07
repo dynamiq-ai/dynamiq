@@ -1,5 +1,4 @@
 import pytest
-from pydantic import ConfigDict
 
 from dynamiq.connections import Firecrawl
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
@@ -37,9 +36,7 @@ def mock_firecrawl_requests(mocker, mock_firecrawl_response):
 def test_firecrawl_basic_scrape(mock_firecrawl_requests, mock_firecrawl_response):
     """Test basic scrape functionality."""
     firecrawl_connection = Firecrawl(api_key="test_key")
-    firecrawl_tool = FirecrawlTool(
-        connection=firecrawl_connection, model_config=ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
-    )
+    firecrawl_tool = FirecrawlTool(connection=firecrawl_connection)
 
     input_data = {"url": "https://example.com"}
 
@@ -74,7 +71,6 @@ def test_firecrawl_agent_optimized(mock_firecrawl_requests, mock_firecrawl_respo
         connection=firecrawl_connection,
         is_optimized_for_agents=True,
         formats=["markdown", "html"],
-        model_config=ConfigDict(arbitrary_types_allowed=True, populate_by_name=True),
     )
 
     input_data = {"url": "https://example.com"}
@@ -110,7 +106,6 @@ def test_firecrawl_with_custom_options(mock_firecrawl_requests):
         mobile=True,
         remove_base64_images=True,
         timeout=45000,
-        model_config=ConfigDict(arbitrary_types_allowed=True, populate_by_name=True),
     )
 
     input_data = {"url": "https://example.com"}

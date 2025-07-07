@@ -1,7 +1,7 @@
 import inspect
 from typing import Any, Callable, ClassVar, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
@@ -136,7 +136,7 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
         return create_model(
             "FunctionToolInputSchema",
             **params_dict,
-            model_config=dict(extra="allow"),
+            __config__=ConfigDict(extra="allow"),
         )
 
     class FunctionToolFromDecorator(FunctionTool[T]):
