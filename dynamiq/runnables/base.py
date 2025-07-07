@@ -4,7 +4,6 @@ from io import BytesIO
 from typing import Any, Awaitable
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing_extensions import Self
 
 from dynamiq.cache.config import CacheConfig
 from dynamiq.callbacks import BaseCallbackHandler
@@ -58,7 +57,7 @@ class RunnableResultError(BaseModel):
     recoverable: bool = False
 
     @classmethod
-    def from_exception(cls, exception: Exception, recoverable: bool = False) -> Self:
+    def from_exception(cls, exception: Exception, recoverable: bool = False) -> "RunnableResultError":
         return cls(
             type=type(exception),
             message=str(exception),

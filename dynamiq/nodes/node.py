@@ -11,7 +11,6 @@ from uuid import uuid4
 
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, create_model, model_validator
-from typing_extensions import Self
 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler
@@ -1131,7 +1130,7 @@ class Node(BaseModel, Runnable, ABC):
         """
         pass
 
-    def depends_on(self, nodes: Union["Node", list["Node"]], condition: ChoiceCondition | None = None) -> Self:
+    def depends_on(self, nodes: Union["Node", list["Node"]], condition: ChoiceCondition | None = None) -> "Node":
         """
         Add dependencies for this node. Accepts either a single node or a list of nodes.
 
