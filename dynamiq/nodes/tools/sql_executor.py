@@ -2,7 +2,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from dynamiq.connections import AWSRedshift, MySQL, PostgreSQL, Snowflake
+from dynamiq.connections import AWSRedshift, DatabricksSQL, MySQL, PostgreSQL, Snowflake
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
@@ -47,7 +47,8 @@ class SQLExecutor(ConnectionNode):
         group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
         name (str): The name of the tool.
         description (str): A brief description of the tool.
-        connection (PostgreSQL|MySQL|Snowflake|AWSRedshift): The connection instance for the specified storage.
+        connection (PostgreSQL|MySQL|Snowflake|AWSRedshift|DatabricksSQL): The connection instance for the
+        specified storage.
         query (Optional[str]): The SQL statement to execute.
         input_schema (SQLInputSchema): The input schema for the tool.
     """
@@ -55,7 +56,7 @@ class SQLExecutor(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "SQL Executor Tool"
     description: str = DESCRIPTION_SQL
-    connection: PostgreSQL | MySQL | Snowflake | AWSRedshift
+    connection: PostgreSQL | MySQL | Snowflake | AWSRedshift | DatabricksSQL
     query: str | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -92,10 +93,16 @@ class SQLExecutor(ConnectionNode):
             if not query:
                 raise ValueError("Query cannot be empty")
             cursor = self.client.cursor(
-                **self.connection.cursor_params if not isinstance(self.connection, (PostgreSQL, AWSRedshift)) else {}
+                **(
+                    self.connection.cursor_params
+                    if not isinstance(self.connection, (PostgreSQL, AWSRedshift, DatabricksSQL))
+                    else {}
+                )
             )
             cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []
+            if isinstance(self.connection, DatabricksSQL):
+                output = [row.asDict(True) for row in output]
             cursor.close()
             if self.is_optimized_for_agents:
                 output = self.format_results(output, query)
