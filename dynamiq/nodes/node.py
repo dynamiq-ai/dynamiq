@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
-from typing import Any, Callable, ClassVar, Self, Union
+from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
 from jinja2 import Template
@@ -1130,7 +1130,7 @@ class Node(BaseModel, Runnable, ABC):
         """
         pass
 
-    def depends_on(self, nodes: Union["Node", list["Node"]], condition: ChoiceCondition | None = None) -> Self:
+    def depends_on(self, nodes: Union["Node", list["Node"]], condition: ChoiceCondition | None = None) -> "Node":
         """
         Add dependencies for this node. Accepts either a single node or a list of nodes.
 

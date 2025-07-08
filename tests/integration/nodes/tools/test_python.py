@@ -2,7 +2,6 @@ import json
 from io import BytesIO
 
 import pytest
-from pydantic import ConfigDict
 
 from dynamiq import Workflow
 from dynamiq.callbacks.tracing import TracingCallbackHandler
@@ -26,7 +25,7 @@ def run(input_data):
         'age_in_months': age * 12
     }
 """
-    python_node = Python(code=python_code, model_config=ConfigDict())
+    python_node = Python(code=python_code)
     input_data = {"name": "Alice", "age": 30}
 
     result = python_node.run(input_data, None)
@@ -51,7 +50,7 @@ def run(input_data):
         'age_in_months': age * 12
     }
 """
-    python_node = Python(code=python_code, model_config=ConfigDict())
+    python_node = Python(code=python_code)
     input_data = {}  # Empty input to trigger default values
 
     result = python_node.run(input_data, None)
@@ -73,7 +72,7 @@ def run(input_data):
         'message': f'The generated number is {pseudo_random}.'
     }
 """
-    python_node = Python(code=python_code, model_config=ConfigDict())
+    python_node = Python(code=python_code)
     result = python_node.run({}, None)
 
     assert isinstance(result, RunnableResult)
@@ -99,7 +98,7 @@ def run(input_data):
         'pi_used': math.pi
     }
 """
-    python_node = Python(code=python_code, model_config=ConfigDict())
+    python_node = Python(code=python_code)
     input_data = {"radius": 5}
 
     result = python_node.run(input_data, None)
@@ -126,7 +125,7 @@ def run(input_data):
         'message': f'The generated random number is {random_number}.'
     }
 """
-    python_node = Python(code=python_code, model_config=ConfigDict())
+    python_node = Python(code=python_code)
     input_data = {"min": 1, "max": 10}
 
     result = python_node.run(input_data, None)
@@ -151,7 +150,7 @@ def run(input_data):
         'documents': [document]
     }
 """
-    python_node = Python(code=python_code, model_config=ConfigDict())
+    python_node = Python(code=python_code)
     input_data = {
         "content": "Document content",
         "metadata": {
@@ -308,7 +307,7 @@ def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mo
     ],
 )
 def test_python_node_security_attacks_blocked(attack_name, attack_code, expected_security_indicator):
-    python_node = Python(code=attack_code, model_config=ConfigDict())
+    python_node = Python(code=attack_code)
 
     result = python_node.run({}, None)
 

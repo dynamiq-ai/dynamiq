@@ -1,5 +1,4 @@
 import pytest
-from pydantic import ConfigDict
 
 from dynamiq.connections import Tavily
 from dynamiq.nodes.tools.tavily import TavilyTool
@@ -48,7 +47,6 @@ def test_tavily_node_parameters(mock_requests):
     tavily_connection = Tavily(api_key="test_key")
     tavily_tool = TavilyTool(
         connection=tavily_connection,
-        model_config=ConfigDict(),
         search_depth="advanced",
         max_results=3,
         include_answer=True,
@@ -86,7 +84,6 @@ def test_tavily_parameter_override(mock_requests):
     tavily_connection = Tavily(api_key="test_key")
     tavily_tool = TavilyTool(
         connection=tavily_connection,
-        model_config=ConfigDict(),
         search_depth="basic",
         max_results=5,
         include_answer=False,
