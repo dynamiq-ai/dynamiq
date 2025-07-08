@@ -5,7 +5,7 @@ import pytest
 
 from dynamiq import Workflow
 from dynamiq.flows import Flow
-from dynamiq.nodes.converters.pypdf import PyPDFConverter
+from dynamiq.nodes.converters.pypdf import PyPDFConverter, PyPDFConverterInputSchema
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableResult, RunnableStatus
@@ -159,7 +159,7 @@ def test_workflow_with_pypdf_converter(request, input_type, input_fixture):
 
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
-        input=input_data,
+        input=dict(PyPDFConverterInputSchema(**input_data)),
         output={
             "documents": [Document(id=document_id, content="Hello, world!", metadata={"file_path": expected_path})]
         },

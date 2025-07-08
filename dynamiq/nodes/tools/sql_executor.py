@@ -82,7 +82,7 @@ class SQLExecutor(ConnectionNode):
             formatted_results.append(formatted_result)
         return "\n\n".join(formatted_results)
 
-    def execute(self, input_data, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+    def execute(self, input_data: SQLInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
         config = ensure_config(config)

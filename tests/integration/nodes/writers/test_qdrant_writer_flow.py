@@ -6,6 +6,7 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Qdrant as QdrantConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.writers import QdrantDocumentWriter
+from dynamiq.nodes.writers.base import WriterInputSchema
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.vector.qdrant.qdrant import QdrantVectorStore
 
@@ -74,7 +75,7 @@ def test_write_workflow(
 
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
-        input={"documents": mock_documents},
+        input=dict(WriterInputSchema(**input_data)),
         output={"upserted_count": len(mock_documents)},
     ).to_dict()
     expected_output = {node_id: expected_result}
