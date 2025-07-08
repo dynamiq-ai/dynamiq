@@ -30,7 +30,7 @@ def main():
         ],
         input_transformer=InputTransformer(
             selector={
-                "documents": f"${html_converter_node.id}.output.documents",
+                "documents": f"${[html_converter_node.id]}.output.documents",
             },
         ),
     )

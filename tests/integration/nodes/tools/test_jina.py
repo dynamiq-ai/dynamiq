@@ -1,5 +1,4 @@
 import pytest
-from pydantic import ConfigDict
 
 from dynamiq.connections import Jina
 from dynamiq.nodes.tools.jina import JinaScrapeTool, JinaSearchTool
@@ -73,7 +72,7 @@ def mock_scrape_requests(mocker, mock_jina_scrape_response):
 def test_jina_basic_search(mock_search_requests, mock_jina_search_response):
     """Test basic search functionality."""
     jina_connection = Jina(api_key="test_key")
-    jina_tool = JinaSearchTool(connection=jina_connection, model_config=ConfigDict(), include_full_content=True)
+    jina_tool = JinaSearchTool(connection=jina_connection, include_full_content=True)
 
     input_data = {"query": "artificial intelligence", "max_results": 2}
 
@@ -108,9 +107,7 @@ def test_jina_basic_search(mock_search_requests, mock_jina_search_response):
 def test_jina_search_agent_optimized(mock_search_requests, mock_jina_search_response):
     """Test search with agent-optimized output format."""
     jina_connection = Jina(api_key="test_key")
-    jina_tool = JinaSearchTool(
-        connection=jina_connection, is_optimized_for_agents=True, model_config=ConfigDict(), include_full_content=True
-    )
+    jina_tool = JinaSearchTool(connection=jina_connection, is_optimized_for_agents=True, include_full_content=True)
 
     input_data = {"query": "artificial intelligence"}
 
@@ -134,7 +131,7 @@ def test_jina_search_agent_optimized(mock_search_requests, mock_jina_search_resp
 def test_jina_basic_scraping(mock_scrape_requests, mock_jina_scrape_response):
     """Test basic scrape functionality"""
     jina_connection = Jina(api_key="test_key")
-    jina_tool = JinaScrapeTool(connection=jina_connection, model_config=ConfigDict())
+    jina_tool = JinaScrapeTool(connection=jina_connection)
 
     input_data = {"url": "https://your-url"}
 
@@ -173,7 +170,7 @@ def test_jina_basic_scraping(mock_scrape_requests, mock_jina_scrape_response):
 def test_jina_scrape_agent_optimized(mock_scrape_requests, mock_jina_scrape_response):
     """Test scraping with agent-optimized output format."""
     jina_connection = Jina(api_key="test_key")
-    jina_tool = JinaScrapeTool(connection=jina_connection, is_optimized_for_agents=True, model_config=ConfigDict())
+    jina_tool = JinaScrapeTool(connection=jina_connection, is_optimized_for_agents=True)
 
     input_data = {"url": "https://your-url"}
 
@@ -193,7 +190,7 @@ def test_jina_scrape_agent_optimized(mock_scrape_requests, mock_jina_scrape_resp
 def test_jina_search_with_additional_parameters(mock_search_requests, mock_jina_search_response):
     """Test search with additional parameters."""
     jina_connection = Jina(api_key="test_key")
-    jina_tool = JinaSearchTool(connection=jina_connection, model_config=ConfigDict())
+    jina_tool = JinaSearchTool(connection=jina_connection)
 
     input_data = {
         "query": "machine learning",
@@ -223,7 +220,7 @@ def test_jina_search_with_additional_parameters(mock_search_requests, mock_jina_
 def test_jina_scrape_with_selectors(mock_scrape_requests, mock_jina_scrape_response):
     """Test scraping with CSS selectors."""
     jina_connection = Jina(api_key="test_key")
-    jina_tool = JinaScrapeTool(connection=jina_connection, model_config=ConfigDict())
+    jina_tool = JinaScrapeTool(connection=jina_connection)
 
     input_data = {
         "url": "https://example.com",
@@ -253,7 +250,7 @@ def test_jina_scrape_with_selectors(mock_scrape_requests, mock_jina_scrape_respo
 def test_jina_scrape_screenshot_format(mock_scrape_requests):
     """Test scraping with screenshot format."""
     jina_connection = Jina(api_key="test_key")
-    jina_tool = JinaScrapeTool(connection=jina_connection, model_config=ConfigDict(), response_format="screenshot")
+    jina_tool = JinaScrapeTool(connection=jina_connection, response_format="screenshot")
 
     input_data = {"url": "https://example.com"}
 

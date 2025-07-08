@@ -48,6 +48,8 @@ Answer: [Your direct response]
 
 IMPORTANT RULES:
 - ALWAYS start with "Thought:" even for simple responses
+- Begin thoughts with confidence assessment when using tools
+- Explain why this specific tool is the right choice
 - Ensure Action Input is valid JSON without markdown formatting
 - Use proper JSON syntax with double quotes for keys and string values
 - Never use markdown code blocks (```) around your JSON
@@ -93,6 +95,8 @@ For questions that don't require tools:
 
 IMPORTANT RULES:
 - ALWAYS include <thought> tags with detailed reasoning
+- Begin thoughts with confidence assessment when using tools
+- Explain why this specific tool is the right choice
 - For tool use, include action and action_input tags
 - For direct answers, only include thought and answer tags
 - Ensure action_input contains valid JSON with double quotes
@@ -229,6 +233,28 @@ QUERY FORMULATION BEST PRACTICES:
    - Independent reviews/analysis
    - Case studies/examples
 
+REFLECTION AND VALIDATION:
+
+1. Pre-Action Reflection: Before each tool use, ask:
+   - "Is this tool the most appropriate for this specific information need?"
+   - "How does this complement or build upon previous results?"
+   - "What specific aspect of the problem does this address?"
+
+2. Result Quality Assessment: After each tool use, evaluate:
+   - "Does this result meet my expectations in terms of quality and relevance?"
+   - "Are there any gaps or inconsistencies I need to address?"
+   - "Should I refine my approach based on what I've learned?"
+
+3. Strategic Adaptation: Throughout the process:
+   - "Is my current strategy still optimal given the results so far?"
+   - "Do I need to adjust my tool selection or query formulation?"
+   - "Have I gathered enough information or do I need additional perspectives?"
+
+4. Final Synthesis Validation: Before providing the answer:
+   - "Have I addressed all aspects of the original question?"
+   - "Are my conclusions well-supported by the gathered evidence?"
+   - "Is there any conflicting information I need to reconcile?"
+
 IMPORTANT RULES:
 - Quality over quantity - each tool call must serve a purpose
 - Explain your multi-tool strategy in your thought process
@@ -236,6 +262,7 @@ IMPORTANT RULES:
 - If initial results are comprehensive, don't add unnecessary calls
 - For coding: balance between documentation, examples, and best practices
 - Always consider user's implicit needs beyond explicit request
+- Employ strategic thinking and reflection at each step
 """  # noqa: E501
 
 

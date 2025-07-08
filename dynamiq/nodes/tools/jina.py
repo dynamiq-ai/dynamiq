@@ -10,77 +10,63 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SCRAPE = """## Jina Scrape Tool
-### Overview
-The Jina Scrape Tool extracts content from web pages.
-### Capabilities
-- Extract web content in various formats
-- Return well-formatted content for further processing
-### When to Use
-- Extract information from specific webpages
-- Convert web content to more readable formats
-### Input Parameters
-- **url** (string, required): Complete URL of the webpage to scrape
-- **target_selector** (string, optional): CSS selector to focus on specific elements
-- **remove_selector** (string, optional): CSS selector to exclude elements (e.g., "header,.ads,#footer")
-- **include_links** (boolean, optional): Include links summary in response
-- **include_images** (boolean, optional): Include images summary in response
-- **generate_alt_text** (boolean, optional): Generate alt text for images without captions
-- **engine** (string, optional): Use 'browser' for JS-heavy sites, 'direct' for speed
-"""  # noqa: E501
+DESCRIPTION_SCRAPE = """Scrapes web content from URLs using Jina with CSS selector targeting and content filtering.
 
-DESCRIPTION_SEARCH = """## Jina Search Tool
-### Overview
-The Jina Search Tool enables comprehensive web searches using Jina AI's search engine,
-delivering structured results with extensive customization options.
-### Capabilities
-- Process natural language and keyword queries
-- Return search results with titles, descriptions, and URLs
-- Support geographic and language targeting
-- Include/exclude images, links, and favicons
-- Control response format (markdown, HTML, text, screenshots)
-- Handle caching, timeouts, and proxy settings
-- Support pagination for large result sets
-- Limit searches to specific domains
-### When to Use
-- Research topics requiring multiple perspectives
-- Discover resources related to specific queries
-- Access current information with geographic/language specificity
-- Perform domain-specific searches
-### Input Parameters
-- **query** (string, required): The search query text
-- **max_results** (integer, optional, default: 5): Maximum results (1-100)
-- **country** (string, optional): Two-letter country code (e.g., 'US', 'GB')
-- **location** (string, optional): Geographic location for search origin
-- **language** (string, optional): Two-letter language code (e.g., 'en', 'es')
-- **page** (integer, optional): Page offset for pagination
-- **site** (string, optional): Limit search to specific domain
-- **return_format** (string, optional): Response format ('markdown', 'html', 'text', 'screenshot', 'pageshot')
-- **include_links** (boolean, optional): Include link summaries
-- **include_favicons** (boolean, optional): Include website favicons
-- **include_favicon** (boolean, optional): Include individual page favicon
-- **no_cache** (boolean, optional): Bypass cache for real-time data
-- **generate_alt_text** (boolean, optional): Generate alt text for images
-- **timeout** (integer, optional): Request timeout in seconds
-- **locale** (string, optional): Browser locale setting
-- **cookies** (string, optional): Custom cookie settings
-- **proxy_url** (string, optional): Proxy URL for requests
-### Usage Examples
-#### Basic Search
-{
-  "query": "climate change solutions 2025"
-}
-#### Search with More Results
-{
-  "query": "best programming languages for beginners",
-  "max_results": 10
-}
-### Best Practices
-1. **Be Specific**: Use clear, specific queries for better results.
-2. **Limit Results**: Start with fewer results (3-5) for focused information.
-3. **Use Natural Language**: Phrases or questions provide better semantic matching.
-4. **Add Context**: Include relevant terms to narrow results (e.g., "Python language" vs. "Python").
-"""  # noqa: E501
+Key Capabilities:
+- Clean text extraction with CSS selector precision
+- Content filtering to remove unwanted elements
+- Optional link and image extraction
+- Selective targeting for specific page sections
+
+Usage Strategy:
+- Use target_selector for specific content areas
+- Use remove_selector to filter out ads, navigation
+- Enable include_links/include_images based on analysis needs
+
+Parameter Guide:
+- url: URL to scrape (e.g., "https://example.com")
+- target_selector: CSS selector for specific content (".content", "#main")
+- remove_selector: Filter unwanted elements (".ads", ".nav")
+- include_links/include_images: Additional content extraction
+- engine: "browser" for JS-heavy sites, "direct" for speed
+
+Examples:
+- {"url": "https://example.com", "target_selector": ".content"}
+- {"url": "https://news.com", "remove_selector": ".ads"}
+- {"url": "https://blog.com", "include_images": true}"""
+
+DESCRIPTION_SEARCH = """Searches the web using Jina with geographic targeting and customizable response formats.
+
+Key Capabilities:
+- Geographic targeting for location-based searches
+- Site-specific searches for authoritative sources
+- Customizable result counts (1-100) for analysis scope
+- Flexible response formatting for different use cases
+
+Usage Strategy:
+- Local searches: Use implicit ("near me") or explicit location terms
+- Research: Combine with site parameter for quality sources
+- Analysis: Adjust count based on comprehensiveness needed
+
+Parameter Guide:
+- query: Search query text (e.g., "restaurants near me")
+- max_results: Maximum results (1-100)
+- country: Two-letter country code (e.g., "US", "GB")
+- location: Geographic location for search origin (e.g., "New York")
+- language: Two-letter language code (e.g., "en", "es")
+- return_format: Response format (markdown, html, text, screenshot, pageshot)
+- include_full_content: Include full content of search results
+- site: Limit search to specific domain (e.g., "example.com")
+- include_images: Include images in search results
+- include_links: Include link summaries in results
+- include_favicons: Include SERP favicons
+- include_favicon: Include individual page favicon
+
+
+Examples:
+- {"query": "restaurants near downtown", "site": "yelp.com"}
+- {"query": "ML papers", "site": "arxiv.org", "max_results": 20}
+- {"query": "Tokyo weather", "max_results": 5}"""
 
 
 class JinaScrapeInputSchema(BaseModel):

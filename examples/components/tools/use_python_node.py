@@ -1,5 +1,3 @@
-from pydantic import ConfigDict
-
 from dynamiq.nodes.tools.python import Python
 
 
@@ -19,7 +17,7 @@ def run(input_data):
     }
 """
 
-    python_node = Python(code=python_code_with_input, model_config=ConfigDict())
+    python_node = Python(code=python_code_with_input)
     input_data = {"name": "Alice", "age": 30}
     config = None
     result = python_node.run(input_data, config)
@@ -39,7 +37,7 @@ def run(input_data):
     }
 """
 
-    python_node = Python(code=python_code_without_input, model_config=ConfigDict())
+    python_node = Python(code=python_code_without_input)
     result = python_node.run({})
     print("\nResult without input:")
     print(result)
@@ -64,7 +62,7 @@ def run(input_data):
     }
 """
 
-    python_node = Python(code=python_code_with_math, model_config=ConfigDict())
+    python_node = Python(code=python_code_with_math)
     input_data = {"radius": 5}
     config = None
     result = python_node.run(input_data, config)
@@ -90,7 +88,7 @@ def run(input_data):
     }
 """
 
-    python_node = Python(code=python_code_with_random, model_config=ConfigDict())
+    python_node = Python(code=python_code_with_random)
     input_data = {"min": 1, "max": 10}
     config = None
     result = python_node.run(input_data, config)
@@ -114,7 +112,7 @@ def run(input_data):
     }
 """
 
-    python_node = Python(code=python_code_with_math, model_config=ConfigDict())
+    python_node = Python(code=python_code_with_math)
 
     input_data = {
         "content": "Document content",

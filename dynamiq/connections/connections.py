@@ -1326,3 +1326,26 @@ class MCPStdio(BaseConnection):
                 encoding_error_handler=self.encoding_error_handler.value,
             )
         )
+
+
+class DatabricksSQL(BaseConnection):
+    server_hostname: str = Field(default_factory=partial(get_env_var, "DATABRICKS_SERVER_HOSTNAME"))
+    http_path: str = Field(default_factory=partial(get_env_var, "DATABRICKS_HTTP_PATH"))
+    access_token: str = Field(default_factory=partial(get_env_var, "DATABRICKS_TOKEN"))
+
+    def connect(self):
+        try:
+            from databricks import sql
+
+            conn = sql.connect(
+                server_hostname=self.server_hostname,
+                http_path=self.http_path,
+                access_token=self.access_token,
+            )
+            logger.debug(
+                f"Connected to DataBricks using server hostname={self.server_hostname}, "
+                f"http path={str(self.http_path)}"
+            )
+            return conn
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Databricks: {str(e)}")

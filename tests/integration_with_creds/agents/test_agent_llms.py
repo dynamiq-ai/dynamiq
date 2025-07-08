@@ -208,6 +208,7 @@ def test_react_agent_anthropic_models(
     run_and_assert_agent(agent, agent_input, expected_answer, run_config)
 
 
+@pytest.mark.skip(reason="Model access limited by current API key")
 @pytest.mark.integration
 @pytest.mark.parametrize("model", GOOGLE_MODELS)
 @pytest.mark.parametrize("inference_mode", INFERENCE_MODES)

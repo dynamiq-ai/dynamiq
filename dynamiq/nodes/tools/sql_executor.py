@@ -2,23 +2,37 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from dynamiq.connections import AWSRedshift, MySQL, PostgreSQL, Snowflake
+from dynamiq.connections import AWSRedshift, DatabricksSQL, MySQL, PostgreSQL, Snowflake
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SQL = """# SQL Executor Tool
-A tool that executes SQL queries against databases like PostgreSQL, MySQL, Snowflake, and AWS Redshift.
-**Functionality:**
-- Executes SQL queries provided through input parameters or pre-configured in the tool
-- Returns query results in a formatted structure or confirmation messages
-- Handles execution errors with clear error messages
-**Usage:**
-Provide a SQL query string to execute against the configured database connection.
-The tool will return the query results or appropriate status messages.
-"""  # noqa: E501
+DESCRIPTION_SQL = """Executes SQL queries on multiple database systems including PostgreSQL,
+MySQL, Snowflake, and AWS Redshift.
+
+Key Capabilities:
+- Full SQL operations: SELECT, INSERT, UPDATE, DELETE, DDL
+- Multi-database support with automatic connection handling
+- Complex query execution with joins, aggregations, subqueries
+- Automatic result formatting and error handling
+
+Usage Strategy:
+- Use specific columns instead of SELECT * for performance
+- Include LIMIT clauses for large datasets
+- Leverage database-specific features for optimization
+- Handle transactions appropriately for data modifications
+
+Parameter Guide:
+- query: SQL statement to execute (required)
+- Database connection configured at tool initialization
+- Supports parameterized queries for security
+
+Examples:
+- {"query": "SELECT name, email FROM users WHERE status = 'active' LIMIT 10"}
+- {"query": "SELECT department, COUNT(*) FROM employees GROUP BY department"}
+- {"query": "INSERT INTO products (name, price) VALUES ('Widget', 29.99)"}"""
 
 
 class SQLInputSchema(BaseModel):
@@ -33,7 +47,8 @@ class SQLExecutor(ConnectionNode):
         group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
         name (str): The name of the tool.
         description (str): A brief description of the tool.
-        connection (PostgreSQL|MySQL|Snowflake|AWSRedshift): The connection instance for the specified storage.
+        connection (PostgreSQL|MySQL|Snowflake|AWSRedshift|DatabricksSQL): The connection instance for the
+        specified storage.
         query (Optional[str]): The SQL statement to execute.
         input_schema (SQLInputSchema): The input schema for the tool.
     """
@@ -41,7 +56,7 @@ class SQLExecutor(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "SQL Executor Tool"
     description: str = DESCRIPTION_SQL
-    connection: PostgreSQL | MySQL | Snowflake | AWSRedshift
+    connection: PostgreSQL | MySQL | Snowflake | AWSRedshift | DatabricksSQL
     query: str | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -78,10 +93,16 @@ class SQLExecutor(ConnectionNode):
             if not query:
                 raise ValueError("Query cannot be empty")
             cursor = self.client.cursor(
-                **self.connection.cursor_params if not isinstance(self.connection, (PostgreSQL, AWSRedshift)) else {}
+                **(
+                    self.connection.cursor_params
+                    if not isinstance(self.connection, (PostgreSQL, AWSRedshift, DatabricksSQL))
+                    else {}
+                )
             )
             cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []
+            if isinstance(self.connection, DatabricksSQL):
+                output = [row.asDict(True) for row in output]
             cursor.close()
             if self.is_optimized_for_agents:
                 output = self.format_results(output, query)

@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from pydantic import ConfigDict, ValidationError
+from pydantic import ValidationError
 
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
@@ -57,7 +57,6 @@ def test_exa_node_parameters(mock_requests):
     exa_connection = Exa(api_key="test_key")
     exa_tool = ExaTool(
         connection=exa_connection,
-        model_config=ConfigDict(),
         include_full_content=True,
         limit=5,
         query_type=QueryType.neural,
@@ -92,7 +91,6 @@ def test_exa_parameter_override(mock_requests):
     exa_connection = Exa(api_key="test_key")
     exa_tool = ExaTool(
         connection=exa_connection,
-        model_config=ConfigDict(),
         include_full_content=True,
         limit=5,
         query_type=QueryType.neural,
@@ -123,7 +121,7 @@ def test_exa_parameter_override(mock_requests):
 def test_exa_basic_search(mock_requests, mock_exa_response):
     """Test basic search functionality without content retrieval."""
     exa_connection = Exa(api_key="test_key")
-    exa_tool = ExaTool(connection=exa_connection, model_config=ConfigDict())
+    exa_tool = ExaTool(connection=exa_connection)
 
     input_data = {"query": "artificial intelligence", "limit": 2, "query_type": "neural", "include_full_content": False}
 
@@ -148,7 +146,7 @@ def test_exa_basic_search(mock_requests, mock_exa_response):
 def test_exa_search_agent_optimized(mock_requests, mock_exa_response):
     """Test search with agent-optimized output format."""
     exa_connection = Exa(api_key="test_key")
-    exa_tool = ExaTool(connection=exa_connection, is_optimized_for_agents=True, model_config=ConfigDict())
+    exa_tool = ExaTool(connection=exa_connection, is_optimized_for_agents=True)
 
     input_data = {"query": "artificial intelligence", "include_full_content": True}
 
@@ -172,7 +170,7 @@ def test_exa_search_agent_optimized(mock_requests, mock_exa_response):
 def test_exa_with_invalid_input_schema(mock_requests, mock_exa_response):
     """Test behavior with invalid input schema."""
     exa_connection = Exa(api_key="test_key")
-    exa_tool = ExaTool(connection=exa_connection, model_config=ConfigDict())
+    exa_tool = ExaTool(connection=exa_connection)
 
     wf = Workflow(flow=Flow(nodes=[exa_tool]))
     input_data = {}
