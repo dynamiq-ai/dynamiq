@@ -86,7 +86,6 @@ class Memory(BaseModel):
                         break
 
                 if not matches_context:
-                    filtered_messages.append(msg)
                     continue
 
             if msg_timestamp >= cutoff_timestamp:
