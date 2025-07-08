@@ -44,10 +44,10 @@ class BaseEmbedder(BaseModel):
             "search_document", "search_query", "classification" and "clustering".
         dimensions(int):he number of dimensions the resulting output embeddings should have.
             Only supported in OpenAI/Azure text-embedding-3 and later models.
-        enable_truncation(bool): Whether to enable automatic text truncation for long inputs that exceed
+        truncation_enabled(bool): Whether to enable automatic text truncation for long inputs that exceed
             the embedding model's token limits. Defaults to True.
         max_input_tokens(int): Maximum number of tokens allowed for input text. If text exceeds this limit
-            and enable_truncation is True, the text will be truncated. Defaults to 8192.
+            and truncation_enabled is True, the text will be truncated. Defaults to 8192.
         truncation_method(TruncationMethod): Method to use for truncation when text exceeds max_input_tokens.
             Options: TruncationMethod.START, TruncationMethod.END, TruncationMethod.MIDDLE.
             Defaults to TruncationMethod.MIDDLE.
@@ -109,7 +109,7 @@ class BaseEmbedder(BaseModel):
     truncate: str | None = None
     input_type: str | None = None
     dimensions: int | None = None
-    enable_truncation: bool = True
+    truncation_enabled: bool = True
     max_input_tokens: int = 8192
     truncation_method: TruncationMethod = TruncationMethod.MIDDLE
     client: Any | None = None
@@ -140,11 +140,11 @@ class BaseEmbedder(BaseModel):
         Returns:
             Original or truncated text
         """
-        if not self.enable_truncation or not text:
+        if not self.truncation_enabled or not text:
             return text
 
         return truncate_text_for_embedding(
-            text=text, max_tokens=self.max_input_tokens, truncate_method=self.truncation_method
+            text=text, max_tokens=self.max_input_tokens, truncation_method=self.truncation_method
         )
 
     def embed_text(self, text: str) -> dict:

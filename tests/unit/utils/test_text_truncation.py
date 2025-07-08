@@ -17,7 +17,7 @@ def test_empty_text():
 def test_middle_truncation():
     """Test middle truncation method."""
     text = "A" * 1000 + "MIDDLE" + "B" * 1000
-    result = truncate_text_for_embedding(text, max_tokens=100, truncate_method=TruncationMethod.MIDDLE)
+    result = truncate_text_for_embedding(text, max_tokens=100, truncation_method=TruncationMethod.MIDDLE)
 
     assert len(result) < len(text)
     assert "...[truncated for embedding]..." in result
@@ -28,7 +28,7 @@ def test_middle_truncation():
 def test_start_truncation():
     """Test start truncation method."""
     text = "START" + "A" * 1000
-    result = truncate_text_for_embedding(text, max_tokens=100, truncate_method=TruncationMethod.START)
+    result = truncate_text_for_embedding(text, max_tokens=100, truncation_method=TruncationMethod.START)
 
     assert len(result) < len(text)
     assert "...[truncated for embedding]..." in result
@@ -39,7 +39,7 @@ def test_start_truncation():
 def test_end_truncation():
     """Test end truncation method."""
     text = "A" * 1000 + "END"
-    result = truncate_text_for_embedding(text, max_tokens=100, truncate_method=TruncationMethod.END)
+    result = truncate_text_for_embedding(text, max_tokens=100, truncation_method=TruncationMethod.END)
 
     assert len(result) < len(text)
     assert "...[truncated for embedding]..." in result
@@ -79,7 +79,7 @@ def test_backward_compatibility_with_strings():
     """Test that string values still work for backward compatibility."""
     text = "A" * 200
 
-    result_enum = truncate_text_for_embedding(text, max_tokens=20, truncate_method=TruncationMethod.START)
-    result_string = truncate_text_for_embedding(text, max_tokens=20, truncate_method="START")
+    result_enum = truncate_text_for_embedding(text, max_tokens=20, truncation_method=TruncationMethod.START)
+    result_string = truncate_text_for_embedding(text, max_tokens=20, truncation_method="START")
 
     assert result_enum == result_string
