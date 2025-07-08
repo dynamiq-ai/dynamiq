@@ -11,7 +11,8 @@ from dynamiq.utils.logger import logger
 @pytest.fixture
 def python_tool_code():
     return """
-def run(text):
+def run(input_data):
+    text = input_data.get('text', '')
     return "The length of the string is  " + str(len(text)) + " {{is ok}}"
 """
 

@@ -15,7 +15,7 @@ from dynamiq.utils import JsonWorkflowEncoder
 def test_python_node_with_input():
     """Test Python node with specific input data for name and age calculation."""
     python_code = """
-def run(input_data):
+def run(input_data:dict):
     name = input_data.get('name', 'World')
     age = input_data.get('age', 0)
     birth_year = 2024 - age
@@ -26,7 +26,7 @@ def run(input_data):
     }
 """
     python_node = Python(code=python_code)
-    input_data = {"input_data": {"name": "Alice", "age": 30}}
+    input_data = {"name": "Alice", "age": 30}
 
     result = python_node.run(input_data, None)
     expected_output = {"greeting": "Hello, Alice!", "message": "You were born around 1994.", "age_in_months": 360}
@@ -65,7 +65,7 @@ def run(input_data: dict):
 def test_python_node_without_input():
     """Test Python node functionality without specific input data."""
     python_code = """
-def run(input_data={}):
+def run(input_data):
     pseudo_random = hash(str(input_data)) % 100 + 1
     return {
         'pseudo_random_number': pseudo_random,
@@ -97,7 +97,7 @@ def run(radius:int):
         'pi_used': math.pi
     }
 """
-    python_node = Python(code=python_code)
+    python_node = Python(code=python_code, use_multiple_params=True)
     input_data = {"radius": 5}
 
     result = python_node.run(input_data, None)
@@ -122,7 +122,7 @@ def run(min:int, max:int):
         'message': f'The generated random number is {random_number}.'
     }
 """
-    python_node = Python(code=python_code)
+    python_node = Python(code=python_code, use_multiple_params=True)
     input_data = {"min": 1, "max": 10}
 
     result = python_node.run(input_data, None)
@@ -145,7 +145,7 @@ def run(content:str,metadata:dict):
         'documents': [document]
     }
 """
-    python_node = Python(code=python_code)
+    python_node = Python(code=python_code, use_multiple_params=True)
     input_data = {
         "content": "Document content",
         "metadata": {
@@ -169,17 +169,16 @@ def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mo
     """Test Workflow integration with multiple nodes and dependencies."""
     file = BytesIO(b"test")
     file.name = "test.txt"
-    input_data = {"inputs": {"question": "What is LLM?", "files": [file]}}
+    input_data = {"question": "What is LLM?", "files": [file]}
     python_node_extra_output = {"test_python": "test_python"}
 
     python_node = (
         Python(
-            # Updated to accept **kwargs to prevent error on unexpected keys
-            code=f"def run(inputs, **kwargs): return inputs | {python_node_extra_output}",
+            code=f"def run(inputs): return inputs | {python_node_extra_output}",
         )
         .inputs(
-            question_lowercase=lambda inputs, outputs: inputs["inputs"]["question"].lower(),
-            file=lambda inputs, outputs: inputs["inputs"]["files"][0],
+            question_lowercase=lambda inputs, outputs: inputs["question"].lower(),
+            file=lambda inputs, outputs: inputs["files"][0],
         )
         .depends_on([openai_node, anthropic_node])
     )
@@ -194,19 +193,13 @@ def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mo
         input=input_data,
         output=expected_output_openai_anthropic,
     )
-    expected_input_python = {
-        **input_data,  # preserve original inputs
+    expected_input_python = input_data | {
         openai_node.id: expected_result_openai_anthropic.to_tracing_depend_dict(),
         anthropic_node.id: expected_result_openai_anthropic.to_tracing_depend_dict(),
-        "question_lowercase": input_data["inputs"]["question"].lower(),
+        "question_lowercase": input_data["question"].lower(),
         "file": file,
     }
-    expected_output_python = {
-        "content": {
-            **input_data["inputs"],
-            **python_node_extra_output,
-        }
-    }
+    expected_output_python = {"content": expected_input_python | python_node_extra_output}
     expected_result_python = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input=expected_input_python,
@@ -275,7 +268,7 @@ def test_workflow_with_python(openai_node, anthropic_node, mock_llm_executor, mo
         ),
         (
             "function_body_open_attack",
-            'def run(): return {"documents": open("/proc/self/environ").read()}',
+            'def run(input_data): return {"documents": open("/proc/self/environ").read()}',
             "name 'open' is not defined",
         ),
         (
