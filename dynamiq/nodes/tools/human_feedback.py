@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar, Literal
+from queue import Queue
 
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -78,8 +79,10 @@ class HumanFeedbackTool(Node):
     """
     A tool for gathering user information through human feedback.
 
-    This tool prompts the user for input and returns the response. It should be used to check actual
-    information from the user or to gather additional input during a process.
+    This tool automatically adapts to the environment:
+    - Console: Uses input() for local development
+    - Streaming: Uses WebSocket/queue for UI applications
+    - Auto-detection: Automatically chooses method based on configuration
 
     Attributes:
         group (Literal[NodeGroup.TOOLS]): The group the node belongs to.
@@ -87,6 +90,7 @@ class HumanFeedbackTool(Node):
         description (str): A brief description of the tool's purpose.
         msg_template (str): Template of message to send.
         input_method (FeedbackMethod | InputMethodCallable): The method used to gather user input.
+        auto_detect (bool): Automatically detect the best input method based on environment.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -107,12 +111,13 @@ Usage Strategy:
 
 Parameter Guide:
 - msg_template: Jinja2 template for message formatting
-
 Examples:
-- {"msg_template": "Please review this email draft before sending"}"""
+- {"msg_template": "Please review this email draft before sending"}
+"""
     input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
     msg_template: str = "{{input}}"
+    auto_detect: bool = True
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @model_validator(mode="after")
@@ -173,6 +178,48 @@ Examples:
 
         return event.data.content
 
+    def _detect_input_method(self, config: RunnableConfig) -> FeedbackMethod:
+        """
+        Automatically detect the best input method based on the environment.
+        
+        Args:
+            config (RunnableConfig): The configuration for the runnable.
+            
+        Returns:
+            FeedbackMethod: The detected input method.
+        """
+        streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
+        
+        if streaming and streaming.enabled and hasattr(streaming, 'input_queue') and streaming.input_queue:
+            return FeedbackMethod.STREAM
+        
+        return FeedbackMethod.CONSOLE
+    
+    def _ensure_streaming_config(self, config: RunnableConfig) -> None:
+        """
+        Ensure streaming configuration is properly set up when using STREAM method.
+        
+        Args:
+            config (RunnableConfig): The configuration for the runnable.
+        """
+        streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
+        
+        if not streaming:
+            from dynamiq.types.streaming import StreamingConfig
+            streaming = StreamingConfig(enabled=True, input_queue=Queue())
+            
+            if not config.nodes_override:
+                config.nodes_override = {}
+            if self.id not in config.nodes_override:
+                from dynamiq.runnables.base import NodeRunnableConfig
+                config.nodes_override[self.id] = NodeRunnableConfig()
+            config.nodes_override[self.id].streaming = streaming
+        elif not streaming.enabled:
+            streaming.enabled = True
+        
+        if not hasattr(streaming, 'input_queue') or not streaming.input_queue:
+            streaming.input_queue = Queue()
+
     def execute(
         self, input_data: HumanFeedbackInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -180,6 +227,7 @@ Examples:
         Execute the tool with the provided input data and configuration.
 
         This method prompts the user for input using the specified input method and returns the result.
+        When auto_detect is enabled, it automatically chooses the best input method based on the environment.
 
         Args:
             input_data (dict[str, Any]): The input data containing the prompt for the user.
@@ -198,19 +246,21 @@ Examples:
 
         input_text = Template(self.msg_template).render(input_data.model_dump())
 
-        if isinstance(self.input_method, FeedbackMethod):
-            if self.input_method == FeedbackMethod.CONSOLE:
-                result = self.input_method_console(input_text)
-            elif self.input_method == FeedbackMethod.STREAM:
-                streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
-                if not streaming.input_streaming_enabled:
-                    raise ValueError(
-                        f"'{FeedbackMethod.STREAM}' input method requires enabled input and output streaming."
-                    )
+        if self.auto_detect:
+            detected_method = self._detect_input_method(config)
+            logger.debug(f"Tool {self.name} - {self.id}: auto-detected input method: {detected_method}")
+            actual_method = detected_method
+        else:
+            actual_method = self.input_method
 
+        if isinstance(actual_method, FeedbackMethod):
+            if actual_method == FeedbackMethod.CONSOLE:
+                result = self.input_method_console(input_text)
+            elif actual_method == FeedbackMethod.STREAM:
+                self._ensure_streaming_config(config)
                 result = self.input_method_streaming(prompt=input_text, config=config, **kwargs)
             else:
-                raise ValueError(f"Unsupported input method: {self.input_method}")
+                raise ValueError(f"Unsupported input method: {actual_method}")
         else:
             result = self.input_method.get_input(input_text)
 
