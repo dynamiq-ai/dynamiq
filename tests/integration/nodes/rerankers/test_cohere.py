@@ -85,6 +85,7 @@ def test_workflow_with_cohere_reranker(mock_rerank_executor):
         query=input_data["query"],
         documents=[doc.content for doc in documents],
         top_n=2,
+        api_key="api_key",
     )
 
 

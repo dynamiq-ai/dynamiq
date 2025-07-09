@@ -9,6 +9,7 @@ from dynamiq.prompts import Message
 from dynamiq.storages.vector.pinecone import PineconeVectorStore
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.types import Document
+from dynamiq.utils.utils import CHARS_PER_TOKEN
 
 
 class PineconeError(Exception):
@@ -35,6 +36,10 @@ class Pinecone(MemoryBackend):
     pod_type: str | None = Field(default=None)
     pods: int = Field(default=1)
     vector_store: PineconeVectorStore | None = None
+    message_truncation_enabled: bool = Field(
+        default=True, description="Enable automatic message truncation for embeddings"
+    )
+    max_message_tokens: int = Field(default=8192, description="Maximum tokens for message content before truncation")
 
     @property
     def to_dict_exclude_params(self):
@@ -68,12 +73,27 @@ class Pinecone(MemoryBackend):
         if not self.vector_store._index:
             raise PineconeError("Failed to initialize Pinecone index")
 
+        # Configure embedder truncation settings
+        self.embedder.document_embedder.truncation_enabled = self.message_truncation_enabled
+        self.embedder.document_embedder.max_input_tokens = self.max_message_tokens
+
     def _message_to_document(self, message: Message) -> Document:
         """Converts a Message object to a Document object."""
+        content = message.content
+        metadata = {"role": message.role.value, **(message.metadata or {})}
+
+        if self.message_truncation_enabled and content:
+            original_length = len(content)
+            max_chars = self.max_message_tokens * CHARS_PER_TOKEN
+            if original_length > max_chars:
+                metadata["truncated"] = True
+                metadata["original_length"] = original_length
+                metadata["truncated_length"] = max_chars
+
         return Document(
             id=str(uuid.uuid4()),
-            content=message.content,
-            metadata={"role": message.role.value, **(message.metadata or {})},
+            content=content,
+            metadata=metadata,
             embedding=None,
         )
 
