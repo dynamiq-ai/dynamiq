@@ -4,6 +4,7 @@ from typing import ClassVar, Literal
 from pydantic import BaseModel, Field
 
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode
+from dynamiq.storages.vector.dry_run import DryRunConfig
 from dynamiq.types import Document
 
 
@@ -11,6 +12,9 @@ class WriterInputSchema(BaseModel):
     documents: list[Document] = Field(..., description="Parameter to provide documents to write.")
     content_key: str = Field(default=None, description="Parameter to provide content key.")
     embedding_key: str = Field(default=None, description="Parameter to provide embedding key.")
+    dry_run_config: DryRunConfig | None = Field(
+        default=None, description="Dry run configuration to override node-level config."
+    )
 
 
 class Writer(VectorStoreNode, ABC):
