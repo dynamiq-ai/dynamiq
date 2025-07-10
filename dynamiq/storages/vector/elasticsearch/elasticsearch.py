@@ -37,7 +37,6 @@ class ElasticsearchVectorStoreParams(BaseVectorStoreParams):
         embedding_key (str): Key for embedding field. Defaults to "embedding".
         batch_size (int): Batch size for writing operations. Defaults to 100.
     """
-    dimension: int = 1536
     similarity: ElasticsearchSimilarityMetric = ElasticsearchSimilarityMetric.COSINE
     embedding_key: str = "embedding"
     batch_size: int = 100
@@ -45,7 +44,7 @@ class ElasticsearchVectorStoreParams(BaseVectorStoreParams):
 
 class ElasticsearchVectorStoreWriterParams(ElasticsearchVectorStoreParams, BaseWriterVectorStoreParams):
     """Parameters for Elasticsearch vector store writer."""
-    pass
+    dimension: int = 1536
 
 
 class ElasticsearchVectorStore(BaseVectorStore):
