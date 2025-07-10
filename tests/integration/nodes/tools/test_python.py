@@ -15,7 +15,7 @@ from dynamiq.utils import JsonWorkflowEncoder
 def test_python_node_with_input():
     """Test Python node with specific input data for name and age calculation."""
     python_code = """
-def run(input_data):
+def run(input_data:dict):
     name = input_data.get('name', 'World')
     age = input_data.get('age', 0)
     birth_year = 2024 - age
@@ -40,7 +40,7 @@ def run(input_data):
 def test_python_node_with_default_values():
     """Test Python node with missing input data to verify default values."""
     python_code = """
-def run(input_data):
+def run(input_data: dict):
     name = input_data.get('name', 'World')
     age = input_data.get('age', 0)
     birth_year = 2024 - age
@@ -51,7 +51,7 @@ def run(input_data):
     }
 """
     python_node = Python(code=python_code)
-    input_data = {}  # Empty input to trigger default values
+    input_data = {"input_data": {}}  # Empty input to trigger default values
 
     result = python_node.run(input_data, None)
     expected_output = {"greeting": "Hello, World!", "message": "You were born around 2024.", "age_in_months": 0}
@@ -87,8 +87,7 @@ def test_python_node_with_math_import():
     python_code = """
 import math
 
-def run(input_data):
-    radius = input_data.get('radius', 1)
+def run(radius:int):
     area = math.pi * radius ** 2
     circumference = 2 * math.pi * radius
     return {
@@ -98,7 +97,7 @@ def run(input_data):
         'pi_used': math.pi
     }
 """
-    python_node = Python(code=python_code)
+    python_node = Python(code=python_code, use_multiple_params=True)
     input_data = {"radius": 5}
 
     result = python_node.run(input_data, None)
@@ -115,17 +114,15 @@ def test_python_node_with_random_import():
     python_code = """
 import random
 
-def run(input_data):
-    min_value = input_data.get('min', 1)
-    max_value = input_data.get('max', 100)
-    random_number = random.randint(min_value, max_value)
+def run(min:int, max:int):
+    random_number = random.randint(min, max)
     return {
         'random_number': random_number,
-        'range': f'{min_value} to {max_value}',
+        'range': f'{min} to {max}',
         'message': f'The generated random number is {random_number}.'
     }
 """
-    python_node = Python(code=python_code)
+    python_node = Python(code=python_code, use_multiple_params=True)
     input_data = {"min": 1, "max": 10}
 
     result = python_node.run(input_data, None)
@@ -141,16 +138,14 @@ def run(input_data):
 def test_python_node_with_dynamiq_import():
     """Test Python node importing dynamiq to create Document objects."""
     python_code = """
-def run(input_data):
+def run(content:str,metadata:dict):
     from dynamiq.types import Document
-    content = input_data.get('content')
-    metadata = input_data.get('metadata', {})
     document = Document(content=content, metadata=metadata)
     return {
         'documents': [document]
     }
 """
-    python_node = Python(code=python_code)
+    python_node = Python(code=python_code, use_multiple_params=True)
     input_data = {
         "content": "Document content",
         "metadata": {

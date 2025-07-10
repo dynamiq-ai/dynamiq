@@ -142,12 +142,16 @@ class Python(Node):
       name (str): node name.
       description (str): node description.
       code (str): Python code to execute.
+      use_multiple_params (bool): Determines how the input dictionary is passed to the Python function.
+        -If True, the input dictionary is unpacked into multiple parameters.
+        -If False, it is passed as a single dictionary with all parameters as keys.
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Python Code Executor Tool"
     description: str = """Executes Python code in a secure sandbox with restricted imports for calculations,
     data processing, and API interactions."""  # noqa: E501
     code: str
+    use_multiple_params: bool = False
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
 
     def execute(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
@@ -185,7 +189,11 @@ class Python(Node):
             restricted_globals = compile_and_execute(self.code, restricted_globals)
             if "run" not in restricted_globals:
                 raise ValueError("The 'run' function is not defined in the provided code.")
-            result = restricted_globals["run"](dict(input_data))
+            result = (
+                restricted_globals["run"](**dict(input_data))
+                if self.use_multiple_params
+                else restricted_globals["run"](dict(input_data))
+            )
             if self.is_optimized_for_agents:
                 result = str(result)
         except Exception as e:
