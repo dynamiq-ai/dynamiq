@@ -74,7 +74,9 @@ class CohereReranker(Node):
 
         logger.debug(f"Node {self.name} - {self.id}: Reranking {len(documents)} documents")
 
-        response = self._rerank(model=self.model, query=query, documents=document_texts, top_n=self.top_k)
+        response = self._rerank(
+            model=self.model, query=query, documents=document_texts, top_n=self.top_k, **self.connection.conn_params
+        )
 
         reranked_documents = []
         for result in response.results:
