@@ -132,15 +132,8 @@ def test_elasticsearch_specific_params(elasticsearch_document_retriever):
     assert elasticsearch_document_retriever.similarity == "cosine"  # Default value
 
 
-def test_elasticsearch_dimension_param(elasticsearch_document_retriever):
-    """Test the dimension parameter specific to Elasticsearch vector store."""
-    assert hasattr(elasticsearch_document_retriever, "dimension")
-    assert elasticsearch_document_retriever.dimension == 1536  # Default value
-
-
 def test_custom_initialization():
     """Test initialization with custom Elasticsearch parameters."""
-    retriever = ElasticsearchDocumentRetriever(index_name="custom_index", dimension=768, similarity="dot_product")
+    retriever = ElasticsearchDocumentRetriever(index_name="custom_index", similarity="dot_product")
     assert retriever.index_name == "custom_index"
-    assert retriever.dimension == 768
     assert retriever.similarity == "dot_product"
