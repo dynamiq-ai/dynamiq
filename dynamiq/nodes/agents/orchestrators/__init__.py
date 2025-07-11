@@ -1,5 +1,7 @@
 from .adaptive import AdaptiveOrchestrator
 from .adaptive_manager import AdaptiveAgentManager
+from .concurrent import ConcurrentOrchestrator
+from .concurrent_manager import ConcurrentAgentManager
 from .graph import GraphOrchestrator
 from .graph_manager import GraphAgentManager
 from .graph_state import GraphState
