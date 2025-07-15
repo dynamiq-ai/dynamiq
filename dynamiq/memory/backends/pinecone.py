@@ -9,6 +9,7 @@ from dynamiq.prompts import Message
 from dynamiq.storages.vector.pinecone import PineconeVectorStore
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.types import Document
+from dynamiq.utils.utils import CHARS_PER_TOKEN
 
 
 class PineconeError(Exception):
@@ -21,12 +22,12 @@ class Pinecone(MemoryBackend):
     """Pinecone memory backend implementation."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
     name: str = "Pinecone"
     connection: PineconeConnection
     embedder: DocumentEmbedder
     index_type: PineconeIndexType
     index_name: str = Field(default="conversations")
+    dimension: int = Field(default=1536)
     create_if_not_exist: bool = Field(default=True)
     namespace: str = Field(default="default")
     cloud: str | None = Field(default=None)
@@ -35,6 +36,10 @@ class Pinecone(MemoryBackend):
     pod_type: str | None = Field(default=None)
     pods: int = Field(default=1)
     vector_store: PineconeVectorStore | None = None
+    message_truncation_enabled: bool = Field(
+        default=True, description="Enable automatic message truncation for embeddings"
+    )
+    max_message_tokens: int = Field(default=8192, description="Maximum tokens for message content before truncation")
 
     @property
     def to_dict_exclude_params(self):
@@ -56,6 +61,7 @@ class Pinecone(MemoryBackend):
                 index_name=self.index_name,
                 namespace=self.namespace,
                 create_if_not_exist=self.create_if_not_exist,
+                dimension=self.dimension,
                 index_type=self.index_type,
                 cloud=self.cloud,
                 region=self.region,
@@ -67,12 +73,27 @@ class Pinecone(MemoryBackend):
         if not self.vector_store._index:
             raise PineconeError("Failed to initialize Pinecone index")
 
+        # Configure embedder truncation settings
+        self.embedder.document_embedder.truncation_enabled = self.message_truncation_enabled
+        self.embedder.document_embedder.max_input_tokens = self.max_message_tokens
+
     def _message_to_document(self, message: Message) -> Document:
         """Converts a Message object to a Document object."""
+        content = message.content
+        metadata = {"role": message.role.value, **(message.metadata or {})}
+
+        if self.message_truncation_enabled and content:
+            original_length = len(content)
+            max_chars = self.max_message_tokens * CHARS_PER_TOKEN
+            if original_length > max_chars:
+                metadata["truncated"] = True
+                metadata["original_length"] = original_length
+                metadata["truncated_length"] = max_chars
+
         return Document(
             id=str(uuid.uuid4()),
-            content=message.content,
-            metadata={"role": message.role.value, **(message.metadata or {})},
+            content=content,
+            metadata=metadata,
             embedding=None,
         )
 
@@ -115,7 +136,7 @@ class Pinecone(MemoryBackend):
             return {"operator": "AND", "conditions": conditions}
         return filters
 
-    def search(self, query: str | None = None, filters: dict | None = None, limit: int = 10) -> list[Message]:
+    def search(self, query: str | None = None, filters: dict | None = None, limit: int = 1000) -> list[Message]:
         """Searches for messages in Pinecone based on the query and/or filters."""
         try:
             normalized_filters = self._prepare_filters(filters)

@@ -1,7 +1,7 @@
 import inspect
 from typing import Any, Callable, ClassVar, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
@@ -19,7 +19,29 @@ class FunctionTool(Node, Generic[T]):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Function Tool"
     description: str = Field(
-        default="A tool for executing a function with given input."
+        default="""Executes custom Python functions as workflow tools with automatic schema generation and parameter validation.
+
+Key Capabilities:
+- Automatic input schema generation from function signatures
+- Dynamic parameter validation using function type hints
+- Support for both sync and async function execution
+- Integration with workflow dependency systems
+
+Usage Strategy:
+- Wrap existing utility functions for workflow integration
+- Create custom tool implementations without full tool classes
+- Rapid prototyping of workflow components
+- Build reusable function libraries for specific domains
+
+Parameter Guide:
+- Function parameters matching wrapped function signature
+- Automatic schema validation based on function type hints
+- Must return serializable data types for workflow compatibility
+
+Examples:
+- {"x": 10, "y": 5} (for math functions)
+- {"text": "Hello World", "reverse": true} (for string operations)
+- {"data": [1,2,3,4,5], "operation": "sum"} (for data processing)"""  # noqa: E501
     )
     error_handling: ErrorHandling = Field(
         default_factory=lambda: ErrorHandling(timeout_seconds=600)
@@ -114,7 +136,7 @@ def function_tool(func: Callable[..., T]) -> type[FunctionTool[T]]:
         return create_model(
             "FunctionToolInputSchema",
             **params_dict,
-            model_config=dict(extra="allow"),
+            __config__=ConfigDict(extra="allow"),
         )
 
     class FunctionToolFromDecorator(FunctionTool[T]):

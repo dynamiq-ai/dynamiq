@@ -6,9 +6,8 @@ from typing import TYPE_CHECKING, Any, Optional
 from pydantic import Field
 
 from dynamiq.connections import Pinecone
-from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.pinecone.filters import _normalize_filters
-from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.env import get_env_var
 from dynamiq.utils.logger import logger
@@ -42,7 +41,7 @@ class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVecto
     pods: int = 1
 
 
-class PineconeVectorStore:
+class PineconeVectorStore(BaseVectorStore):
     """Vector store using Pinecone."""
 
     def __init__(
@@ -247,17 +246,6 @@ class PineconeVectorStore:
             filters = _normalize_filters(filters)
             self._index.delete(filter=filters, namespace=self.namespace)
 
-    def delete_documents_by_file_id(self, file_id: str):
-        """
-        Delete documents from the Pinecone vector store by file ID.
-            file_id should be located in the metadata of the document.
-
-        Args:
-            file_id (str): The file ID to filter by.
-        """
-        filters = create_file_id_filter(file_id)
-        self.delete_documents_by_filters(filters)
-
     def list_documents(self, include_embeddings: bool = False, content_key: str | None = None) -> list[Document]:
         """
         List documents in the Pinecone vector store.
@@ -366,7 +354,7 @@ class PineconeVectorStore:
             doc_for_pinecone = {
                 "id": document.id,
                 "values": embedding,
-                "metadata": dict(document.metadata),
+                "metadata": dict(document.metadata or {}),
             }
 
             if document.content is not None:

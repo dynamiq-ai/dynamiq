@@ -1,0 +1,38 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+    organization: ${oc.env:OPENAI_ORG_ID}
+  aws-conn:
+    type: dynamiq.connections.AWS
+    access_key_id: ${oc.env:AWS_ACCESS_KEY_ID}
+    secret_access_key: ${oc.env:AWS_SECRET_ACCESS_KEY}
+    region_name: ${oc.env:AWS_REGION}
+
+nodes:
+  chat-agent:
+    type: dynamiq.nodes.agents.simple.SimpleAgent
+    llm:
+      id: chat-agent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o-mini
+    memory:
+      backend:
+        type: dynamiq.memory.backends.DynamoDB
+        connection: aws-conn
+        table_name: "messages"
+        create_table_if_not_exists: true
+      message_limit: 50
+    role: "Helpful assistant focusing on the current conversation."
+
+flows:
+  chat-flow:
+    name: "Chat Flow with DynamoDB Memory"
+    nodes:
+      - chat-agent
+
+workflows:
+  dynamodb-chat-workflow:
+    flow: chat-flow
+    version: 1

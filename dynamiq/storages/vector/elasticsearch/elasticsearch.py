@@ -6,11 +6,10 @@ from elasticsearch import NotFoundError
 from elasticsearch.helpers import bulk
 
 from dynamiq.connections import Elasticsearch
-from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.elasticsearch.filters import _normalize_filters
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
-from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -32,26 +31,24 @@ class ElasticsearchVectorStoreParams(BaseVectorStoreParams):
 
     Attributes:
         index_name (str): Name of the index. Defaults to "default".
+        content_key (str): Key for content field. Defaults to "content".
         dimension (int): Dimension of the vectors. Defaults to 1536.
         similarity (str): Similarity metric to use. Defaults to "cosine".
-        content_key (str): Key for content field. Defaults to "content".
         embedding_key (str): Key for embedding field. Defaults to "embedding".
+        batch_size (int): Batch size for writing operations. Defaults to 100.
     """
-
     dimension: int = 1536
     similarity: ElasticsearchSimilarityMetric = ElasticsearchSimilarityMetric.COSINE
     embedding_key: str = "embedding"
-    write_batch_size: int = 100
-    scroll_size: int = 1000
+    batch_size: int = 100
 
 
 class ElasticsearchVectorStoreWriterParams(ElasticsearchVectorStoreParams, BaseWriterVectorStoreParams):
     """Parameters for Elasticsearch vector store writer."""
-
     pass
 
 
-class ElasticsearchVectorStore:
+class ElasticsearchVectorStore(BaseVectorStore):
     """Vector store using Elasticsearch for dense vector search."""
 
     def __init__(
@@ -64,8 +61,7 @@ class ElasticsearchVectorStore:
         create_if_not_exist: bool = False,
         content_key: str = "content",
         embedding_key: str = "embedding",
-        write_batch_size: int = 100,
-        scroll_size: int = 1000,
+        batch_size: int = 100,
         index_settings: dict | None = None,
         mapping_settings: dict | None = None,
     ):
@@ -82,8 +78,7 @@ class ElasticsearchVectorStore:
             create_if_not_exist (bool): Whether to create the index if it does not exist. Defaults to False.
             content_key (str): Key for content field. Defaults to "content".
             embedding_key (str): Key for embedding field. Defaults to "embedding".
-            write_batch_size (int): Batch size for write operations. Defaults to 100.
-            scroll_size (int): Batch size for scroll operations. Defaults to 1000.
+            batch_size (int): Batch size for write operations. Defaults to 100.
             index_settings (Optional[dict]): Custom index settings. Defaults to None.
             mapping_settings (Optional[dict]): Custom mapping settings. Defaults to None.
         """
@@ -99,44 +94,50 @@ class ElasticsearchVectorStore:
         self.similarity = similarity
         self.content_key = content_key
         self.embedding_key = embedding_key
-        self.write_batch_size = write_batch_size
-        self.scroll_size = scroll_size
+        self.batch_size = batch_size
         self.index_settings = index_settings or {}
         self.mapping_settings = mapping_settings or {}
 
-        if create_if_not_exist:
-            self._create_index_if_not_exists()
+        if not self.client.indices.exists(index=self.index_name):
+            if create_if_not_exist:
+                logger.info(f"Index {self.index_name} does not exist. Creating a new index.")
+                self._create_index_if_not_exists()
+            else:
+                raise ValueError(
+                    f"Index {self.index_name} does not exist. Set 'create_if_not_exist' to True to create it."
+                )
+        else:
+            logger.info(f"Collection {self.index_name} already exists. Skipping creation.")
 
         logger.debug(f"ElasticsearchVectorStore initialized with index: {self.index_name}")
 
     def _create_index_if_not_exists(self) -> None:
         """Create the index if it doesn't exist."""
-        if not self.client.indices.exists(index=self.index_name):
-            # Base mapping
-            mapping = {
-                "mappings": {
-                    "properties": {
-                        self.content_key: {"type": "text"},
-                        "metadata": {"type": "object"},
-                        self.embedding_key: {
-                            "type": "dense_vector",
-                            "dims": self.dimension,
-                            "index": True,
-                            "similarity": self.similarity,
-                        },
-                    }
+        # Base mapping
+        mapping = {
+            "mappings": {
+                "properties": {
+                    self.content_key: {"type": "text"},
+                    "metadata": {"type": "object"},
+                    self.embedding_key: {
+                        "type": "dense_vector",
+                        "dims": self.dimension,
+                        "index": True,
+                        "similarity": self.similarity,
+                    },
                 }
             }
+        }
 
-            # Add custom mapping settings if provided
-            if self.mapping_settings:
-                mapping["mappings"].update(self.mapping_settings)
+        # Add custom mapping settings if provided
+        if self.mapping_settings:
+            mapping["mappings"].update(self.mapping_settings)
 
-            # Add index settings if provided
-            if self.index_settings:
-                mapping["settings"] = self.index_settings
+        # Add index settings if provided
+        if self.index_settings:
+            mapping["settings"] = self.index_settings
 
-            self.client.indices.create(index=self.index_name, body=mapping)
+        self.client.indices.create(index=self.index_name, body=mapping)
 
     def _handle_duplicate_documents(
         self, documents: list[Document], policy: DuplicatePolicy = DuplicatePolicy.FAIL
@@ -219,7 +220,7 @@ class ElasticsearchVectorStore:
             return 0
 
         # Process in batches
-        batch_size = batch_size or self.write_batch_size
+        batch_size = batch_size or self.batch_size
         content_key = content_key or self.content_key
         embedding_key = embedding_key or self.embedding_key
         total_written = 0
@@ -240,8 +241,11 @@ class ElasticsearchVectorStore:
                 )
 
             if operations:
-                self.client.bulk(operations=operations, refresh=True)
-                total_written += len(batch)
+                result = self.client.bulk(operations=operations, refresh=True)
+                total_written += sum(
+                    item.get("index", {}).get("_shards", {}).get("successful", 0)
+                    for item in result.raw.get("items", [])
+                )
 
         return total_written
 
@@ -411,16 +415,6 @@ class ElasticsearchVectorStore:
 
         self.client.delete_by_query(index=self.index_name, query=bool_query, refresh=True)
 
-    def delete_document_by_file_id(self, file_id: str):
-        """
-        Delete documents from the Pinecone vector store by file ID.
-
-        Args:
-            file_id (str): The file ID to filter by.
-        """
-        filters = create_file_id_filter(file_id)
-        self.delete_documents_by_filters(filters)
-
     def list_documents(
         self,
         top_k: int | None = 100,
@@ -553,7 +547,7 @@ class ElasticsearchVectorStore:
             int: Number of documents successfully updated.
 
         """
-        batch_size = batch_size or self.write_batch_size
+        batch_size = batch_size or self.batch_size
         total_updated = 0
         content_key = content_key or self.content_key
         embedding_key = embedding_key or self.embedding_key

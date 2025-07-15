@@ -49,7 +49,7 @@ def get_map_workflow(
         ),
     ],
 )
-def test_workflow_with_map_node(inputs, outputs):
+def test_workflow_with_map_node(mock_llm_executor, mock_llm_response_text, inputs, outputs):
     model = "gpt-3.5-turbo"
     connection = connections.OpenAI(
         api_key="api_key",

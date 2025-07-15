@@ -2,7 +2,7 @@ import io
 from hashlib import sha256
 from typing import Any, ClassVar, Literal
 
-from e2b import Sandbox
+from e2b_code_interpreter import Sandbox
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dynamiq.connections import E2B as E2BConnection
@@ -12,39 +12,29 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_E2B = """## E2B Code Interpreter
-### Description
-A secure sandbox environment for code execution, file management, and external resource interaction.
-### Capabilities
-- Execute Python code with extensive library support
-- Run shell commands in Linux environment
-- Manage files (upload, download, manipulate)
-- Access internet resources and APIs
-- Create data visualizations
-- Install custom Python packages
-- Maintain state between executions
-- Execute code in isolated sandbox
-### Required Guidelines
-- Include all necessary imports.
-- Always use print statements to display results.
-- If any errors occur, recheck the code for syntax or runtime issues and fix them.
-- Always specify the required packages to be installed for code execution.
-### Usage Examples
-#### Python Execution
-{ "python": "import pandas as pd\n\ndf = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})\nprint(df)", "packages": "pandas,matplotlib" }
-#### Shell Commands
-{ "shell_command": "ls -la && echo 'Current directory contents'" }
-#### API/Internet Guidelines
-- Use `requests` library for API calls or curl via shell commands
-- Use actual endpoints specified by users
-- Prioritize free and open APIs when user doesn't specify an API provider
-- Recommended open search APIs: DuckDuckGo
-- For general data: OpenData APIs, public government datasets, or open-source repositories
-- Provide attribution for data sources
-#### File Operations
-- Access uploaded files using provided paths
-- Generate and access files programmatically
-"""  # noqa: E501
+DESCRIPTION_E2B = """Executes Python code and shell commands in a secure cloud sandbox environment.
+Provides isolated execution with package installation,
+file upload/download, and persistent sessions for complex data analysis and system operations.
+
+-Key Capabilities:-
+- Execute Python code with full library support and package installation
+- Run shell commands and system operations with file system access
+- Upload and process files (CSV, JSON, images) with persistent storage
+- Maintain sandbox sessions across multiple executions for workflows
+
+-Usage Strategy:-
+Always use print() statements to display results - code without output will fail. Specify required packages in the 'packages' parameter. Handle errors gracefully and validate code syntax before execution.
+
+-Parameter Guide:-
+- packages: Comma-separated list of Python packages to install
+- python: Python code to execute (must include print statements)
+- shell_command: Shell commands to run in the sandbox
+- files: Binary files to upload for processing
+
+-Examples:-
+- Data analysis: {"packages": "pandas,numpy", "python": "import pandas as pd\\ndata = pd.read_csv('data.csv')\\nprint(data.describe())"}
+- File processing: {"packages": "requests", "python": "import requests\\nresponse = requests.get('https://api.example.com')\\nprint(response.json())"}
+- System operations: {"shell_command": "ls -la /home/user && df -h"}"""  # noqa: E501
 
 
 def generate_fallback_filename(file: bytes | io.BytesIO) -> str:
@@ -114,7 +104,7 @@ class E2BInterpreterInputSchema(BaseModel):
     files: list[FileData] = Field(
         default=None,
         description="Parameter to provide files for uploading to the sandbox.",
-        is_accessible_to_agent=False,
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
     @model_validator(mode="after")
@@ -167,7 +157,7 @@ class E2BInterpreterTool(ConnectionNode):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if self.persistent_sandbox:
+        if self.persistent_sandbox and self.connection.api_key:
             self._initialize_persistent_sandbox()
         else:
             logger.debug(f"Tool {self.name} - {self.id}: Will initialize sandbox on each execute")
@@ -215,7 +205,13 @@ class E2BInterpreterTool(ConnectionNode):
         """Installs the specified packages in the given sandbox."""
         if packages:
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
-            sandbox.process.start_and_wait(f"pip install -qq {' '.join(packages.split(','))}")
+            try:
+                process = sandbox.commands.run(f"pip install -qq {' '.join(packages.split(','))}")
+            except Exception as e:
+                raise ToolExecutionException(f"Error during package installation: {e}", recoverable=True)
+
+            if process.exit_code != 0:
+                raise ToolExecutionException(f"Error during package installation: {process.stderr}", recoverable=True)
 
     def _upload_files(self, files: list[FileData], sandbox: Sandbox) -> str:
         """Uploads multiple files to the sandbox and returns details for each file."""
@@ -242,10 +238,10 @@ class E2BInterpreterTool(ConnectionNode):
         file_like_object.name = file.name
 
         # Upload the file to the sandbox
-        uploaded_path = sandbox.upload_file(file=file_like_object)
-        logger.debug(f"Tool {self.name} - {self.id}: Uploaded file to {uploaded_path}")
+        uploaded_info = sandbox.files.write(f"/home/user/{file.name}", file_like_object)
+        logger.debug(f"Tool {self.name} - {self.id}: Uploaded file info: {uploaded_info}")
 
-        return uploaded_path
+        return uploaded_info.path
 
     def _update_description_with_files(self, upload_details: list[dict]) -> None:
         """Updates the tool description with detailed information about the uploaded files."""
@@ -266,8 +262,12 @@ class E2BInterpreterTool(ConnectionNode):
             raise ValueError("Sandbox instance is required for code execution.")
         code_hash = sha256(code.encode()).hexdigest()
         filename = f"/home/user/{code_hash}.py"
-        sandbox.filesystem.write(filename, code)
-        process = sandbox.process.start_and_wait(f"python3 {filename}")
+        sandbox.files.write(filename, code)
+        try:
+            process = sandbox.commands.run(f"python3 {filename}")
+        except Exception as e:
+            raise ToolExecutionException(f"Error during Python code execution: {e}", recoverable=True)
+
         if not (process.stdout or process.stderr):
             raise ToolExecutionException(
                 "Error: No output. Please use 'print()' to display the result of your Python code.",
@@ -282,9 +282,13 @@ class E2BInterpreterTool(ConnectionNode):
         if not sandbox:
             raise ValueError("Sandbox instance is required for command execution.")
 
-        process = sandbox.process.start(command)
+        try:
+            process = sandbox.commands.run(command, background=True)
+        except Exception as e:
+            raise ToolExecutionException(f"Error during shell command execution: {e}", recoverable=True)
+
         output = process.wait()
-        if process.exit_code != 0:
+        if output.exit_code != 0:
             raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
         return output.stdout
 
@@ -317,26 +321,27 @@ class E2BInterpreterTool(ConnectionNode):
                 content["code_execution"] = self._execute_python_code(python, sandbox=sandbox)
             if not (packages or files or shell_command or python):
                 raise ToolExecutionException(
-                    "Error: Invalid input data. Please provide 'files' for file upload (bytes or BytesIO)",
+                    "Error: Invalid input data. Please provide packages, files, shell_command, or python code.",
                     recoverable=True,
                 )
 
         finally:
             if not self.persistent_sandbox:
                 logger.debug(f"Tool {self.name} - {self.id}: Closing Sandbox")
-                sandbox.close()
+                sandbox.kill()
 
         if self.is_optimized_for_agents:
             result = ""
             if files_installation := content.get("files_installation"):
-                result += "<Files installation>\n" + files_installation + "\n</Files installation>"
+                result += "## Files Installation\n\n" + files_installation + "\n\n"
             if packages_installation := content.get("packages_installation"):
-                result += "<Package installation>\n" + packages_installation + "\n</Package installation>"
+                result += "## Package Installation\n\n" + packages_installation + "\n\n"
             if shell_command_execution := content.get("shell_command_execution"):
-                result += "<Shell command execution>\n" + shell_command_execution + "\n</Shell command execution>"
+                result += "## Shell Command Execution\n\n" + shell_command_execution + "\n\n"
             if code_execution := content.get("code_execution"):
-                result += "<Code execution>\n" + code_execution + "\n</Code execution>"
-            content = result
+                result += "## Code Execution\n\n" + code_execution + "\n\n"
+            if result:
+                content = result
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
         return {"content": content}
@@ -345,5 +350,5 @@ class E2BInterpreterTool(ConnectionNode):
         """Closes the persistent sandbox if it exists."""
         if self._sandbox and self.persistent_sandbox:
             logger.debug(f"Tool {self.name} - {self.id}: Closing Sandbox")
-            self._sandbox.close()
+            self._sandbox.kill()
             self._sandbox = None

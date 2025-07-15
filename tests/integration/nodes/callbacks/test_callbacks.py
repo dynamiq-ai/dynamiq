@@ -66,7 +66,7 @@ def create_orchestrator(
         return END
 
     orchestrator = GraphOrchestrator(
-        name="Graph orchestrator", manager=GraphAgentManager(llm=llm), context=context_input
+        name="Graph orchestrator", manager=GraphAgentManager(llm=llm), context=context_input, enable_handle_input=False
     )
 
     orchestrator.add_state_by_tasks("generate_sketch", [generate_sketch], callbacks=[human_feedback_callback])
@@ -97,6 +97,11 @@ def create_orchestrator(
                         {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
                         {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
                     ],
+                    "history": [
+                        {"role": "user", "content": ""},
+                        {"role": "assistant", "content": "mocked_response"},
+                        {"role": "assistant", "content": "mocked_response"},
+                    ],
                 },
             },
         ),
@@ -111,12 +116,18 @@ def create_orchestrator(
                         {"content": "Answer on question", "role": MessageRole.USER, "metadata": None},
                         {"content": "mocked_response", "role": MessageRole.ASSISTANT, "metadata": None},
                     ],
+                    "history": [
+                        {"role": "user", "content": ""},
+                        {"role": "assistant", "content": "mocked_response"},
+                    ],
                 },
             },
         ),
     ],
 )
-def test_workflow_with_map_node(get_orchestrator_workflow, context_input, outputs):
+def test_workflow_with_map_node(
+    mock_llm_executor, mock_llm_response_text, get_orchestrator_workflow, context_input, outputs
+):
     model = "gpt-3.5-turbo"
     connection = connections.OpenAI(
         api_key="api_key",

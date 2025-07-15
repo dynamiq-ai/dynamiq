@@ -1,11 +1,11 @@
 from typing import TYPE_CHECKING, Any, Optional
 
-from pymilvus import DataType
+from pydantic.types import PositiveInt
+from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker
 
 from dynamiq.connections import Milvus
-from dynamiq.storages.vector.base import BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.milvus.filter import Filter
-from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -13,11 +13,15 @@ if TYPE_CHECKING:
     from pymilvus import MilvusClient
 
 
-class MilvusVectorStoreParams(BaseWriterVectorStoreParams):
+class MilvusVectorStoreParams(BaseVectorStoreParams):
     embedding_key: str = "embedding"
 
 
-class MilvusVectorStore:
+class MilvusWriterVectorStoreParams(MilvusVectorStoreParams, BaseWriterVectorStoreParams):
+    dimension: PositiveInt = 1536
+
+
+class MilvusVectorStore(BaseVectorStore):
     """
     Vector store using Milvus.
 
@@ -48,19 +52,28 @@ class MilvusVectorStore:
         self.embedding_key = embedding_key
         self.dimension = dimension
         self.create_if_not_exist = create_if_not_exist
-        self.schema = self.client.create_schema(
-            auto_id=False,
-            enable_dynamic_field=True,
-        )
+        self.schema = self.client.create_schema(auto_id=False, enable_dynamic_field=True)
         self.schema.add_field(field_name="id", datatype=DataType.VARCHAR, is_primary=True, max_length=65_535)
-        self.schema.add_field(field_name=self.content_key, datatype=DataType.VARCHAR, max_length=65_535)
+        self.schema.add_field(
+            field_name=self.content_key, datatype=DataType.VARCHAR, max_length=65_535, enable_analyzer=True
+        )
         self.schema.add_field(field_name=self.embedding_key, datatype=DataType.FLOAT_VECTOR, dim=self.dimension)
+        self.schema.add_field(field_name="sparse", datatype=DataType.SPARSE_FLOAT_VECTOR)
+
+        bm25_function = Function(
+            name="text_bm25_emb",
+            input_field_names=[self.content_key],
+            output_field_names=["sparse"],
+            function_type=FunctionType.BM25,
+        )
+        self.schema.add_function(bm25_function)
 
         self.index_params = self.client.prepare_index_params()
         self.index_params.add_index(field_name="id")
         self.index_params.add_index(
             field_name=self.embedding_key, index_type=self.index_type, metric_type=self.metric_type
         )
+        self.index_params.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
 
         if not self.client.has_collection(self.index_name):
             if self.create_if_not_exist:
@@ -169,17 +182,6 @@ class MilvusVectorStore:
 
         logger.info(f"Deleted {len(delete_result)} entities from collection {self.index_name} based on filters.")
 
-    def delete_documents_by_file_id(self, file_id: str) -> None:
-        """
-        Delete documents from the vector store based on the provided file ID.
-            file_id should be located in the metadata of the document.
-
-        Args:
-            file_id (str): The file ID to filter by.
-        """
-        filters = create_file_id_filter(file_id)
-        self.delete_documents_by_filters(filters)
-
     def list_documents(
         self, limit: int = 1000, content_key: str | None = None, embedding_key: str | None = None
     ) -> list[Document]:
@@ -201,13 +203,14 @@ class MilvusVectorStore:
 
         return self._get_result_to_documents(result, content_key=content_key, embedding_key=embedding_key)
 
-    def search_embeddings(
+    def _embedding_retrieval(
         self,
         query_embeddings: list[list[float]],
         top_k: int,
         filters: dict[str, Any] | None = None,
         content_key: str | None = None,
         embedding_key: str | None = None,
+        return_embeddings: bool = False,
     ) -> list[Document]:
         """
         Perform vector search on the stored documents using query embeddings.
@@ -218,6 +221,7 @@ class MilvusVectorStore:
             filters (dict[str, Any] | None): A dictionary of filters to apply to the search. Defaults to None.
             content_key (Optional[str]): The field used to store content in the storage.
             embedding_key (Optional[str]): The field used to store vector in the storage.
+            return_embeddings (bool): Whether to return the embeddings of the retrieved documents.
 
         Returns:
             List[Document]: A list of Document objects containing the retrieved documents.
@@ -232,14 +236,20 @@ class MilvusVectorStore:
             limit=top_k,
             filter=filter_expression,
             output_fields=["*"],
+            anns_field=embedding_key or self.embedding_key,
             search_params=search_params,
         )
 
-        return self._convert_query_result_to_documents(results[0], content_key=content_key, embedding_key=embedding_key)
+        return self._convert_query_result_to_documents(
+            results[0], content_key=content_key, embedding_key=embedding_key, return_embeddings=return_embeddings
+        )
 
-    # @staticmethod
     def _convert_query_result_to_documents(
-        self, result: list[dict[str, Any]], content_key: str | None = None, embedding_key: str | None = None
+        self,
+        result: list[dict[str, Any]],
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+        return_embeddings: bool = False,
     ) -> list[Document]:
         """
         Convert Milvus search results to Document objects.
@@ -248,6 +258,7 @@ class MilvusVectorStore:
             result (List[Dict[str, Any]]): The result from a Milvus search operation.
             content_key (Optional[str]): The field used to store content in the storage.
             embedding_key (Optional[str]): The field used to store vector in the storage.
+            return_embeddings (bool): Whether to return the embeddings of the retrieved documents.
 
         Returns:
             List[Document]: A list of Document instances created from the Milvus search result.
@@ -265,9 +276,11 @@ class MilvusVectorStore:
                 id=str(hit.get("id", "")),
                 content=content,
                 metadata=metadata,
-                embedding=embedding,
                 score=hit.get("distance", None),
             )
+            if return_embeddings:
+                doc.embedding = embedding
+
             documents.append(doc)
 
         return documents
@@ -301,7 +314,6 @@ class MilvusVectorStore:
         )
         return self._get_result_to_documents(result, content_key=content_key, embedding_key=embedding_key)
 
-    # @staticmethod
     def _get_result_to_documents(
         self, result: list[dict[str, Any]], content_key: str | None = None, embedding_key: str | None = None
     ) -> list[Document]:
@@ -336,3 +348,66 @@ class MilvusVectorStore:
                 logger.error(f"Error creating Document: {e}, data: {document_dict}")
 
         return documents
+
+    def _hybrid_retrieval(
+        self,
+        query: str,
+        query_embeddings: list[list[float]],
+        top_k: int,
+        top_k_dense: int | None = None,
+        top_k_sparse: int | None = None,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+        return_embeddings: bool = False,
+        drop_ratio_build: float = 0.0,
+    ) -> list[Document]:
+        """
+        Perform a hybrid search using both dense (vector-based) and sparse (text-based) retrieval techniques.
+
+        Args:
+            query (str): The textual query used for sparse search (BM25).
+            query_embeddings (list[list[float]]): A list of embeddings representing the query for dense search.
+            top_k (int): The maximum number of documents to retrieve with hybrid search.
+            top_k_dense (int | None, optional): The number of top results to retrieve from the dense search.
+                If None, defaults to `top_k`.
+            top_k_sparse (int | None, optional): The number of top results to retrieve from the sparse search.
+                If None, defaults to `top_k`.
+            content_key (Optional[str]): The field used to store content in the storage.
+            embedding_key (Optional[str]): The field used to store vector in the storage.
+            return_embeddings (bool): Whether to return the embeddings of the retrieved documents.
+            drop_ratio_build (float): The ratio of small vector values to be dropped during indexing during text search.
+
+        Returns:
+            List[Document]: A list of Document objects containing the retrieved documents.
+        """
+
+        search_param_1 = {
+            "data": query_embeddings,
+            "anns_field": embedding_key or self.embedding_key,
+            "param": {
+                "metric_type": self.metric_type,
+            },
+            "limit": top_k_dense or top_k,
+        }
+        request_1 = AnnSearchRequest(**search_param_1)
+
+        search_param_2 = {
+            "data": [query],
+            "anns_field": "sparse",
+            "param": {"metric_type": "BM25", "params": {"drop_ratio_build": drop_ratio_build}},
+            "limit": top_k_sparse or top_k,
+        }
+        request_2 = AnnSearchRequest(**search_param_2)
+
+        ranker = RRFRanker()
+        results = self.client.hybrid_search(
+            collection_name=self.index_name,
+            output_fields=["*"],
+            reqs=[request_1, request_2],
+            ranker=ranker,
+            limit=top_k,
+        )
+
+        return self._convert_query_result_to_documents(
+            results[0], content_key=content_key, embedding_key=embedding_key, return_embeddings=return_embeddings
+        )

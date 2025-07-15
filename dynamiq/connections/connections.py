@@ -1,9 +1,13 @@
 import enum
+import json
 from abc import ABC, abstractmethod
+from datetime import timedelta
+from enum import Enum
 from functools import cached_property, partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -240,18 +244,30 @@ class AWS(BaseConnection):
         pass
 
     @property
-    def conn_params(self):
+    def conn_params(self) -> dict:
+        """Return parameters with aws_ prefix for compatibility with other systems"""
+        params = {}
         if self.profile:
-            return {
-                "aws_profile_name": self.profile,
-                "aws_region_name": self.region,
-            }
+            params["aws_profile_name"] = self.profile
+            params["aws_region_name"] = self.region
         else:
-            return {
-                "aws_access_key_id": self.access_key_id,
-                "aws_secret_access_key": self.secret_access_key,
-                "aws_region_name": self.region,
-            }
+            params["aws_access_key_id"] = self.access_key_id
+            params["aws_secret_access_key"] = self.secret_access_key
+            params["aws_region_name"] = self.region
+        return params
+
+    def get_boto3_session(self):
+        """Create and return a boto3.Session with properly formatted parameters"""
+        import boto3
+        params = {}
+        if self.profile:
+            params["profile_name"] = self.profile
+        elif self.access_key_id and self.secret_access_key:
+            params["aws_access_key_id"] = self.access_key_id
+            params["aws_secret_access_key"] = self.secret_access_key
+        if self.region:
+            params["region_name"] = self.region
+        return boto3.Session(**params)
 
 
 class Gemini(BaseApiKeyConnection):
@@ -261,21 +277,77 @@ class Gemini(BaseApiKeyConnection):
         pass
 
 
-class GeminiVertexAI(BaseConnection):
+class GoogleCloud(BaseConnection):
     """
-    Represents a connection to the Gemini Vertex AI service.
-
-    This connection requires additional GCP application credentials. The credentials should be set in the
-    `application_default_credentials.json` file. The path to this credentials file should be defined in the
-    `GOOGLE_APPLICATION_CREDENTIALS` environment variable.
+    Represents a connection to Google Cloud Platform (GCP) using service account credentials.
 
     Attributes:
         project_id (str): The GCP project ID.
-        project_location (str): The location of the GCP project.
+        private_key_id (str): The private key ID used for authentication.
+        private_key (str): The private key used for secure access.
+        client_email (str): The service account email address.
+        client_id (str): The unique client ID for authentication.
+        auth_uri (str): The URI for Google's authentication endpoint.
+        token_uri (str): The URI for obtaining OAuth tokens.
+        auth_provider_x509_cert_url (str): The URL for Google's authentication provider X.509 certificates.
+        client_x509_cert_url (str): The URL for the client's X.509 certificate.
+        universe_domain (str): The domain associated with the Google Cloud environment.
     """
 
-    project_id: str
-    project_location: str
+    project_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PROJECT_ID"))
+    private_key_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY_ID"))
+    private_key: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_PRIVATE_KEY"))
+    client_email: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_EMAIL"))
+    client_id: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_ID"))
+    auth_uri: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_URI"))
+    token_uri: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_TOKEN_URI"))
+    auth_provider_x509_cert_url: str = Field(
+        default_factory=partial(get_env_var, "GOOGLE_CLOUD_AUTH_PROVIDER_X509_CERT_URL")
+    )
+    client_x509_cert_url: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_CLIENT_X509_CERT_URL"))
+    universe_domain: str = Field(default_factory=partial(get_env_var, "GOOGLE_CLOUD_UNIVERSE_DOMAIN"))
+
+    def connect(self):
+        pass
+
+    @property
+    def conn_params(self):
+        """
+        Returns the parameters required for the connection.
+
+        This property returns a dictionary containing Google Cloud service account credentials.
+
+        Returns:
+            dict: A dictionary with the keys 'vertex_project' and 'vertex_location'.
+        """
+        return {
+            "project_id": self.project_id,
+            "private_key_id": self.private_key_id,
+            "private_key": self.private_key,
+            "client_email": self.client_email,
+            "client_id": self.client_id,
+            "client_x509_cert_url": self.client_x509_cert_url,
+            "auth_uri": self.auth_uri,
+            "token_uri": self.token_uri,
+            "auth_provider_x509_cert_url": self.auth_provider_x509_cert_url,
+            "universe_domain": self.universe_domain,
+        }
+
+
+class VertexAI(GoogleCloud):
+    """
+    Represents a connection to the Vertex AI service.
+
+    This connection requires additional GCP application credentials. The credentials should be provided in the
+    connection fields (related to Google Cloud) or set in the environment variables.
+
+    Attributes:
+        vertex_project_id (str): The GCP project ID.
+        vertex_project_location (str): The location of the GCP project.
+    """
+
+    vertex_project_id: str = Field(default_factory=partial(get_env_var, "VERTEXAI_PROJECT_ID"))
+    vertex_project_location: str = Field(default_factory=partial(get_env_var, "VERTEXAI_PROJECT_LOCATION"))
 
     def connect(self):
         pass
@@ -290,9 +362,11 @@ class GeminiVertexAI(BaseConnection):
         Returns:
             dict: A dictionary with the keys 'vertex_project' and 'vertex_location'.
         """
+        vertex_credentials = json.dumps(super().conn_params.copy())
         return {
-            "vertex_project": self.project_id,
-            "vertex_location": self.project_location,
+            "vertex_project": self.vertex_project_id,
+            "vertex_location": self.vertex_project_location,
+            "vertex_credentials": vertex_credentials,
         }
 
 
@@ -327,15 +401,12 @@ class Whisper(Http):
     method: str = HTTPMethod.POST
     api_key: str = Field(default_factory=partial(get_env_var, "OPENAI_API_KEY"))
 
-    def connect(self):
-        """
-        Configures the request authorization header with the API key for authentication
-
-        Returns:
-            requests: The `requests` module for making HTTP requests.
-        """
-        self.headers.update({"Authorization": f"Bearer {self.api_key}"})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation."""
+        if self.api_key:
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return self
 
 
 class ElevenLabs(Http):
@@ -358,15 +429,12 @@ class ElevenLabs(Http):
     method: str = HTTPMethod.POST
     api_key: str = Field(default_factory=partial(get_env_var, "ELEVENLABS_API_KEY"))
 
-    def connect(self):
-        """
-        Connects to the ElevenLabs API.
-
-        Returns:
-            requests: The `requests` module for making HTTP requests.
-        """
-        self.headers.update({"xi-api-key": self.api_key})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation."""
+        if self.api_key:
+            self.headers.update({"xi-api-key": self.api_key})
+        return self
 
 
 class Pinecone(BaseApiKeyConnection):
@@ -580,12 +648,12 @@ class Tavily(Http):
     api_key: str = Field(default_factory=partial(get_env_var, "TAVILY_API_KEY"))
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
 
-    def connect(self):
-        """
-        Returns the requests module for making HTTP requests.
-        """
-        self.data.update({"api_key": self.api_key})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_data(self):
+        """Setup data after model validation."""
+        if self.api_key:
+            self.data.update({"api_key": self.api_key})
+        return self
 
 
 class ScaleSerp(Http):
@@ -599,12 +667,12 @@ class ScaleSerp(Http):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def connect(self):
-        """
-        Returns the requests module for making HTTP requests.
-        """
-        self.params.update({"api_key": self.api_key})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_params(self):
+        """Setup params after model validation."""
+        if self.api_key:
+            self.params.update({"api_key": self.api_key})
+        return self
 
 
 class ZenRows(Http):
@@ -616,12 +684,12 @@ class ZenRows(Http):
     api_key: str = Field(default_factory=partial(get_env_var, "ZENROWS_API_KEY"))
     method: str = HTTPMethod.GET
 
-    def connect(self):
-        """
-        Returns the requests module for making HTTP requests.
-        """
-        self.params.update({"apikey": self.api_key})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_params(self):
+        """Setup params after model validation."""
+        if self.api_key:
+            self.params.update({"apikey": self.api_key})
+        return self
 
 
 class Groq(BaseApiKeyConnection):
@@ -650,12 +718,12 @@ class Firecrawl(Http):
     api_key: str = Field(default_factory=lambda: get_env_var("FIRECRAWL_API_KEY"))
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
 
-    def connect(self):
-        """
-        Returns the requests module for making HTTP requests.
-        """
-        self.headers.update({"Authorization": f"Bearer {self.api_key}"})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup authorization headers after model validation."""
+        if self.api_key:
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return self
 
 
 class E2B(BaseApiKeyConnection):
@@ -889,15 +957,12 @@ class Exa(Http):
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
     api_key: str = Field(default_factory=partial(get_env_var, "EXA_API_KEY"))
 
-    def connect(self):
-        """
-        Configures the request headers with the API key for authentication.
-
-        Returns:
-            requests: The requests module for making HTTP requests.
-        """
-        self.headers.update({"x-api-key": self.api_key, "Content-Type": "application/json"})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation."""
+        if self.api_key:
+            self.headers.update({"x-api-key": self.api_key, "Content-Type": "application/json"})
+        return self
 
 
 class Ollama(BaseConnection):
@@ -939,12 +1004,12 @@ class Jina(Http):
     api_key: str = Field(default_factory=partial(get_env_var, "JINA_API_KEY"))
     method: Literal[HTTPMethod.GET] = HTTPMethod.GET
 
-    def connect(self):
-        """
-        Returns the requests module for making HTTP requests.
-        """
-        self.headers.update({"Authorization": f"Bearer {self.api_key}"})
-        return super().connect()
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Setup headers after model validation."""
+        if self.api_key:
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return self
 
 
 class MySQL(BaseConnection):
@@ -980,7 +1045,7 @@ class Snowflake(BaseConnection):
     account: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_ACCOUNT", "account"))
     warehouse: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_WAREHOUSE", "warehouse"))
     database: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_DATABASE", "db"))
-    schema: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_SCHEMA", "schema"))
+    snowflake_schema: str = Field(default_factory=partial(get_env_var, "SNOWFLAKE_SCHEMA", "schema"), alias="schema")
 
     def connect(self):
         try:
@@ -992,12 +1057,12 @@ class Snowflake(BaseConnection):
                 account=self.account,
                 warehouse=self.warehouse,
                 database=self.database,
-                schema=self.schema,
+                schema=self.snowflake_schema,
             )
             logger.debug(
                 f"Connected to Snowflake using account={self.account}, "
                 f"warehouse={str(self.warehouse)}, user={self.user}, "
-                f"database={self.database}, schema={self.schema}."
+                f"database={self.database}, schema={self.snowflake_schema}."
             )
             return conn
         except Exception as e:
@@ -1130,3 +1195,157 @@ class xAI(BaseApiKeyConnection):
 
     def connect(self):
         pass
+
+
+class FireworksAI(BaseApiKeyConnection):
+    api_key: str = Field(default_factory=partial(get_env_var, "FIREWORKS_AI_API_KEY"))
+
+    def connect(self):
+        pass
+
+
+class NvidiaNIM(BaseApiKeyConnection):
+    url: str = Field(default_factory=partial(get_env_var, "NVIDIA_NIM_URL"))
+    api_key: str = Field(default_factory=partial(get_env_var, "NVIDIA_NIM_API_KEY"))
+
+    def connect(self):
+        pass
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+        """
+        return {
+            "api_base": self.url,
+            "api_key": self.api_key,
+        }
+
+
+class Databricks(BaseApiKeyConnection):
+    url: str = Field(default_factory=partial(get_env_var, "DATABRICKS_API_BASE"))
+    api_key: str = Field(default_factory=partial(get_env_var, "DATABRICKS_API_KEY"))
+
+    def connect(self):
+        pass
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+        """
+        return {
+            "api_base": self.url,
+            "api_key": self.api_key,
+        }
+
+
+class MCPSse(BaseConnection):
+    url: str = Field(..., description="The SSE endpoint URL to connect to.")
+    headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the SSE request.")
+    timeout: float = Field(default=5.0, description="Timeout in seconds for establishing the initial connection.")
+    sse_read_timeout: float = Field(default=60 * 5, description="Timeout for reading SSE messages (in seconds).")
+
+    def connect(self):
+        """
+        Establishes an SSE connection.
+
+        Returns:
+            Async context manager for the SSE client.
+        """
+        from mcp.client.sse import sse_client
+
+        return sse_client(
+            url=self.url,
+            headers=self.headers,
+            timeout=self.timeout,
+            sse_read_timeout=self.sse_read_timeout,
+        )
+
+
+class MCPStreamableHTTP(BaseConnection):
+    url: str = Field(..., description="The endpoint URL to connect to.")
+    headers: dict[str, Any] | None = Field(default=None, description="Optional headers to include in the request.")
+    timeout: timedelta = Field(
+        timedelta(seconds=30), description="Timeout in seconds for establishing the initial connection."
+    )
+    sse_read_timeout: timedelta = Field(
+        timedelta(seconds=60 * 5), description="Timeout for reading messages (in seconds)."
+    )
+
+    def connect(self):
+        """
+        Establishes a streamable HTTP connection.
+
+        Returns:
+            Async context manager for the streamable HTTP client.
+        """
+        from mcp.client.streamable_http import streamablehttp_client
+
+        return streamablehttp_client(
+            url=self.url,
+            headers=self.headers,
+            timeout=self.timeout,
+            sse_read_timeout=self.sse_read_timeout,
+        )
+
+
+class MCPEncodingErrorHandler(str, Enum):
+    STRICT = "strict"
+    IGNORE = "ignore"
+    REPLACE = "replace"
+
+
+class MCPStdio(BaseConnection):
+    command: str = Field(..., description="The executable to run to start the server.")
+    args: list[str] = Field(default_factory=list, description="Command-line arguments to pass to the executable.")
+    env: dict[str, str] | None = Field(None, description="Environment variables for the process.")
+    cwd: str | Path | None = Field(None, description="Working directory for the process.")
+    encoding: str = Field(default="utf-8", description="Text encoding for communication.")
+    encoding_error_handler: MCPEncodingErrorHandler = Field(
+        default=MCPEncodingErrorHandler.STRICT, description="Strategy for handling encoding errors."
+    )
+
+    def connect(self):
+        """
+        Establishes a STDIO connection using a subprocess.
+
+        Returns:
+            Async context manager for the STDIO client.
+        """
+        from mcp import StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        return stdio_client(
+            StdioServerParameters(
+                command=self.command,
+                args=self.args,
+                env=self.env,
+                cwd=self.cwd,
+                encoding=self.encoding,
+                encoding_error_handler=self.encoding_error_handler.value,
+            )
+        )
+
+
+class DatabricksSQL(BaseConnection):
+    server_hostname: str = Field(default_factory=partial(get_env_var, "DATABRICKS_SERVER_HOSTNAME"))
+    http_path: str = Field(default_factory=partial(get_env_var, "DATABRICKS_HTTP_PATH"))
+    access_token: str = Field(default_factory=partial(get_env_var, "DATABRICKS_TOKEN"))
+
+    def connect(self):
+        try:
+            from databricks import sql
+
+            conn = sql.connect(
+                server_hostname=self.server_hostname,
+                http_path=self.http_path,
+                access_token=self.access_token,
+            )
+            logger.debug(
+                f"Connected to DataBricks using server hostname={self.server_hostname}, "
+                f"http path={str(self.http_path)}"
+            )
+            return conn
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Databricks: {str(e)}")

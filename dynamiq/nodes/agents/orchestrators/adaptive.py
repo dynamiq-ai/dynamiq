@@ -9,9 +9,10 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Orchestrator, OrchestratorError
+from dynamiq.nodes.agents.orchestrators.orchestrator import ActionParseError, Decision, Orchestrator, OrchestratorError
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.chat import format_chat_history
 from dynamiq.utils.logger import logger
 
@@ -97,6 +98,28 @@ class AdaptiveOrchestrator(Orchestrator):
         """Get a formatted string of agent descriptions."""
         return "\n".join([f"{i}. {agent.name}" for i, agent in enumerate(self.agents)]) if self.agents else ""
 
+    def _handle_next_action(self, content: str, config: RunnableConfig | None = None, **kwargs) -> Action:
+        """
+        Parse XML content to extract action details. Streams action if streaming is enabled.
+
+        Args:
+            content (str): XML formatted content from LLM response
+
+        Returns:
+            Action: Parsed action object
+        """
+        action = self._parse_xml_content(content)
+        if self.manager.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            self.manager.stream_content(
+                content={"next_action": action},
+                step="manager_planning",
+                source=self.name,
+                config=config,
+                by_tokens=False,
+                **kwargs,
+            )
+        return action
+
     def get_next_action(self, config: RunnableConfig = None, **kwargs) -> Action:
         """
         Determine the next action based on the current state and LLM output.
@@ -121,7 +144,7 @@ class AdaptiveOrchestrator(Orchestrator):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            error_message = f"Agent '{self.manager.name}' failed: {manager_result.output.get('content')}"
+            error_message = f"Agent '{self.manager.name}' failed: {manager_result.error.message}"
             raise ActionParseError(f"Unable to retrieve the next action from Agent Manager, Error: {error_message}")
 
         manager_content = manager_result.output.get("content").get("result")
@@ -142,19 +165,18 @@ class AdaptiveOrchestrator(Orchestrator):
             self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
             if reflect_result.status != RunnableStatus.SUCCESS:
-                error_message = (
-                    f"Agent '{self.manager.name}' failed on reflection: {reflect_result.output.get('content')}"
-                )
+                error_message = f"Agent '{self.manager.name}' failed on reflection: {reflect_result.error.message}"
                 logger.error(error_message)
-                return self._parse_xml_content(manager_content)
+                return self._handle_next_action(manager_content, config=config, **kwargs)
             else:
                 reflect_content = reflect_result.output.get("content").get("result")
                 try:
-                    return self._parse_xml_content(reflect_content)
+                    return self._handle_next_action(reflect_content, config=config, **kwargs)
                 except ActionParseError as e:
                     logger.error(f"Agent '{self.manager.name}' failed on reflection parsing: {str(e)}")
-                    return self._parse_xml_content(manager_content)
-        return self._parse_xml_content(manager_content)
+                    return self._handle_next_action(manager_content, config=config, **kwargs)
+
+        return self._handle_next_action(manager_content, config=config, **kwargs)
 
     def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """
@@ -167,31 +189,39 @@ class AdaptiveOrchestrator(Orchestrator):
         Returns:
             dict[str, Any]: The final output generated after processing the task.
         """
-        self._chat_history.append({"role": "user", "content": input_task})
 
-        for i in range(self.max_loops):
-            action = self.get_next_action(config=config, **kwargs)
-            logger.info(f"Orchestrator {self.name} - {self.id}: Loop {i + 1} - Action: {action.dict()}")
-            if action.command == ActionCommand.DELEGATE:
-                self._handle_delegation(action=action, config=config, **kwargs)
+        analysis = self._analyze_user_input(input_task, self.agents_descriptions, config=config, **kwargs)
+        decision = analysis.decision
+        message = analysis.message
 
-            elif action.command == ActionCommand.RESPOND:
-                respond_result = self._handle_respond(action=action)
-                respond_final_result = self.parse_xml_final_answer(respond_result)
-                return {"content": respond_final_result}
+        if decision == Decision.RESPOND:
+            return {"content": message}
+        else:
+            self._chat_history.append({"role": "user", "content": input_task})
 
-            elif action.command == ActionCommand.FINAL_ANSWER:
-                manager_final_result = self.get_final_result(
-                    {
-                        "input_task": input_task,
-                        "chat_history": format_chat_history(self._chat_history),
-                        "preliminary_answer": action.answer,
-                    },
-                    config=config,
-                    **kwargs,
-                )
-                final_result = self.parse_xml_final_answer(manager_final_result)
-                return {"content": final_result}
+            for i in range(self.max_loops):
+                action = self.get_next_action(config=config, **kwargs)
+                logger.info(f"Orchestrator {self.name} - {self.id}: Loop {i + 1} - Action: {action.dict()}")
+                if action.command == ActionCommand.DELEGATE:
+                    self._handle_delegation(action=action, config=config, **kwargs)
+
+                elif action.command == ActionCommand.RESPOND:
+                    respond_result = self._handle_respond(action=action)
+                    respond_final_result = self.parse_xml_final_answer(respond_result)
+                    return {"content": respond_final_result}
+
+                elif action.command == ActionCommand.FINAL_ANSWER:
+                    manager_final_result = self.get_final_result(
+                        {
+                            "input_task": input_task,
+                            "chat_history": format_chat_history(self._chat_history),
+                            "preliminary_answer": action.answer,
+                        },
+                        config=config,
+                        **kwargs,
+                    )
+                    final_result = self.parse_xml_final_answer(manager_final_result)
+                    return {"content": final_result}
 
     def _handle_delegation(self, action: Action, config: RunnableConfig = None, **kwargs) -> None:
         """
@@ -210,7 +240,7 @@ class AdaptiveOrchestrator(Orchestrator):
             )
             self._run_depends = [NodeDependency(node=agent).to_dict()]
             if result.status != RunnableStatus.SUCCESS:
-                error_message = f"Agent '{agent.name}' failed: {result.output.get('content')}"
+                error_message = f"Agent '{agent.name}' failed: {result.error.message}"
                 raise OrchestratorError(f"Failed to execute Agent {agent.name}, due to error: {error_message}")
 
             self._chat_history.append(
@@ -233,16 +263,17 @@ class AdaptiveOrchestrator(Orchestrator):
             )
             self._run_depends = [NodeDependency(node=self.manager).to_dict()]
             if result.status != RunnableStatus.SUCCESS:
+                content = result.error.message
                 logger.error(
-                    f"Orchestrator {self.name} - {self.id}: "
-                    f"Error executing {self.manager.name}:"
-                    f"{result.output.get('content')}"
+                    f"Orchestrator {self.name} - {self.id}: " f"Error executing {self.manager.name}:" f"{content}"
                 )
+            else:
+                content = result.output.get("content")
 
             self._chat_history.append(
                 {
                     "role": "system",
-                    "content": f"LLM result: {result.output.get('content')}",
+                    "content": f"LLM result: {content}",
                 }
             )
 
@@ -275,7 +306,7 @@ class AdaptiveOrchestrator(Orchestrator):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            error_message = f"Manager agent '{self.manager.name}' failed: {manager_result.output.get('content')}"
+            error_message = f"Manager agent '{self.manager.name}' failed: {manager_result.error.message}"
             raise OrchestratorError(f"Failed to execute respond action with manager, due to error: {error_message}")
 
         manager_result_content = manager_result.output.get("content").get("result")

@@ -12,6 +12,7 @@ from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.function_tool import FunctionTool
 from dynamiq.nodes.types import NodeGroup
+from dynamiq.prompts import MessageRole
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
@@ -129,16 +130,16 @@ class GraphState(Node):
             bool: Whether input data is correct.
         """
 
-        if task.input_transformer:
-            try:
-                output = task.transform(input_data, task.input_transformer, task.id)
+        try:
+            if task.input_transformer and (task.input_transformer.path or task.input_transformer.selector):
+                output = task.transform(input_data, task.input_transformer)
                 task.validate_input_schema(output, **kwargs)
-
                 return True
-
-            except Exception:
+            else:
                 return False
-        else:
+
+        except Exception as e:
+            logger.error(f"Error occurred while applying the InputTransformer to the {task.name} Node. {e}")
             return False
 
     def _submit_task(
@@ -187,8 +188,9 @@ class GraphState(Node):
                 run_depends = [NodeDependency(node=self.manager).to_dict()]
 
                 if manager_result.status != RunnableStatus.SUCCESS:
-                    logger.error(f"GraphOrchestrator: Error generating actions for state: {manager_result}")
-                    raise OrchestratorError(f"GraphOrchestrator: Error generating actions for state: {manager_result}")
+                    result = manager_result.to_dict()
+                    logger.error(f"GraphOrchestrator: Error generating actions for state: {result}")
+                    raise OrchestratorError(f"GraphOrchestrator: Error generating actions for state: {result}")
 
                 try:
                     agent_input = {
@@ -212,12 +214,12 @@ class GraphState(Node):
                 **kwargs,
             )
 
-            result = response.output.get("content")
-
             if response.status != RunnableStatus.SUCCESS:
-                logger.error(f"GraphOrchestrator: Failed to execute Agent {task.name} with Error: {result}")
-                raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {result}")
+                error_msg = response.error.message
+                logger.error(f"GraphOrchestrator: Failed to execute Agent {task.name} with Error: {error_msg}")
+                raise OrchestratorError(f"Failed to execute Agent {task.name} with Error: {error_msg}")
 
+            result = response.output.get("content")
             return result, {}
 
         elif isinstance(task, FunctionTool):
@@ -227,19 +229,23 @@ class GraphState(Node):
 
         response = task.run(input_data=input_data, config=config, run_depends=run_depends, **kwargs)
 
+        if response.status != RunnableStatus.SUCCESS:
+            error_msg = response.error.message
+            logger.error(f"GraphOrchestrator: Failed to execute {task.name} with Error: {error_msg}")
+            raise OrchestratorError(f"Failed to execute {task.name} with Error: {error_msg}")
+
         context = response.output.get("content")
 
-        if response.status != RunnableStatus.SUCCESS:
-            logger.error(f"GraphOrchestrator: Failed to execute {task.name} with Error: {context}")
-            raise OrchestratorError(f"Failed to execute {task.name} with Error: {context}")
+        if isinstance(task, FunctionTool) or isinstance(task, Python):
+            if not isinstance(context, dict):
+                raise OrchestratorError(
+                    f"Error: Task returned invalid data format. Expected a dictionary got {type(context)}"
+                )
 
-        if not isinstance(context, dict):
-            raise OrchestratorError(
-                f"Error: Task returned invalid data format. Expected a dictionary got {type(context)}"
-            )
-
-        if "result" not in context:
-            raise OrchestratorError("Error: Task returned dictionary with no 'result' key in it.")
+            if "result" not in context:
+                raise OrchestratorError("Error: Task returned dictionary with no 'result' key in it.")
+        else:
+            return context, {}
 
         context.pop("history", None)
 
@@ -280,8 +286,8 @@ class GraphState(Node):
 
             history_messages.append(
                 {
-                    "role": "system",
-                    "content": f"Result: {result}",
+                    "role": MessageRole.ASSISTANT,
+                    "content": result,
                 }
             )
 
@@ -299,8 +305,8 @@ class GraphState(Node):
 
                 history_messages.append(
                     {
-                        "role": "system",
-                        "content": f"Result: {result}",
+                        "role": MessageRole.ASSISTANT,
+                        "content": result,
                     }
                 )
 

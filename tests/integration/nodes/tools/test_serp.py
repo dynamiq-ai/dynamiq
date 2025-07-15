@@ -1,5 +1,4 @@
 import pytest
-from pydantic import ConfigDict
 
 from dynamiq.connections import ScaleSerp
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool, SearchType
@@ -39,7 +38,7 @@ def test_basic_search(mock_requests):
     """Test basic search functionality."""
     # Setup
     scale_connection = ScaleSerp(api_key="test_key")
-    search_tool = ScaleSerpTool(connection=scale_connection, model_config=ConfigDict())
+    search_tool = ScaleSerpTool(connection=scale_connection)
 
     # Execute
     input_data = {"query": "test query", "limit": 5}
@@ -61,7 +60,7 @@ def test_search_with_custom_params(mock_requests):
     """Test search with custom parameters."""
     # Setup
     scale_connection = ScaleSerp(api_key="test_key")
-    search_tool = ScaleSerpTool(connection=scale_connection, model_config=ConfigDict(), is_optimized_for_agents=True)
+    search_tool = ScaleSerpTool(connection=scale_connection, is_optimized_for_agents=True)
 
     # Execute
     input_data = {"query": "test query", "search_type": SearchType.NEWS, "limit": 2}
@@ -76,5 +75,5 @@ def test_search_with_custom_params(mock_requests):
 
     # Verify response contains agent-optimized format
     content = result.output["content"]
-    assert "<Sources with URLs>" in content
-    assert "<Search results>" in content
+    assert "## Sources with URLs" in content
+    assert "## Search results for" in content

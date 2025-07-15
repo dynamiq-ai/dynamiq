@@ -12,7 +12,7 @@ from psycopg.sql import Literal as SQLLiteral
 from psycopg.types.json import Jsonb
 
 from dynamiq.connections import PostgreSQL
-from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
 from dynamiq.types import Document
@@ -47,6 +47,8 @@ VECTOR_FUNCTION_TO_SCORE_DEFINITION = {
 }
 
 DEFAULT_TABLE_NAME = "dynamiq_vector_store"
+DEFAULT_INDEX_NAME = "dynamiq_index"
+DEFAULT_KEYWORD_INDEX_NAME = "dynamiq_keyword_index"
 DEFAULT_SCHEMA_NAME = "public"
 DEFAULT_LANGUAGE = "english"
 
@@ -67,7 +69,7 @@ class PGVectorStoreWriterParams(PGVectorStoreParams, BaseWriterVectorStoreParams
     create_if_not_exist: bool = False
 
 
-class PGVectorStore:
+class PGVectorStore(BaseVectorStore):
     """Vector store using pgvector."""
 
     def __init__(
@@ -80,11 +82,11 @@ class PGVectorStore:
         dimension: int = 1536,
         vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY,
         index_method: PGVectorIndexMethod = PGVectorIndexMethod.EXACT,
-        index_name: str | None = None,
+        index_name: str = DEFAULT_INDEX_NAME,
         create_if_not_exist: bool = False,
         content_key: str = "content",
         embedding_key: str = "embedding",
-        keyword_index_name: str | None = None,
+        keyword_index_name: str = DEFAULT_KEYWORD_INDEX_NAME,
         language: str = DEFAULT_LANGUAGE,
     ):
         """
@@ -207,8 +209,8 @@ class PGVectorStore:
         )
 
         with conn.cursor() as cur:
-            self._execute_sql_query(query, (self.schema_name,), cursor=cur)
-            return cur.fetchone()[0]
+            result = self._execute_sql_query(query, (self.schema_name,), cursor=cur).fetchone()
+            return bool(result["exists"])
 
     def _check_if_table_exists(self, conn: psycopg.Connection) -> bool:
         """
@@ -233,8 +235,8 @@ class PGVectorStore:
         )
 
         with conn.cursor() as cur:
-            self._execute_sql_query(query, (self.schema_name, self.table_name), cursor=cur)
-            return cur.fetchone()[0]
+            result = self._execute_sql_query(query, (self.schema_name, self.table_name), cursor=cur).fetchone()
+            return bool(result["exists"])
 
     def _execute_sql_query(self, sql_query: Any, params: tuple | None = None, cursor: Cursor | None = None) -> Any:
         """
@@ -403,17 +405,15 @@ class PGVectorStore:
             USING gin(to_tsvector({language}, {content_key}));
             """
         ).format(
-            index_name=SQLLiteral(self.keyword_index_name),
-            schema_name=SQLLiteral(self.schema_name),
-            table_name=SQLLiteral(self.table_name),
-            content_key=SQLLiteral(content_key),
+            index_name=Identifier(self.keyword_index_name),
+            schema_name=Identifier(self.schema_name),
+            table_name=Identifier(self.table_name),
+            content_key=Identifier(content_key),
             language=SQLLiteral(self.language),
         )
 
         with conn.cursor() as cur:
-            self._execute_sql_query(check_if_keyword_index_exists_query, cursor=cur)
-            index_exists = bool(cur.fetchone())
-
+            index_exists = bool(self._execute_sql_query(check_if_keyword_index_exists_query, cursor=cur).fetchone())
             if not index_exists:
                 self._execute_sql_query(create_keyword_index_query, cursor=cur)
                 conn.commit()
@@ -595,22 +595,13 @@ class PGVectorStore:
             if not document_ids:
                 logger.warning("No document IDs provided. No documents will be deleted.")
             else:
-                self.delete_documents_by_file_id(document_ids)
-
-    def delete_documents_by_file_id(self, document_ids: list[str]) -> None:
-        """
-        Delete documents from the pgvector vector store by document IDs.
-
-        Args:
-            document_ids (list[str]): List of document IDs to delete.
-        """
-        with self._get_connection() as conn:
-            with conn.cursor() as cur:
-                query = SQL("DELETE FROM {schema_name}.{table_name} WHERE id = ANY(%s::text[])").format(
-                    schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name)
-                )
-                self._execute_sql_query(query, (document_ids,), cursor=cur)
-                conn.commit()
+                with self._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        query = SQL("DELETE FROM {schema_name}.{table_name} WHERE id = ANY(%s::text[])").format(
+                            schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name)
+                        )
+                        self._execute_sql_query(query, (document_ids,), cursor=cur)
+                        conn.commit()
 
     def list_documents(
         self, include_embeddings: bool = False, content_key: str | None = None, embedding_key: str | None = None

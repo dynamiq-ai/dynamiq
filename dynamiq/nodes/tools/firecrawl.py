@@ -9,30 +9,35 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_FIRECRAWL = """## Firecrawl Web Scraping Tool
-### Overview
-The Firecrawl Tool is a powerful web scraping utility that extracts high-fidelity content from websites.
-### Capabilities
-- Extract content from any accessible webpage.
-### When to Use
-- When you need to extract information from a specific webpage.
-- When you require content in a structured, readable format.
-- When parsing complex web applications or content behind user interactions.
-### Input Parameters
-- **url** (string, required): URL of the webpage to scrape.
-Must be a valid, accessible URL including protocol (http/https).
-### Usage Examples
-#### Basic Scraping
-{
-  "url": "https://example.com/article/123"
-}
-"""
+DESCRIPTION_FIRECRAWL = """Scrapes web content from URLs using Firecrawl
+with high-fidelity extraction and structured output.
+
+Key Capabilities:
+- High-quality content extraction with JavaScript support
+- Multiple output formats (markdown, HTML, screenshots)
+- Custom JSON schemas for structured data extraction
+- Main content filtering and selective tag extraction
+
+Usage Strategy:
+- Use markdown format for clean, readable content
+- Enable only_main_content to filter navigation/ads
+- Use JSON schemas for structured data extraction
+- Combine formats for comprehensive content analysis
+
+Parameter Guide:
+- url: Target website URL to scrape
+- formats: Output types (["markdown", "html", "screenshot"])
+- only_main_content: Filter to main article content
+- include_tags: Specific HTML elements to extract
+
+Examples:
+- {"url": "https://example.com", "formats": ["markdown"]}"""
 
 
 class JsonOptions(BaseModel):
     """Options for configuring JSON extraction."""
 
-    schema: dict | None = None
+    json_schema: dict | None = Field(default=None, alias="schema")
     system_prompt: str | None = Field(None, alias="systemPrompt")
     prompt: str | None = None
 
@@ -54,6 +59,18 @@ class Action(BaseModel):
 
 class FirecrawlInputSchema(BaseModel):
     url: str = Field(default="", description="Parameter to specify the url of the page to be scraped.")
+    only_main_content: bool = Field(
+        default=True,
+        description="If True, only the main content of the page will be extracted, excluding navigation and ads.",
+    )
+    formats: list[str] = Field(
+        default_factory=lambda: ["markdown"],
+        description="List of output formats to return. Supported formats: markdown, html, screenshot.",
+    )
+    include_tags: list[str] | None = Field(
+        default=None,
+        description="List of HTML tags to include in the extraction. If None, all tags are included.",
+    )
 
 
 class FirecrawlTool(ConnectionNode):
@@ -118,14 +135,17 @@ class FirecrawlTool(ConnectionNode):
         return {**base_data, **filtered_fields}
 
     def _format_agent_response(self, url: str, data: dict) -> str:
-        """Format the response for agent consumption."""
-        sections = [f"<Source URL>\n{url}\n<\\Source URL>"]
+        """Format the response for agent consumption using Markdown."""
+        sections = [f"## Source URL\n{url}"]
 
-        format_mappings = {"content": "Scraped result", "markdown": "Markdown", "html": "HTML", "json": "JSON"}
+        format_mappings = {"content": "Scraped Result", "markdown": "Markdown Content", "html": "HTML", "json": "JSON"}
 
         for data_key, section_name in format_mappings.items():
             if data_key in data:
-                sections.append(f"<{section_name}>\n{data[data_key]}\n<\\{section_name}>")
+                if data_key in ["html", "json"]:
+                    sections.append(f"## {section_name}\n{data_key}\n{data[data_key]}\n")
+                else:
+                    sections.append(f"## {section_name}\n{data[data_key]}")
 
         return "\n\n".join(sections)
 

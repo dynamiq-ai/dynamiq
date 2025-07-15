@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dynamiq.storages.vector.milvus.filter import Filter
-from dynamiq.storages.vector.milvus.milvus import MilvusVectorStore
+from dynamiq.storages.vector.milvus.milvus import MilvusVectorStore, MilvusWriterVectorStoreParams
 from dynamiq.types import Document
 
 
@@ -103,7 +103,7 @@ def test_search_embeddings(milvus_vector_store, mock_milvus_client):
             }
         ]
     ]
-    documents = milvus_vector_store.search_embeddings(query_embeddings, top_k=1)
+    documents = milvus_vector_store._embedding_retrieval(query_embeddings, top_k=1)
     assert len(documents) == 1
     assert documents[0].id == "1"
     assert documents[0].content == "Document 1"
@@ -148,3 +148,60 @@ def test_convert_query_result_to_documents(milvus_vector_store):
     assert documents[0].id == "1"
     assert documents[0].content == "Document 1"
     assert documents[0].score == 0.1
+
+
+def test_hybrid_search(milvus_vector_store, mock_milvus_client):
+    query = "example"
+    query_embeddings = [[0.1, 0.2]]
+    mock_milvus_client.hybrid_search.return_value = [
+        [
+            {
+                "id": "1",
+                "entity": {"content": "Document 1", "vector": [0.1, 0.2], "metadata": {"type": "test"}},
+                "distance": 0.1,
+            }
+        ]
+    ]
+    documents = milvus_vector_store._hybrid_retrieval(query=query, query_embeddings=query_embeddings, top_k=3)
+    assert len(documents) == 1
+    assert documents[0].id == "1"
+    assert documents[0].content == "Document 1"
+    assert documents[0].score == 0.1
+
+
+@pytest.mark.parametrize("dimension", [None, 384, 768, 1024])
+def test_writer_params_dimension(dimension):
+    if dimension is None:
+        params = MilvusWriterVectorStoreParams()
+        assert params.dimension == 1536  # Default value
+    else:
+        params = MilvusWriterVectorStoreParams(dimension=dimension)
+        assert params.dimension == dimension
+
+
+@pytest.mark.parametrize("dimension", [512, 1024])
+def test_dimension_used_in_schema(dimension):
+    mock_client = MagicMock()
+    mock_schema = MagicMock()
+    mock_client.create_schema.return_value = mock_schema
+    mock_client.has_collection.return_value = False
+
+    vector_store = MilvusVectorStore(client=mock_client, dimension=dimension, create_if_not_exist=True)
+
+    for call in mock_schema.add_field.call_args_list:
+        args, kwargs = call
+        if kwargs.get("field_name") == vector_store.embedding_key:
+            assert kwargs.get("dim") == dimension
+            return
+
+    pytest.fail("No add_field call found for embedding field")
+
+
+def test_writer_params_rejects_negative_dimension():
+    with pytest.raises(ValueError):
+        MilvusWriterVectorStoreParams(dimension=-1)
+
+
+def test_writer_params_rejects_zero_dimension():
+    with pytest.raises(ValueError):
+        MilvusWriterVectorStoreParams(dimension=0)

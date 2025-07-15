@@ -3,7 +3,6 @@ from functools import cached_property
 from queue import Queue
 from threading import Event
 from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dynamiq.utils import generate_uuid
@@ -19,6 +18,12 @@ class StreamingMode(str, Enum):
 STREAMING_EVENT = "streaming"
 
 
+class StreamingEntitySource(BaseModel):
+    name: str | None = None
+    group: str | None = None
+    type: str | None = None
+
+
 class StreamingEventMessage(BaseModel):
     """Message for streaming events.
 
@@ -28,13 +33,15 @@ class StreamingEventMessage(BaseModel):
         entity_id (str): Entity ID.
         data (Any): Data associated with the event.
         event (str | None): Event name. Defaults to "streaming".
+        source (StreamingEntitySource | None): Entity details.
     """
 
     run_id: str | None = None
     wf_run_id: str | None = Field(default_factory=generate_uuid)
-    entity_id: str
+    entity_id: str | None = None
     data: Any
     event: str | None = None
+    source: StreamingEntitySource | None = None
 
     @field_validator("event")
     @classmethod
@@ -77,6 +84,7 @@ class StreamingConfig(BaseModel):
         input_queue_done_event (Event | None): Event to signal input queue completion. Defaults to None.
         mode (StreamingMode): Streaming mode. Defaults to StreamingMode.ANSWER.
         by_tokens (bool): Whether to stream  by tokens. Defaults to False.
+        include_usage (bool): Whether to include usage information. Defaults to False.
     """
     enabled: bool = False
     event: str = STREAMING_EVENT
@@ -85,6 +93,7 @@ class StreamingConfig(BaseModel):
     input_queue_done_event: Event | None = None
     mode: StreamingMode = StreamingMode.FINAL
     by_tokens: bool = True
+    include_usage: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

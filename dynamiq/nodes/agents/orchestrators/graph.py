@@ -6,11 +6,12 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.agents.base import Agent
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.agents.orchestrators.graph_state import GraphState
-from dynamiq.nodes.agents.orchestrators.orchestrator import Orchestrator, OrchestratorError
+from dynamiq.nodes.agents.orchestrators.orchestrator import Decision, Orchestrator, OrchestratorError
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools import Python
 from dynamiq.nodes.tools.function_tool import function_tool
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 
@@ -37,6 +38,7 @@ class GraphOrchestrator(Orchestrator):
         initial_state (str): State to start from.
         objective (Optional[str]): The main objective of the orchestration.
         max_loops (Optional[int]): Maximum number of transition between states.
+        input_analysis_enabled (bool): Enables initial input analysis.
     """
 
     name: str | None = "GraphOrchestrator"
@@ -45,6 +47,7 @@ class GraphOrchestrator(Orchestrator):
     context: dict[str, Any] = {}
     states: list[GraphState] = []
     max_loops: int = 15
+    input_analysis_enabled: bool = False
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
@@ -236,13 +239,25 @@ class GraphOrchestrator(Orchestrator):
         self._run_depends = [NodeDependency(node=self.manager).to_dict()]
 
         if manager_result.status != RunnableStatus.SUCCESS:
-            logger.error(f"GraphOrchestrator {self.id}: Error generating final answer")
+            error = manager_result.error.to_dict()
+            logger.error(f"GraphOrchestrator {self.id}: Error generating final answer: {error}")
             raise OrchestratorError("Failed to generate final answer")
 
         try:
             next_state = json.loads(
                 manager_result.output.get("content").get("result").replace("json", "").replace("```", "").strip()
             )["state"]
+
+            if self.manager.streaming.enabled and self.manager.streaming.mode == StreamingMode.ALL:
+                self.manager.stream_content(
+                    content={"next_state": next_state},
+                    step="manager_planning",
+                    source=self.name,
+                    config=config,
+                    by_tokens=False,
+                    **kwargs,
+                )
+
         except Exception as e:
             logger.error("GraphOrchestrator: Error when parsing response about next state.")
             raise OrchestratorError(f"Error when parsing response about next state {e}")
@@ -312,43 +327,49 @@ class GraphOrchestrator(Orchestrator):
         Returns:
             dict[str, Any]: The final output generated after processing the task and inner context of orchestrator.
         """
+        if self.input_analysis_enabled:
+            analysis = self._analyze_user_input(
+                input_task, self.states_descriptions(list(self._state_by_id.keys())), config=config, **kwargs
+            )
+            decision = analysis.decision
+            message = analysis.message
+        else:
+            decision = Decision.PLAN
 
-        self._chat_history.append({"role": "user", "content": input_task})
-        state = self._state_by_id[self.initial_state]
+        if decision == Decision.RESPOND:
+            return {"content": message}
+        else:
+            self._chat_history.append({"role": "user", "content": input_task})
+            state = self._state_by_id[self.initial_state]
 
-        for _ in range(self.max_loops):
-            logger.info(f"GraphOrchestrator {self.id}: Next state: {state.id}")
+            for _ in range(self.max_loops):
+                logger.info(f"GraphOrchestrator {self.id}: Next state: {state.id}")
 
-            if state.id == END:
-                final_output = self.get_final_result(
-                    {
-                        "input_task": input_task,
-                        "chat_history": self._chat_history,
-                    },
-                    config=config,
-                    **kwargs,
-                )
-                return {"content": final_output, "context": self.context}
+                if state.id == END:
+                    final_output = self._chat_history[-1]["content"] if self._chat_history else ""
+                    return {"content": final_output, "context": self.context | {"history": self._chat_history}}
 
-            elif state.id != START:
+                elif state.id != START:
 
-                output = state.run(
-                    input_data={"context": self.context, "chat_history": self._chat_history},
-                    config=config,
-                    run_depends=self._run_depends,
-                    **kwargs,
-                ).output
+                    output = state.run(
+                        input_data={"context": self.context, "chat_history": self._chat_history},
+                        config=config,
+                        run_depends=self._run_depends,
+                        **kwargs,
+                    )
+                    if output.status != RunnableStatus.SUCCESS:
+                        raise OrchestratorError(output.error.message)
 
-                self.context = self.context | output["context"]
-                self._run_depends = [NodeDependency(node=state).to_dict()]
-                self._chat_history = self._chat_history + output["history_messages"]
+                    output = output.output
+                    self.context = self.context | output["context"]
+                    self._run_depends = [NodeDependency(node=state).to_dict()]
+                    self._chat_history = self._chat_history + output["history_messages"]
 
-            state = self._get_next_state(state, config=config, **kwargs)
+                state = self._get_next_state(state, config=config, **kwargs)
 
     def setup_streaming(self) -> None:
         """Setups streaming for orchestrator."""
         self.manager.streaming = self.streaming
         for state in self.states:
             for task in state.tasks:
-                if isinstance(task, Agent):
-                    task.streaming = self.streaming
+                task.streaming = self.streaming

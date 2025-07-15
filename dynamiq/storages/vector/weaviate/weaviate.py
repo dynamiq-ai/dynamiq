@@ -2,17 +2,16 @@ import datetime
 import re
 from typing import TYPE_CHECKING, Any, Optional
 
-from weaviate.classes.config import Configure
+from weaviate.classes.config import Configure, DataType, Property
 from weaviate.classes.query import HybridFusion
 from weaviate.classes.tenants import Tenant, TenantActivityStatus
-from weaviate.exceptions import UnexpectedStatusCodeError, WeaviateQueryError
+from weaviate.exceptions import ObjectAlreadyExistsException, UnexpectedStatusCodeError, WeaviateQueryError
 from weaviate.util import generate_uuid5
 
 from dynamiq.connections import Weaviate
-from dynamiq.storages.vector.base import BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
-from dynamiq.storages.vector.utils import create_file_id_filter
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -37,7 +36,7 @@ class WeaviateRetrieverVectorStoreParams(BaseVectorStoreParams):
     tenant_name: str | None = None
 
 
-class WeaviateVectorStore:
+class WeaviateVectorStore(BaseVectorStore):
     """
     A Document Store for Weaviate.
 
@@ -46,6 +45,21 @@ class WeaviateVectorStore:
 
     PATTERN_COLLECTION_NAME = re.compile(r"^[A-Z][_0-9A-Za-z]*$")
     PATTERN_PROPERTY_NAME = re.compile(r"^[_A-Za-z][_0-9A-Za-z]*$")
+    _PROPERTY_DATA_TYPES: dict[str, str] = {
+        "content": DataType.TEXT,
+        "message_content": DataType.TEXT,
+        "message_role": DataType.TEXT,
+        "message_timestamp": DataType.NUMBER,
+        "message_id": DataType.TEXT,
+        "user_id": DataType.TEXT,
+        "session_id": DataType.TEXT,
+    }
+
+    def _get_property_type(self, property_name: str) -> str:
+        """Gets the Weaviate data type for a known property, defaults to TEXT."""
+        if property_name == self.content_key:
+            return DataType.TEXT
+        return self._PROPERTY_DATA_TYPES.get(property_name, DataType.TEXT)
 
     @staticmethod
     def is_valid_collection_name(name: str) -> bool:
@@ -93,6 +107,7 @@ class WeaviateVectorStore:
         create_if_not_exist: bool = False,
         content_key: str = "content",
         tenant_name: str | None = None,
+        alpha: float = 0.5,
     ):
         """
         Initialize a new instance of WeaviateDocumentStore and connect to the
@@ -108,6 +123,8 @@ class WeaviateVectorStore:
                 storage.
             tenant_name (str | None): The name of the tenant to use for all operations.
                 If provided, multi-tenancy will be enabled for the collection.
+            alpha (float): The alpha value used for hybrid retrieval operations. Controls
+                the balance between keyword and vector search. Defaults to 0.5.
         """
         # Validate and normalize the index name
         index_name = self._fix_and_validate_index_name(index_name)
@@ -123,6 +140,7 @@ class WeaviateVectorStore:
         # Store multi-tenancy configuration
         self._multi_tenancy_enabled = tenant_name is not None
         self.content_key = content_key
+        self.alpha = alpha
 
         # Create collection if needed or validate existing collection
         if not self.client.collections.exists(collection_name):
@@ -142,27 +160,83 @@ class WeaviateVectorStore:
         # Set up the collection - either with tenant context or without
         self._setup_collection(base_collection, collection_name, tenant_name)
 
-    def _create_collection(self, collection_name: str, tenant_name: str | None):
+    def _create_collection(
+        self, collection_name: str, tenant_name: str | None, properties_to_define: list[str] | None = None
+    ):
         """
-        Create a new Weaviate collection with appropriate configuration.
+        Create a new Weaviate collection with appropriate configuration and properties.
 
         Args:
             collection_name: Name of the collection to create
             tenant_name: Optional tenant name to enable multi-tenancy
+            properties_to_define: List of property names to explicitly define in the schema.
         """
+        collection_config_params = {
+            "name": collection_name,
+            "inverted_index_config": Configure.inverted_index(index_null_state=True),
+            "vector_index_config": Configure.VectorIndex.hnsw(),
+        }
 
-        # Set up basic collection configuration
-        collection_config = {"inverted_index_config": Configure.inverted_index(index_null_state=True)}
-
-        # Add multi-tenancy configuration if tenant_name is provided
         if tenant_name is not None:
-            mt_config = {"enabled": True}
+            collection_config_params["multi_tenancy_config"] = Configure.multi_tenancy(enabled=True)
 
-            collection_config["multi_tenancy_config"] = Configure.multi_tenancy(**mt_config)
+        properties = []
+        all_props_to_define = set(properties_to_define or [])
+        all_props_to_define.add(self.content_key)
+        all_props_to_define.add("_original_id")
 
-        # Create the collection
-        self.client.collections.create(name=collection_name, **collection_config)
-        logger.info(f"Created collection '{collection_name}'")
+        for prop_name in all_props_to_define:
+            if self.is_valid_property_name(prop_name):
+                prop_type = self._get_property_type(prop_name)
+                properties.append(Property(name=prop_name, data_type=prop_type))
+                logger.debug(f"Prepared property definition: {prop_name} (Type: {prop_type})")
+            else:
+                logger.warning(f"Skipping definition for invalid property name: '{prop_name}'")
+
+        if properties:
+            collection_config_params["properties"] = properties
+        try:
+            self.client.collections.create(**collection_config_params)
+            logger.info(f"Created collection '{collection_name}' with defined properties.")
+        except ObjectAlreadyExistsException:
+            logger.warning(f"Collection '{collection_name}' already exists. Skipping creation.")
+        except Exception as e:
+            logger.error(f"Failed to create collection '{collection_name}': {e}")
+            raise
+
+    def ensure_properties_exist(self, properties_to_ensure: list[str]):
+        """
+        Checks if properties exist in the schema and adds them if they don't.
+
+        Args:
+            properties_to_ensure: A list of property names to check/add.
+        """
+        if not properties_to_ensure:
+            return
+
+        try:
+            collection_config = self._collection.config.get()
+            existing_properties = {prop.name for prop in collection_config.properties}
+
+            for prop_name in properties_to_ensure:
+                if prop_name not in existing_properties and self.is_valid_property_name(prop_name):
+                    prop_type = self._get_property_type(prop_name)
+                    try:
+                        self._collection.config.add_property(Property(name=prop_name, data_type=prop_type))
+                        logger.info(
+                            f"Added missing property '{prop_name}' "
+                            f"(Type: {prop_type}) to collection "
+                            f"'{self._collection.name}' schema."
+                        )
+                    except Exception as add_err:
+                        logger.error(f"Failed to add property '{prop_name}' to schema: {add_err}")
+                elif prop_name in existing_properties:
+                    logger.debug(f"Property '{prop_name}' already exists in schema.")
+                elif not self.is_valid_property_name(prop_name):
+                    logger.warning(f"Cannot ensure invalid property name: '{prop_name}'")
+
+        except Exception as e:
+            logger.error(f"Failed to check or update schema properties for collection '{self._collection.name}': {e}")
 
     def _update_multi_tenancy_status(self, collection):
         """
@@ -711,16 +785,6 @@ class WeaviateVectorStore:
         else:
             raise ValueError("No filters provided to delete documents.")
 
-    def delete_documents_by_file_id(self, file_id: str) -> None:
-        """
-        Delete documents from the DocumentStore based on the provided file_id.
-
-        Args:
-            file_id (str): The file ID to filter by.
-        """
-        filters = create_file_id_filter(file_id)
-        self.delete_documents_by_filters(filters)
-
     def _keyword_retrieval(
         self,
         query: str,
@@ -821,6 +885,7 @@ class WeaviateVectorStore:
         """
         properties = [p.name for p in self._collection.config.get().properties]
 
+        query_alpha = self.alpha if alpha is None else alpha
         result = self._collection.query.hybrid(
             query=query,
             vector=query_embedding,
@@ -830,7 +895,7 @@ class WeaviateVectorStore:
             query_properties=[content_key or self.content_key],
             return_properties=properties,
             return_metadata=["score"],
-            alpha=alpha,
+            alpha=query_alpha,
             fusion_type=fusion_type,
         )
 

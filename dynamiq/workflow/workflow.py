@@ -1,9 +1,10 @@
 from datetime import datetime
+from functools import cached_property
 from os import PathLike
 from typing import IO, TYPE_CHECKING, Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import BaseFlow, Flow
@@ -21,13 +22,21 @@ class Workflow(BaseModel, Runnable):
     versioning, metadata, callbacks, and configuration.
 
     Attributes:
+        name (str): Name of workflow.
         id (str): Unique identifier for the workflow.
         flow (BaseFlow): The flow associated with the workflow.
         version (str | None): Version of the workflow.
     """
+
+    name: str = "Workflow"
     id: str = Field(default_factory=generate_uuid)
     flow: BaseFlow = Field(default_factory=Flow)
     version: str | None = None
+
+    @computed_field
+    @cached_property
+    def type(self) -> str:
+        return "dynamiq.workflows.Workflow"
 
     def __enter__(self):
         return self
@@ -144,10 +153,8 @@ class Workflow(BaseModel, Runnable):
             logger.error(f"Failed to dump workflow to YAML. {e}")
             raise
 
-    def run(
-        self, input_data: Any, config: RunnableConfig = None, **kwargs
-    ) -> RunnableResult:
-        """Run the workflow with given input data and configuration.
+    def run_sync(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
+        """Run the workflow synchronously with given input data and configuration.
 
         Args:
             input_data (Any): Input data for the workflow.
@@ -165,21 +172,50 @@ class Workflow(BaseModel, Runnable):
         self.run_on_workflow_start(input_data, config, **merged_kwargs)
         time_start = datetime.now()
 
-        result = self.flow.run(input_data, config, **merge(merged_kwargs, {"parent_run_id": run_id}))
+        result = self.flow.run_sync(input_data, config, **merge(merged_kwargs, {"parent_run_id": run_id}))
+        if result.status == RunnableStatus.SUCCESS:
+            self.run_on_workflow_end(result.output, config, **merged_kwargs)
+            logger.info(f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
+        else:
+            error = result.error.type(result.error.message)
+            self.run_on_workflow_error(error, config, **merged_kwargs)
+            logger.error(f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
+
+        return RunnableResult(status=result.status, input=input_data, output=result.output, error=result.error)
+
+    async def run_async(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
+        """Run the workflow asynchronously with given input data and configuration.
+
+        Args:
+            input_data (Any): Input data for the workflow.
+            config (RunnableConfig, optional): Configuration for the run. Defaults to None.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            RunnableResult: Result of the workflow execution.
+        """
+        run_id = uuid4()
+        logger.info(f"Workflow {self.id}: execution started.")
+
+        # update kwargs with run_id
+        merged_kwargs = merge(kwargs, {"run_id": run_id, "wf_run_id": getattr(config, "run_id", None)})
+        self.run_on_workflow_start(input_data, config, **merged_kwargs)
+        time_start = datetime.now()
+
+        result = await self.flow.run_async(input_data, config, **merge(merged_kwargs, {"parent_run_id": run_id}))
         if result.status == RunnableStatus.SUCCESS:
             self.run_on_workflow_end(result.output, config, **merged_kwargs)
             logger.info(
                 f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}."
             )
         else:
-            self.run_on_workflow_error(result.output, config, **merged_kwargs)
+            error = result.error.type(result.error.message)
+            self.run_on_workflow_error(error, config, **merged_kwargs)
             logger.error(
                 f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}."
             )
 
-        return RunnableResult(
-            status=result.status, input=input_data, output=result.output
-        )
+        return RunnableResult(status=result.status, input=input_data, output=result.output, error=result.error)
 
     def run_on_workflow_start(self, input_data: Any, config: RunnableConfig = None, **kwargs: Any):
         """Run callbacks on workflow start.

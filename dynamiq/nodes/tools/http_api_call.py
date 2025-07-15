@@ -5,64 +5,37 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from dynamiq.connections import Http as HttpConnection
+from dynamiq.connections import HTTPMethod
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_HTTP = """## HTTP API Call Tool
-### Overview
-Make web requests to external APIs and services with support for various HTTP methods, payload formats, and response types.
-### Capabilities
-- Execute all standard HTTP methods (GET, POST, PUT, DELETE, PATCH)
-- Configure headers, query parameters, and request body
-- Handle multiple payload formats (raw or JSON) and response types
-- Customize timeout and success response criteria
-### When to Use
-- Fetch data from external web services
-- Submit data to external systems
-- Interact with HTTP-based APIs including RESTful services
-- Access authenticated third-party services
-### Parameters
-- **url** (string): Required endpoint URL if not configured in tool settings
-- **data** (object, optional): Request body payload (JSON-serializable)
-- **headers** (object, optional): HTTP request headers
-- **params** (object, optional): URL query parameters
-- **payload_type** (string, optional): Format of payload ("raw" or "json", default: "raw")
-### Configuration
-- **method** (string): HTTP method (GET, POST, PUT, DELETE, etc.)
-- **timeout** (number): Request timeout in seconds (default: 30)
-- **success_codes** (array): HTTP status codes considered successful (default: [200])
-- **response_type** (string): Response format ("text", "raw", "json", default: "raw")
-  - "text": Returns response as string
-  - "raw": Returns raw response content as bytes
-  - "json": Parses response as JSON object
-  - Responses with "application/json" content-type automatically parse as JSON
-### Examples
-#### Basic GET Request
-{"url": "https://api.example.com/data"}
-#### POST with JSON Payload
-{
-  "url": "https://api.example.com/submit",
-  "data": {"name": "John Doe", "email": "john@example.com"},
-  "payload_type": "json",
-  "headers": {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer token123"
-  }
-}
-#### GET with Query Parameters
-{
-  "url": "https://api.example.com/search",
-  "params": {"q": "search term", "limit": 10}
-}
-### Best Practices
-1. Set appropriate timeouts based on expected response times
-2. Include authentication in headers rather than URLs
-3. Use "json" response type for JSON APIs, "text" for HTML/plain text
-4. The tool handles URL encoding for query parameters
-"""  # noqa: E501
+DESCRIPTION_HTTP = """Makes HTTP API requests with support for all methods and configurable parameters.
+
+Key Capabilities:
+- All HTTP methods: GET, POST, PUT, DELETE, PATCH
+- Custom headers, authentication, and request/response handling
+- JSON, form data, and file upload support
+- Automatic response parsing and error handling
+
+Usage Strategy:
+- Use GET for data retrieval, POST for creation
+- Include authentication headers for secured APIs
+- Handle different content types with appropriate parameters
+- Configure timeouts and retries for reliability
+
+Parameter Guide:
+- url: Target API endpoint (required)
+- method: HTTP method (GET, POST, PUT, DELETE)
+- headers: Custom headers including authentication
+- body/files: Request payload for POST/PUT operations
+
+Examples:
+- {"url": "https://api.example.com/data", "method": "GET", "headers": {"Authorization": "Bearer token"}}
+- {"url": "https://api.com/users", "method": "POST", "body": {"name": "John"}}
+- {"url": "https://api.com/upload", "method": "PUT", "files": {"file": "data.csv"}}"""
 
 
 class ResponseType(str, enum.Enum):
@@ -111,6 +84,8 @@ class HttpApiCall(ConnectionNode):
         headers(dict[str,Any]): The headers of request.
         payload_type (dict[str, Any]): Parameter to specify the type of payload data.
         params(dict[str,Any]): The additional query params of request.
+        url(str): The endpoint url for sending request
+        method(str): The HTTP method for sending request.
         response_type(ResponseType|str): The type of response content.
     """
 
@@ -125,6 +100,7 @@ class HttpApiCall(ConnectionNode):
     headers: dict[str, Any] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     url: str = ""
+    method: HTTPMethod | None = None
     response_type: ResponseType | str | None = ResponseType.RAW
     input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
@@ -156,20 +132,30 @@ class HttpApiCall(ConnectionNode):
             raise ValueError("No url provided.")
         headers = input_data.headers
         params = input_data.params
+        method = self.method or self.connection.method
 
-        response = self.client.request(
-            method=self.connection.method,
-            url=url,
-            headers=self.connection.headers | self.headers | headers,
-            params=self.connection.params | self.params | params,
-            timeout=self.timeout,
-            **extras,
-        )
+        try:
+            response = self.client.request(
+                method=method,
+                url=url,
+                headers=self.connection.headers | self.headers | headers,
+                params=self.connection.params | self.params | params,
+                timeout=self.timeout,
+                **extras,
+            )
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
+            raise ToolExecutionException(
+                f"Request failed with error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
 
         if response.status_code not in self.success_codes:
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results.")
             raise ToolExecutionException(
                 f"Request failed with unexpected status code: {response.status_code} and response: {response.text}. "
-                f"Please analyze the error and take appropriate action."
+                f"Please analyze the error and take appropriate action.",
+                recoverable=True,
             )
 
         response_type = self.response_type

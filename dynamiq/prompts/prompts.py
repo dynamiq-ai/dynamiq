@@ -7,8 +7,10 @@ from typing import Any
 
 import filetype
 from jinja2 import Environment, meta
+from litellm import token_counter
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
 
 
@@ -56,11 +58,12 @@ class Message(BaseModel):
         content (str): The content of the message.
         role (MessageRole): The role of the message sender.
         metadata (dict | None): Additional metadata for the message, default is None.
+        static (bool): Determines whether it is possible to pass parameters via this message.
     """
-
     content: str
     role: MessageRole = MessageRole.USER
     metadata: dict | None = None
+    static: bool = Field(default=False, exclude=True)
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -122,10 +125,12 @@ class VisionMessage(BaseModel):
     Attributes:
         content (list[VisionTextMessage | VisionImageMessage]): The content of the message.
         role (MessageRole): The role of the message sender.
+        static (bool): Determines whether it is possible to pass parameters via this message.
     """
 
     content: list[VisionMessageTextContent | VisionMessageImageContent]
     role: MessageRole = MessageRole.USER
+    static: bool = Field(default=False, exclude=True)
 
     def parse_bytes_to_base64(self, file_bytes: bytes) -> str:
         """
@@ -194,11 +199,14 @@ class VisionMessage(BaseModel):
         out_msg_content = []
         for content in self.content:
             if isinstance(content, VisionMessageTextContent):
-                out_msg_content.append(
-                    VisionMessageTextContent(
-                        text=self._Template(content.text).render(**kwargs),
+                if not self.static:
+                    out_msg_content.append(
+                        VisionMessageTextContent(
+                            text=self._Template(content.text).render(**kwargs),
+                        )
                     )
-                )
+                else:
+                    out_msg_content.append(content)
             elif isinstance(content, VisionMessageImageContent):
                 self.parse_image_url_parameters(content.image_url.url, kwargs)
                 out_msg_content.append(
@@ -232,23 +240,6 @@ class VisionMessage(BaseModel):
             dict: The message as a dictionary.
         """
         return self.model_dump(**kwargs)
-
-
-class ToolFunctionParameters(BaseModel):
-    type: str
-    properties: dict[str, dict]
-    required: list[str]
-
-
-class ToolFunction(BaseModel):
-    name: str
-    description: str
-    parameters: ToolFunctionParameters
-
-
-class Tool(BaseModel):
-    type: str = "function"
-    function: ToolFunction
 
 
 class BasePrompt(ABC, BaseModel):
@@ -297,17 +288,31 @@ class Prompt(BasePrompt):
     Attributes:
         messages (list[Message | VisionMessage]): List of Message or VisionMessage objects
         representing the prompt.
-        tools (list[dict[str, Any]]): List of functions for which the model may generate JSON inputs.
+        tools (list[Tool]): List of functions for which the model may generate JSON inputs.
+        response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output.
     """
 
     messages: list[Message | VisionMessage]
-    tools: list[Tool] | None = None
+    tools: list[Tool | dict] | None = None
+    response_format: dict[str, Any] | None = None
     _Template: Any = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
     def __init__(self, **data):
         super().__init__(**data)
+
+    def count_tokens(self, model: str) -> int:
+        """
+        Counts number of tokens in prompt based on the model name.
+
+        Args:
+            * model (str): Model name.
+
+        Returns:
+            int: Number of tokens.
+        """
+        return token_counter(model=model, messages=[message.model_dump() for message in self.messages])
 
     def get_required_parameters(self) -> set[str]:
         """Extracts set of parameters required for messages.
@@ -318,14 +323,15 @@ class Prompt(BasePrompt):
         parameters = set()
 
         env = Environment(autoescape=True)
-
         for msg in self.messages:
             if isinstance(msg, Message):
-                parameters |= get_parameters_for_template(msg.content, env=env)
+                if not msg.static:
+                    parameters |= get_parameters_for_template(msg.content, env=env)
             elif isinstance(msg, VisionMessage):
                 for content in msg.content:
                     if isinstance(content, VisionMessageTextContent):
-                        parameters |= get_parameters_for_template(content.text, env=env)
+                        if not msg.static:
+                            parameters |= get_parameters_for_template(content.text, env=env)
                     elif isinstance(content, VisionMessageImageContent):
                         parameters |= get_parameters_for_template(content.image_url.url, env=env)
                     else:
@@ -348,7 +354,9 @@ class Prompt(BasePrompt):
         out: list[dict] = []
         for msg in self.messages:
             if isinstance(msg, Message):
-                out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
+                if not msg.static:
+                    msg = msg.format_message(**kwargs)
+                out.append(msg.model_dump(exclude={"metadata"}))
             elif isinstance(msg, VisionMessage):
                 out.append(msg.format_message(**kwargs).model_dump(exclude={"metadata"}))
             else:

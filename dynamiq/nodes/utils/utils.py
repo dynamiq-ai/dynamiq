@@ -1,4 +1,6 @@
-from typing import Literal, Any
+from typing import Any, ClassVar, Literal
+
+from pydantic import Field
 
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.operators import Pass
@@ -18,7 +20,19 @@ class Input(Pass):
 
     name: str | None = "Start"
     group: Literal[NodeGroup.UTILS] = NodeGroup.UTILS
-    schema: dict[str, Any] | None = None
+    json_schema: dict[str, Any] | None = Field(
+        default=None,
+        alias="schema",
+        description="""Determines input parameters of workflow.
+        Provide it in the properties field format. Example:
+        "properties": {
+            "query": {
+                "type": "Any"
+            }
+        }
+    """,
+    )
+    _json_schema_fields: ClassVar[list[str]] = ["json_schema"]
 
 
 class Output(Pass):
@@ -35,4 +49,16 @@ class Output(Pass):
 
     name: str | None = "End"
     group: Literal[NodeGroup.UTILS] = NodeGroup.UTILS
-    schema: dict[str, Any] | None = None
+    json_schema: dict[str, Any] | None = Field(
+        default=None,
+        alias="schema",
+        description="""Determines output parameters of workflow.
+        Provide it in the properties field format. Example:
+        "properties": {
+            "query": {
+                "type": "Any"
+            }
+        }
+    """,
+    )
+    _json_schema_fields: ClassVar[list[str]] = ["json_schema"]

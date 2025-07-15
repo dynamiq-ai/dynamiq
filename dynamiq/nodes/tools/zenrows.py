@@ -9,22 +9,24 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_ZENROWS = """## ZenRows Web Scraper Tool
-### Description
-A powerful web scraping tool that extracts content from any web page.
-### Capabilities
-- Extracts complete text from web pages
-### When to Use
-- To access specific web content not in your knowledge base or requiring up-to-date information.
-- To extract information from articles, documentation, or product pages.
-- When you need detailed content from a known URL rather than general search results.
-### Input Parameters
-- `url` (required): The complete URL of the web page to scrape (e.g., "https://www.example.com/article/12345").
-### Usage Examples
-{"url": "https://www.bbc.com/news/science-environment-12345678"}
-### Notes
-- Always provide the complete URL including the protocol (http:// or https://).
-"""
+DESCRIPTION_ZENROWS = """Scrapes web content from URLs using ZenRows with advanced anti-bot protection and JavaScript rendering. Handles complex websites with proxy rotation, CAPTCHA solving, and browser automation for reliable data extraction.
+
+Key Capabilities:
+- Bypass anti-bot protection and access blocked websites
+- JavaScript rendering for dynamic content and SPAs
+- Automatic proxy rotation and CAPTCHA solving
+- Convert HTML to clean Markdown format for easy processing
+
+Usage Strategy:
+Use for websites that block standard scrapers or require JavaScript execution.
+
+Parameter Guide:
+- url: Target website URL to scrape
+
+Examples:
+- Basic scraping: {"url": "https://example.com"}
+- E-commerce data: {"url": "https://shop.example.com/products"}
+- News articles: {"url": "https://news.example.com/article/123"}"""  # noqa: E501
 
 
 class ZenRowsInputSchema(BaseModel):
@@ -59,7 +61,7 @@ class ZenRowsTool(ConnectionNode):
         Args:
             input_data (dict[str, Any]): A dictionary containing 'input' key with the URL to scrape.
             config (RunnableConfig, optional): Configuration for the runnable, including callbacks.
-            **kwargs: Additional arguments passed to the execution context.
+            kwargs: Additional arguments passed to the execution context.
 
         Returns:
             dict[str, Any]: A dictionary containing the URL and the scraped content.
@@ -92,10 +94,7 @@ class ZenRowsTool(ConnectionNode):
             )
 
         if self.is_optimized_for_agents:
-            result = (
-                f"<Source URL>\n{input_data.url}\n<\\Source URL>"
-                f"\n<Scraped result>\n{scrape_result}\n<\\Scraped result>"
-            )
+            result = f"## Source URL\n{input_data.url}\n\n## Scraped Result\n\n{scrape_result}\n"
         else:
             result = {"url": input_data.url, "content": scrape_result}
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
