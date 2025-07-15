@@ -12,20 +12,27 @@ from dynamiq.types import Document
 from dynamiq.utils import JsonWorkflowEncoder
 
 
-def test_python_node_with_input():
+@pytest.mark.parametrize(
+    ("python_code", "use_multiple_params"),
+    [
+        (
+            "def run(input_data: dict):\n    name = input_data.get('name', 'World')\n    "
+            "age = input_data.get('age', 0)\n    birth_year = 2024 - age\n    return {\n        "
+            "'greeting': f'Hello, {name}!',\n        'message': f'You were born around {birth_year}.',\n"
+            "        'age_in_months': age * 12\n    }",
+            False,
+        ),
+        (
+            "def run(name: str, age: int):\n    birth_year = 2024 - age\n    return {\n        "
+            "'greeting': f'Hello, {name}!',\n        'message': f'You were born around {birth_year}.',\n        "
+            "'age_in_months': age * 12\n    }",
+            True,
+        ),
+    ],
+)
+def test_python_node_with_input(python_code, use_multiple_params):
     """Test Python node with specific input data for name and age calculation."""
-    python_code = """
-def run(input_data):
-    name = input_data.get('name', 'World')
-    age = input_data.get('age', 0)
-    birth_year = 2024 - age
-    return {
-        'greeting': f'Hello, {name}!',
-        'message': f'You were born around {birth_year}.',
-        'age_in_months': age * 12
-    }
-"""
-    python_node = Python(code=python_code)
+    python_node = Python(code=python_code, use_multiple_params=use_multiple_params)
     input_data = {"name": "Alice", "age": 30}
 
     result = python_node.run(input_data, None)
@@ -40,7 +47,7 @@ def run(input_data):
 def test_python_node_with_default_values():
     """Test Python node with missing input data to verify default values."""
     python_code = """
-def run(input_data):
+def run(input_data: dict):
     name = input_data.get('name', 'World')
     age = input_data.get('age', 0)
     birth_year = 2024 - age
@@ -82,23 +89,28 @@ def run(input_data):
     assert 1 <= result.output["content"]["pseudo_random_number"] <= 100
 
 
-def test_python_node_with_math_import():
+@pytest.mark.parametrize(
+    ("python_code", "use_multiple_params"),
+    [
+        (
+            "import math\ndef run(input_data):\n    radius = input_data.get('radius', 1)\n    "
+            "area = math.pi * radius ** 2\n    circumference = 2 * math.pi * radius\n    return {\n        "
+            "'radius': radius,\n        'area': round(area, 2),\n        'circumference': round(circumference, 2),\n"
+            "        'pi_used': math.pi\n    }",
+            False,
+        ),
+        (
+            "import math\ndef run(radius: int):\n    area = math.pi * radius ** 2\n    "
+            "circumference = 2 * math.pi * radius\n    return {\n        'radius': radius,\n        "
+            "'area': round(area, 2),\n        'circumference': round(circumference, 2),\n        "
+            "'pi_used': math.pi\n    }",
+            True,
+        ),
+    ],
+)
+def test_python_node_with_math_import(python_code, use_multiple_params):
     """Test Python node importing the math module for circle calculations."""
-    python_code = """
-import math
-
-def run(input_data):
-    radius = input_data.get('radius', 1)
-    area = math.pi * radius ** 2
-    circumference = 2 * math.pi * radius
-    return {
-        'radius': radius,
-        'area': round(area, 2),
-        'circumference': round(circumference, 2),
-        'pi_used': math.pi
-    }
-"""
-    python_node = Python(code=python_code)
+    python_node = Python(code=python_code, use_multiple_params=use_multiple_params)
     input_data = {"radius": 5}
 
     result = python_node.run(input_data, None)
@@ -110,22 +122,27 @@ def run(input_data):
     assert result.input == input_data
 
 
-def test_python_node_with_random_import():
+@pytest.mark.parametrize(
+    ("python_code", "use_multiple_params"),
+    [
+        (
+            "import random\ndef run(min: int, max: int):\n    random_number = random.randint(min, max)\n    return {\n"
+            "        'random_number': random_number,\n        'range': f'{min} to {max}',\n        "
+            "'message': f'The generated random number is {random_number}.'\n    }",
+            True,
+        ),
+        (
+            "import random\ndef run(input_data):\n    min_value = input_data.get('min', 1)\n    "
+            "max_value = input_data.get('max', 100)\n    random_number = random.randint(min_value, max_value)\n    "
+            "return {\n        'random_number': random_number,\n        'range': f'{min_value} to {max_value}',\n"
+            "        'message': f'The generated random number is {random_number}.'\n    }",
+            False,
+        ),
+    ],
+)
+def test_python_node_with_random_import(python_code, use_multiple_params):
     """Test Python node importing the random module."""
-    python_code = """
-import random
-
-def run(input_data):
-    min_value = input_data.get('min', 1)
-    max_value = input_data.get('max', 100)
-    random_number = random.randint(min_value, max_value)
-    return {
-        'random_number': random_number,
-        'range': f'{min_value} to {max_value}',
-        'message': f'The generated random number is {random_number}.'
-    }
-"""
-    python_node = Python(code=python_code)
+    python_node = Python(code=python_code, use_multiple_params=use_multiple_params)
     input_data = {"min": 1, "max": 10}
 
     result = python_node.run(input_data, None)
@@ -138,19 +155,26 @@ def run(input_data):
     assert result.input == input_data
 
 
-def test_python_node_with_dynamiq_import():
+@pytest.mark.parametrize(
+    ("python_code", "use_multiple_params"),
+    [
+        (
+            "def run(content: str,metadata: dict):\n    from dynamiq.types import Document\n    "
+            "document = Document(content=content, metadata=metadata)\n    "
+            "return {\n        'documents': [document]\n    }",
+            True,
+        ),
+        (
+            "def run(input_data):\n    from dynamiq.types import Document\n    content = input_data.get('content')\n"
+            "    metadata = input_data.get('metadata', {})\n    document = Document(content=content, metadata=metadata)"
+            "\n    return {\n        'documents': [document]\n    }",
+            False,
+        ),
+    ],
+)
+def test_python_node_with_dynamiq_import(python_code, use_multiple_params):
     """Test Python node importing dynamiq to create Document objects."""
-    python_code = """
-def run(input_data):
-    from dynamiq.types import Document
-    content = input_data.get('content')
-    metadata = input_data.get('metadata', {})
-    document = Document(content=content, metadata=metadata)
-    return {
-        'documents': [document]
-    }
-"""
-    python_node = Python(code=python_code)
+    python_node = Python(code=python_code, use_multiple_params=use_multiple_params)
     input_data = {
         "content": "Document content",
         "metadata": {
