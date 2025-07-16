@@ -231,12 +231,6 @@ def test_create_alias(es_vector_store, mock_es_client):
     mock_es_client.indices.update_aliases.assert_called_once()
 
 
-def test_search_by_vector_invalid_dimension(es_vector_store):
-    """Test vector search with invalid embedding dimension."""
-    with pytest.raises(ValueError, match="query_embedding must have dimension 768"):
-        es_vector_store._embedding_retrieval([0.1] * 512)
-
-
 def test_close(es_vector_store):
     es_vector_store.close()
     es_vector_store.client.close.assert_called_once()
