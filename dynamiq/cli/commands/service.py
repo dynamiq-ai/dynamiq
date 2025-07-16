@@ -187,7 +187,7 @@ def get_service_status(*, api: ApiClient, settings: Settings, service_id: str):
 
 @service.command("update")
 @click.option("--id", "service_id", prompt=True)
-@click.option("--access", required=False)
+@click.option("--access", required=False, type=click.Choice(["private", "public"], case_sensitive=True))
 @click.option("--description", required=False)
 @with_api_and_settings
 def update_service(*, api: ApiClient, settings: Settings, service_id: str, access: str | None, description: str | None):
