@@ -91,25 +91,9 @@ class HumanFeedbackTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Human Feedback Tool"
-    description: str = """Collects human feedback during workflow execution for validation and decision-making.
-
-Key Capabilities:
-- Workflow pause for human input collection
-- Console and streaming interface support
-- Customizable message templates with parameter substitution
-- Integration with workflow orchestrators and streaming systems
-
-Usage Strategy:
-- Use for content validation before publication
-- Implement decision confirmation for high-stakes operations
-- Create quality assurance checkpoints in automated workflows
-- Collect user preferences and customization inputs
-
-Parameter Guide:
-- msg_template: Jinja2 template for message formatting
-
-Examples:
-- {"msg_template": "Please review this email draft before sending"}"""
+    description: str = """Collects human input.
+    Use for asking clarification questions, getting user confirmation,
+    collecting missing information, or validating content."""
     input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
     msg_template: str = "{{input}}"
@@ -236,27 +220,11 @@ class MessageSenderTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Message Sender Tool"
-    description: str = """Sends messages to users through console or streaming output methods.
-
-Key Capabilities:
-- Message delivery via console or streaming interfaces
-- Customizable message templates with parameter substitution
-- Real-time status updates and notifications
-- Integration with workflow callback systems
-
-Usage Strategy:
-- Send status updates during long-running processes
-- Provide user notifications for completed operations
-- Display error messages with context and details
-- Broadcast information to connected clients
-
-Parameter Guide:
-- msg_template: Jinja2 template for message formatting
-- Dynamic parameters: Content substituted into template
-
-Examples:
-- {"msg_template": "Process completed successfully"}
-"""
+    description: str = """Sends messages to users.
+    Delivers notifications, status updates,
+    and information to users during workflow execution.
+    Use for progress updates, error notifications, or general user communication.
+    """
     msg_template: str = "{{input}}"
     output_method: FeedbackMethod | OutputMethodCallable = FeedbackMethod.CONSOLE
     input_schema: ClassVar[type[MessageSenderInputSchema]] = MessageSenderInputSchema
