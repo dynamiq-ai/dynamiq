@@ -93,9 +93,7 @@ class HumanFeedbackTool(Node):
     name: str = "Human Feedback Tool"
     description: str = """Collects human input.
     Use for asking clarification questions, getting user confirmation,
-    collecting missing information, or validating content.
-    Examples:
-    - {"input": "Which option do you prefer: A, B, or C?"}"""
+    collecting missing information, or validating content."""
     input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
     msg_template: str = "{{input}}"
@@ -226,8 +224,6 @@ class MessageSenderTool(Node):
     Delivers notifications, status updates,
     and information to users during workflow execution.
     Use for progress updates, error notifications, or general user communication.
-    Examples:
-    - {"input": "Processing your request, please wait..."}
     """
     msg_template: str = "{{input}}"
     output_method: FeedbackMethod | OutputMethodCallable = FeedbackMethod.CONSOLE
