@@ -303,9 +303,6 @@ class ElasticsearchVectorStore(BaseVectorStore):
         if not query_embedding:
             raise ValueError("query_embedding must not be empty")
 
-        if len(query_embedding) != self.dimension:
-            raise ValueError(f"query_embedding must have dimension {self.dimension}")
-
         embedding_key = embedding_key or self.embedding_key
         # Build the query
         query = {
