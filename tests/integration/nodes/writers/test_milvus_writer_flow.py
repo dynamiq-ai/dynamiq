@@ -6,6 +6,7 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Milvus as MilvusConnection
 from dynamiq.connections import MilvusDeploymentType
 from dynamiq.flows import Flow
+from dynamiq.nodes.writers.base import WriterInputSchema
 from dynamiq.nodes.writers.milvus import MilvusDocumentWriter
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.vector.milvus.milvus import MilvusVectorStore
@@ -77,7 +78,7 @@ def test_milvus_write_workflow(
 
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
-        input=input_data,
+        input=dict(WriterInputSchema(**input_data)),
         output={"upserted_count": len(mock_documents)},
     ).to_dict()
     expected_output = {node_id: expected_result}
