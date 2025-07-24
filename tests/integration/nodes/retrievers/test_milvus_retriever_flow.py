@@ -6,6 +6,7 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Milvus as MilvusConnection
 from dynamiq.connections import MilvusDeploymentType
 from dynamiq.flows import Flow
+from dynamiq.nodes.retrievers.base import RetrieverInputSchema
 from dynamiq.nodes.retrievers.milvus import MilvusDocumentRetriever
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.vector.milvus.milvus import MilvusVectorStore
@@ -89,7 +90,7 @@ def test_milvus_retrieve_workflow(
 
     expected_result = RunnableResult(
         status=RunnableStatus.SUCCESS,
-        input=input_data,
+        input=dict(RetrieverInputSchema(**input_data)),
         output={"documents": [doc.to_dict() for doc in mock_documents]},
     ).to_dict()
     expected_output = {node_id: expected_result}
