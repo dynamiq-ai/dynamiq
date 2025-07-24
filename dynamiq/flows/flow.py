@@ -197,6 +197,7 @@ class Flow(BaseFlow):
             for node in self.nodes
         }
         self._ts = self.init_node_topological_sorter(nodes=self.nodes)
+        self._dry_run_nodes = []
 
     def _cleanup_dry_run(self, config: RunnableConfig = None):
         """
@@ -222,6 +223,8 @@ class Flow(BaseFlow):
                     logger.debug(f"Cleaned up dry run resources for node {node.id}")
                 except Exception as e:
                     logger.error(f"Failed to clean up dry run resources for node {node.id}: {str(e)}")
+
+        self._dry_run_nodes = []
 
     def run_sync(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
         """
@@ -264,7 +267,11 @@ class Flow(BaseFlow):
                     self._ts.done(*results.keys())
 
                     for node in ready_nodes:
-                        if isinstance(node.node, BaseVectorStore) or isinstance(node.node, Writer):
+                        if (
+                            isinstance(node.node, BaseVectorStore)
+                            or isinstance(node.node, Writer)
+                            and node.node not in self._dry_run_nodes
+                        ):
                             self._dry_run_nodes.append(node.node)
 
                 run_executor.shutdown()
@@ -336,7 +343,11 @@ class Flow(BaseFlow):
                         self._ts.done(*results.keys())
 
                         for node in nodes_to_run:
-                            if isinstance(node.node, BaseVectorStore) or isinstance(node.node, Writer):
+                            if (
+                                isinstance(node.node, BaseVectorStore)
+                                or isinstance(node.node, Writer)
+                                and node.node not in self._dry_run_nodes
+                            ):
                                 self._dry_run_nodes.append(node.node)
                     else:
                         # If no nodes are ready yet but the sorter is still active,
