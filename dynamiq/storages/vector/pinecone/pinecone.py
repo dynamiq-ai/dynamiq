@@ -7,6 +7,7 @@ from pydantic import Field
 
 from dynamiq.connections import Pinecone
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
 from dynamiq.storages.vector.pinecone.filters import _normalize_filters
 from dynamiq.types import Document
 from dynamiq.utils.env import get_env_var
@@ -41,7 +42,7 @@ class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVecto
     pods: int = 1
 
 
-class PineconeVectorStore(BaseVectorStore):
+class PineconeVectorStore(BaseVectorStore, DryRunMixin):
     """Vector store using Pinecone."""
 
     def __init__(
@@ -61,6 +62,7 @@ class PineconeVectorStore(BaseVectorStore):
         pod_type: str | None = None,
         pods: int = 1,
         content_key: str = "content",
+        dry_run_config: DryRunConfig | None = None,
         **index_creation_kwargs,
     ):
         """
@@ -75,8 +77,11 @@ class PineconeVectorStore(BaseVectorStore):
             dimension (int): Number of dimensions for vectors. Defaults to 1536.
             metric (str): Metric for calculating vector similarity. Defaults to 'cosine'.
             content_key (Optional[str]): The field used to store content in the storage. Defaults to 'content'.
+            dry_run_config (Optional[DryRunConfig]): Configuration for dry run mode. Defaults to None.
             **index_creation_kwargs: Additional arguments for index creation.
         """
+        super().__init__(dry_run_config=dry_run_config)
+
         self.client = client
         if self.client is None:
             if connection is None:
@@ -169,6 +174,7 @@ class PineconeVectorStore(BaseVectorStore):
                     metric=self.metric,
                     **self.index_creation_kwargs,
                 )
+                self._track_collection(self.index_name)
                 return self.client.Index(name=self.index_name)
             else:
                 raise ValueError(
@@ -198,10 +204,15 @@ class PineconeVectorStore(BaseVectorStore):
             )
         return actual_dimension or dimension
 
-    def delete_index(self):
+    def delete_index(self, index_name: str | None = None):
         """Delete the entire index."""
+        index_to_delete = index_name or self.index_name
         self._index.delete(delete_all=True, namespace=self.namespace)
-        self.client.delete_index(self.index_name)
+        self.client.delete_index(index_to_delete)
+
+    def delete_collection(self, collection_name: str | None = None):
+        """Delete the entire collection."""
+        self.delete_index(index_name=collection_name)
 
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """
@@ -314,6 +325,8 @@ class PineconeVectorStore(BaseVectorStore):
         if len(documents) > 0 and not isinstance(documents[0], Document):
             msg = "param 'documents' must contain a list of objects of type Document"
             raise ValueError(msg)
+
+        self._track_documents([doc.id for doc in documents])
 
         documents_for_pinecone = self._convert_documents_to_pinecone_format(
             documents, content_key=content_key or self.content_key

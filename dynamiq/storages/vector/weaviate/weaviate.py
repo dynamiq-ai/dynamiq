@@ -10,6 +10,7 @@ from weaviate.util import generate_uuid5
 
 from dynamiq.connections import Weaviate
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.types import Document
@@ -36,7 +37,7 @@ class WeaviateRetrieverVectorStoreParams(BaseVectorStoreParams):
     tenant_name: str | None = None
 
 
-class WeaviateVectorStore(BaseVectorStore):
+class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
     """
     A Document Store for Weaviate.
 
@@ -108,6 +109,7 @@ class WeaviateVectorStore(BaseVectorStore):
         content_key: str = "content",
         tenant_name: str | None = None,
         alpha: float = 0.5,
+        dry_run_config: DryRunConfig | None = None,
     ):
         """
         Initialize a new instance of WeaviateDocumentStore and connect to the
@@ -125,7 +127,10 @@ class WeaviateVectorStore(BaseVectorStore):
                 If provided, multi-tenancy will be enabled for the collection.
             alpha (float): The alpha value used for hybrid retrieval operations. Controls
                 the balance between keyword and vector search. Defaults to 0.5.
+            dry_run_config (Optional[DryRunConfig]): Configuration for dry run mode.
         """
+        super().__init__(dry_run_config=dry_run_config)
+
         # Validate and normalize the index name
         index_name = self._fix_and_validate_index_name(index_name)
         collection_name = index_name
@@ -146,6 +151,7 @@ class WeaviateVectorStore(BaseVectorStore):
         if not self.client.collections.exists(collection_name):
             if create_if_not_exist:
                 self._create_collection(collection_name, tenant_name)
+                self._track_collection(collection_name)
             else:
                 raise ValueError(
                     f"Collection '{collection_name}' does not exist. Set 'create_if_not_exist' to True to create it."
@@ -202,6 +208,21 @@ class WeaviateVectorStore(BaseVectorStore):
             logger.warning(f"Collection '{collection_name}' already exists. Skipping creation.")
         except Exception as e:
             logger.error(f"Failed to create collection '{collection_name}': {e}")
+            raise
+
+    def delete_collection(self, collection_name: str | None = None):
+        """
+        Delete a Weaviate collection.
+
+        Args:
+            collection_name: Name of the collection to delete
+        """
+        try:
+            collection_to_delete = collection_name or self.index_name
+            self.client.collections.delete(collection_name=collection_to_delete)
+            logger.info(f"Deleted collection '{collection_to_delete}'.")
+        except Exception as e:
+            logger.error(f"Failed to delete collection '{collection_to_delete}': {e}")
             raise
 
     def ensure_properties_exist(self, properties_to_ensure: list[str]):
@@ -746,6 +767,8 @@ class WeaviateVectorStore(BaseVectorStore):
         Returns:
             int: The number of documents written.
         """
+        self._track_documents([doc.id for doc in documents])
+
         if policy in [DuplicatePolicy.NONE, DuplicatePolicy.OVERWRITE]:
             return self._batch_write(documents, content_key=content_key)
 

@@ -13,8 +13,10 @@ from dynamiq.executors.base import BaseExecutor
 from dynamiq.executors.pool import ThreadExecutor
 from dynamiq.flows.base import BaseFlow
 from dynamiq.nodes.node import Node, NodeReadyToRun
+from dynamiq.nodes.writers.base import Writer
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
+from dynamiq.storages.vector.base import BaseVectorStore
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.logger import logger
 
@@ -46,6 +48,7 @@ class Flow(BaseFlow):
         super().__init__(**kwargs)
         self._node_by_id = {node.id: node for node in self.nodes}
         self._ts = None
+        self._dry_run_nodes = []
 
         self._init_components()
         self.reset_run_state()
@@ -67,6 +70,7 @@ class Flow(BaseFlow):
         """
         data = super().to_dict(include_secure_params=include_secure_params, **kwargs)
         data["nodes"] = [node.to_dict(include_secure_params=include_secure_params, **kwargs) for node in self.nodes]
+        data["dry_run_nodes"] = [node.id for node in self._dry_run_nodes]
         return data
 
     @field_validator("nodes")
@@ -194,6 +198,31 @@ class Flow(BaseFlow):
         }
         self._ts = self.init_node_topological_sorter(nodes=self.nodes)
 
+    def _cleanup_dry_run(self, config: RunnableConfig = None):
+        """
+        Clean up resources created during dry run.
+
+        Args:
+            config (RunnableConfig, optional): Configuration for the run.
+        """
+        if not config or not config.dry_run_config:
+            return
+
+        logger.info("Starting dry run cleanup...")
+        for node in self._dry_run_nodes:
+            if isinstance(node, BaseVectorStore):
+                try:
+                    node.dry_run_cleanup(config.dry_run_config)
+                    logger.debug(f"Cleaned up dry run resources for node {node.id}")
+                except Exception as e:
+                    logger.error(f"Failed to clean up dry run resources for node {node.id}: {str(e)}")
+            elif isinstance(node, Writer):
+                try:
+                    node.vector_store.dry_run_cleanup(config.dry_run_config)
+                    logger.debug(f"Cleaned up dry run resources for node {node.id}")
+                except Exception as e:
+                    logger.error(f"Failed to clean up dry run resources for node {node.id}: {str(e)}")
+
     def run_sync(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
         """
         Run the flow synchronously with the given input data and configuration.
@@ -234,6 +263,10 @@ class Flow(BaseFlow):
                     self._results.update(results)
                     self._ts.done(*results.keys())
 
+                    for node in ready_nodes:
+                        if isinstance(node.node, BaseVectorStore) or isinstance(node.node, Writer):
+                            self._dry_run_nodes.append(node.node)
+
                 run_executor.shutdown()
 
             output = self._get_output()
@@ -252,6 +285,8 @@ class Flow(BaseFlow):
                 input=input_data,
                 error=RunnableResultError.from_exception(e),
             )
+        finally:
+            self._cleanup_dry_run(config)
 
     async def run_async(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
         """
@@ -299,6 +334,10 @@ class Flow(BaseFlow):
 
                         self._results.update(results)
                         self._ts.done(*results.keys())
+
+                        for node in nodes_to_run:
+                            if isinstance(node.node, BaseVectorStore) or isinstance(node.node, Writer):
+                                self._dry_run_nodes.append(node.node)
                     else:
                         # If no nodes are ready yet but the sorter is still active,
                         # yield control to allow other async operations to progress
@@ -316,6 +355,8 @@ class Flow(BaseFlow):
                 input=input_data,
                 error=RunnableResultError.from_exception(e),
             )
+        finally:
+            self._cleanup_dry_run(config)
 
     def get_dependant_nodes(
         self, nodes_types_to_skip: set[str] | None = None
