@@ -1309,13 +1309,39 @@ class ReActAgent(Agent):
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
                     if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                        if "tool" in locals():
+                            source_name = tool.name
+                            tool_name = tool.name
+                        elif isinstance(action, list):
+                            tool_names = []
+                            for tool_data in action:
+                                if isinstance(tool_data, dict) and "name" in tool_data:
+                                    tool_names.append(tool_data["name"])
+                                else:
+                                    tool_names.append("unknown_tool")
+
+                            if len(tool_names) == 1:
+                                source_name = tool_names[0]
+                                tool_name = tool_names[0]
+                            else:
+                                unique_tools = list(dict.fromkeys(tool_names))
+                                if len(unique_tools) == 1:
+                                    source_name = f"{unique_tools[0]} (parallel)"
+                                    tool_name = f"{unique_tools[0]} (parallel)"
+                                else:
+                                    source_name = " + ".join(unique_tools)
+                                    tool_name = " + ".join(unique_tools)
+                        else:
+                            source_name = str(action)
+                            tool_name = str(action)
+
                         self.stream_content(
                             content={
-                                "name": tool.name if "tool" in locals() else action,
+                                "name": tool_name,
                                 "input": action_input,
                                 "result": tool_result,
                             },
-                            source=tool.name if "tool" in locals() else action,
+                            source=source_name,
                             step="tool",
                             config=config,
                             by_tokens=False,
