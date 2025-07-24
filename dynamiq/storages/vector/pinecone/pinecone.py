@@ -211,8 +211,18 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
         self.client.delete_index(index_to_delete)
 
     def delete_collection(self, collection_name: str | None = None):
-        """Delete the entire collection."""
-        self.delete_index(index_name=collection_name)
+        """
+        Delete a Pinecone collection (index).
+
+        Args:
+            collection_name (str | None): Name of the collection to delete. Defaults to None.
+        """
+        try:
+            self.delete_index(index_name=collection_name)
+            logger.info(f"Deleted collection '{collection_name}'.")
+        except Exception as e:
+            logger.error(f"Failed to delete index '{collection_name}': {e}")
+            raise
 
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """

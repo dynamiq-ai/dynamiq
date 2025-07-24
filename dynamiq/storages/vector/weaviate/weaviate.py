@@ -215,7 +215,7 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
         Delete a Weaviate collection.
 
         Args:
-            collection_name: Name of the collection to delete
+            collection_name (str | None): Name of the collection to delete. Defaults to None.
         """
         try:
             collection_to_delete = collection_name or self.index_name
