@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
-from typing import Any, Callable, ClassVar, Self, Union
+from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
 from jinja2 import Template
@@ -236,7 +236,7 @@ class Node(BaseModel, Runnable, ABC):
     _output_references: NodeOutputReferences = PrivateAttr()
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    input_schema: ClassVar[type[BaseModel] | None] = None
+    input_schema: type[BaseModel] | None = None
     callbacks: list[NodeCallbackHandler] = []
     _json_schema_fields: ClassVar[list[str]] = []
 
@@ -696,7 +696,7 @@ class Node(BaseModel, Runnable, ABC):
         Args:
             input_data (Any): Input data for the node.
             config (RunnableConfig, optional): Configuration for the run. Defaults to None.
-            depends_result (dict, optional): Results of dependent nodes. Defaults to None.
+            depends_result (dict, optional): Results of already executed nodes. Defaults to None.
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -738,17 +738,17 @@ class Node(BaseModel, Runnable, ABC):
                     error=RunnableResultError.from_exception(e, recoverable=e.recoverable),
                 )
 
-            transformed_input = self.transform_input(input_data=input_data, depends_result=depends_result, **kwargs)
-            self.run_on_node_start(config.callbacks, transformed_input, **merged_kwargs)
+            transformed_input = self.validate_input_schema(
+                self.transform_input(input_data=input_data, depends_result=depends_result, **kwargs), **kwargs
+            )
+            self.run_on_node_start(config.callbacks, dict(transformed_input), **merged_kwargs)
             cache = cache_wf_entity(
                 entity_id=self.id,
                 cache_enabled=self.caching.enabled,
                 cache_config=config.cache,
             )
 
-            output, from_cache = cache(self.execute_with_retry)(
-                self.validate_input_schema(transformed_input, **kwargs), config, **merged_kwargs
-            )
+            output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)
 
             merged_kwargs["is_output_from_cache"] = from_cache
             transformed_output = self.transform_output(output)
@@ -759,7 +759,9 @@ class Node(BaseModel, Runnable, ABC):
                 f"Node {self.name} - {self.id}: execution succeeded in "
                 f"{format_duration(time_start, datetime.now())}."
             )
-            return RunnableResult(status=RunnableStatus.SUCCESS, input=transformed_input, output=transformed_output)
+            return RunnableResult(
+                status=RunnableStatus.SUCCESS, input=dict(transformed_input), output=transformed_output
+            )
         except Exception as e:
             self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
             logger.error(
@@ -770,7 +772,7 @@ class Node(BaseModel, Runnable, ABC):
             recoverable = isinstance(e, RecoverableAgentException)
             result = RunnableResult(
                 status=RunnableStatus.FAILURE,
-                input=input_data,
+                input=transformed_input,
                 output=None,
                 error=RunnableResultError.from_exception(e, recoverable=recoverable),
             )
@@ -1130,7 +1132,7 @@ class Node(BaseModel, Runnable, ABC):
         """
         pass
 
-    def depends_on(self, nodes: Union["Node", list["Node"]], condition: ChoiceCondition | None = None) -> Self:
+    def depends_on(self, nodes: Union["Node", list["Node"]], condition: ChoiceCondition | None = None) -> "Node":
         """
         Add dependencies for this node. Accepts either a single node or a list of nodes.
 

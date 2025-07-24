@@ -11,41 +11,30 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_SERP = """## Scale SERP Search Tool
-### Overview
-A web search tool that retrieves current information from the internet using Scale SERP API.
-Access search results including web pages, news, images, and videos with organized titles, links, and descriptive snippets.
-### When to Use
-- Find current information beyond your knowledge base.
-- Verify facts or recent developments.
-- Research specific topics, people, companies, or events.
-- Locate authoritative sources.
-- Discover relevant visual content.
-### Parameters
-- `query`: Search term (e.g., "latest climate change report")
-- `url`: Specific website to search (e.g., "https://www.example.com")
-- `limit`: Number of results (default: 10, max: 1000)
-- `search_type`: Search category:
-  - `web`: Standard results (default)
-  - `news`: Recent articles
-  - `images`: Image results
-  - `videos`: Video results
-### Examples
-1. Basic web search:
-   {
-     "query": "renewable energy breakthroughs 2024",
-     "limit": 5
-   }
-2. News search:
-   {
-     "query": "latest economic policy updates",
-     "search_type": "news",
-     "limit": 3
-   }
-### Notes
-- Use specific, concise search terms for best results.
-- News results reflect most recent publications.
-"""  # noqa E501
+DESCRIPTION_SERP = """Performs web search using Scale SERP with support for web, news, images, and video results.
+
+Key Capabilities:
+- Multi-format search: web, news, images, videos
+- Geographic targeting with location and country filtering
+- Language preferences and safe search filtering
+- Customizable result counts (1-100) and time-based filtering
+
+Usage Strategy:
+- Web: General research, documentation, comprehensive results
+- News: Current events, recent developments with time_range
+- Images/Videos: Visual content for presentations, analysis
+- Use location for local results, num parameter for analysis depth
+
+Parameter Guide:
+- search_type: web/news/images/videos for content type
+- location: Geographic targeting ("New York", "London")
+- num: Result count based on analysis needs (1-100)
+- time_range: Recent results (day, week, month, year)
+
+Examples:
+- {"query": "coffee shops", "search_type": "web", "location": "New York"}
+- {"query": "tech news", "search_type": "news", "time_range": "week"}
+- {"query": "data visualization", "search_type": "images", "num": 30}"""
 
 
 class SearchType(str, enum.Enum):
@@ -72,6 +61,12 @@ class ScaleSerpInputSchema(BaseModel):
     search_type: SearchType = Field(
         default=SearchType.WEB, description="Type of search to perform (web, news, images, videos)"
     )
+    output: str | None = Field(
+        default=None, description="Output format for the results (json, html, csv). Defaults to json if not specified."
+    )
+    include_html: bool = Field(
+        default=False, description="Whether to include HTML content in the results. Defaults to False."
+    )
 
     @model_validator(mode="after")
     def validate_query_url(self):
@@ -97,6 +92,9 @@ class ScaleSerpTool(ConnectionNode):
         url (str): The default URL to search.
         limit (int): The default number of search results to return.
         search_type (SearchType): The type of search to perform.
+        output (str | None): The output format for the results (json, html, csv).
+        include_html (bool): Whether to include HTML content in the results.
+
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -108,7 +106,12 @@ class ScaleSerpTool(ConnectionNode):
     url: str = Field(default="", description="The default URL to search")
     limit: int = Field(default=10, ge=1, le=1000, description="The default number of search results to return")
     search_type: SearchType = Field(default=SearchType.WEB, description="The type of search to perform")
-
+    output: str | None = Field(
+        default=None, description="Output format for the results (json, html, csv). Defaults to json if not specified."
+    )
+    include_html: bool = Field(
+        default=False, description="Whether to include HTML content in the results. Defaults to False."
+    )
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ScaleSerpInputSchema]] = ScaleSerpInputSchema
 
@@ -131,26 +134,6 @@ class ScaleSerpTool(ConnectionNode):
 
         return "\n".join(formatted_results).strip()
 
-    def get_params(
-        self, query: str | None = None, url: str | None = None, search_type: SearchType | None = None, **kwargs
-    ) -> dict[str, Any]:
-        """
-        Prepare the parameters for the API request.
-        """
-        params = {"api_key": self.connection.api_key, **kwargs}
-
-        current_search_type = search_type or self.search_type
-
-        if current_search_type != SearchType.WEB:
-            params["search_type"] = current_search_type
-
-        if query:
-            params["q"] = query
-        elif url:
-            params["url"] = url
-
-        return {k: v for k, v in params.items() if v is not None}
-
     def execute(
         self, input_data: ScaleSerpInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -166,6 +149,8 @@ class ScaleSerpTool(ConnectionNode):
         url = input_data.url or self.url
         limit = input_data.limit or self.limit
         search_type = input_data.search_type or self.search_type
+        output_format = input_data.output or self.output
+        include_html = input_data.include_html if input_data.include_html is not None else self.include_html
 
         if not query and not url:
             raise ToolExecutionException(
@@ -176,7 +161,14 @@ class ScaleSerpTool(ConnectionNode):
             response = self.client.request(
                 method=self.connection.method,
                 url=urljoin(self.connection.url, "/search"),
-                params=self.get_params(query=query, url=url, num=limit, search_type=search_type),
+                params=self.get_params(
+                    query=query,
+                    url=url,
+                    num=limit,
+                    search_type=search_type,
+                    output=output_format,
+                    include_html=include_html,
+                ),
             )
             response.raise_for_status()
             search_result = response.json()
@@ -212,3 +204,35 @@ class ScaleSerpTool(ConnectionNode):
                 "raw_response": search_result,
             }
         }
+
+    def get_params(
+        self,
+        query: str | None = None,
+        url: str | None = None,
+        search_type: SearchType | None = None,
+        output: str | None = None,
+        include_html: bool | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
+        """
+        Prepare the parameters for the API request.
+        """
+        params = {"api_key": self.connection.api_key, **kwargs}
+
+        current_search_type = search_type or self.search_type
+
+        if current_search_type != SearchType.WEB:
+            params["search_type"] = current_search_type
+
+        if query:
+            params["q"] = query
+        elif url:
+            params["url"] = url
+
+        if output:
+            params["output"] = output
+
+        if include_html is not None:
+            params["include_html"] = include_html
+
+        return {k: v for k, v in params.items() if v is not None}

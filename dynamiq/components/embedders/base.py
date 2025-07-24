@@ -4,6 +4,7 @@ from pydantic import BaseModel, PrivateAttr
 
 from dynamiq.connections import BaseConnection
 from dynamiq.types import Document
+from dynamiq.utils import TruncationMethod, truncate_text_for_embedding
 from dynamiq.utils.logger import logger
 
 
@@ -43,6 +44,13 @@ class BaseEmbedder(BaseModel):
             "search_document", "search_query", "classification" and "clustering".
         dimensions(int):he number of dimensions the resulting output embeddings should have.
             Only supported in OpenAI/Azure text-embedding-3 and later models.
+        truncation_enabled(bool): Whether to enable automatic text truncation for long inputs that exceed
+            the embedding model's token limits. Defaults to True.
+        max_input_tokens(int): Maximum number of tokens allowed for input text. If text exceeds this limit
+            and truncation_enabled is True, the text will be truncated. Defaults to 8192.
+        truncation_method(TruncationMethod): Method to use for truncation when text exceeds max_input_tokens.
+            Options: TruncationMethod.START, TruncationMethod.END, TruncationMethod.MIDDLE.
+            Defaults to TruncationMethod.MIDDLE.
 
     """
 
@@ -101,6 +109,9 @@ class BaseEmbedder(BaseModel):
     truncate: str | None = None
     input_type: str | None = None
     dimensions: int | None = None
+    truncation_enabled: bool = True
+    max_input_tokens: int = 8192
+    truncation_method: TruncationMethod = TruncationMethod.MIDDLE
     client: Any | None = None
 
     _embedding: Callable = PrivateAttr()
@@ -118,6 +129,23 @@ class BaseEmbedder(BaseModel):
         if self.client:
             params = {"client": self.client}
         return params
+
+    def _apply_text_truncation(self, text: str) -> str:
+        """
+        Apply text truncation if enabled and text exceeds max_input_tokens.
+
+        Args:
+            text: The text to potentially truncate
+
+        Returns:
+            Original or truncated text
+        """
+        if not self.truncation_enabled or not text:
+            return text
+
+        return truncate_text_for_embedding(
+            text=text, max_tokens=self.max_input_tokens, truncation_method=self.truncation_method
+        )
 
     def embed_text(self, text: str) -> dict:
         """
@@ -144,6 +172,7 @@ class BaseEmbedder(BaseModel):
 
         text_to_embed = self.prefix + text + self.suffix
         text_to_embed = text_to_embed.replace("\n", " ")
+        text_to_embed = self._apply_text_truncation(text_to_embed)
 
         response = self._embedding(model=self.model, input=[text_to_embed], **self.embed_params)
 
@@ -179,6 +208,7 @@ class BaseEmbedder(BaseModel):
             text_to_embed = self.embedding_separator.join(
                 meta_values_to_embed + [doc.content or ""]
             )
+            text_to_embed = self._apply_text_truncation(text_to_embed)
             texts_to_embed.append(text_to_embed)
         return texts_to_embed
 

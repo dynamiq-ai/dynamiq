@@ -11,6 +11,7 @@ from dynamiq.prompts import Message, MessageRole
 from dynamiq.storages.vector.weaviate import WeaviateVectorStore, WeaviateWriterVectorStoreParams
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import CHARS_PER_TOKEN
 
 
 class WeaviateMemoryError(Exception):
@@ -38,6 +39,10 @@ class Weaviate(MemoryBackend):
     create_if_not_exist: bool = Field(default=True)
     content_property_name: str = Field(default="message_content")
     alpha: float = Field(default=0.5, description="Alpha for hybrid search (0=keyword, 1=vector)")
+    message_truncation_enabled: bool = Field(
+        default=True, description="Enable automatic message truncation for embeddings"
+    )
+    max_message_tokens: int = Field(default=8192, description="Maximum tokens for message content before truncation")
 
     _vector_store: WeaviateVectorStore | None = PrivateAttr(default=None)
 
@@ -104,6 +109,10 @@ class Weaviate(MemoryBackend):
                 properties_to_ensure.append(self.content_property_name)
                 self._vector_store.ensure_properties_exist(properties_to_ensure)
 
+            # Configure embedder truncation settings
+            self.embedder.document_embedder.truncation_enabled = self.message_truncation_enabled
+            self.embedder.document_embedder.max_input_tokens = self.max_message_tokens
+
         except Exception as e:
             logger.error(f"Weaviate backend '{self.name}' failed to initialize vector store: {e}")
             raise WeaviateMemoryError(f"Failed to initialize Weaviate vector store: {e}") from e
@@ -122,6 +131,14 @@ class Weaviate(MemoryBackend):
             self._MESSAGE_ID_KEY: message_id,
             **(message.metadata or {}),
         }
+
+        if self.message_truncation_enabled and message.content:
+            original_length = len(message.content)
+            max_chars = self.max_message_tokens * CHARS_PER_TOKEN
+            if original_length > max_chars:
+                doc_metadata["truncated"] = True
+                doc_metadata["original_length"] = original_length
+                doc_metadata["truncated_length"] = max_chars
 
         sanitized_metadata = {}
         for k, v in doc_metadata.items():

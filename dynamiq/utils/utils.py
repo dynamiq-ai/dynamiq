@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import inspect
 from datetime import date, datetime
 from enum import Enum
 from io import BytesIO
@@ -11,6 +12,59 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, PydanticUserError, RootModel
 
 TRUNCATE_LIMIT = 20
+
+CHARS_PER_TOKEN = 4
+
+
+class TruncationMethod(str, Enum):
+    """Enum for text truncation methods."""
+
+    START = "START"
+    END = "END"
+    MIDDLE = "MIDDLE"
+
+
+def truncate_text_for_embedding(
+    text: str,
+    max_tokens: int = 8192,
+    truncation_method: TruncationMethod | str = TruncationMethod.MIDDLE,
+    truncation_message: str = "...[truncated for embedding]...",
+) -> str:
+    """
+    Truncate text for embedding models to prevent token limit exceeded errors.
+
+    Args:
+        text: The text to potentially truncate
+        max_tokens: Maximum allowed token count (default: 8192 for most embedding models)
+        truncation_method: Method to use for truncation (TruncationMethod.START/END/MIDDLE)
+        truncation_message: Message to insert when truncating
+
+    Returns:
+        Truncated text that should fit within the embedding model's token limits
+    """
+    if not text:
+        return text
+
+    max_chars = max_tokens * CHARS_PER_TOKEN
+
+    if len(text) <= max_chars:
+        return text
+
+    truncation_msg_len = len(truncation_message)
+
+    if max_chars <= truncation_msg_len:
+        simple_msg = "...[truncated]..."
+        if max_chars <= len(simple_msg):
+            return text[:max_chars]
+        return simple_msg
+
+    if truncation_method == TruncationMethod.START or truncation_method == "START":
+        return truncation_message + text[-(max_chars - truncation_msg_len) :]
+    elif truncation_method == TruncationMethod.END or truncation_method == "END":
+        return text[: max_chars - truncation_msg_len] + truncation_message
+    else:
+        half_length = (max_chars - truncation_msg_len) // 2
+        return text[:half_length] + truncation_message + text[-half_length:]
 
 
 def generate_uuid() -> str:
@@ -68,6 +122,30 @@ def encode_bytes(value: bytes) -> str:
         return base64.b64encode(value).decode()
 
 
+def encode(value: Any) -> Any:
+    """
+    Encode a value into a JSON/YAML-serializable format.
+
+    Handles specific object types like Enum, UUID, datetime objects, and other complex types
+    to convert them into serializable formats.
+
+    Args:
+        value (Any): The value to be encoded.
+
+    Returns:
+        Any: A serializable representation of the value.
+    """
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, (BytesIO, bytes, Exception)) or callable(value):
+        return format_value(value)[0]
+    return value
+
+
 class JsonWorkflowEncoder(JSONEncoder):
     """
     A custom JSON encoder for handling specific object types in workflow serialization.
@@ -89,15 +167,11 @@ class JsonWorkflowEncoder(JSONEncoder):
         Raises:
             TypeError: If the object type is not handled by this encoder or the default encoder.
         """
-        if isinstance(obj, Enum):
-            return obj.value
-        if isinstance(obj, UUID):
-            return str(obj)
-        if isinstance(obj, (datetime, date)):
-            return obj.isoformat()
-        if isinstance(obj, (BytesIO, bytes, Exception)) or callable(obj):
-            return format_value(obj)[0]
-        return JSONEncoder.default(self, obj)
+        encoded_value = encode(obj)
+        if encoded_value is obj:
+            encoded_value = JSONEncoder.default(self, obj)
+
+        return encoded_value
 
 
 def format_value(
@@ -250,7 +324,12 @@ def is_called_from_async_context() -> bool:
     """
     try:
         asyncio.get_running_loop()
-        return True
+        frame = inspect.currentframe()
+        while frame:
+            if frame.f_code.co_flags & inspect.CO_COROUTINE:
+                return True
+            frame = frame.f_back
+        return False
     except Exception:
         return False
 
