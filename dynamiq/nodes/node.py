@@ -538,8 +538,10 @@ class Node(BaseModel, Runnable, ABC):
         return self.to_dict_exclude_params | {
             "connection": {
                 "api_key": True,
+                "browserbase_api_key": True,
                 "access_token": True,
                 "access_key_id": True,
+                "model_api_key": True,
                 "password": True,
                 "private_key_id": True,
                 "private_key": True,
