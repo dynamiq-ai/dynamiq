@@ -26,9 +26,14 @@ def list_services(*, api: ApiClient, settings: Settings):
     if response.status_code == 200:
         services = response.json().get("data", [])
         max_name_len = max(len(s["name"]) for s in services) + 2 if services else 40
-        click.echo(f"{'ID':<40} {'Name':<{max_name_len}} {'Host'}")
+        max_category_len = max(len(s["category"]) for s in services) + 2 if services else 40
+        click.echo(f"{'ID':<40} {'Name':<{max_name_len}} {'Access type':<15} {'Category':<{max_category_len}} {'Host'}")
         for service in services:
-            click.echo(f"{service['id']:<40} {service['name']:<{max_name_len}} {service['hostname']}")
+            click.echo(
+                f"{service['id']:<40} {service['name']:<{max_name_len}} "
+                f"{service.get("access_control", {}).get("access_type", "private"):<15} "
+                f"{service["category"]:<{max_category_len}} {service['hostname']}"
+            )
     else:
         click.echo("Failed to list services.")
 
@@ -51,8 +56,9 @@ def get_service(*, api: ApiClient, settings: Settings, service_id: str):
 @click.option(
     "--access", default="private", required=False, type=click.Choice(["private", "public"], case_sensitive=True)
 )
+@click.option("--category", default="service", required=False)
 @with_api_and_settings
-def create_service(*, api: ApiClient, settings: Settings, name: str, access: str):
+def create_service(*, api: ApiClient, settings: Settings, name: str, access: str, category: str):
     project_id = settings.project_id
 
     if not project_id:
@@ -65,6 +71,7 @@ def create_service(*, api: ApiClient, settings: Settings, name: str, access: str
         "access_control": {
             "access_type": access,
         },
+        "category": category,
     }
     try:
         _require_project()
