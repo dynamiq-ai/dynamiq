@@ -1,43 +1,119 @@
-import json
-from typing import TYPE_CHECKING
+import asyncio
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin
 
+import httpx
+import orjson
 import requests
+from httpx import Response
+from httpx._types import URLTypes
 
 from dynamiq.clients import BaseTracingClient
-from dynamiq.utils import JsonWorkflowEncoder
+from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.env import get_env_var
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import orjson_workflow_default
 
 if TYPE_CHECKING:
     from dynamiq.callbacks.tracing import Run
 
-DYNAMIQ_BASE_URL = "https://api.us-east-1.aws.getdynamiq.ai"
+DYNAMIQ_BASE_URL = "https://collector.getdynamiq.ai"
+
+
+class HttpBaseError(Exception):
+    pass
+
+
+class HttpConnectionError(HttpBaseError):
+    pass
+
+
+class HttpServerError(HttpBaseError):
+    pass
+
+
+class HttpClientError(HttpBaseError):
+    pass
 
 
 class DynamiqTracingClient(BaseTracingClient):
 
-    def __init__(self, base_url: str = DYNAMIQ_BASE_URL, api_key: str | None = None):
+    def __init__(self, base_url: str = DYNAMIQ_BASE_URL, access_key: str | None = None, timeout: float = 60.0):
         self.base_url = base_url
-        self.api_key = api_key or get_env_var("DYNAMIQ_API_KEY")
-        if self.api_key is None:
+        self.access_key = access_key or get_env_var("DYNAMIQ_ACCESS_KEY") or get_env_var("DYNAMIQ_SERVICE_TOKEN")
+        if self.access_key is None:
             raise ValueError("No API key provided")
+        self.timeout = timeout
+
+    def _send_traces_sync(self, runs: list["Run"]) -> None:
+        """Synchronous method to send traces using requests"""
+        try:
+            trace_data = orjson.dumps(
+                {"runs": [run.to_dict() for run in runs]},
+                default=orjson_workflow_default,
+                option=orjson.OPT_NON_STR_KEYS,
+            )
+            requests.post(  # nosec
+                urljoin(self.base_url, "/v1/traces"),
+                data=trace_data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.access_key}",
+                },
+                timeout=self.timeout,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send traces (sync). Error: {e}")
+
+    async def request(self, method: str, url_path: URLTypes, **kwargs: Any) -> Response:
+        logger.debug(f'[{self.__class__.__name__}] REQ "{method} {url_path}". Kwargs: {kwargs}')
+        url = f"{self.base_url}/{str(url_path).lstrip('/')}" if self.base_url else str(url_path).lstrip("/")
+        try:
+            async with httpx.AsyncClient() as client:  # nosec B113
+                response = await client.request(method, url=url, timeout=self.timeout, **kwargs)
+        except (httpx.TimeoutException, httpx.NetworkError) as e:
+            raise HttpConnectionError(e) from e
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            if httpx.codes.is_client_error(response.status_code):
+                raise HttpClientError(e, response) from e
+            else:
+                raise HttpServerError(e, response) from e
+
+        return response
+
+    async def _send_traces_async(self, runs: list["Run"]) -> None:
+        """Async method to send traces using httpx"""
+        try:
+            trace_data = orjson.dumps(
+                {"runs": [run.to_dict() for run in runs]},
+                default=orjson_workflow_default,
+                option=orjson.OPT_NON_STR_KEYS,
+            )
+            await self.request(
+                method="POST",
+                url_path="/v1/traces",
+                content=trace_data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.access_key}",
+                },
+            )
+        except Exception as e:
+            logger.error(f"Failed to send traces (async). Error: {e}")
 
     def trace(self, runs: list["Run"]) -> None:
-        """Trace the given runs.
+        """Sync method required by BaseTracingClient interface"""
+        if not runs:
+            return
 
-        Args:
-            runs (list["Run"]): List of runs to trace.
-        """
         try:
-            response = requests.post(
-                urljoin(self.base_url, "/v1/tracing/traces"),
-                headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
-                data=json.dumps({"runs": [run.to_dict() for run in runs]}, cls=JsonWorkflowEncoder),
-                timeout=60,
-            )
-            if response.status_code not in [200, 201, 202]:
-                logger.error(f"Failed to send traces. Error details: {response.json()}")
-
+            if is_called_from_async_context():
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._send_traces_async(runs))
+            else:
+                self._send_traces_sync(runs)
         except Exception as e:
-            logger.error(f"Failed to send traces. Error {e}")
+            logger.error(f"Failed to send traces. Error: {e}")

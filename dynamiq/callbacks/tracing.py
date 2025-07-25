@@ -556,8 +556,7 @@ def ensure_execution_run(execution_run_id: UUID, executions: list[ExecutionRun])
 class DynamiqTracingCallbackHandler(TracingCallbackHandler):
     client: DynamiqTracingClient | None = None
 
-    def __init__(self, project_id: str, api_key: str | None = None, **kwargs):
+    def __init__(self, access_key: str | None = None, base_url: str | None = None, **kwargs):
         super().__init__(**kwargs)
-        self.source_id = project_id
         if self.client is None:
-            self.client = DynamiqTracingClient(api_key=api_key)
+            self.client = DynamiqTracingClient(access_key=access_key, base_url=base_url)
