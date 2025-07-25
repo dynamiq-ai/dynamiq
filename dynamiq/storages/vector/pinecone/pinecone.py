@@ -253,29 +253,15 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
             else:
                 self._index.delete(ids=document_ids, namespace=self.namespace)
 
-    def delete_documents_by_filters(self, filters: dict[str, Any], top_k: int = 1000) -> None:
+    def delete_documents_by_filters(self, filters: dict[str, Any]) -> None:
         """
         Delete documents from the Pinecone vector store using filters.
 
         Args:
             filters (dict[str, Any]): Filters to select documents to delete.
-            top_k (int): Maximum number of documents to retrieve for deletion. Defaults to 1000.
         """
-        if self.index_type is None or self.index_type == PineconeIndexType.SERVERLESS:
-            """
-            Serverless and Starter indexes do not support deleting with metadata filtering.
-            """
-            documents = self._embedding_retrieval(
-                query_embedding=self._dummy_vector,
-                filters=filters,
-                exclude_document_embeddings=True,
-                top_k=top_k,
-            )
-            document_ids = [doc.id for doc in documents]
-            self.delete_documents(document_ids=document_ids)
-        else:
-            filters = _normalize_filters(filters)
-            self._index.delete(filter=filters, namespace=self.namespace)
+        filters = _normalize_filters(filters)
+        self._index.delete(filter=filters, namespace=self.namespace)
 
     def list_documents(self, include_embeddings: bool = False, content_key: str | None = None) -> list[Document]:
         """
