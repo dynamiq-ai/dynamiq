@@ -535,7 +535,19 @@ class Node(BaseModel, Runnable, ABC):
 
     @property
     def to_dict_exclude_secure_params(self):
-        return self.to_dict_exclude_params | {"connection": {"api_key": True}}
+        return self.to_dict_exclude_params | {
+            "connection": {
+                "api_key": True,
+                "browserbase_api_key": True,
+                "access_token": True,
+                "access_key_id": True,
+                "model_api_key": True,
+                "password": True,
+                "private_key_id": True,
+                "private_key": True,
+                "secret_access_key": True,
+            }
+        }
 
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
         """Converts the instance to a dictionary.
