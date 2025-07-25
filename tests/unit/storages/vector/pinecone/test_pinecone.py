@@ -16,8 +16,8 @@ from dynamiq.storages.vector.pinecone import PineconeVectorStore
         "a" * 30,
     ],
 )
-def test_valid_collection_names(name: str) -> None:
-    assert PineconeVectorStore.is_valid_collection_name(name) is True
+def test_valid_index_names(name: str) -> None:
+    assert PineconeVectorStore.is_valid_index_name(name) is True
 
 
 @pytest.mark.parametrize(
@@ -37,8 +37,8 @@ def test_valid_collection_names(name: str) -> None:
         "white space",  # space in the name
     ],
 )
-def test_invalid_collection_names(name: str) -> None:
-    assert PineconeVectorStore.is_valid_collection_name(name) is False
+def test_invalid_index_names(name: str) -> None:
+    assert PineconeVectorStore.is_valid_index_name(name) is False
 
 
 @pytest.mark.parametrize(
