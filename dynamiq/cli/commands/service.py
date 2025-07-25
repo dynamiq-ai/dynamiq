@@ -41,23 +41,31 @@ def get_service(*, api: ApiClient, settings: Settings, service_id: str):
     if response.status_code == 200:
         service_info = response.json().get("data", [])
         for key, value in service_info.items():
-            if not isinstance(value, dict):
-                click.echo(f"{key}: {value}")
+            click.echo(f"{key}: {value}")
     else:
         click.echo(f"Failed to find service ID {service_id}.")
 
 
 @service.command("create")
 @click.option("--name", prompt=True)
+@click.option(
+    "--access", default="private", required=False, type=click.Choice(["private", "public"], case_sensitive=True)
+)
 @with_api_and_settings
-def create_service(*, api: ApiClient, settings: Settings, name: str):
+def create_service(*, api: ApiClient, settings: Settings, name: str, access: str):
     project_id = settings.project_id
 
     if not project_id:
         click.echo("No project ID found. Please set the current project ID.")
         return
 
-    payload = {"name": name, "project_id": project_id}
+    payload = {
+        "name": name,
+        "project_id": project_id,
+        "access_control": {
+            "access_type": access,
+        },
+    }
     try:
         _require_project()
         response = api.post(
@@ -175,3 +183,34 @@ def get_service_status(*, api: ApiClient, settings: Settings, service_id: str):
                 click.echo(f"{key}: {value}")
     else:
         click.echo(f"Failed to find service ID {service_id}.")
+
+
+@service.command("update")
+@click.option("--id", "service_id", prompt=True)
+@click.option("--access", required=False, type=click.Choice(["private", "public"], case_sensitive=True))
+@click.option("--description", required=False)
+@with_api_and_settings
+def update_service(*, api: ApiClient, settings: Settings, service_id: str, access: str | None, description: str | None):
+    payload = {
+        **({"access_control": {"access_type": access}} if access else {}),
+        **({"description": description} if description else {}),
+    }
+    if not payload:
+        click.echo("Nothing to update. Please provide --access or --description.")
+        return
+    response = api.put(f"/v1/services/{service_id}", json=payload)
+    if response.status_code == 200:
+        click.echo(f"Service with ID '{service_id}' updated successfully: {response.json()}")
+    else:
+        click.echo(f"Failed to update service with ID '{service_id}'.")
+
+
+@service.command("delete")
+@click.option("--id", "service_id", prompt=True)
+@with_api_and_settings
+def delete_service(*, api: ApiClient, settings: Settings, service_id: str):
+    response = api.delete(f"/v1/services/{service_id}")
+    if response.status_code == 200:
+        click.echo(f"Service with ID '{service_id}' deleted successfully.")
+    else:
+        click.echo(f"Failed to delete service with ID '{service_id}'.")

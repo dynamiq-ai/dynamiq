@@ -122,6 +122,30 @@ def encode_bytes(value: bytes) -> str:
         return base64.b64encode(value).decode()
 
 
+def encode(value: Any) -> Any:
+    """
+    Encode a value into a JSON/YAML-serializable format.
+
+    Handles specific object types like Enum, UUID, datetime objects, and other complex types
+    to convert them into serializable formats.
+
+    Args:
+        value (Any): The value to be encoded.
+
+    Returns:
+        Any: A serializable representation of the value.
+    """
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, (BytesIO, bytes, Exception)) or callable(value):
+        return format_value(value)[0]
+    return value
+
+
 class JsonWorkflowEncoder(JSONEncoder):
     """
     A custom JSON encoder for handling specific object types in workflow serialization.
@@ -143,15 +167,11 @@ class JsonWorkflowEncoder(JSONEncoder):
         Raises:
             TypeError: If the object type is not handled by this encoder or the default encoder.
         """
-        if isinstance(obj, Enum):
-            return obj.value
-        if isinstance(obj, UUID):
-            return str(obj)
-        if isinstance(obj, (datetime, date)):
-            return obj.isoformat()
-        if isinstance(obj, (BytesIO, bytes, Exception)) or callable(obj):
-            return format_value(obj)[0]
-        return JSONEncoder.default(self, obj)
+        encoded_value = encode(obj)
+        if encoded_value is obj:
+            encoded_value = JSONEncoder.default(self, obj)
+
+        return encoded_value
 
 
 def format_value(

@@ -39,6 +39,27 @@ class ApiClient:
     ) -> Any:
         return self._request("POST", path, headers=headers, json=json, data=data, files=files)
 
+    def put(
+        self,
+        path: str,
+        *,
+        headers: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+    ) -> Any:
+        return self._request("PUT", path, headers=headers, json=json, data=data, files=files)
+
+    def delete(
+        self,
+        path: str,
+        *,
+        headers: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> Any:
+        return self._request("DELETE", path, headers=headers, json=json, data=data)
+
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=0.25, min=0.25, max=4),

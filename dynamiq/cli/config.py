@@ -10,7 +10,7 @@ __all__ = ["Settings", "DYNAMIQ_BASE_URL"]
 _XDG_CONFIG_HOME = Path(os.getenv("XDG_CONFIG_HOME", os.path.join(Path.home(), ".config")))
 _CONFIG_FILE_PATH = Path(os.path.join(_XDG_CONFIG_HOME, "dynamiq", "config.json"))
 _CREDS_FILE_PATH = Path(os.path.join(_XDG_CONFIG_HOME, "dynamiq", "credentials.json"))
-DYNAMIQ_BASE_URL = "https://api.us-east-1.aws.getdynamiq.ai"
+DYNAMIQ_BASE_URL = "https://api.getdynamiq.ai"
 # Expected structure of `.dynamiq/config.json`:
 # {
 #   "org_id": "your-org-id",
@@ -20,7 +20,7 @@ DYNAMIQ_BASE_URL = "https://api.us-east-1.aws.getdynamiq.ai"
 # Expected structure of `.dynamiq/credentials.json`:
 # {
 #   "api_key": "your-api-key-here",
-#   "api_host": "https://api.us-east-1.aws.getdynamiq.ai"
+#   "api_host": "https://api.getdynamiq.ai"
 # }
 
 
