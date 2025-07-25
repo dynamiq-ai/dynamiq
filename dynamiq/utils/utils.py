@@ -349,3 +349,18 @@ def clear_annotation(annotation: Any) -> Any:
         first_non_none = next((t for t in get_args(annotation) if t is not NoneType), None)
         return first_non_none
     return annotation
+
+
+def orjson_encode(obj: Any) -> Any:
+    """
+    orjson-compatible default function that replicates dynamiq JsonWorkflowEncoder behavior.
+    """
+    encoded_value = encode(value=obj)
+    if encoded_value is obj:
+        try:
+            formatted_value, _ = format_value(obj)
+            return formatted_value
+        except Exception:
+            return str(obj)
+    else:
+        return encoded_value

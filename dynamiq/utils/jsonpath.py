@@ -1,6 +1,8 @@
 from jsonpath_ng import parse
 from jsonpath_ng.exceptions import JsonPathParserError
 
+JSONPATH_EXPRESSION_PREFIXES = ("$", "@")
+
 
 def is_jsonpath(path: str) -> bool:
     """
@@ -19,13 +21,20 @@ def is_jsonpath(path: str) -> bool:
         return False
 
 
-def mapper(json: dict | list, expression_map: dict) -> dict:
+def mapper(
+    json: dict | list,
+    expression_map: dict,
+    expression_prefixes: tuple = JSONPATH_EXPRESSION_PREFIXES,
+    use_expression_as_value: bool = True,
+) -> dict:
     """
     Map values from a JSON object or list to a new dictionary based on a mapping configuration.
 
     Args:
         json (dict | list): The input JSON object or list to be mapped.
         expression_map (dict): A dictionary defining the mapping configuration.
+        expression_prefixes (tuple): The prefixes of the JSONPath expressions.
+        use_expression_as_value (bool): Whether to use the expression as value if the value is not found.
 
     Returns:
         dict: A new dictionary with mapped values according to the provided configuration.
@@ -49,7 +58,10 @@ def mapper(json: dict | list, expression_map: dict) -> dict:
         try:
             found = parse(path).find(json)
             if not found:
-                new_json[key] = None
+                if use_expression_as_value and not path.startswith(expression_prefixes):
+                    new_json[key] = path
+                else:
+                    new_json[key] = None
             elif len(found) == 1:
                 new_json[key] = found[0].value
             else:

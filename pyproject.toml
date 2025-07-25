@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "dynamiq"
-version = "0.21.0"
+version = "0.22.0"
 description = "Dynamiq is an orchestration framework for agentic AI and LLM applications"
 authors = ["Dynamiq Team <hello@getdynamiq.ai>"]
 license = "Apache License 2.0"
@@ -60,6 +60,7 @@ mcp = "1.10.0"
 datamodel-code-generator = "0.30.0"
 python-docx = "^1.1.2"
 databricks-sql-connector = "~4.0.3"
+orjson = "3.10.18"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~78.1.1"

@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_execution_run_id, get_parent_run_id, get_run_id
-from dynamiq.clients import BaseTracingClient
+from dynamiq.clients import BaseTracingClient, DynamiqTracingClient
 from dynamiq.utils import JsonWorkflowEncoder, format_value, generate_uuid
 
 UTC = timezone.utc
@@ -327,6 +327,9 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             output_data, truncate_enabled=True
         )
         run.status = RunStatus.SUCCEEDED
+        # If parent_run_id is None, the run is the highest in the execution tree
+        if run.parent_run_id is None:
+            self.flush()
 
     def on_flow_error(
         self, serialized: dict[str, Any], error: BaseException, **kwargs: Any
@@ -378,6 +381,9 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         )
         run.status = RunStatus.SUCCEEDED
         run.metadata["is_output_from_cache"] = kwargs.get("is_output_from_cache", False)
+        # If parent_run_id is None, the run is the highest in the execution tree
+        if run.parent_run_id is None:
+            self.flush()
 
     def on_node_error(
         self, serialized: dict[str, Any], error: BaseException, **kwargs: Any
@@ -545,3 +551,12 @@ def ensure_execution_run(execution_run_id: UUID, executions: list[ExecutionRun])
             return execution
 
     raise ValueError(f"execution run {execution_run_id} not found")
+
+
+class DynamiqTracingCallbackHandler(TracingCallbackHandler):
+    client: DynamiqTracingClient | None = None
+
+    def __init__(self, access_key: str | None = None, base_url: str | None = None, **kwargs):
+        super().__init__(**kwargs)
+        if self.client is None:
+            self.client = DynamiqTracingClient(access_key=access_key, base_url=base_url)
