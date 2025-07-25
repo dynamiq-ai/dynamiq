@@ -1,4 +1,5 @@
 import enum
+import re
 from copy import copy
 from functools import partial
 from typing import TYPE_CHECKING, Any, Optional
@@ -39,6 +40,9 @@ class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVecto
     environment: str | None = Field(default_factory=partial(get_env_var, "PINECONE_ENVIRONMENT"))
     pod_type: str | None = Field(default_factory=partial(get_env_var, "PINECONE_POD_TYPE"))
     pods: int = 1
+
+
+COLLECTION_NAME_PATTERN = re.compile(r"^[a-z](?:[a-z0-9]*(-[a-z0-9]+)*)?$")
 
 
 class PineconeVectorStore(BaseVectorStore):
@@ -83,7 +87,7 @@ class PineconeVectorStore(BaseVectorStore):
                 connection = Pinecone()
             self.client = connection.connect()
 
-        self.index_name = index_name
+        self.index_name = self._fix_and_validate_index_name(index_name)
         self.namespace = namespace
         self.index_type = index_type
         self.content_key = content_key
@@ -148,6 +152,47 @@ class PineconeVectorStore(BaseVectorStore):
             raise ValueError("'environment' and 'pod_type' must be specified for 'pod' index")
 
         return PodSpec(environment=self.environment, pod_type=self.pod_type, pods=self.pods)
+
+    @staticmethod
+    def is_valid_collection_name(name: str) -> bool:
+        return bool(COLLECTION_NAME_PATTERN.fullmatch(name))
+
+    @classmethod
+    def _fix_and_validate_index_name(cls, index_name: str) -> str:
+        """
+        Clean and fix the index name if it does not match the pattern.
+        Fixing includes:
+        - Lowercasing the name
+        - Replacing dots, underscores, and whitespace with dashes
+        - Removing all invalid characters
+        - Collapsing multiple dashes
+        - Stripping leading and trailing dashes
+
+        Args:
+            index_name (str): The index name to clean and fix.
+
+        Returns:
+            str: The cleaned and fixed index name.
+
+        Raises:
+            ValueError: If the index name cannot be made valid through transformations.
+        """
+        if not cls.is_valid_collection_name(index_name):
+            transformed = index_name.lower().strip()
+            transformed = re.sub(r"[._\s]+", "-", transformed)
+            transformed = re.sub(r"[^a-z0-9\-]", "", transformed)
+            transformed = re.sub(r"-{2,}", "-", transformed)
+            transformed = transformed.strip("-")
+
+            if not cls.is_valid_collection_name(transformed):
+                msg = (
+                    f"Index name '{index_name}' is invalid. It must match the pattern {COLLECTION_NAME_PATTERN.pattern}"
+                )
+                raise ValueError(msg)
+
+            index_name = transformed
+
+        return index_name
 
     def connect_to_index(self):
         """
