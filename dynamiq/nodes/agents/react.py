@@ -583,6 +583,8 @@ TYPE_MAPPING = {
     str: "string",
 }
 
+UNKNOWN_TOOL_NAME = "unknown_tool"
+
 
 class ReActAgent(Agent):
     """Agent that uses the ReAct strategy for processing tasks by interacting with tools in a loop."""
@@ -1197,6 +1199,7 @@ class ReActAgent(Agent):
 
                 if action and self.tools:
                     tool_result = None
+                    tool = None
 
                     if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled:
                         tool_result = self._execute_tools(tools_data, config, **kwargs)
@@ -1309,13 +1312,36 @@ class ReActAgent(Agent):
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
                     if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                        if tool is not None:
+                            source_name = tool_name = tool.name
+                        elif isinstance(action, list):
+                            tool_names = [
+                                (
+                                    tool_data["name"]
+                                    if isinstance(tool_data, dict) and "name" in tool_data
+                                    else UNKNOWN_TOOL_NAME
+                                )
+                                for tool_data in action
+                            ]
+
+                            if len(tool_names) == 1:
+                                source_name = tool_name = tool_names[0]
+                            else:
+                                unique_tools = list(set(tool_names))
+                                if len(unique_tools) == 1:
+                                    source_name = tool_name = f"{unique_tools[0]} (parallel)"
+                                else:
+                                    source_name = tool_name = " + ".join(unique_tools)
+                        else:
+                            source_name = tool_name = str(action)
+
                         self.stream_content(
                             content={
-                                "name": tool.name if "tool" in locals() else action,
+                                "name": tool_name,
                                 "input": action_input,
                                 "result": tool_result,
                             },
-                            source=tool.name if "tool" in locals() else action,
+                            source=source_name,
                             step="tool",
                             config=config,
                             by_tokens=False,
