@@ -23,12 +23,7 @@ class MilvusWriterVectorStoreParams(MilvusVectorStoreParams, BaseWriterVectorSto
 
 
 class MilvusVectorStore(BaseVectorStore, DryRunMixin):
-    """
-    Vector store using Milvus.
-
-    This class can be used with Zilliz Cloud Services or self-hosted instances.
-
-    """
+    """Vector store using Milvus."""
 
     def __init__(
         self,
