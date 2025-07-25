@@ -183,6 +183,14 @@ class StreamChunkChoiceDelta(BaseModel):
     source: str
     step: str
 
+    @field_validator('source')
+    @classmethod
+    def validate_source(cls, v):
+        """Ensure source is always a string."""
+        if not isinstance(v, str):
+            raise ValueError(f"source must be a string, got {type(v).__name__}: {v}")
+        return v
+
 
 class StreamChunkChoice(BaseModel):
     """Stream chunk choice model."""
@@ -680,6 +688,12 @@ class Agent(Node):
         Returns:
             str | dict: Streamed data.
         """
+        if not isinstance(source, str):
+            raise ValueError(
+                f"stream_content source parameter must be a string, got {type(source).__name__}: {source}. "
+                f"This likely indicates incorrect parameter passing from the calling code."
+            )
+
         if (by_tokens is None and self.streaming.by_tokens) or by_tokens:
             return self.stream_by_tokens(content=content, source=source, step=step, config=config, **kwargs)
         return self.stream_response(content=content, source=source, step=step, config=config, **kwargs)
@@ -708,6 +722,12 @@ class Agent(Node):
     def stream_response(
         self, content: str | dict, source: str, step: str, config: RunnableConfig | None = None, **kwargs
     ):
+        if not isinstance(source, str):
+            raise ValueError(
+                f"stream_response source parameter must be a string, got {type(source).__name__}: {source}. "
+                f"This likely indicates a parameter ordering issue in the calling code."
+            )
+
         response_for_stream = StreamChunk(
             choices=[StreamChunkChoice(delta=StreamChunkChoiceDelta(content=content, source=source, step=step))]
         )
