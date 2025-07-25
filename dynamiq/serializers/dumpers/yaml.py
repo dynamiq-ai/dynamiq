@@ -1,4 +1,3 @@
-import enum
 from os import PathLike
 from typing import IO, Any
 
@@ -7,6 +6,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes import Node
 from dynamiq.serializers.types import WorkflowYamlData
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import encode
 
 
 class WorkflowYAMLDumperException(Exception):
@@ -55,10 +55,10 @@ class WorkflowYAMLDumper:
                         param_data_inner = cls.get_updated_node_data(
                             node_data={param_name_inner: param_data_inner}, connections_data=connections_data
                         )[param_name_inner]
-                    elif isinstance(param_data_inner, enum.Enum):
-                        param_data_inner = param_data_inner.value
                     elif param_data_inner is None and skip_nullable:
                         continue
+                    else:
+                        param_data_inner = encode(param_data_inner)
 
                     updated_param_data[param_name_inner] = param_data_inner
 
@@ -72,18 +72,19 @@ class WorkflowYAMLDumper:
                         item = cls.get_updated_node_data(node_data={param_id: item}, connections_data=connections_data)[
                             param_id
                         ]
-                    elif isinstance(item, enum.Enum):
-                        item = item.value
                     elif item is None and skip_nullable:
                         continue
+                    else:
+                        item = encode(item)
                     updated_items.append(item)
                 updated_node_init_data[param_name] = updated_items
 
             else:
-                if isinstance(param_data, enum.Enum):
-                    param_data = param_data.value
-                elif param_data is None and skip_nullable:
+                if param_data is None and skip_nullable:
                     continue
+                else:
+                    param_data = encode(param_data)
+
                 updated_node_init_data[param_name] = param_data
 
         return updated_node_init_data
