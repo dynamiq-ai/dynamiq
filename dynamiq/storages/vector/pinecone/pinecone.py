@@ -42,7 +42,7 @@ class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVecto
     pods: int = 1
 
 
-COLLECTION_NAME_PATTERN = re.compile(r"^[a-z](?:[a-z0-9]*(-[a-z0-9]+)*)?$")
+VALID_INDEX_NAME_PATTERN = re.compile(r"^[a-z](?:[a-z0-9]*(-[a-z0-9]+)*)?$")
 
 
 class PineconeVectorStore(BaseVectorStore):
@@ -154,8 +154,8 @@ class PineconeVectorStore(BaseVectorStore):
         return PodSpec(environment=self.environment, pod_type=self.pod_type, pods=self.pods)
 
     @staticmethod
-    def is_valid_collection_name(name: str) -> bool:
-        return bool(COLLECTION_NAME_PATTERN.fullmatch(name))
+    def is_valid_index_name(name: str) -> bool:
+        return bool(VALID_INDEX_NAME_PATTERN.fullmatch(name))
 
     @classmethod
     def _fix_and_validate_index_name(cls, index_name: str) -> str:
@@ -177,16 +177,17 @@ class PineconeVectorStore(BaseVectorStore):
         Raises:
             ValueError: If the index name cannot be made valid through transformations.
         """
-        if not cls.is_valid_collection_name(index_name):
+        if not cls.is_valid_index_name(index_name):
             transformed = index_name.lower().strip()
             transformed = re.sub(r"[._\s]+", "-", transformed)
             transformed = re.sub(r"[^a-z0-9\-]", "", transformed)
             transformed = re.sub(r"-{2,}", "-", transformed)
             transformed = transformed.strip("-")
 
-            if not cls.is_valid_collection_name(transformed):
+            if not cls.is_valid_index_name(transformed):
                 msg = (
-                    f"Index name '{index_name}' is invalid. It must match the pattern {COLLECTION_NAME_PATTERN.pattern}"
+                    f"Index name '{index_name}' is invalid. "
+                    f"It must match the pattern {VALID_INDEX_NAME_PATTERN.pattern}."
                 )
                 raise ValueError(msg)
 
