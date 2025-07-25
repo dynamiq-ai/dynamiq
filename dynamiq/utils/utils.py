@@ -351,21 +351,16 @@ def clear_annotation(annotation: Any) -> Any:
     return annotation
 
 
-def orjson_workflow_default(obj: Any) -> Any:
+def orjson_encode(obj: Any) -> Any:
     """
     orjson-compatible default function that replicates dynamiq JsonWorkflowEncoder behavior.
     """
-    if isinstance(obj, Enum):
-        return obj.value
-    if isinstance(obj, UUID):
-        return str(obj)
-    if isinstance(obj, (datetime, date)):
-        return obj.isoformat()
-    if isinstance(obj, (BytesIO, bytes, Exception)) or callable(obj):
-        return format_value(obj)[0]
-
-    try:
-        formatted_value, _ = format_value(obj)
-        return formatted_value
-    except Exception:
-        return str(obj)
+    encoded_value = encode(value=obj)
+    if encoded_value is obj:
+        try:
+            formatted_value, _ = format_value(obj)
+            return formatted_value
+        except Exception:
+            return str(obj)
+    else:
+        return encoded_value

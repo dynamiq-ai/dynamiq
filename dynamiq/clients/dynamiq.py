@@ -12,7 +12,7 @@ from dynamiq.clients import BaseTracingClient
 from dynamiq.utils import is_called_from_async_context
 from dynamiq.utils.env import get_env_var
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import orjson_workflow_default
+from dynamiq.utils.utils import orjson_encode
 
 if TYPE_CHECKING:
     from dynamiq.callbacks.tracing import Run
@@ -50,10 +50,10 @@ class DynamiqTracingClient(BaseTracingClient):
         try:
             trace_data = orjson.dumps(
                 {"runs": [run.to_dict() for run in runs]},
-                default=orjson_workflow_default,
+                default=orjson_encode,
                 option=orjson.OPT_NON_STR_KEYS,
             )
-            requests.post(  # nosec
+            response = requests.post(  # nosec
                 urljoin(self.base_url, "/v1/traces"),
                 data=trace_data,
                 headers={
@@ -62,6 +62,7 @@ class DynamiqTracingClient(BaseTracingClient):
                 },
                 timeout=self.timeout,
             )
+            response.raise_for_status()
         except Exception as e:
             logger.error(f"Failed to send traces (sync). Error: {e}")
 
@@ -89,7 +90,7 @@ class DynamiqTracingClient(BaseTracingClient):
         try:
             trace_data = orjson.dumps(
                 {"runs": [run.to_dict() for run in runs]},
-                default=orjson_workflow_default,
+                default=orjson_encode,
                 option=orjson.OPT_NON_STR_KEYS,
             )
             await self.request(
