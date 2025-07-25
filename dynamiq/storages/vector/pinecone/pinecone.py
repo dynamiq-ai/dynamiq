@@ -205,10 +205,19 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
         return actual_dimension or dimension
 
     def delete_index(self, index_name: str | None = None):
-        """Delete the entire index."""
-        index_to_delete = index_name or self.index_name
-        self._index.delete(delete_all=True, namespace=self.namespace)
-        self.client.delete_index(index_to_delete)
+        """Delete the entire index.
+
+        Args:
+            index_name (str): Name of the index to delete.
+        """
+        try:
+            index_to_delete = index_name or self.index_name
+            self._index.delete(delete_all=True, namespace=self.namespace)
+            self.client.delete_index(index_name=index_to_delete)
+            logger.info(f"Deleted index '{index_to_delete}'.")
+        except Exception as e:
+            logger.error(f"Failed to delete index '{index_to_delete}': {e}")
+            raise
 
     def delete_collection(self, collection_name: str | None = None):
         """
@@ -218,8 +227,9 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
             collection_name (str | None): Name of the collection to delete. Defaults to None.
         """
         try:
-            self.delete_index(index_name=collection_name)
-            logger.info(f"Deleted collection '{collection_name}'.")
+            collection_to_delete = collection_name or self.index_name
+            self.delete_index(index_name=collection_to_delete)
+            logger.info(f"Deleted collection '{collection_to_delete}'.")
         except Exception as e:
             logger.error(f"Failed to delete index '{collection_name}': {e}")
             raise
