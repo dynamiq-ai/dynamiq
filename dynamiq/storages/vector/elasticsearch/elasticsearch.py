@@ -6,6 +6,7 @@ from elasticsearch import NotFoundError
 from elasticsearch.helpers import bulk
 
 from dynamiq.connections import Elasticsearch
+from dynamiq.storages.vector.dry_run import DryRunMixin, DryRunConfig
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.elasticsearch.filters import _normalize_filters
 from dynamiq.storages.vector.exceptions import VectorStoreException
@@ -47,7 +48,7 @@ class ElasticsearchVectorStoreWriterParams(ElasticsearchVectorStoreParams, BaseW
     dimension: int = 1536
 
 
-class ElasticsearchVectorStore(BaseVectorStore):
+class ElasticsearchVectorStore(BaseVectorStore, DryRunMixin):
     """Vector store using Elasticsearch for dense vector search."""
 
     def __init__(
@@ -63,6 +64,7 @@ class ElasticsearchVectorStore(BaseVectorStore):
         batch_size: int = 100,
         index_settings: dict | None = None,
         mapping_settings: dict | None = None,
+        dry_run_config: DryRunConfig | None = None,
     ):
         """
         Initialize ElasticsearchVectorStore.
@@ -80,7 +82,10 @@ class ElasticsearchVectorStore(BaseVectorStore):
             batch_size (int): Batch size for write operations. Defaults to 100.
             index_settings (Optional[dict]): Custom index settings. Defaults to None.
             mapping_settings (Optional[dict]): Custom mapping settings. Defaults to None.
+            dry_run_config (Optional[DryRunConfig]): Configuration for dry run mode. Defaults to None.
         """
+        super().__init__(dry_run_config=dry_run_config)
+
         if client is None:
             if connection is None:
                 connection = Elasticsearch()
@@ -101,6 +106,7 @@ class ElasticsearchVectorStore(BaseVectorStore):
             if create_if_not_exist:
                 logger.info(f"Index {self.index_name} does not exist. Creating a new index.")
                 self._create_index_if_not_exists()
+                self._track_collection(self.index_name)
             else:
                 raise ValueError(
                     f"Index {self.index_name} does not exist. Set 'create_if_not_exist' to True to create it."
@@ -137,6 +143,21 @@ class ElasticsearchVectorStore(BaseVectorStore):
             mapping["settings"] = self.index_settings
 
         self.client.indices.create(index=self.index_name, body=mapping)
+
+    def delete_collection(self, collection_name: str | None = None) -> None:
+        """
+        Delete the collection in the database.
+
+        Args:
+            collection_name (str | None): Name of the collection to delete.
+        """
+        try:
+            collection_to_delete = collection_name or self.index_name
+            self.client.indices.delete(index=collection_to_delete)
+            logger.info(f"Deleted collection '{collection_to_delete}'.")
+        except Exception as e:
+            logger.error(f"Failed to delete collection '{collection_to_delete}': {e}")
+            raise
 
     def _handle_duplicate_documents(
         self, documents: list[Document], policy: DuplicatePolicy = DuplicatePolicy.FAIL
@@ -238,6 +259,7 @@ class ElasticsearchVectorStore(BaseVectorStore):
                         },
                     ]
                 )
+                self._track_documents([doc.id for doc in batch])
 
             if operations:
                 result = self.client.bulk(operations=operations, refresh=True)

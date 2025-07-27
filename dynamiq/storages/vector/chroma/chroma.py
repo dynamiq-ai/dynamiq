@@ -154,8 +154,7 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
         Delete a Chroma collection.
 
         Args:
-            collection_name (str | None): Name of the collection to delete. Defaults to None.
-
+            collection_name (str | None): Name of the collection to delete.
         """
         try:
             collection_to_delete = collection_name or self.index_name
