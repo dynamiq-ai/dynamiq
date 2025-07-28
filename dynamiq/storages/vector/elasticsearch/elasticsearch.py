@@ -6,8 +6,8 @@ from elasticsearch import NotFoundError
 from elasticsearch.helpers import bulk
 
 from dynamiq.connections import Elasticsearch
-from dynamiq.storages.vector.dry_run import DryRunMixin, DryRunConfig
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
 from dynamiq.storages.vector.elasticsearch.filters import _normalize_filters
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy

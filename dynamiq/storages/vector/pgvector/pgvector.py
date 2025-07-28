@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 
 from dynamiq.connections import PostgreSQL
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
+from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
 from dynamiq.types import Document
@@ -69,7 +70,7 @@ class PGVectorStoreWriterParams(PGVectorStoreParams, BaseWriterVectorStoreParams
     create_if_not_exist: bool = False
 
 
-class PGVectorStore(BaseVectorStore):
+class PGVectorStore(BaseVectorStore, DryRunMixin):
     """Vector store using pgvector."""
 
     def __init__(
@@ -88,6 +89,7 @@ class PGVectorStore(BaseVectorStore):
         embedding_key: str = "embedding",
         keyword_index_name: str = DEFAULT_KEYWORD_INDEX_NAME,
         language: str = DEFAULT_LANGUAGE,
+        dry_run_config: DryRunConfig | None = None,
     ):
         """
         Initialize a PGVectorStore instance.
@@ -107,7 +109,10 @@ class PGVectorStore(BaseVectorStore):
             create_if_not_exist (bool): Whether to create the table and index if they do not exist. Defaults to False.
             content_key (Optional[str]): The field used to store content in the storage. Defaults to 'content'.
             embedding_key (Optional[str]): The field used to store embeddings in the storage. Defaults to 'embedding'.
+            dry_run_config (Optional[DryRunConfig]): Configuration for dry run mode. Defaults to None.
         """
+        super().__init__(dry_run_config=dry_run_config)
+
         if vector_function not in PGVectorVectorFunction:
             raise ValueError(f"vector_function must be one of {list(PGVectorVectorFunction)}")
         if index_method is not None and index_method not in PGVectorIndexMethod:
@@ -145,6 +150,8 @@ class PGVectorStore(BaseVectorStore):
         self.content_key = content_key
         self.embedding_key = embedding_key
 
+        self.create_if_not_exist = create_if_not_exist
+
         if (
             self.index_method == PGVectorIndexMethod.IVFFLAT
             and self.vector_function == PGVectorVectorFunction.L1_DISTANCE
@@ -152,7 +159,7 @@ class PGVectorStore(BaseVectorStore):
             msg = "IVFFLAT index does not support L1 distance metric"
             raise VectorStoreException(msg)
 
-        if create_if_not_exist:
+        if self.create_if_not_exist:
             with self._get_connection() as conn:
                 self._create_schema(conn)
                 self._create_tables(conn)
@@ -160,6 +167,7 @@ class PGVectorStore(BaseVectorStore):
                     self.index_name = index_name or f"{self.index_method}_index"
                     self._create_index(conn)
                 self._create_keyword_index(conn)
+                self._track_collection(f"{self.schema_name}.{self.table_name}")
         else:
             if not self._check_if_schema_exists(self._conn):
                 msg = f"Schema '{self.schema_name}' does not exist"
@@ -485,6 +493,23 @@ class PGVectorStore(BaseVectorStore):
             self._execute_sql_query(query, cursor=cur)
             conn.commit()
 
+    def delete_collection(self, collection_name: str | None = None) -> None:
+        """
+        Delete the collection in the database.
+
+        Args:
+            collection_name (str | None): Name of the collection to delete.
+        """
+        try:
+            with self._get_connection() as conn:
+                if self.create_if_not_exist:
+                    self._drop_tables(conn)
+                if self.schema_name and self.schema_name != DEFAULT_SCHEMA_NAME:
+                    self._drop_schema(conn)
+        except Exception as e:
+            logger.error(f"Failed to delete collection '{self.schema_name}.{self.table_name}': {e}")
+            raise
+
     def count_documents(self) -> int:
         """
         Count the number of documents in the store.
@@ -549,6 +574,7 @@ class PGVectorStore(BaseVectorStore):
                     self._execute_sql_query(
                         query, (doc.id, doc.content, Jsonb(doc.metadata), doc.embedding), cursor=cur
                     )
+                    self._track_documents([doc.id])
                     written += 1
                 conn.commit()
                 return written
