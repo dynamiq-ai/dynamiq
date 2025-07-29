@@ -3,7 +3,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal
 
-import charset_normalizer
+from charset_normalizer import from_bytes
 
 from dynamiq.components.converters.base import BaseConverter
 from dynamiq.components.converters.utils import get_filename_for_bytesio
@@ -96,7 +96,7 @@ class TextFileConverter(BaseConverter):
         If detection fails, fallback to "utf-8".
         """
         try:
-            result = charset_normalizer.from_bytes(data)
+            result = from_bytes(data)
             best = result.best()
 
             if best and best.encoding:
