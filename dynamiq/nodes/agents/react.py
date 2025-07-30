@@ -18,9 +18,14 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-
-from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
-
+from dynamiq.nodes.agents.utils import (
+    ChunkedToolOutput,
+    SummarizationConfig,
+    ToolCacheEntry,
+    XMLParser,
+    create_chunked_tool_output,
+)
+from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
@@ -28,7 +33,6 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.llms.gemini import Gemini
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 Thought: [Your detailed reasoning about what to do next]
@@ -55,7 +59,13 @@ IMPORTANT RULES:
 - Never use markdown code blocks (```) around your JSON
 - JSON must be properly formatted with correct commas and brackets
 - Only use tools from the provided list
-- If you can answer directly, use only Thought followed by Answer"""  # noqa: E501
+- If you can answer directly, use only Thought followed by Answer
+
+ADVANCED FEATURES:
+- Tool outputs are automatically chunked and stored with unique IDs (tool_1, tool_2, etc.)
+- You can return raw tool outputs directly using: <answer type="tool_output" tool_id="tool_X">
+- This bypasses summarization and returns the complete tool output to the user
+- Use this format only when the raw tool output is exactly what the user needs"""  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
 <output>
@@ -66,7 +76,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in you
         [Tool name from ONLY [{tools_name}]]
     </action>
     <action_input>
-        [JSON input for the tool]
+        [JSON input for the tool - single line, properly escaped]
     </action_input>
 </output>
 
@@ -93,18 +103,33 @@ For questions that don't require tools:
     </answer>
 </output>
 
-IMPORTANT RULES:
+CRITICAL XML FORMAT RULES:
 - ALWAYS include <thought> tags with detailed reasoning
 - Begin thoughts with confidence assessment when using tools
 - Explain why this specific tool is the right choice
 - For tool use, include action and action_input tags
 - For direct answers, only include thought and answer tags
-- Ensure action_input contains valid JSON with double quotes
+- JSON in <action_input> MUST be on single line with proper escaping
+- NO line breaks or control characters inside JSON strings
+- Use double quotes for JSON strings
+- Escape special characters in JSON (\\n for newlines, \\" for quotes)
 - Properly close all XML tags
 - For all tags other than <answer>, text content should ideally be XML-escaped.
 - Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
 - Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
 - You can get "Observation (shortened)" this indicates that output from this tool is shortened.
+
+JSON FORMATTING REQUIREMENTS:
+- Put JSON on single line within tags
+- Use double quotes for all strings
+- Escape newlines as \\n, quotes as \\"
+- NO multi-line JSON formatting
+
+ADVANCED FEATURES:
+- Tool outputs are automatically chunked and stored with unique IDs (tool_1, tool_2, etc.)
+- You can return raw tool outputs directly using: <answer type="tool_output" tool_id="tool_X">
+- This bypasses summarization and returns the complete tool output to the user
+- Use this format only when the raw tool output is exactly what the user needs
 """  # noqa: E501
 
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
@@ -302,6 +327,12 @@ Answer: [Your direct response]
 - Proper JSON syntax with commas and brackets
 - List each Action and Action Input separately
 - Only use tools from the provided list
+
+**ADVANCED FEATURES:**
+- Tool outputs are automatically chunked and stored with unique IDs (tool_1, tool_2, etc.)
+- You can return raw tool outputs directly using: <answer type="tool_output" tool_id="tool_X">
+- This bypasses summarization and returns the complete tool output to the user
+- Use this format only when the raw tool output is exactly what the user needs
 """  # noqa: E501
 )
 
@@ -318,12 +349,12 @@ For Tool Usage (Single or Multiple):
     <tool_calls>
         <tool>
             <name>[Tool name from ONLY [{tools_name}]]</name>
-            <input>[JSON input for the tool]</input>
+            <input>[JSON input for the tool - single line, properly escaped]</input>
         </tool>
         <!-- Add more tool elements as needed based on your strategy -->
         <tool>
             <name>[Tool name]</name>
-            <input>[JSON input]</input>
+            <input>[JSON input for the tool - single line, properly escaped]</input>
         </tool>
     </tool_calls>
 </output>
@@ -351,11 +382,21 @@ For questions that don't require tools:
 After each tool usage, you'll receive:
 Observation: [Result(s) from the tool(s)]
 
-XML FORMAT RULES:
+CRITICAL XML FORMAT RULES:
 - Always include strategic thinking in <thought> tags
 - Group parallel tool calls in single <tool_calls> block
+- JSON in <input> tags MUST be on single line with proper escaping
+- NO line breaks or control characters inside JSON strings
+- Use double quotes for JSON strings
+- Escape special characters in JSON (\\n for newlines, \\" for quotes)
 - Use sequential outputs only when dependencies exist
 - Synthesize all results in final answer
+
+JSON FORMATTING REQUIREMENTS:
+- Put JSON on single line within tags
+- Use double quotes for all strings
+- Escape newlines as \\n, quotes as \\"
+- NO multi-line JSON formatting
 """  # noqa: E501
 )
 
@@ -601,11 +642,20 @@ class ReActAgent(Agent):
         description="Enable multi-tool execution in a single step. "
         "When True, the agent can call multiple tools in parallel.",
     )
-    format_schema: list = []
+    allow_direct_tool_return: bool = Field(
+        default=False,
+        description="Allow agent to return raw tool outputs as final answers. "
+        "When True, agent can use special XML format to return tool outputs directly.",
+    )
+    format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
-    _tool_cache: dict[ToolCacheEntry, Any] = {}
-    _tools: list[Tool] = []
-    _response_format: dict[str, Any] | None = None
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self._tool_cache: dict[ToolCacheEntry, Any] = {}
+        self._tools: list[Tool] = []
+        self._response_format: dict[str, Any] | None = None
+        self._tool_outputs_registry: dict[str, ChunkedToolOutput] = {}
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -763,6 +813,35 @@ class ReActAgent(Agent):
             return thought, answer
         else:
             return "", ""
+
+    def _process_direct_tool_output_return(self, final_answer: str) -> str:
+        """
+        Process direct tool output return format.
+        Looks for XML format: <answer type="tool_output" tool_id="tool_X">
+
+        Args:
+            final_answer (str): The final answer to process
+
+        Returns:
+            str: Either the raw tool output or the original final answer
+        """
+        tool_output_match = re.search(
+            r'<answer\s+type="tool_output"\s+tool_id="([^"]+)"\s*>', final_answer, re.IGNORECASE
+        )
+
+        if tool_output_match:
+            tool_id = tool_output_match.group(1)
+            if tool_id in self._tool_outputs_registry:
+                chunked_output = self._tool_outputs_registry[tool_id]
+                return "\n".join(chunked_output.tool_chunks)
+            else:
+                logger.warning(
+                    f"Tool ID '{tool_id}' not found in registry. "
+                    f"Available IDs: {list(self._tool_outputs_registry.keys())}"
+                )
+                return final_answer
+
+        return final_answer
 
     def stream_reasoning(self, content: dict[str, Any], config: RunnableConfig, **kwargs) -> None:
         """
@@ -948,6 +1027,10 @@ class ReActAgent(Agent):
 
                         if "Answer:" in llm_generated_output:
                             thought, final_answer = self._extract_final_answer(llm_generated_output)
+
+                            if self.allow_direct_tool_return:
+                                final_answer = self._process_direct_tool_output_return(final_answer)
+
                             self.log_final_output(thought, final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
 
@@ -1269,10 +1352,18 @@ class ReActAgent(Agent):
                                 )
 
                                 tool_result = self._run_tool(tool, action_input, config, **kwargs)
+
+                                tool_id = f"tool_{len(self._tool_outputs_registry) + 1}"
+                                chunked_output = create_chunked_tool_output(
+                                    tool_result,
+                                    iteration_number=len(self._tool_outputs_registry) + 1,
+                                    max_chars=self.summarization_config.tool_output.max_chars,
+                                    chunk_strategy=self.summarization_config.tool_output.chunk_strategy,
+                                )
+                                self._tool_outputs_registry[tool_id] = chunked_output
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
                     else:
-                        # Handle single tool execution
                         try:
                             tool = self.tool_by_names.get(self.sanitize_tool_name(action))
                             if not tool:
@@ -1295,19 +1386,26 @@ class ReActAgent(Agent):
                                 **kwargs,
                             )
 
-                            # Check tool cache first
                             tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                             tool_result = self._tool_cache.get(tool_cache_entry, None)
                             if not tool_result:
                                 tool_result = self._run_tool(tool, action_input, config, **kwargs)
                                 self._tool_cache[tool_cache_entry] = tool_result
+
+                                tool_id = f"tool_{len(self._tool_outputs_registry) + 1}"
+                                chunked_output = create_chunked_tool_output(
+                                    tool_result,
+                                    iteration_number=len(self._tool_outputs_registry) + 1,
+                                    max_chars=self.summarization_config.tool_output.max_chars,
+                                    chunk_strategy=self.summarization_config.tool_output.chunk_strategy,
+                                )
+                                self._tool_outputs_registry[tool_id] = chunked_output
                             else:
                                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
 
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
 
-                    # Add observation to prompt
                     observation = f"\nObservation: {tool_result}\n"
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
@@ -1701,6 +1799,15 @@ class ReActAgent(Agent):
                     continue
 
                 tool_result = self._run_tool(tool, tool_input, config, **kwargs)
+
+                tool_id = f"tool_{len(self._tool_outputs_registry) + 1}"
+                chunked_output = create_chunked_tool_output(
+                    tool_result,
+                    iteration_number=len(self._tool_outputs_registry) + 1,
+                    max_chars=self.summarization_config.tool_output.max_chars,
+                    chunk_strategy=self.summarization_config.tool_output.chunk_strategy,
+                )
+                self._tool_outputs_registry[tool_id] = chunked_output
 
                 all_results.append(
                     {"tool_name": tool_name, "success": True, "tool_input": tool_input, "result": tool_result}
