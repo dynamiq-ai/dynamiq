@@ -713,14 +713,15 @@ def bytes_to_data_url(image_bytes: bytes) -> str:
         raise ValueError(f"Failed to convert image to data URL: {str(e)}")
 
 
-def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKENS, truncate: bool = True) -> str:
+def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKENS, truncate: bool = True) -> tuple[str, list]:
     """
     Process tool output for agent consumption.
 
-    This function converts various types of tool outputs into a string representation.
-    It handles dictionaries (with or without a 'content' key), lists, tuples, and other
-    types by converting them to a string. If the resulting string exceeds the maximum
-    allowed length (calculated from max_tokens), it is truncated.
+    This function converts various types of tool outputs into a string representation
+    and extracts any files for separate handling. It handles dictionaries (with or 
+    without a 'content' key), lists, tuples, and other types by converting them to 
+    a string. If the resulting string exceeds the maximum allowed length 
+    (calculated from max_tokens), it is truncated.
 
     Args:
         content: The output from tool execution, which can be of various types.
@@ -729,29 +730,50 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
         truncate: Whether to truncate the content if it exceeds the maximum length.
 
     Returns:
-        A processed string suitable for agent consumption.
+        A tuple of (processed_string, files_list) where:
+        - processed_string: A processed string suitable for agent consumption
+        - files_list: List of FileOutput objects from the tool execution
     """
+    from dynamiq.types import FileOutput
+    
+    files = []
+    
     if not isinstance(content, str):
         if isinstance(content, dict):
+            if "files" in content:
+                tool_files = content["files"]
+                if isinstance(tool_files, list):
+                    for file_item in tool_files:
+                        if isinstance(file_item, FileOutput):
+                            files.append(file_item)
+                        elif isinstance(file_item, dict):
+                            try:
+                                files.append(FileOutput(**file_item))
+                            except Exception as e:
+                                logger.warning(f"Failed to create FileOutput from dict: {e}")
+            
             if "content" in content:
                 inner_content = content["content"]
-                content = inner_content if isinstance(inner_content, str) else json.dumps(inner_content, indent=2)
+                processed_content = inner_content if isinstance(inner_content, str) else json.dumps(inner_content, indent=2)
             else:
-                content = json.dumps(content, indent=2)
+                content_copy = {k: v for k, v in content.items() if k != "files"}
+                processed_content = json.dumps(content_copy, indent=2)
         elif isinstance(content, (list, tuple)):
-            content = "\n".join(str(item) for item in content)
+            processed_content = "\n".join(str(item) for item in content)
         else:
-            content = str(content)
+            processed_content = str(content)
+    else:
+        processed_content = content
 
     max_len_in_char: int = max_tokens * 4  # This assumes an average of 4 characters per token.
-    content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", content)
+    processed_content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", processed_content)
 
-    if len(content) > max_len_in_char and truncate:
+    if len(processed_content) > max_len_in_char and truncate:
         half_length: int = (max_len_in_char - 100) // 2
         truncation_message: str = "\n...[Content truncated]...\n"
-        content = content[:half_length] + truncation_message + content[-half_length:]
+        processed_content = processed_content[:half_length] + truncation_message + processed_content[-half_length:]
 
-    return content
+    return processed_content, files
 
 
 def extract_thought_from_intermediate_steps(intermediate_steps):

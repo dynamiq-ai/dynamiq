@@ -366,6 +366,7 @@ class Agent(Node):
         self._intermediate_steps: dict[int, dict] = {}
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
+        self._collected_files: list = []
 
         expanded_tools = []
         for tool in self.tools:
@@ -567,6 +568,7 @@ class Agent(Node):
         execution_result = {
             "content": result,
             "intermediate_steps": self._intermediate_steps,
+            "files": self._collected_files,
         }
         logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
@@ -848,11 +850,17 @@ class Agent(Node):
             else:
                 raise ValueError({error_message})
         tool_result_content = tool_result.output.get("content")
-        tool_result_content_processed = process_tool_output_for_agent(
+        tool_result_content_processed, tool_files = process_tool_output_for_agent(
             content=tool_result_content,
             max_tokens=self.tool_output_max_length,
             truncate=self.tool_output_truncate_enabled,
         )
+        
+        if tool_files:
+            self._collected_files.extend(tool_files)
+            if self.verbose:
+                logger.info(f"Agent {self.name} - {self.id}: Collected {len(tool_files)} files from tool {tool.name}")
+        
         return tool_result_content_processed
 
     @property
@@ -895,6 +903,7 @@ class Agent(Node):
         """Resets the agent's run state."""
         self._intermediate_steps = {}
         self._run_depends = []
+        self._collected_files = []
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """Generates the prompt using specified blocks and variables."""
@@ -1001,6 +1010,7 @@ class AgentManager(Agent):
         execution_result = {
             "content": result,
             "intermediate_steps": self._intermediate_steps,
+            "files": self._collected_files,
         }
         logger.info(f"Agent {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 

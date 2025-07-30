@@ -10,6 +10,7 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.types import FileOutput
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_E2B = """Executes Python code and shell commands in a secure cloud sandbox environment.
@@ -292,6 +293,114 @@ class E2BInterpreterTool(ConnectionNode):
             raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
         return output.stdout
 
+    def _collect_generated_files(self, sandbox: Sandbox, initial_files: set[str] = None) -> list[FileOutput]:
+        """
+        Collect files that were generated during execution by comparing with initial file list.
+        
+        Args:
+            sandbox: The sandbox instance to check for files
+            initial_files: Set of file paths that existed before execution
+            
+        Returns:
+            List of FileOutput objects for newly generated files
+        """
+        if not sandbox:
+            return []
+            
+        try:
+            search_dirs = ["/home/user", "/tmp"]
+            current_files = set()
+            
+            for dir_path in search_dirs:
+                try:
+                    result = sandbox.commands.run(f"find {dir_path} -type f -not -path '*/.*' 2>/dev/null || true")
+                    if result.exit_code == 0:
+                        files_in_dir = [f.strip() for f in result.stdout.split('\n') if f.strip()]
+                        current_files.update(files_in_dir)
+                except Exception as e:
+                    logger.debug(f"Failed to list files in {dir_path}: {e}")
+                    continue
+            
+            if initial_files is None:
+                new_files = [f for f in current_files if self._is_likely_output_file(f)]
+            else:
+                new_files = current_files - initial_files
+            
+            collected_files = []
+            for file_path in new_files:
+                try:
+                    file_info = sandbox.files.get_info(file_path)
+                    if file_info.type.value == 'file' and file_info.size > 0:
+                        file_content = sandbox.files.read(file_path)
+                        
+                        mime_type = self._get_mime_type(file_path)
+                        
+                        file_output = FileOutput(
+                            name=file_info.name,
+                            content=file_content.encode() if isinstance(file_content, str) else file_content,
+                            mime_type=mime_type,
+                            description=f"Generated file from E2B sandbox",
+                            path=file_path,
+                            size=file_info.size,
+                        )
+                        collected_files.append(file_output)
+                        
+                        logger.debug(f"Tool {self.name} - {self.id}: Collected file {file_info.name} ({file_info.size} bytes)")
+                        
+                except Exception as e:
+                    logger.warning(f"Tool {self.name} - {self.id}: Failed to collect file {file_path}: {e}")
+                    continue
+            
+            return collected_files
+            
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: Error collecting generated files: {e}")
+            return []
+
+    def _is_likely_output_file(self, file_path: str) -> bool:
+        """Check if a file is likely to be an output file based on its path and extension."""
+        output_extensions = {
+            '.csv', '.json', '.txt', '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.svg',
+            '.html', '.xml', '.xlsx', '.docx', '.pptx', '.zip', '.tar', '.gz'
+        }
+        
+        skip_patterns = [
+            '.bash', '.profile', '.cache', '.config', '.local', 
+            '__pycache__', '.pyc', '.log', '.lock'
+        ]
+        
+        for pattern in skip_patterns:
+            if pattern in file_path:
+                return False
+                
+        import os
+        _, ext = os.path.splitext(file_path.lower())
+        return ext in output_extensions
+
+    def _get_mime_type(self, file_path: str) -> str | None:
+        """Get MIME type based on file extension."""
+        import os
+        
+        mime_types = {
+            '.txt': 'text/plain',
+            '.csv': 'text/csv',
+            '.json': 'application/json',
+            '.html': 'text/html',
+            '.xml': 'application/xml',
+            '.pdf': 'application/pdf',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.svg': 'image/svg+xml',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.zip': 'application/zip',
+        }
+        
+        _, ext = os.path.splitext(file_path.lower())
+        return mime_types.get(ext)
+
     def execute(
         self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -307,6 +416,23 @@ class E2BInterpreterTool(ConnectionNode):
             self._install_default_packages(sandbox)
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
+
+        initial_files = None
+        try:
+            if sandbox:
+                search_dirs = ["/home/user", "/tmp"]
+                initial_files = set()
+                for dir_path in search_dirs:
+                    try:
+                        result = sandbox.commands.run(f"find {dir_path} -type f -not -path '*/.*' 2>/dev/null || true")
+                        if result.exit_code == 0:
+                            files_in_dir = [f.strip() for f in result.stdout.split('\n') if f.strip()]
+                            initial_files.update(files_in_dir)
+                    except Exception:
+                        pass
+                        
+        except Exception as e:
+            logger.debug(f"Tool {self.name} - {self.id}: Failed to capture initial file state: {e}")
 
         try:
             content = {}
@@ -325,6 +451,8 @@ class E2BInterpreterTool(ConnectionNode):
                     recoverable=True,
                 )
 
+            generated_files = self._collect_generated_files(sandbox, initial_files)
+
         finally:
             if not self.persistent_sandbox:
                 logger.debug(f"Tool {self.name} - {self.id}: Closing Sandbox")
@@ -340,11 +468,23 @@ class E2BInterpreterTool(ConnectionNode):
                 result += "## Shell Command Execution\n\n" + shell_command_execution + "\n\n"
             if code_execution := content.get("code_execution"):
                 result += "## Code Execution\n\n" + code_execution + "\n\n"
+            
+            if generated_files:
+                result += f"## Generated Files\n\n"
+                for file_output in generated_files:
+                    result += f"- **{file_output.name}** ({file_output.size} bytes): {file_output.description}\n"
+                result += "\n"
+            
             if result:
                 content = result
 
+        response = {"content": content}
+        if generated_files:
+            response["files"] = generated_files
+            logger.info(f"Tool {self.name} - {self.id}: returning {len(generated_files)} generated files")
+
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
-        return {"content": content}
+        return response
 
     def close(self) -> None:
         """Closes the persistent sandbox if it exists."""
