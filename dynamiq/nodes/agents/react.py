@@ -650,10 +650,14 @@ class ReActAgent(Agent):
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
 
+    _tool_cache: dict[ToolCacheEntry, Any] = {}
+    _tools: list[Tool] = []
+    _response_format: dict[str, Any] | None = None
+    _tool_outputs_registry: dict[str, ChunkedToolOutput] = {}
+
     def __init__(self, **data):
         super().__init__(**data)
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
-        self._tools: list[Tool] = []
         self._response_format: dict[str, Any] | None = None
         self._tool_outputs_registry: dict[str, ChunkedToolOutput] = {}
 
@@ -1059,7 +1063,6 @@ class ReActAgent(Agent):
                     case InferenceMode.FUNCTION_CALLING:
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using function calling inference mode")
-
                         if "tool_calls" not in dict(llm_result.output):
                             logger.error("Error: No function called.")
                             raise ActionParsingException(
@@ -1116,7 +1119,10 @@ class ReActAgent(Agent):
                         llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         try:
-                            llm_generated_output_json = json.loads(llm_generated_output)
+                            if isinstance(llm_generated_output, str):
+                                llm_generated_output_json = json.loads(llm_generated_output)
+                            else:
+                                llm_generated_output_json = llm_generated_output
                         except json.JSONDecodeError as e:
                             raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
 
@@ -1147,7 +1153,9 @@ class ReActAgent(Agent):
                             return action_input
 
                         try:
-                            action_input = json.loads(action_input)
+                            if isinstance(action_input, str):
+                                action_input = json.loads(action_input)
+                            # If it's already a dict/object, use it as-is
                         except json.JSONDecodeError as e:
                             raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
 
