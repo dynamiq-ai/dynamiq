@@ -59,7 +59,7 @@ def create_enhanced_context_agent() -> ReActAgent:
         llm=llm,
         tools=[search_tool, code_tool],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.STRUCTURED_OUTPUT,
+        inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         allow_direct_tool_return=True,
         summarization_config=context_config,
