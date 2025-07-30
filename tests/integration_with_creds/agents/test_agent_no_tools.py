@@ -16,7 +16,7 @@ def create_openai_llm():
     connection = OpenAIConnection()
     return OpenAI(
         connection=connection,
-        model="gpt-4o",
+        model="o3-mini",
         max_tokens=1000,
         temperature=0,
     )
