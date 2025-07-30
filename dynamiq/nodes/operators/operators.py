@@ -37,19 +37,13 @@ class Choice(Node):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"options": True}
 
-    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
+    def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary.
 
         Returns:
             dict: A dictionary representation of the instance.
         """
-        # Separately dump ChoiceOption list as it has nested ChoiceCondition model
-        # Bug: https://github.com/pydantic/pydantic/issues/9670
-        data = self.model_dump(
-            exclude=kwargs.pop("exclude", self.to_dict_exclude_params),
-            serialize_as_any=True,
-            **kwargs,
-        )
+        data = super().to_dict(**kwargs)
         data["options"] = [option.model_dump(**kwargs) for option in self.options]
         return data
 
