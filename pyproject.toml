@@ -61,6 +61,7 @@ datamodel-code-generator = "0.30.0"
 python-docx = "^1.1.2"
 databricks-sql-connector = "~4.0.3"
 orjson = "3.10.18"
+charset-normalizer = "^3.4.2"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~78.1.1"
