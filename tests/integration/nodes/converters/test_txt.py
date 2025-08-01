@@ -5,7 +5,7 @@ import pytest
 
 from dynamiq import Workflow
 from dynamiq.flows import Flow
-from dynamiq.nodes.converters.txt import TextFileConverter
+from dynamiq.nodes.converters.text import TextFileConverter
 from dynamiq.nodes.node import NodeDependency
 from dynamiq.nodes.utils import Output
 from dynamiq.runnables import RunnableStatus
