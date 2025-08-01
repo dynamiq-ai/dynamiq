@@ -3,7 +3,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from dynamiq.components.converters.txt import TextFileConverter as TextFileConverterComponent
+from dynamiq.components.converters.text import TextFileConverter as TextFileConverterComponent
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.node import Node, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
