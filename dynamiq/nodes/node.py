@@ -268,7 +268,7 @@ class Node(BaseModel, Runnable, ABC):
         fields_to_include = {}
         generated_schemas = {}
         for name in fields or cls._json_schema_fields:
-            field = cls.__fields__[name]
+            field = cls.model_fields[name]
             annotation = clear_annotation(field.annotation)
             parameter_name = name
             if field.alias:
@@ -279,7 +279,7 @@ class Node(BaseModel, Runnable, ABC):
                 fields_to_include[parameter_name] = (annotation, Field(..., description=field.description))
 
         model = create_model(cls.__name__, **fields_to_include)
-        schema = model.schema()
+        schema = model.model_json_schema()
         schema["additionalProperties"] = False
         for param, param_schema in generated_schemas.items():
             schema["properties"][param] = param_schema
