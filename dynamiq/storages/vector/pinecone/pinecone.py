@@ -4,7 +4,7 @@ from copy import copy
 from functools import partial
 from typing import TYPE_CHECKING, Any, Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from dynamiq.connections import Pinecone
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
@@ -15,6 +15,20 @@ from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
     from pinecone import Pinecone as PineconeClient
+
+
+PINECONE_VALID_INDEX_NAME_PATTERN = re.compile(r"^[a-z](?:[a-z0-9]*(-[a-z0-9]+)*)?$")
+
+
+def validate_pinecone_index_name(index_name: str) -> str:
+    if not bool(PINECONE_VALID_INDEX_NAME_PATTERN.fullmatch(index_name)):
+        msg = (
+            f"Index name '{index_name}' is invalid. "
+            f"It must match the pattern {PINECONE_VALID_INDEX_NAME_PATTERN.pattern}."
+        )
+        raise ValueError(msg)
+
+    return index_name
 
 
 class PineconeIndexType(str, enum.Enum):
@@ -29,6 +43,11 @@ class PineconeIndexType(str, enum.Enum):
 class PineconeVectorStoreParams(BaseVectorStoreParams):
     namespace: str = "default"
 
+    @field_validator("index_name")
+    @classmethod
+    def validate_index(cls, v):
+        return validate_pinecone_index_name(v)
+
 
 class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVectorStoreParams):
     batch_size: int = 100
@@ -40,9 +59,6 @@ class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVecto
     environment: str | None = Field(default_factory=partial(get_env_var, "PINECONE_ENVIRONMENT"))
     pod_type: str | None = Field(default_factory=partial(get_env_var, "PINECONE_POD_TYPE"))
     pods: int = 1
-
-
-VALID_INDEX_NAME_PATTERN = re.compile(r"^[a-z](?:[a-z0-9]*(-[a-z0-9]+)*)?$")
 
 
 class PineconeVectorStore(BaseVectorStore):
@@ -87,7 +103,7 @@ class PineconeVectorStore(BaseVectorStore):
                 connection = Pinecone()
             self.client = connection.connect()
 
-        self.index_name = self._fix_and_validate_index_name(index_name)
+        self.index_name = validate_pinecone_index_name(index_name)
         self.namespace = namespace
         self.index_type = index_type
         self.content_key = content_key
@@ -152,48 +168,6 @@ class PineconeVectorStore(BaseVectorStore):
             raise ValueError("'environment' and 'pod_type' must be specified for 'pod' index")
 
         return PodSpec(environment=self.environment, pod_type=self.pod_type, pods=self.pods)
-
-    @staticmethod
-    def is_valid_index_name(name: str) -> bool:
-        return bool(VALID_INDEX_NAME_PATTERN.fullmatch(name))
-
-    @classmethod
-    def _fix_and_validate_index_name(cls, index_name: str) -> str:
-        """
-        Clean and fix the index name if it does not match the pattern.
-        Fixing includes:
-        - Lowercasing the name
-        - Replacing dots, underscores, and whitespace with dashes
-        - Removing all invalid characters
-        - Collapsing multiple dashes
-        - Stripping leading and trailing dashes
-
-        Args:
-            index_name (str): The index name to clean and fix.
-
-        Returns:
-            str: The cleaned and fixed index name.
-
-        Raises:
-            ValueError: If the index name cannot be made valid through transformations.
-        """
-        if not cls.is_valid_index_name(index_name):
-            transformed = index_name.lower().strip()
-            transformed = re.sub(r"[._\s]+", "-", transformed)
-            transformed = re.sub(r"[^a-z0-9\-]", "", transformed)
-            transformed = re.sub(r"-{2,}", "-", transformed)
-            transformed = transformed.strip("-")
-
-            if not cls.is_valid_index_name(transformed):
-                msg = (
-                    f"Index name '{index_name}' is invalid. "
-                    f"It must match the pattern {VALID_INDEX_NAME_PATTERN.pattern}."
-                )
-                raise ValueError(msg)
-
-            index_name = transformed
-
-        return index_name
 
     def connect_to_index(self):
         """
