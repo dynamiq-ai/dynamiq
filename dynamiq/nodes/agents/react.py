@@ -30,37 +30,55 @@ from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 from dynamiq.nodes.llms.gemini import Gemini
 
-REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
-Thought: [Your detailed reasoning about what to do next]
+REACT_BLOCK_INSTRUCTIONS_SINGLE = """
+Always use this EXACT format in your responses:
+TOOL USAGE FORMAT:
+Thought: [Explain why you need this specific tool and your reasoning]
 Action: [Tool name from ONLY [{tools_name}]]
 Action Input: [JSON input for the tool]
 
-After each action, you'll receive:
-Observation: [Result from the tool]
-
-When you have enough information to provide a final answer:
+FINAL ANSWER FORMAT:
 Thought: [Your reasoning for the final answer]
 Answer: [Your complete answer to the user's question]
 
-For questions that don't require tools:
-Thought: [Your reasoning about the question]
-Answer: [Your direct response]
+CONCRETE EXAMPLES:
 
-IMPORTANT RULES:
-- ALWAYS start with "Thought:" even for simple responses
-- Begin thoughts with confidence assessment when using tools
-- Explain why this specific tool is the right choice
-- Ensure Action Input is valid JSON without markdown formatting
-- Use proper JSON syntax with double quotes for keys and string values
-- Never use markdown code blocks (```) around your JSON
-- JSON must be properly formatted with correct commas and brackets
-- Only use tools from the provided list
-- If you can answer directly, use only Thought followed by Answer"""  # noqa: E501
+CORRECT - Using a tool:
+Thought: I need to search for current weather information in Paris to answer the user's question accurately.
+Action: web-search
+Action Input: {{"query": "weather Paris today", "num_results": 3}}
 
-REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
+CORRECT - Final answer:
+Thought: Based on the search results, I now have enough information about Paris weather to provide a complete answer.
+Answer: The current weather in Paris is 15°C with partly cloudy skies and light rain expected this evening.
+
+CORRECT - Direct answer (no tools needed):
+Thought: This is a simple math question that I can answer directly without needing any tools.
+Answer: 2 + 2 = 4
+
+WRONG - Markdown code blocks:
+Action Input: ```json
+json  is here
+```
+
+CRITICAL RULES:
+1. Valid JSON with double quotes - "key": "value" not key: value
+2. No markdown code blocks around JSON - Never use ```
+3. Use exact tool names from [{tools_name}]
+4. Always start with "Thought:" even for simple responses
+5. One Action per response - Use only one tool at a time
+
+After each action, you'll receive:
+Observation: [Result from the tool]
+"""  # noqa: E501
+
+REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """
+Always use EXACTLY one of these XML formats in your responses:
+
+FORMAT 1: For Tool Usage
 <output>
     <thought>
-        [Your detailed reasoning about what to do next]
+        [Explain why you need this specific tool and your reasoning]
     </thought>
     <action>
         [Tool name from ONLY [{tools_name}]]
@@ -70,10 +88,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in you
     </action_input>
 </output>
 
-After each action, you'll receive:
-Observation: [Result from the tool]
-
-When you have enough information to provide a final answer:
+FORMAT 2: For Final Answer
 <output>
     <thought>
         [Your reasoning for the final answer]
@@ -83,28 +98,50 @@ When you have enough information to provide a final answer:
     </answer>
 </output>
 
-For questions that don't require tools:
+CONCRETE EXAMPLES:
+
+CORRECT - Using a tool:
 <output>
     <thought>
-        [Your reasoning about the question]
+        I need to search for current weather information in Paris to answer the user's question.
+    </thought>
+    <action>
+        web-search
+    </action>
+    <action_input>
+        Query for search
+    </action_input>
+</output>
+
+CORRECT - Final answer:
+<output>
+    <thought>
+        Based on the search results, I now have enough information to provide a complete answer about Paris weather.
     </thought>
     <answer>
-        [Your direct response]
+        The current weather in Paris is 15°C with partly cloudy skies and light rain expected this evening.
     </answer>
 </output>
 
-IMPORTANT RULES:
-- ALWAYS include <thought> tags with detailed reasoning
-- Begin thoughts with confidence assessment when using tools
-- Explain why this specific tool is the right choice
-- For tool use, include action and action_input tags
-- For direct answers, only include thought and answer tags
-- Ensure action_input contains valid JSON with double quotes
-- Properly close all XML tags
-- For all tags other than <answer>, text content should ideally be XML-escaped.
-- Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
-- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
-- You can get "Observation (shortened)" this indicates that output from this tool is shortened.
+WRONG - XML in action_input (DON'T DO THIS):
+<action_input>
+    <query>weather Paris</query>
+    <limit>3</limit>
+</action_input>
+
+WRONG - Multiple <output> blocks:
+<output>...</output>
+<output>...</output>
+
+CRITICAL RULES:
+1. JSON STRINGS ONLY in <action_input> - Never use XML structure inside <action_input>
+2. ONE <output> block per response - Never generate multiple <output> blocks  
+3. Valid JSON with double quotes - "key": "value" not key: value
+4. Use exact tool names from [{tools_name}]
+5. No markdown code blocks around JSON
+
+After each action, you'll receive:
+Observation: [Result from the tool]
 """  # noqa: E501
 
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
@@ -268,94 +305,139 @@ IMPORTANT RULES:
 
 REACT_BLOCK_INSTRUCTIONS_MULTI = (
     REACT_BLOCK_MULTI_TOOL_PLANNING
-    + """\nAlways follow this exact format in your responses:
-**RESPONSE FORMAT:**
+    + """\n
+CRITICAL: Use this EXACT format for multiple tool calls:
 
-Thought: [Your detailed reasoning about what to do next, including your multi-tool strategy if applicable]
-Action: [Tool name from ONLY [{tools_name}]]
-Action Input: [JSON input for the tool]
+SINGLE TOOL FORMAT:
+Thought: [Explain why you need this specific tool]
+Action: [Tool name from ONLY {tools_name}]
+Action Input: [Valid JSON]
+
+MULTIPLE TOOLS FORMAT:
+Thought: [Explain your multi-tool strategy and why you need each tool]
+Action: [First tool name]
+Action Input: [Valid JSON for first tool]
+Action: [Second tool name]  
+Action Input: [Valid JSON for second tool]
+
+FINAL ANSWER FORMAT:
+Thought: [Synthesize all findings and explain your conclusion]
+Answer: [Your complete, well-structured final answer]
+
+CONCRETE EXAMPLES:
+
+CORRECT - Single Tool:
+Thought: I need to search for weather information in Paris.
+Action: web-search
+Action Input: query for tool
+
+CORRECT - Multiple Tools:
+Thought: I need to search FIFA for Ukraine info, then scrape their page.
+Action: web-search
+Action Input: first query
+Action: web-scrape
+Action Input: another query
+
+CORRECT - Final Answer:
+Thought: Based on my search and scraping results, I can provide a comparison.
+Answer: The leadership information matches between FIFA and UAF websites.
+
+
+CRITICAL RULES:
+1. Valid JSON with double quotes - "key": "value" not key: value
+2. No markdown code blocks around JSON - Never use ```
+3. List each Action/Action Input separately for multiple tools
+4. Use exact tool names from [{tools_name}]
+5. One response per turn - Don't generate multiple complete responses
 
 After each action, you'll receive:
 Observation: [Result from the tool]
-
-When you need to use multiple tools in parallel, list them sequentially:
-Thought: [Explain your multi-tool strategy and why each tool is needed]
-Action: [Tool name]
-Action Input: [JSON input]
-Action: [Another tool name]
-Action Input: [JSON input]
-... (repeat for each tool)
-
-When you have enough information to provide a final answer:
-Thought: [Your reasoning for the final answer based on all gathered information]
-Answer: [Your complete, well-structured answer synthesizing all tool results]
-
-For questions that don't require tools:
-Thought: [Your reasoning why tools aren't needed]
-Answer: [Your direct response]
-
-**FORMAT RULES:**
-- ALWAYS start with "Thought:" explaining your approach
-- Valid JSON only - no markdown formatting
-- Double quotes for JSON keys and string values
-- No code blocks (```) around JSON
-- Proper JSON syntax with commas and brackets
-- List each Action and Action Input separately
-- Only use tools from the provided list
 """  # noqa: E501
 )
 
 REACT_BLOCK_XML_INSTRUCTIONS_MULTI = (
     REACT_BLOCK_MULTI_TOOL_PLANNING
-    + """\nAlways use one of these exact XML formats in your responses:
-**XML RESPONSE FORMATS:**
+    + """\n
+Always use EXACTLY one of these XML formats in your responses:
 
-For Tool Usage (Single or Multiple):
+FORMAT 1: For Tool Usage (Single or Multiple)
 <output>
     <thought>
-        [Explain your strategy, including multi-tool planning if applicable]
+        [Explain your strategy and why you need these specific tools]
     </thought>
     <tool_calls>
         <tool>
-            <name>[Tool name from ONLY [{tools_name}]]</name>
-            <input>[JSON input for the tool]</input>
+            <name>tool-name-here</name>
+            <input>Input for tool</input>
         </tool>
-        <!-- Add more tool elements as needed based on your strategy -->
         <tool>
-            <name>[Tool name]</name>
-            <input>[JSON input]</input>
+            <name>another-tool</name>
+            <input>Input for tool</input>
         </tool>
     </tool_calls>
 </output>
 
-When you have enough information to provide a final answer:
+FORMAT 2: For Final Answer
 <output>
     <thought>
-        [Synthesize findings and explain your final reasoning]
+        [Synthesize all findings and explain your conclusion]
     </thought>
     <answer>
-        [Complete, well-structured answer based on all gathered information]
+        [Your complete, well-structured final answer]
     </answer>
 </output>
 
-For questions that don't require tools:
+CONCRETE EXAMPLES:
+
+CORRECT - Single Tool:
 <output>
     <thought>
-        [Explain why tools aren't needed for this query]
+        I need to search for information about the weather in Paris.
     </thought>
-    <answer>
-        [Your direct response]
-    </answer>
+    <tool_calls>
+        <tool>
+            <name>web-search</name>
+            <input>Query input for tool</input>
+        </tool>
+    </tool_calls>
 </output>
 
-After each tool usage, you'll receive:
-Observation: [Result(s) from the tool(s)]
+CORRECT - Multiple Tools:
+<output>
+    <thought>
+        I need to both search for information and scrape a specific page.
+    </thought>
+    <tool_calls>
+        <tool>
+            <name>web-search</name>
+            <input>Query input for tool</input>
+        </tool>
+        <tool>
+            <name>web-scrape</name>
+            <input>URL for scrape</input>
+        </tool>
+    </tool_calls>
+</output>
 
-XML FORMAT RULES:
-- Always include strategic thinking in <thought> tags
-- Group parallel tool calls in single <tool_calls> block
-- Use sequential outputs only when dependencies exist
-- Synthesize all results in final answer
+WRONG - XML in input (DON'T DO THIS):
+<input>
+    <query>search term</query>
+    <limit>5</limit>
+</input>
+
+WRONG - Multiple <output> blocks:
+<output>...</output>
+<output>...</output>
+
+CRITICAL RULES:
+1. JSON STRINGS ONLY in <input> tags - Never use XML structure inside <input>
+2. ONE <output> block per response - Never generate multiple <output> blocks
+3. Valid JSON with double quotes - "key": "value" not key: value
+4. Use exact tool names from [{tools_name}]
+5. Group parallel tools in single <tool_calls> block
+
+After tool execution, you'll receive:
+Observation: [Results from your tools]
 """  # noqa: E501
 )
 
