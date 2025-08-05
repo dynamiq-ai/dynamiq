@@ -135,7 +135,7 @@ WRONG - Multiple <output> blocks:
 
 CRITICAL RULES:
 1. JSON STRINGS ONLY in <action_input> - Never use XML structure inside <action_input>
-2. ONE <output> block per response - Never generate multiple <output> blocks  
+2. ONE <output> block per response - Never generate multiple <output> blocks
 3. Valid JSON with double quotes - "key": "value" not key: value
 4. Use exact tool names from [{tools_name}]
 5. No markdown code blocks around JSON
@@ -317,7 +317,7 @@ MULTIPLE TOOLS FORMAT:
 Thought: [Explain your multi-tool strategy and why you need each tool]
 Action: [First tool name]
 Action Input: [Valid JSON for first tool]
-Action: [Second tool name]  
+Action: [Second tool name]
 Action Input: [Valid JSON for second tool]
 
 FINAL ANSWER FORMAT:

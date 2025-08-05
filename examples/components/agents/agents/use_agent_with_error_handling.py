@@ -7,16 +7,18 @@ from dynamiq.nodes.types import Behavior
 from dynamiq.nodes.node import ErrorHandling
 from dynamiq.runnables import RunnableConfig
 
+INPUT_PROMPT = "What is the capital of France and why is it important?"
+
 
 def create_openai_llm_with_error_handling() -> OpenAI:
     """
     Create OpenAI LLM with error handling configuration.
-    
+
     Returns:
         OpenAI: Configured OpenAI LLM instance with error handling
     """
     connection = OpenAIConnection()
-    
+
     error_handling = ErrorHandling(
         timeout_seconds=30.0,
         retry_interval_seconds=2.0,
@@ -24,7 +26,7 @@ def create_openai_llm_with_error_handling() -> OpenAI:
         backoff_rate=2.0,
         behavior=Behavior.RAISE
     )
-    
+
     return OpenAI(
         connection=connection,
         model="gpt-4o-mpini",
@@ -37,12 +39,12 @@ def create_openai_llm_with_error_handling() -> OpenAI:
 def create_react_agent_no_tools() -> ReActAgent:
     """
     Create a ReAct agent without tools, using only OpenAI LLM with error handling.
-    
+
     Returns:
         ReActAgent: Configured ReAct agent without tools
     """
     llm = create_openai_llm_with_error_handling()
-    
+
     agent_error_handling = ErrorHandling(
         timeout_seconds=60.0,
         retry_interval_seconds=3.0,
@@ -50,13 +52,15 @@ def create_react_agent_no_tools() -> ReActAgent:
         backoff_rate=1.5,
         behavior=Behavior.RAISE
     )
-    
+
     return ReActAgent(
         name="React Agent No Tools",
         id="react_no_tools",
         llm=llm,
         tools=[],
-        role="You are a helpful AI assistant that provides thoughtful and accurate responses to user questions. You think step by step and provide clear, concise answers.",
+        role="You are a helpful AI assistant that provides "
+        "thoughtful and accurate responses to user questions. "
+        "You think step by step and provide clear, concise answers.",
         inference_mode=InferenceMode.DEFAULT,
         max_loops=3,
         verbose=True,
@@ -64,29 +68,29 @@ def create_react_agent_no_tools() -> ReActAgent:
     )
 
 
-def run_agent_workflow(input_prompt: str = "What is the capital of France and why is it important?") -> tuple[str, bool]:
+def run_agent_workflow(input_prompt: str = INPUT_PROMPT) -> tuple[str, bool]:
     """
     Execute a workflow using the ReAct agent without tools.
-    
+
     Args:
         input_prompt (str): The input question/prompt for the agent
-        
+
     Returns:
         tuple[str, bool]: The agent response and success status
     """
     agent = create_react_agent_no_tools()
     workflow = Workflow(flow=Flow(nodes=[agent]))
-    
+
     try:
         print(f"Running agent with input: {input_prompt}")
-        
+
         config = RunnableConfig(request_timeout=120)
-        
+
         result = workflow.run(
             input_data={"input": input_prompt},
             config=config
         )
-        
+
         if result and result.output and agent.id in result.output:
             agent_output = result.output[agent.id]["output"]["content"]
             print(f"Agent response: {agent_output}")
@@ -94,7 +98,7 @@ def run_agent_workflow(input_prompt: str = "What is the capital of France and wh
         else:
             print("No valid output received from agent")
             return "No response generated", False
-            
+
     except Exception as e:
         print(f"Error during agent execution: {type(e).__name__}: {e}")
         return f"Error: {str(e)}", False
@@ -106,20 +110,20 @@ def main():
     """
     print("=== React Agent Without Tools - Demo ===")
     print("This agent uses OpenAI LLM with comprehensive error handling.\n")
-    
+
     test_queries = [
         "What is the capital of France and why is it important?",
     ]
-    
+
     for i, query in enumerate(test_queries, 1):
         print(f"\n--- Test {i} ---")
         response, success = run_agent_workflow(query)
-        
+
         if success:
             print("✅ Success")
         else:
             print("❌ Failed")
-        
+
         print("-" * 50)
 
 
