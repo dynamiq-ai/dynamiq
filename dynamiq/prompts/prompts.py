@@ -312,7 +312,9 @@ class Prompt(BasePrompt):
         Returns:
             int: Number of tokens.
         """
-        return token_counter(model=model, messages=[message.model_dump(exclude={"metadata"}) for message in self.messages])
+        return token_counter(
+            model=model, messages=[message.model_dump(exclude={"metadata"}) for message in self.messages]
+        )
 
     def get_required_parameters(self) -> set[str]:
         """Extracts set of parameters required for messages.
