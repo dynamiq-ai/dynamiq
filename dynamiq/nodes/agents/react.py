@@ -38,7 +38,7 @@ DEFAULT_DIRECT_OUTPUT_CAPABILITIES = """
 ADVANCED FEATURES:
 - Tool outputs are automatically chunked and stored with unique IDs (tool_1, tool_2, etc.)
 - You can return raw tool observation directly using:
-Thought: [Your reasoning about the using direct tool output]
+Thought: [Your reasoning about using direct tool output]
 Answer: <answer type="tool_output" tool_id="tool_X">
 - Do this only after receiving output from this tool in the next loop.
 - This bypasses summarization and returns the complete tool output to the user
