@@ -1,11 +1,11 @@
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
-from dynamiq.connections import E2B, Exa
+from dynamiq.connections import E2B, ScaleSerp
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolOutputConfig
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
-from dynamiq.nodes.tools.exa_search import ExaTool
+from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
 from examples.llm_setup import setup_llm
 
@@ -29,6 +29,12 @@ Available tools:
 Always be explicit about which approach you're using and why.
 """
 
+QUERY1 = """Return result of query search 'ai 2025'"""
+QUERY2 = """Research the latest developments in
+            AI agents and multi-agent systems at this months;
+            then create a report for perspectives;
+            regarding all areas of ML/DL and AI"""
+
 
 def create_enhanced_context_agent() -> ReActAgent:
     """
@@ -37,10 +43,10 @@ def create_enhanced_context_agent() -> ReActAgent:
     Returns:
         ReActAgent with context management enabled
     """
-    exa_conn = Exa()
+    exa_conn = ScaleSerp()
     e2b_conn = E2B()
 
-    search_tool = ExaTool(connection=exa_conn, name="web-search")
+    search_tool = ScaleSerpTool(connection=exa_conn, name="web-search")
     code_tool = E2BInterpreterTool(connection=e2b_conn, name="code-executor")
 
     llm = setup_llm(model_provider="claude", model_name="claude-3-5-sonnet-20240620")
@@ -48,7 +54,7 @@ def create_enhanced_context_agent() -> ReActAgent:
 
     context_config = SummarizationConfig(
         enabled=True,
-        max_token_context_length=100,
+        max_token_context_length=10000,
         context_usage_ratio=0.8,
         context_history_length=10,
         tool_output=tool_config,
@@ -59,9 +65,9 @@ def create_enhanced_context_agent() -> ReActAgent:
         llm=llm,
         tools=[search_tool, code_tool],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.DEFAULT,
         parallel_tool_calls_enabled=True,
-        allow_direct_tool_return=True,
+        direct_tool_return_enabled=True,
         summarization_config=context_config,
         max_loops=15,
         verbose=True,
@@ -79,10 +85,7 @@ def demonstrate_context_features():
     scenarios = [
         {
             "name": "📊 Data Analysis with Direct Return",
-            "query": """Research the latest developments in
-            AI agents and multi-agent systems at this months;
-            then create a report for perspectives;
-            regarding all areas of ML/DL and IA""",
+            "query": QUERY2,
         },
     ]
 
@@ -103,12 +106,12 @@ def demonstrate_context_features():
             print(output[:1000] + "..." if len(output) > 1000 else output)
 
             print("Context Info:")
-            print(f"   - Tool outputs in registry: {len(agent._tool_outputs_registry)}")
-            print(f"   - Available tool IDs: {list(agent._tool_outputs_registry.keys())}")
+            print(f"   - Tool outputs in registry: {len(agent._tool_chunked_outputs)}")
+            print(f"   - Available tool IDs: {list(agent._tool_chunked_outputs.keys())}")
 
-            if agent._tool_outputs_registry:
-                latest_id = list(agent._tool_outputs_registry.keys())[-1]
-                latest_output = agent._tool_outputs_registry[latest_id]
+            if agent._tool_chunked_outputs:
+                latest_id = list(agent._tool_chunked_outputs.keys())[-1]
+                latest_output = agent._tool_chunked_outputs[latest_id]
                 print(f"   - Latest tool ({latest_id}): {latest_output.tool_chunks[0][:200]}...")
 
         except Exception as e:
@@ -125,21 +128,11 @@ def demonstrate_direct_tool_return():
     print("=" * 50)
 
     agent = create_enhanced_context_agent()
-
-    query = """Please research the latest developments in AI agents
-    and multi-agent systems from this month.
-    Then, create a report for stakeholders covering
-    all areas of machine learning and deep learning.
-    Finally, return the raw output from the last tool."""
-
-    print(f"Query: {query}")
-    print()
-
     tracing = TracingCallbackHandler()
     wf = Workflow(flow=Flow(nodes=[agent]))
 
     try:
-        result = wf.run(input_data={"input": query}, config=RunnableConfig(callbacks=[tracing]))
+        result = wf.run(input_data={"input": QUERY1}, config=RunnableConfig(callbacks=[tracing]))
 
         output = result.output[agent.id]["output"]["content"]
 
@@ -147,8 +140,8 @@ def demonstrate_direct_tool_return():
         print(output)
 
         print("\nRegistry Status:")
-        print(f"   - Tools executed: {len(agent._tool_outputs_registry)}")
-        for tool_id, tool_output in agent._tool_outputs_registry.items():
+        print(f"   - Tools executed: {len(agent._tool_chunked_outputs)}")
+        for tool_id, tool_output in agent._tool_chunked_outputs.items():
             print(
                 f"   - {tool_id}: {len(tool_output.tool_chunks)} chunks, " f"{tool_output.original_size} chars original"
             )

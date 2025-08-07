@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import re
+from enum import Enum
 from typing import Any, Sequence
 
 import filetype
@@ -725,7 +726,7 @@ def bytes_to_data_url(image_bytes: bytes) -> str:
         raise ValueError(f"Failed to convert image to data URL: {str(e)}")
 
 
-def _chunk_content(content: str, max_chunk_size: int = 8000) -> list[str]:
+def _create_chunked_content(content: str, max_chunk_size: int = 8000) -> list[str]:
     """
     Split content into manageable chunks.
 
@@ -751,18 +752,18 @@ def _chunk_content(content: str, max_chunk_size: int = 8000) -> list[str]:
 
         last_paragraph = chunk.rfind("\n\n")
         if last_paragraph > max_chunk_size // 2:
-            split_pos = last_paragraph + 2
+            split_pos = last_paragraph + len("\n\n")
         else:
             last_newline = chunk.rfind("\n")
             if last_newline > max_chunk_size // 2:
-                split_pos = last_newline + 1
+                split_pos = last_newline + len("\n")
             else:
                 last_sentence = max(chunk.rfind(". "), chunk.rfind(".\n"))
                 if last_sentence > max_chunk_size // 2:
-                    split_pos = last_sentence + 1
+                    split_pos = last_sentence + len(". ")
                 else:
                     last_space = chunk.rfind(" ")
-                    split_pos = last_space + 1 if last_space > max_chunk_size // 2 else max_chunk_size
+                    split_pos = last_space + len(" ") if last_space > max_chunk_size // 2 else max_chunk_size
 
         chunks.append(remaining[:split_pos].strip())
         remaining = remaining[split_pos:].strip()
@@ -780,21 +781,20 @@ def _create_chunked_summary(chunks: list[str]) -> str:
     Returns:
         Summary string showing representative parts
     """
-    if len(chunks) <= 2:
+    NUM_OF_SUMMARY_CHUNKS = 3
+
+    if len(chunks) < NUM_OF_SUMMARY_CHUNKS:
         return "\n".join(chunks)
 
     summary_parts = []
-
     summary_parts.append(f"[CHUNK 1/{len(chunks)}]\n{chunks[0]}")
 
-    if len(chunks) >= 4:
+    if len(chunks) > NUM_OF_SUMMARY_CHUNKS:
         middle_idx = len(chunks) // 2
         summary_parts.append(f"\n[CHUNK {middle_idx + 1}/{len(chunks)}]\n{chunks[middle_idx]}")
-
-    if len(chunks) > 3:
-        omitted_count = len(chunks) - (3 if len(chunks) >= 4 else 2)
+        omitted_count = len(chunks) - NUM_OF_SUMMARY_CHUNKS
         summary_parts.append(f"\n... [{omitted_count} chunks omitted] ...")
-    elif len(chunks) == 3:
+    elif len(chunks) == NUM_OF_SUMMARY_CHUNKS:
         summary_parts.append(f"\n[CHUNK 2/{len(chunks)}]\n{chunks[1]}")
 
     summary_parts.append(f"\n[CHUNK {len(chunks)}/{len(chunks)}]\n{chunks[-1]}")
@@ -835,7 +835,7 @@ def create_chunked_tool_output(
     if len(content) > max_chars:
         if chunk_strategy == "smart":
             chunk_size = max_chars // 3
-            chunks = _chunk_content(content, chunk_size)
+            chunks = _create_chunked_content(content, chunk_size)
         else:
             chunk_size = max_chars
             chunks = [content[i : i + chunk_size] for i in range(0, len(content), chunk_size)]
@@ -907,7 +907,7 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
 
     if len(content) > max_len_in_char and truncate:
         chunk_size = max_len_in_char // 3
-        chunks = _chunk_content(content, chunk_size)
+        chunks = _create_chunked_content(content, chunk_size)
 
         if len(chunks) > 1:
             content = _create_chunked_summary(chunks)
@@ -968,11 +968,16 @@ class ToolCacheEntry(BaseModel):
         return data
 
 
+class ChunkStrategy(Enum):
+    SIMPLE = "simple"
+    SMART = "smart"
+
+
 class ToolOutputConfig(BaseModel):
     """Configuration for tool output processing and chunking."""
 
     max_chars: int = 32000
-    chunk_strategy: str = "smart"  # "smart" or "simple"
+    chunk_strategy: ChunkStrategy = ChunkStrategy.SMART  # "smart" or "simple"
     summary_strategy: str = "structured"  # "structured" or "simple"
 
 
