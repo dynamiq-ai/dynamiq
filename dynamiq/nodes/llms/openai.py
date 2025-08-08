@@ -63,4 +63,9 @@ class OpenAI(BaseLLM):
                 new_params.pop("stop", None)
             new_params.pop("max_tokens", None)
             new_params.pop("temperature", None)
+        elif self.model.lower().startswith("gpt-5"):
+            new_params["max_completion_tokens"] = self.max_tokens
+            new_params.pop("stop", None)
+            new_params.pop("max_tokens", None)
+
         return new_params
