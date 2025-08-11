@@ -21,7 +21,7 @@ def get_openai_workflow(
         flow=Flow(
             nodes=[
                 OpenAI(
-                    name="Anthropic",
+                    name="OpenAI",
                     model=model,
                     connection=connection,
                     prompt=Prompt(
