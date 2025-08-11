@@ -132,10 +132,12 @@ class Weaviate(MemoryBackend):
             **(message.metadata or {}),
         }
 
-        if self.message_truncation_enabled and message.content:
-            original_length = len(message.content)
+        content = message.content
+        if self.message_truncation_enabled and content:
+            original_length = len(content)
             max_chars = self.max_message_tokens * CHARS_PER_TOKEN
             if original_length > max_chars:
+                content = content[:max_chars]
                 doc_metadata["truncated"] = True
                 doc_metadata["original_length"] = original_length
                 doc_metadata["truncated_length"] = max_chars
@@ -151,7 +153,7 @@ class Weaviate(MemoryBackend):
 
         return Document(
             id=doc_id,
-            content=message.content,
+            content=content,
             metadata=sanitized_metadata,
             embedding=None,
         )
