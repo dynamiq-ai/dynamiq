@@ -222,21 +222,25 @@ Usage Strategy:
         Returns:
             None
         """
-        async with self.connection.connect() as result:
-            read, write = result[:2]
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                tools = await session.list_tools()
-                for tool in tools.tools:
-                    self._mcp_tools[tool.name] = MCPTool(
-                        name=tool.name,
-                        description=tool.description or "MCP Tool",
-                        json_input_schema=tool.inputSchema,
-                        connection=self.connection,
-                        server_metadata=ServerMetadata(id=self.id, name=self.name, description=self.description),
-                    )
+        try:
+            async with self.connection.connect() as result:
+                read, write = result[:2]
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    tools = await session.list_tools()
+                    for tool in tools.tools:
+                        self._mcp_tools[tool.name] = MCPTool(
+                            name=tool.name,
+                            description=tool.description or "MCP Tool",
+                            json_input_schema=tool.inputSchema,
+                            connection=self.connection,
+                            server_metadata=ServerMetadata(id=self.id, name=self.name, description=self.description),
+                        )
 
-        logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
+            logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {str(e)}")
+            raise ToolExecutionException(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {str(e)}")
 
     def get_mcp_tools(self, select_all: bool = False) -> list[MCPTool]:
         """
