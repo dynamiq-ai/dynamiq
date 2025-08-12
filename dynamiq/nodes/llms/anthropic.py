@@ -11,6 +11,7 @@ class Anthropic(BaseLLM):
         connection (AnthropicConnection | None): The connection to use for the Anthropic LLM.
     """
     connection: AnthropicConnection | None = None
+    MODEL_PREFIX = "anthropic/"
 
     def __init__(self, **kwargs):
         """Initialize the Anthropic LLM node.
