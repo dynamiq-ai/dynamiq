@@ -48,6 +48,7 @@ class VectorStoreRetriever(Node):
     alpha: float = 0.0
 
     input_schema: ClassVar[type[VectorStoreRetrieverInputSchema]] = VectorStoreRetrieverInputSchema
+    _EXCLUDED_METADATA_FIELDS: ClassVar[frozenset[str]] = frozenset({"embedding", "embeddings", "vector", "vectors"})
 
     def __init__(self, **kwargs):
         """
@@ -120,10 +121,9 @@ class VectorStoreRetriever(Node):
                     if field in metadata:
                         formatted_doc += f"{field.capitalize()}: {metadata[field]}\n"
             else:
-                excluded_fields = {"embedding", "embeddings", "vector", "vectors"}
                 for field, value in metadata.items():
                     field_lower = field.lower()
-                    if field_lower not in excluded_fields and "id" not in field_lower:
+                    if field_lower not in self._EXCLUDED_METADATA_FIELDS and "id" not in field_lower:
                         formatted_doc += f"{field.capitalize()}: {value}\n"
 
             formatted_doc += f"Content: {doc.content}\n"
