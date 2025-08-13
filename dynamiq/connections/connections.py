@@ -71,6 +71,11 @@ class BaseConnection(BaseModel, ABC):
 
     @model_serializer
     def serialize(self) -> dict[str, Any]:
+        """Converts the connection instance to a dictionary. It returns only non‐sensitive fields.
+
+        Returns:
+            dict: A dictionary representation of the connection instance.
+        """
         return {
             "id": self.id,
             "type": self.type,
