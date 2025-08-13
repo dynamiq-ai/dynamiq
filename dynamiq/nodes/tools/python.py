@@ -1,5 +1,6 @@
 import importlib
 import io
+from copy import deepcopy
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -203,7 +204,7 @@ class Python(Node):
 
         if isinstance(result, dict) and "content" in result:
             if self.is_optimized_for_agents:
-                optimized_result = result.copy()
+                optimized_result = deepcopy(result)
                 optimized_result["content"] = str(result["content"])
                 return optimized_result
             else:
