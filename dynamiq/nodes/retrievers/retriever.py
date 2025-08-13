@@ -48,7 +48,7 @@ class VectorStoreRetriever(Node):
     alpha: float = 0.0
 
     input_schema: ClassVar[type[VectorStoreRetrieverInputSchema]] = VectorStoreRetrieverInputSchema
-    _EXCLUDED_METADATA_FIELDS: ClassVar[frozenset[str]] = frozenset({"embedding", "embeddings", "vector", "vectors"})
+    _EXCLUDED_METADATA_FIELDS: ClassVar[tuple[str, ...]] = ("embedding", "embeddings", "vector", "vectors")
 
     def __init__(self, **kwargs):
         """
