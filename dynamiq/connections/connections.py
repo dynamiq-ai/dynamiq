@@ -5,9 +5,9 @@ from datetime import timedelta
 from enum import Enum
 from functools import cached_property, partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_serializer, model_validator
 from pydantic_core.core_schema import ValidationInfo
 
 from dynamiq.utils import generate_uuid
@@ -68,6 +68,13 @@ class BaseConnection(BaseModel, ABC):
             dict: A dictionary representation of the connection instance.
         """
         return self.model_dump(**kwargs)
+
+    @model_serializer
+    def serialize(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "type": self.type,
+        }
 
     @abstractmethod
     def connect(self):
