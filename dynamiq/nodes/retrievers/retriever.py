@@ -105,19 +105,27 @@ class VectorStoreRetriever(Node):
 
         Args:
             documents (list[Document]): List of retrieved documents.
-            metadata_fields (list[str]): Metadata fields to include.
+            metadata_fields (list[str]): Metadata fields to include. If None, uses all metadata except embeddings.
 
         Returns:
             str: Formatted content of the documents.
         """
-        metadata_fields = metadata_fields or ["title", "url"]
         formatted_docs = []
         for i, doc in enumerate(documents):
-            metadata = doc.metadata
+            metadata = doc.metadata or {}
             formatted_doc = f"Source {i + 1}\n"
-            for field in metadata_fields:
-                if field in metadata:
-                    formatted_doc += f"{field.capitalize()}: {metadata[field]}\n"
+
+            if metadata_fields is not None:
+                for field in metadata_fields:
+                    if field in metadata:
+                        formatted_doc += f"{field.capitalize()}: {metadata[field]}\n"
+            else:
+                excluded_fields = {"embedding", "embeddings", "vector", "vectors"}
+                for field, value in metadata.items():
+                    field_lower = field.lower()
+                    if field_lower not in excluded_fields and "id" not in field_lower:
+                        formatted_doc += f"{field.capitalize()}: {value}\n"
+
             formatted_doc += f"Content: {doc.content}\n"
             formatted_docs.append(formatted_doc)
         return "\n\n".join(formatted_docs)
