@@ -65,6 +65,9 @@ class Weaviate(MemoryBackend):
         return super().to_dict_exclude_params | {
             "embedder": True,
             "_vector_store": True,
+            "connection": {
+                "api_key": True,
+            },
         }
 
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict[str, Any]:

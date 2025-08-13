@@ -53,7 +53,13 @@ class PostgreSQL(MemoryBackend):
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
         """Define parameters to exclude during serialization."""
-        return super().to_dict_exclude_params | {"_conn": True, "_is_closed": True}
+        return super().to_dict_exclude_params | {
+            "_conn": True,
+            "_is_closed": True,
+            "connection": {
+                "password": True,
+            },
+        }
 
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict[str, Any]:
         """Converts the instance to a dictionary."""
