@@ -138,10 +138,12 @@ class Weaviate(MemoryBackend):
             **(message.metadata or {}),
         }
 
-        if self.message_truncation_enabled and message.content:
-            original_length = len(message.content)
+        content = message.content
+        if self.message_truncation_enabled and content:
+            original_length = len(content)
             max_chars = self.max_message_tokens * CHARS_PER_TOKEN
             if original_length > max_chars:
+                content = content[:max_chars]
                 doc_metadata["truncated"] = True
                 doc_metadata["original_length"] = original_length
                 doc_metadata["truncated_length"] = max_chars
@@ -157,7 +159,7 @@ class Weaviate(MemoryBackend):
 
         return Document(
             id=doc_id,
-            content=message.content,
+            content=content,
             metadata=sanitized_metadata,
             embedding=None,
         )
@@ -216,7 +218,7 @@ class Weaviate(MemoryBackend):
             if not document.embedding:
                 raise WeaviateMemoryError("Generated embedding is empty.")
 
-            self._vector_store.write_documents([document], content_property_name=self.content_property_name)
+            self._vector_store.write_documents([document], content_key=self.content_property_name)
             logger.debug(f"Weaviate Memory ({self.collection_name}): Added message {document.id}")
 
         except Exception as e:
@@ -236,7 +238,7 @@ class Weaviate(MemoryBackend):
 
         try:
             documents = self._vector_store.list_documents(
-                include_embeddings=False, content_property_name=self.content_property_name
+                include_embeddings=False, content_key=self.content_property_name
             )
 
             messages = [self._document_to_message(doc) for doc in documents]
@@ -336,13 +338,13 @@ class Weaviate(MemoryBackend):
                     top_k=effective_limit,
                     exclude_document_embeddings=True,
                     alpha=self.alpha,
-                    content_property_name=self.content_property_name,
+                    content_key=self.content_property_name,
                 )
                 retrieved_messages = [self._document_to_message(doc) for doc in documents]
 
             elif prepared_filters:
                 documents = self._vector_store.filter_documents(
-                    filters=prepared_filters, content_property_name=self.content_property_name
+                    filters=prepared_filters, content_key=self.content_property_name
                 )
                 retrieved_messages = [self._document_to_message(doc) for doc in documents]
                 if effective_limit > 0:

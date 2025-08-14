@@ -88,6 +88,7 @@ class Qdrant(MemoryBackend):
             original_length = len(content)
             max_chars = self.max_message_tokens * CHARS_PER_TOKEN
             if original_length > max_chars:
+                content = content[:max_chars]
                 metadata["truncated"] = True
                 metadata["original_length"] = original_length
                 metadata["truncated_length"] = max_chars
