@@ -58,6 +58,8 @@ class PostgreSQL(MemoryBackend):
             "_is_closed": True,
             "connection": {
                 "password": True,
+                "host": True,
+                "user": True,
             },
         }
 

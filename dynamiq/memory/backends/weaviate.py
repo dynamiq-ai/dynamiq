@@ -67,6 +67,9 @@ class Weaviate(MemoryBackend):
             "_vector_store": True,
             "connection": {
                 "api_key": True,
+                "url": True,
+                "http_host": True,
+                "grpc_host": True,
             },
         }
 
