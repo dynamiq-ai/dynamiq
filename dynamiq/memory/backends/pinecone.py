@@ -44,7 +44,13 @@ class Pinecone(MemoryBackend):
     @property
     def to_dict_exclude_params(self):
         """Define parameters to exclude when converting the class instance to a dictionary."""
-        return super().to_dict_exclude_params | {"embedder": True, "vector_store": True}
+        return super().to_dict_exclude_params | {
+            "embedder": True,
+            "vector_store": True,
+            "connection": {
+                "api_key": True,
+            },
+        }
 
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
         """Converts the instance to a dictionary."""

@@ -103,6 +103,16 @@ class DynamoDB(MemoryBackend):
     _dynamodb_table: Any = PrivateAttr(default=None)
     _dynamodb_client: Any = PrivateAttr(default=None)
 
+    @property
+    def to_dict_exclude_params(self):
+        """Define parameters to exclude when converting the class instance to a dictionary."""
+        return super().to_dict_exclude_params | {
+            "connection": {
+                "access_key_id": True,
+                "secret_access_key": True,
+            }
+        }
+
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict[str, Any]:
         exclude = kwargs.pop("exclude", self.to_dict_exclude_params.copy())
         data = self.model_dump(exclude=exclude, **kwargs)
