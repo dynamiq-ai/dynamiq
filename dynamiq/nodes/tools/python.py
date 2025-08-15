@@ -1,5 +1,6 @@
 import importlib
 import io
+from copy import deepcopy
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -194,14 +195,26 @@ class Python(Node):
                 if self.use_multiple_params
                 else restricted_globals["run"](dict(input_data))
             )
-            if self.is_optimized_for_agents:
-                result = str(result)
         except Exception as e:
             error_msg = f"Code execution error: {str(e)}"
             logger.error(error_msg)
             raise ToolExecutionException(error_msg, recoverable=True)
+
         logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n" f"{str(result)[:200]}...")
-        return {"content": result}
+
+        if isinstance(result, dict) and "content" in result:
+            if self.is_optimized_for_agents:
+                optimized_result = deepcopy(result)
+                optimized_result["content"] = str(result["content"])
+                return optimized_result
+            else:
+                return result
+        else:
+            if self.is_optimized_for_agents:
+                return {"content": str(result)}
+            else:
+
+                return {"content": result}
 
     @staticmethod
     def _inplacevar(op: str, x: Any, y: Any) -> Any:

@@ -34,6 +34,7 @@ def list_services(*, api: ApiClient, settings: Settings):
                 f"{service.get('access_control', {}).get('access_type', 'private'):<15} "
                 f"{service['category']:<{max_category_len}} {service['hostname']}"
             )
+
     else:
         click.echo("Failed to list services.")
 

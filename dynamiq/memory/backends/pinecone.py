@@ -44,7 +44,13 @@ class Pinecone(MemoryBackend):
     @property
     def to_dict_exclude_params(self):
         """Define parameters to exclude when converting the class instance to a dictionary."""
-        return super().to_dict_exclude_params | {"embedder": True, "vector_store": True}
+        return super().to_dict_exclude_params | {
+            "embedder": True,
+            "vector_store": True,
+            "connection": {
+                "api_key": True,
+            },
+        }
 
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
@@ -86,6 +92,7 @@ class Pinecone(MemoryBackend):
             original_length = len(content)
             max_chars = self.max_message_tokens * CHARS_PER_TOKEN
             if original_length > max_chars:
+                content = content[:max_chars]
                 metadata["truncated"] = True
                 metadata["original_length"] = original_length
                 metadata["truncated_length"] = max_chars
