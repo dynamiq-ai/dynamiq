@@ -1,0 +1,136 @@
+"""In-memory file storage implementation."""
+
+import io
+import mimetypes
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import Any, BinaryIO, Dict, Iterator, Union, List
+
+from .base import FileStorage, FileInfo, FileNotFoundError, FileExistsError, StorageError
+
+
+class InMemoryFileStorage(FileStorage):
+    """In-memory file storage implementation.
+    
+    This implementation stores files in memory using Python dictionaries.
+    Files are lost when the process terminates.
+
+    """
+
+    def __init__(self):
+        """Initialize the in-memory storage."""
+        self._files: Dict[str, Dict[str, Any]] = {}
+    
+    def store(
+        self, 
+        file_path: Union[str, Path], 
+        content: Union[str, bytes, BinaryIO],
+        content_type: str = None,
+        metadata: Dict[str, Any] = None,
+        overwrite: bool = False
+    ) -> FileInfo:
+        """Store a file in memory."""
+        file_path = str(file_path)
+        
+        if file_path in self._files and not overwrite:
+            raise FileExistsError(
+                f"File '{file_path}' already exists",
+                operation="store",
+                path=file_path
+            )
+        
+        # Convert content to bytes
+        if isinstance(content, str):
+            content_bytes = content.encode('utf-8')
+        elif isinstance(content, bytes):
+            content_bytes = content
+        elif hasattr(content, 'read'):  # BinaryIO-like object
+            content_bytes = content.read()
+            if hasattr(content, 'seek'):
+                content.seek(0)  # Reset position for future reads
+        else:
+            raise StorageError(
+                f"Unsupported content type: {type(content)}",
+                operation="store",
+                path=file_path
+            )
+        
+        if content_type is None:
+            content_type, _ = mimetypes.guess_type(file_path)
+            if content_type is None:
+                content_type = "application/octet-stream"
+        
+        now = datetime.now()
+        file_info = {
+            'content': content_bytes,
+            'size': len(content_bytes),
+            'content_type': content_type,
+            'created_at': now,
+            'metadata': metadata or {},
+        }
+        
+        self._files[file_path] = file_info
+        
+        return self._create_file_info(file_path, file_info)
+    
+    def retrieve(self, file_path: Union[str, Path]) -> bytes:
+        """Retrieve file content as bytes."""
+        file_path = str(file_path)
+        
+        if file_path not in self._files:
+            raise FileNotFoundError(
+                f"File '{file_path}' not found",
+                operation="retrieve",
+                path=file_path
+            )
+        
+        return self._files[file_path]['content']
+    
+    def exists(self, file_path: Union[str, Path]) -> bool:
+        """Check if file exists."""
+        return str(file_path) in self._files
+    
+    def delete(self, file_path: Union[str, Path]) -> bool:
+        """Delete a file."""
+        file_path = str(file_path)
+        
+        if file_path in self._files:
+            del self._files[file_path]
+            return True
+        
+        return False
+    
+    def list_files(
+        self, 
+        directory: Union[str, Path] = "", 
+        recursive: bool = False,
+    ) -> List[FileInfo]:
+        """List files in storage."""
+        directory = str(directory)
+        files_list = []
+        
+        for file_path in self._files.keys():
+            if directory and not file_path.startswith(directory):
+                continue
+
+            if not recursive:
+                # Only show files directly in the specified directory, not in subdirectories
+                rel_path = file_path[len(directory):].lstrip('/')
+                if '/' in rel_path:
+                    continue
+
+            files_list.append(self._create_file_info(file_path, self._files[file_path]))
+        
+        return files_list
+
+    def _create_file_info(self, file_path: str, file_data: Dict[str, Any]) -> FileInfo:
+        """Create a FileInfo object from internal file data."""
+        return FileInfo(
+            name=os.path.basename(file_path),
+            path=file_path,
+            size=file_data['size'],
+            content_type=file_data['content_type'],
+            created_at=file_data['created_at'],
+            metadata=file_data.get('metadata', {})
+        )

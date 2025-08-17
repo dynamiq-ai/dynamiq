@@ -169,6 +169,12 @@ These style instructions enhance but should never override or contradict the PRI
 {{role}}
 {%- endif %}
 
+{%- if core_memory %}
+
+# CORE MEMORY
+{{core_memory}}
+{%- endif %}
+
 {%- if context %}
 
 # CONTEXT
@@ -443,6 +449,7 @@ class Agent(Node):
         """Initializes default prompt blocks and variables."""
         self._prompt_blocks = {
             "date": "{date}",
+            "core_memory": "{core_memory}",
             "tools": "{tool_description}",
             "files": "{file_description}",
             "instructions": "",
@@ -451,6 +458,7 @@ class Agent(Node):
             "tool_description": self.tool_description,
             "file_description": self.file_description,
             "date": datetime.now().strftime("%d %B %Y"),
+            "core_memory": "",
         }
 
     def set_block(self, block_name: str, content: str):
