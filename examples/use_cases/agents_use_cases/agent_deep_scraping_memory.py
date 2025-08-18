@@ -4,15 +4,17 @@ from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.tavily import TavilyTool
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.storages.file_storage import InMemoryFileStorage
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
-from dynamiq.storages.file_storage import InMemoryFileStorage
 
 AGENT_ROLE = "A helpful and general-purpose AI assistant"
 
-PROMPT1 = """Parse all aws partners having by scraping pages of https://clutch.co/developers/artificial-intelligence/generative?page=1
+PROMPT1 = """Parse all aws partners having by scraping pages of
+https://clutch.co/developers/artificial-intelligence/generative?page=1
  and generate csv like file with this structure
- Company Name,Rating,Reviews,Location,Minimum Project Size,Hourly Rate,Company Size,Services Focus. Use filesystem to """
+ Company Name,Rating,Reviews,Location,Minimum Project Size,Hourly Rate,Company Size,Services Focus.
+  Use filesystem to save the file."""
 
 PROMPT2 = """Create long research on state of AI in EU. Give report for each country."""
 
@@ -26,7 +28,6 @@ if __name__ == "__main__":
     llm = setup_llm(model_provider="claude", model_name="claude-3-7-sonnet-20250219", temperature=0)
 
     storage = InMemoryFileStorage()
-
     agent = ReActAgent(
         name="Agent",
         id="Agent",

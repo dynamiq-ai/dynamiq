@@ -700,7 +700,6 @@ class ReActAgent(Agent):
     _response_format: dict[str, Any] | None = None
     _tool_chunked_outputs: dict[str, ChunkedToolOutput] = {}
     _core_memory: CoreMemory = CoreMemory()
-    
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -1847,7 +1846,6 @@ class ReActAgent(Agent):
             "instructions": REACT_BLOCK_INSTRUCTIONS_NO_TOOLS if not self.tools else instructions_default,
             "output_format": REACT_BLOCK_OUTPUT_FORMAT,
         }
-
 
         match self.inference_mode:
             case InferenceMode.FUNCTION_CALLING:

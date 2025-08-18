@@ -3,11 +3,11 @@ import io
 import json
 import re
 from enum import Enum
-from typing import Any, Sequence, Dict
+from typing import Any, Sequence
 
 import filetype
 from lxml import etree as LET  # nosec: B410
-from pydantic import BaseModel, ConfigDict, model_validator, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
 from dynamiq.prompts import (
@@ -1000,16 +1000,16 @@ class SummarizationConfig(BaseModel):
     tool_output: ToolOutputConfig = ToolOutputConfig()
 
 
-
 class MemoryBlock(BaseModel):
     """A block of memory with a name and content."""
     name: str = Field(description="Name of the memory block")
     content: str = Field(description="Content of the memory block")
 
+
 class CoreMemory(BaseModel):
     """Core memory system with blocks that can be modified."""
-    
-    blocks: Dict[str, MemoryBlock] = Field(default_factory=dict, description="Memory blocks by name")
+
+    blocks: dict[str, MemoryBlock] = Field(default_factory=dict, description="Memory blocks by name")
 
     def add_block(self, name: str, content: str = "") -> bool:
         """Add a new memory block."""
@@ -1019,7 +1019,7 @@ class CoreMemory(BaseModel):
             content=content,
         )
         return True
-    
+
     def remove_block(self, name: str) -> bool:
         """Remove a memory block."""
         if name in self.blocks:
@@ -1031,15 +1031,14 @@ class CoreMemory(BaseModel):
         """Get the entire memory formatted as a string for prompt injection."""
         if not self.blocks:
             return ""
-        
+
         formatted_parts = []
-        
+
         for block_name in sorted(self.blocks.keys()):
             block = self.blocks[block_name]
             formatted_parts.append(f"### {block.name}")
             if block.content:
                 formatted_parts.append(block.content)
             formatted_parts.append("")
-        
-        return "\n".join(formatted_parts)
 
+        return "\n".join(formatted_parts)

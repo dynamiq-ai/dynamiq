@@ -1,6 +1,4 @@
-import json
-from datetime import datetime
-from typing import Any, ClassVar, Dict, List, Literal, Optional, Union
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,13 +16,14 @@ class FileReadInputSchema(BaseModel):
 
 
 class FileWriteInputSchema(BaseModel):
-    """Schema for file write input parameters."""    
+    """Schema for file write input parameters."""
     file_path: str = Field(description="Path where the file should be written")
-    content: Union[str, bytes, Dict, List, Any] = Field(description="File content (string, bytes, or serializable object)")
-    content_type: Optional[str] = Field(default=None, description="MIME type (auto-detected if not provided)")
-    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Additional metadata for the file")
+    content: str | bytes | dict | list | Any = Field(description="File content (string, bytes, or serializable object)")
+    content_type: str | None = Field(default=None, description="MIME type (auto-detected if not provided)")
+    metadata: dict[str, Any] | None = Field(default=None, description="Additional metadata for the file")
 
-class FileReadTool(Node):   
+
+class FileReadTool(Node):
     """
     A tool for reading files from storage.
 
@@ -45,13 +44,21 @@ class FileReadTool(Node):
         Usage Examples:
             - Read text file: {"file_path": "config.txt"}
             - Read JSON file: {"file_path": "data.json"}
+
+        Usage:
+            - Save intermediate results.
     """
 
     file_storage: FileStorage = Field(..., description="File storage to read from.")
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileReadInputSchema]] = FileReadInputSchema
-    
-    def execute(self, input_data: FileReadInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+
+    def execute(
+        self,
+        input_data: FileReadInputSchema,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
         """
         Executes the file read operation and returns the file content.
         """
@@ -66,7 +73,7 @@ class FileReadTool(Node):
                     f"File '{input_data.file_path}' not found",
                     recoverable=True,
                 )
-            
+
             content = self.file_storage.retrieve(input_data.file_path)
 
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
@@ -80,7 +87,8 @@ class FileReadTool(Node):
                 recoverable=True,
             )
 
-class FileWriteTool(Node):  
+
+class FileWriteTool(Node):
     """
     A tool for writing files to storage.
 
@@ -108,8 +116,12 @@ class FileWriteTool(Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileWriteInputSchema]] = FileWriteInputSchema
 
-
-    def execute(self, input_data: FileWriteInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self,
+        input_data: FileWriteInputSchema,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
         """
         Executes the file write operation and returns the file information.
         """
@@ -124,7 +136,6 @@ class FileWriteTool(Node):
                 content_type = "text/plain"
             else:
                 content_type = input_data.content_type
-            
 
             # Store file
             file_info = self.file_storage.store(
@@ -132,11 +143,10 @@ class FileWriteTool(Node):
                 content_str,
                 content_type=content_type,
             )
-            
-            
+
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(file_info)[:200]}...")
             return {"content": f"File '{input_data.file_path}' written successfully"}
-            
+
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to write file. Error: {str(e)}")
             raise ToolExecutionException(

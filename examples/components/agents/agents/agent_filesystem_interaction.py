@@ -1,5 +1,3 @@
-import json
-
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
@@ -11,19 +9,20 @@ from dynamiq.storages.file_storage.in_memory import InMemoryFileStorage
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
-AGENT_ROLE = (
-" You are helpful assistant that can read and write files to the filesystem and has access to core memory tools. "
-"You can store and retrieve information from memory to help with tasks."
-)
+AGENT_ROLE = """
+You are helpful assistant that can read and write files to the filesystem
+and has access to core memory tools.
+You can store and retrieve information from memory to help with tasks.
+"""
 
-EXAMPLE_QUERY = (
-    "Create a file called 'test.txt' with the content 'Hello, world!'"
-    "Read the content of the file and return it."
-)
+EXAMPLE_QUERY = """
+Create a file called 'test.txt' with the content 'Hello, world!'
+Read the content of the file and return it.
+"""
 
-EXAMPLE_MEMORY_QUERY = (
-    "Store the information 'User prefers dark theme' in memory with key 'user_preferences'."
-)
+EXAMPLE_MEMORY_QUERY = """
+Store the information 'User prefers dark theme' in memory with key 'user_preferences'.
+"""
 
 
 def setup_agent() -> ReActAgent:
@@ -55,18 +54,16 @@ def setup_agent() -> ReActAgent:
 
 
 def run_workflow(
-    agent: ReActAgent = None, 
-    input_prompt: str = EXAMPLE_QUERY,
-    workflow_type: str = "filesystem"
+    agent: ReActAgent = None, input_prompt: str = EXAMPLE_QUERY, workflow_type: str = "filesystem"
 ) -> tuple[str, dict, list]:
     """
     Run the agent workflow for either filesystem operations or memory operations.
-    
+
     Args:
         agent: The agent to use, if None will create a new one
         input_prompt: The input prompt for the agent
         workflow_type: Either "filesystem" or "memory" to determine workflow type
-    
+
     Returns:
         tuple: (output_content, tracing_data, streaming_data)
     """
@@ -83,7 +80,7 @@ def run_workflow(
             input_data={"input": input_prompt},
             config=RunnableConfig(callbacks=[tracing, streaming_handler]),
         )
-        
+
         print(f"Files in storage after {workflow_type} workflow:")
         file_storage = agent.tools[0].file_storage
         for file_info in file_storage.list_files():
@@ -92,11 +89,11 @@ def run_workflow(
             print(f"Size: {file_info.size} bytes")
             print(f"Content: {file_storage.retrieve(file_info.path).decode('utf-8')}")
             print("-" * 30)
-        
+
         print("Core Memory contents:")
         print(agent._core_memory.get_formatted_memory())
         print("=" * 50)
-        
+
         return result.output[agent.id]["output"]["content"]
 
     except Exception as e:
@@ -109,7 +106,7 @@ if __name__ == "__main__":
     print("=== Testing Filesystem Interaction ===")
     result1 = run_workflow(input_prompt=EXAMPLE_QUERY, workflow_type="filesystem")
     print(f"Filesystem Result: {result1}")
-    
+
     print("\n=== Testing Memory Functionality ===")
     result2 = run_workflow(input_prompt=EXAMPLE_MEMORY_QUERY, workflow_type="memory")
     print(f"Memory Result: {result2}")

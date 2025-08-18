@@ -1,4 +1,5 @@
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import Node
@@ -6,7 +7,6 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.agents.utils import CoreMemory
 
 
 class CoreMemoryWriteInputSchema(BaseModel):
@@ -31,7 +31,12 @@ class CoreMemoryWriteTool(Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[CoreMemoryWriteInputSchema]] = CoreMemoryWriteInputSchema
 
-    def execute(self, input_data: CoreMemoryWriteInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self,
+        input_data: CoreMemoryWriteInputSchema,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
         """
         Executes the core memory write operation.
         """
@@ -43,9 +48,10 @@ class CoreMemoryWriteTool(Node):
         try:
             self.agent._core_memory.add_block(input_data.block_name, input_data.content)
             result = f"Created new memory block '{input_data.block_name}' with content."
-            
+
             self.agent._prompt_variables["core_memory"] = self.agent._core_memory.get_formatted_memory()
-            
+            self.agent.update_system_message()
+
             logger.info(f"Tool {self.name} - {self.id}: finished successfully")
             return {"content": result}
 
@@ -81,7 +87,12 @@ class CoreMemoryRemoveTool(Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[CoreMemoryRemoveInputSchema]] = CoreMemoryRemoveInputSchema
 
-    def execute(self, input_data: CoreMemoryRemoveInputSchema, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
+    def execute(
+        self,
+        input_data: CoreMemoryRemoveInputSchema,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
         """
         Executes the core memory clear operation.
         """
@@ -93,9 +104,10 @@ class CoreMemoryRemoveTool(Node):
         try:
             self.agent._core_memory.remove_block(input_data.block_name)
             result = f"Removed memory block '{input_data.block_name}'."
-            
+
             self.agent._prompt_variables["core_memory"] = self.agent._core_memory.get_formatted_memory()
-            
+            self.agent.update_system_message()
+
             logger.info(f"Tool {self.name} - {self.id}: finished successfully")
             return {"content": result}
 

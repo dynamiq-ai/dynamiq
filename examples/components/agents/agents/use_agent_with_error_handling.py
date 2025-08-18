@@ -9,6 +9,7 @@ from dynamiq.runnables import RunnableConfig
 
 INPUT_PROMPT = "What is the capital of France and why is it important?"
 
+
 def create_openai_llm_with_error_handling() -> OpenAI:
     """
     Create OpenAI LLM with error handling configuration.
