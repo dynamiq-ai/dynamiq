@@ -3,7 +3,7 @@ import io
 from copy import deepcopy
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from RestrictedPython import compile_restricted, safe_builtins, utility_builtins
 from RestrictedPython.Eval import default_guarded_getattr, default_guarded_getitem, default_guarded_getiter
 from RestrictedPython.Guards import guarded_unpack_sequence
@@ -17,6 +17,7 @@ from dynamiq.utils.logger import logger
 
 ALLOWED_MODULES = [
     "base64",
+    "io",
     "collections",
     "copy",
     "cmath",
@@ -108,6 +109,8 @@ def get_restricted_globals() -> dict:
             "_getattr_": default_guarded_getattr,
             "_getitem_": default_guarded_getitem,
             "_getiter_": default_guarded_getiter,
+            "__metaclass__": type,
+            "__name__": "__main__",
         },
         "_getattr_": default_guarded_getattr,
         "_unpack_sequence_": guarded_unpack_sequence,
@@ -131,8 +134,18 @@ def compile_and_execute(code: str, restricted_globals: dict) -> dict:
 class PythonInputSchema(BaseModel):
     model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
 
+    code: str = Field(default="", description="Python code to execute. If provided, overrides the node's default code.")
+
     def to_dict(self, **kwargs) -> dict:
-        return {field: format_value(value, **kwargs)[0] for field, value in self.model_extra.items()}
+        result = {}
+        # Add explicit fields
+        if self.code:
+            result["code"] = self.code
+        # Add extra fields
+        if self.model_extra:
+            for field, value in self.model_extra.items():
+                result[field] = format_value(value, **kwargs)[0]
+        return result
 
 
 class Python(Node):
@@ -186,14 +199,34 @@ class Python(Node):
             }
         )
 
+        tool_params_vars = {}
+
         try:
-            restricted_globals = compile_and_execute(self.code, restricted_globals)
+            code_to_execute = input_data.code if input_data.code else self.code
+            if not code_to_execute:
+                raise ValueError("No code provided. Either set code in the node or provide it in input_data.")
+
+            restricted_globals = compile_and_execute(code_to_execute, restricted_globals)
             if "run" not in restricted_globals:
                 raise ValueError("The 'run' function is not defined in the provided code.")
+
+            if hasattr(input_data, "model_dump"):
+                run_input = input_data.model_dump()
+                if hasattr(input_data, "model_extra") and input_data.model_extra:
+                    run_input.update(input_data.model_extra)
+            else:
+                run_input = dict(input_data)
+
+            if "code" in run_input:
+                del run_input["code"]
+            for key in tool_params_vars:
+                if key in run_input:
+                    del run_input[key]
+
             result = (
-                restricted_globals["run"](**dict(input_data))
+                restricted_globals["run"](**run_input)
                 if self.use_multiple_params
-                else restricted_globals["run"](dict(input_data))
+                else restricted_globals["run"](run_input)
             )
         except Exception as e:
             error_msg = f"Code execution error: {str(e)}"
