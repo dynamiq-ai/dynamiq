@@ -461,9 +461,9 @@ class AnswerCorrectnessEvaluator(BaseEvaluator):
             questions=questions, answers=answers, ground_truth_answers=ground_truth_answers, verbose=verbose
         )
         out_results = []
-        for i in range(len(run_input.questions)):
+        for i, question in enumerate(run_input.questions):
             result = self.run_single(
-                question=run_input.questions[i],
+                question=question,
                 answer=run_input.answers[i],
                 ground_truth_answer=run_input.ground_truth_answers[i],
                 verbose=run_input.verbose,

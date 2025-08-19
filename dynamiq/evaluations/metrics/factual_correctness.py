@@ -520,9 +520,7 @@ class FactualCorrectnessEvaluator(BaseEvaluator):
         beta_value = run_input.beta or self.beta
 
         results_output = []
-        for index in range(len(run_input.answers)):
-            answer_sample = run_input.answers[index]
-            context_sample = run_input.contexts[index]
+        for index, (answer_sample, context_sample) in enumerate(zip(run_input.answers, run_input.contexts)):
             result_single = self.run_single(
                 answer=answer_sample,
                 context=context_sample,

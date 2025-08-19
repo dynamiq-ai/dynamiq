@@ -119,11 +119,11 @@ class DocumentSplitter:
         else:
             units = text.split(split_at)
         # Add the delimiter back to all units except the last one
-        for i in range(len(units) - 1):
+        for i, unit in enumerate(units[:-1]):
             if split_at == "\n#":
-                units[i] = "\n# " + units[i]
+                units[i] = "\n# " + unit
             else:
-                units[i] += split_at
+                units[i] = unit + split_at
         return units
 
     def _concatenate_units(
