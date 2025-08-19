@@ -23,6 +23,10 @@ from .connections import (
     Chroma,
     Milvus,
     Elasticsearch,
-    PgVector,
 )
 from .storages import RedisConnection
+
+try:
+    from ..storages.vector.pgvector.pgvector import PGVectorStore as PgVector
+except ImportError:
+    PgVector = None

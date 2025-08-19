@@ -337,7 +337,9 @@ class ContextPrecisionEvaluator(BaseEvaluator):
             verbose=verbose,
         )
         results_output = []
-        for index, (question, answer, contexts) in enumerate(zip(run_input.questions, run_input.answers, run_input.contexts_list)):
+        for index, (question, answer, contexts) in enumerate(
+            zip(run_input.questions, run_input.answers, run_input.contexts_list)
+        ):
             result_single = self.run_single(
                 question=question, answer=answer, contexts=contexts, verbose=run_input.verbose
             )

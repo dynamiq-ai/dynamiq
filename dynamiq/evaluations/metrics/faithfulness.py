@@ -487,7 +487,9 @@ class FaithfulnessEvaluator(BaseEvaluator):
         """
         input_data = RunInput(questions=questions, answers=answers, contexts=contexts, verbose=verbose)
         results_out = []
-        for idx, (question, answer, context) in enumerate(zip(input_data.questions, input_data.answers, input_data.contexts)):
+        for idx, (question, answer, context) in enumerate(
+            zip(input_data.questions, input_data.answers, input_data.contexts)
+        ):
             result_item = self.run_single(question=question, answer=answer, context=context, verbose=input_data.verbose)
             results_out.append(result_item)
         output_data = RunOutput(results=results_out)

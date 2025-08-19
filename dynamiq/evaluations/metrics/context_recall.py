@@ -299,7 +299,9 @@ class ContextRecallEvaluator(BaseEvaluator):
             verbose=verbose,
         )
         results_output = []
-        for i, (question, context, answer) in enumerate(zip(run_input.questions, run_input.contexts, run_input.answers)):
+        for i, (question, context, answer) in enumerate(
+            zip(run_input.questions, run_input.contexts, run_input.answers)
+        ):
             result_single = self.run_single(
                 question=question, context=context, answer=answer, verbose=run_input.verbose
             )
