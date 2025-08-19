@@ -472,7 +472,7 @@ class Agent(Node):
             dict: Processed metadata
         """
         EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata", "files", "images", "tool_params"}
-        custom_metadata = input_data.get("metadata", {})
+        custom_metadata = input_data.get("metadata", {}).copy()
         custom_metadata.update({k: v for k, v in input_data.items() if k not in EXCLUDED_KEYS})
 
         if "files" in custom_metadata:
