@@ -362,7 +362,7 @@ class VertexAI(GoogleCloud):
         Returns:
             dict: A dictionary with the keys 'vertex_project' and 'vertex_location'.
         """
-        vertex_credentials = json.dumps(super().conn_params.copy())
+        vertex_credentials = json.dumps(super().conn_params)
         return {
             "vertex_project": self.vertex_project_id,
             "vertex_location": self.vertex_project_location,

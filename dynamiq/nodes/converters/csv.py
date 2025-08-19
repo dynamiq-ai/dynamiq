@@ -220,7 +220,7 @@ class CSVConverter(Node):
 
             if external_metadata is not None:
                 if isinstance(external_metadata, dict):
-                    merged_metadata = external_metadata.copy()  # create an independent copy
+                    merged_metadata = external_metadata.copy()
                     merged_metadata.update(csv_metadata)  # CSV metadata takes precedence on key conflicts
                 else:
                     # If external_metadata is not a dict (e.g. a list), store it under its own key.

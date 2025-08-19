@@ -267,7 +267,7 @@ class XMLParser:
         Raises:
             JSONParsingError: If a JSON field cannot be parsed correctly
         """
-        parsed_data = data.copy()
+        parsed_data = data
         for field in json_fields:
             if field in parsed_data:
                 try:

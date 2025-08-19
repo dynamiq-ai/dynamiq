@@ -472,7 +472,7 @@ class Agent(Node):
             dict: Processed metadata
         """
         EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata", "files", "images", "tool_params"}
-        custom_metadata = input_data.get("metadata", {}).copy()
+        custom_metadata = input_data.get("metadata", {})
         custom_metadata.update({k: v for k, v in input_data.items() if k not in EXCLUDED_KEYS})
 
         if "files" in custom_metadata:
@@ -502,13 +502,13 @@ class Agent(Node):
         """
         Executes the agent with the given input data.
         """
-        log_data = dict(input_data).copy()
+        log_data = dict(input_data)
 
         if log_data.get("images"):
-            log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
+            log_data["images"] = [f"image_{i}" for i, _ in enumerate(log_data["images"])]
 
         if log_data.get("files"):
-            log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
+            log_data["files"] = [f"file_{i}" for i, _ in enumerate(log_data["files"])]
 
         logger.info(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
@@ -789,7 +789,7 @@ class Agent(Node):
             debug_info = []
         for key, value in params.items():
             if key in merged_input and isinstance(value, dict) and isinstance(merged_input[key], dict):
-                merged_nested = merged_input[key].copy()
+                merged_nested = merged_input[key]
                 merged_input[key] = deep_merge(value, merged_nested)
                 debug_info.append(f"  - From {source}: Merged nested {key}")
             else:
@@ -802,7 +802,7 @@ class Agent(Node):
             if tool.is_files_allowed is True:
                 tool_input["files"] = self.files
 
-        merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
+        merged_input = tool_input if isinstance(tool_input, dict) else {"input": tool_input}
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
@@ -976,13 +976,13 @@ class AgentManager(Agent):
         self, input_data: AgentManagerInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """Executes the manager agent with the given input data and action."""
-        log_data = dict(input_data).copy()
+        log_data = dict(input_data)
 
         if log_data.get("images"):
-            log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
+            log_data["images"] = [f"image_{i}" for i, _ in enumerate(log_data["images"])]
 
         if log_data.get("files"):
-            log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
+            log_data["files"] = [f"file_{i}" for i, _ in enumerate(log_data["files"])]
 
         logger.info(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
