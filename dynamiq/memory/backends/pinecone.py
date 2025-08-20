@@ -40,7 +40,9 @@ class Pinecone(MemoryBackend):
         default=True, description="Enable automatic message truncation for embeddings"
     )
     max_message_tokens: int = Field(default=6000, description="Maximum tokens for message content before truncation")
-    truncation_method: TruncationMethod = Field(default=TruncationMethod.START, description="Method to use for message truncation")
+    truncation_method: TruncationMethod = Field(
+        default=TruncationMethod.START, description="Method to use for message truncation"
+    )
 
     @property
     def to_dict_exclude_params(self):
@@ -97,7 +99,7 @@ class Pinecone(MemoryBackend):
                 max_tokens=self.max_message_tokens,
                 truncation_method=self.truncation_method
             )
-            
+
             if len(truncated_content) < original_length:
                 content = truncated_content
                 metadata["truncated"] = True
