@@ -341,7 +341,11 @@ class XMLParser:
         cleaned_text = XMLParser._clean_content(text)
         if not cleaned_text:
             if required_tags:
-                raise ParsingError("Input text is empty or became empty after cleaning.")
+                logger.warning("XMLParser: Content became empty after cleaning, trying original text")
+                if text and text.strip():
+                    cleaned_text = text.strip()
+                else:
+                    raise ParsingError("Input text is empty or became empty after cleaning.")
             else:
                 return {}
 
@@ -386,6 +390,12 @@ class XMLParser:
                 if re.search(empty_tag_pattern, text):
                     raise TagNotFoundError(f"Required tag <{tag}> found but contains no text content.")
                 else:
+                    # Special handling for truncated content - be more lenient with missing tags
+                    truncation_indicators = ["...[truncated", "[Content truncated]", "..."]
+                    is_truncated = any(indicator in text for indicator in truncation_indicators)
+                    if is_truncated:
+                        logger.warning(f"XMLParser: Content appears truncated, skipping required tag <{tag}>")
+                        continue
                     raise TagNotFoundError(f"Required tag <{tag}> not found even with fallback methods")
 
         for tag in remaining_optional:
