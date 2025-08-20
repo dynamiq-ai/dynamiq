@@ -157,26 +157,25 @@ class ScaleSerpTool(ConnectionNode):
                 "Either 'query' or 'url' must be provided in input data or node parameters.", recoverable=True
             )
 
-        try:
-            response = self.client.request(
-                method=self.connection.method,
-                url=urljoin(self.connection.url, "/search"),
-                params=self.get_params(
-                    query=query,
-                    url=url,
-                    num=limit,
-                    search_type=search_type,
-                    output=output_format,
-                    include_html=include_html,
-                ),
-            )
-            response.raise_for_status()
-            search_result = response.json()
-        except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(e)}")
+        response = self.client.request(
+            method=self.connection.method,
+            url=urljoin(self.connection.url, "/search"),
+            params=self.get_params(
+                query=query,
+                url=url,
+                num=limit,
+                search_type=search_type,
+                output=output_format,
+                include_html=include_html,
+            ),
+        )
+        search_result = response.json()
+        if response.status_code >= 400:
+            error_message = search_result.get("request_info", {}).get("message")
+            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(error_message)}")
             raise ToolExecutionException(
                 f"Tool '{self.name}' failed to retrieve search results. "
-                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                f"Error: {str(error_message)}. Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
 
