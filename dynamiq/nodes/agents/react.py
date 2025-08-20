@@ -7,6 +7,7 @@ from typing import Any, Union, get_args, get_origin
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
+from dynamiq.callbacks import ReActAgentStreamingParserCallback
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -18,9 +19,8 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
-
+from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
@@ -28,7 +28,6 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.llms.gemini import Gemini
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 Thought: [Your detailed reasoning about what to do next]
@@ -924,6 +923,27 @@ class ReActAgent(Agent):
 
         for loop_num in range(1, self.max_loops + 1):
             try:
+                # Create a streaming callback
+                streaming_callback = None
+                original_streaming_enabled = self.llm.streaming.enabled
+
+                if self.streaming.enabled:
+                    streaming_callback = ReActAgentStreamingParserCallback(
+                        agent_instance=self,
+                        config=config,
+                        loop_num=loop_num,
+                        **kwargs,
+                    )
+
+                    # Temporarily enable streaming on LLM
+                    if not original_streaming_enabled:
+                        self.llm.streaming.enabled = True
+
+                    # Add the callback to the config
+                    if config.callbacks is None:
+                        config.callbacks = []
+                    config.callbacks.append(streaming_callback)
+
                 llm_result = self._run_llm(
                     messages=self._prompt.messages,
                     tools=self._tools,
@@ -931,18 +951,32 @@ class ReActAgent(Agent):
                     config=config,
                     **kwargs,
                 )
+
+                # Remove the callback after execution and restore original streaming state
+                if streaming_callback:
+                    if streaming_callback in config.callbacks:
+                        config.callbacks.remove(streaming_callback)
+                    if not original_streaming_enabled:
+                        self.llm.streaming.enabled = original_streaming_enabled
+
                 action, action_input = None, None
                 llm_generated_output = ""
+
+                # Use content from callback if available
+                if streaming_callback and streaming_callback.accumulated_content:
+                    llm_generated_output = streaming_callback.accumulated_content
+                else:
+                    llm_generated_output = llm_result.output.get("content", "")
+
                 llm_reasoning = (
-                    llm_result.output.get("content")[:200]
-                    if llm_result.output.get("content")
+                    llm_generated_output[:200]
+                    if llm_generated_output
                     else str(llm_result.output.get("tool_calls", ""))[:200]
                 )
                 logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, " f"reasoning:\n{llm_reasoning}...")
 
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
-                        llm_generated_output = llm_result.output.get("content", "")
 
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
 
@@ -950,24 +984,6 @@ class ReActAgent(Agent):
                             thought, final_answer = self._extract_final_answer(llm_generated_output)
                             self.log_final_output(thought, final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-
-                            if self.streaming.enabled:
-                                if self.streaming.mode == StreamingMode.ALL:
-                                    self.stream_content(
-                                        content={"thought": thought, "loop_num": loop_num},
-                                        source=self.name,
-                                        step="reasoning",
-                                        config=config,
-                                        **kwargs,
-                                    )
-                                self.stream_content(
-                                    content=final_answer,
-                                    source=self.name,
-                                    step="answer",
-                                    config=config,
-                                    **kwargs,
-                                )
-
                             return final_answer
 
                         thought, action, action_input = self._parse_action(llm_generated_output)
@@ -996,22 +1012,6 @@ class ReActAgent(Agent):
                             final_answer = llm_generated_output_json["answer"]
                             self.log_final_output(thought, final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled:
-                                if self.streaming.mode == StreamingMode.ALL:
-                                    self.stream_content(
-                                        content={"thought": thought, "loop_num": loop_num},
-                                        source=self.name,
-                                        step="reasoning",
-                                        config=config,
-                                        **kwargs,
-                                    )
-                                self.stream_content(
-                                    content=final_answer,
-                                    source=self.name,
-                                    step="answer",
-                                    config=config,
-                                    **kwargs,
-                                )
                             return final_answer
 
                         action_input = llm_generated_output_json["action_input"]
@@ -1030,7 +1030,6 @@ class ReActAgent(Agent):
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
 
-                        llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         try:
                             llm_generated_output_json = json.loads(llm_generated_output)
@@ -1044,23 +1043,6 @@ class ReActAgent(Agent):
                         if action == "finish":
                             self.log_final_output(thought, action_input, loop_num)
                             self.tracing_final(loop_num, action_input, config, kwargs)
-                            if self.streaming.enabled:
-                                if self.streaming.mode == StreamingMode.ALL:
-                                    self.stream_content(
-                                        content={"thought": thought, "loop_num": loop_num},
-                                        source=self.name,
-                                        step="reasoning",
-                                        config=config,
-                                        **kwargs,
-                                    )
-
-                                self.stream_content(
-                                    content=action_input,
-                                    source=self.name,
-                                    step="answer",
-                                    config=config,
-                                    **kwargs,
-                                )
                             return action_input
 
                         try:
@@ -1074,7 +1056,6 @@ class ReActAgent(Agent):
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
 
-                        llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
 
                         if self.parallel_tool_calls_enabled:
@@ -1087,23 +1068,6 @@ class ReActAgent(Agent):
                                     final_answer = parsed_result.get("answer", "")
                                     self.log_final_output(thought, final_answer, loop_num)
                                     self.tracing_final(loop_num, final_answer, config, kwargs)
-
-                                    if self.streaming.enabled:
-                                        if self.streaming.mode == StreamingMode.ALL:
-                                            self.stream_content(
-                                                content={"thought": thought, "loop_num": loop_num},
-                                                source=self.name,
-                                                step="reasoning",
-                                                config=config,
-                                                **kwargs,
-                                            )
-                                        self.stream_content(
-                                            content=final_answer,
-                                            source=self.name,
-                                            step="answer",
-                                            config=config,
-                                            **kwargs,
-                                        )
                                     return final_answer
 
                                 tools_data = parsed_result.get("tools", [])
@@ -1118,16 +1082,6 @@ class ReActAgent(Agent):
                                     )
                                 else:
                                     self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
-
-                                self.stream_reasoning(
-                                    {
-                                        "thought": thought,
-                                        "tools": tools_data,
-                                        "loop_num": loop_num,
-                                    },
-                                    config,
-                                    **kwargs,
-                                )
 
                             except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
                                 self._prompt.messages.append(
@@ -1154,22 +1108,6 @@ class ReActAgent(Agent):
                                 final_answer = parsed_data.get("answer")
                                 self.log_final_output(thought, final_answer, loop_num)
                                 self.tracing_final(loop_num, final_answer, config, kwargs)
-                                if self.streaming.enabled:
-                                    if self.streaming.mode == StreamingMode.ALL:
-                                        self.stream_content(
-                                            content={"thought": thought, "loop_num": loop_num},
-                                            source=self.name,
-                                            step="reasoning",
-                                            config=config,
-                                            **kwargs,
-                                        )
-                                    self.stream_content(
-                                        content=final_answer,
-                                        source=self.name,
-                                        step="answer",
-                                        config=config,
-                                        **kwargs,
-                                    )
                                 return final_answer
 
                             except TagNotFoundError:
@@ -1221,17 +1159,6 @@ class ReActAgent(Agent):
 
                                 tools_data.append({"name": tool_call["tool_name"], "input": tool_call["tool_input"]})
 
-                            self.stream_reasoning(
-                                {
-                                    "thought": thought,
-                                    "action": "multiple_tools",
-                                    "tools": tools_data,
-                                    "loop_num": loop_num,
-                                },
-                                config,
-                                **kwargs,
-                            )
-
                             tool_result = self._execute_tools(tools_data, config, **kwargs)
 
                             action_input_json = json.dumps(action_input)
@@ -1256,18 +1183,6 @@ class ReActAgent(Agent):
                                         "Please correct the action field or state that you cannot answer the question. "
                                     )
 
-                                self.stream_reasoning(
-                                    {
-                                        "thought": thought,
-                                        "action": action,
-                                        "tool": tool,
-                                        "action_input": action_input,
-                                        "loop_num": loop_num,
-                                    },
-                                    config,
-                                    **kwargs,
-                                )
-
                                 tool_result = self._run_tool(tool, action_input, config, **kwargs)
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
@@ -1282,18 +1197,6 @@ class ReActAgent(Agent):
                                     "Do not include any additional reasoning. "
                                     "Please correct the action field or state that you cannot answer the question."
                                 )
-
-                            self.stream_reasoning(
-                                {
-                                    "thought": thought,
-                                    "action": action,
-                                    "tool": tool,
-                                    "action_input": action_input,
-                                    "loop_num": loop_num,
-                                },
-                                config,
-                                **kwargs,
-                            )
 
                             # Check tool cache first
                             tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
@@ -1356,17 +1259,7 @@ class ReActAgent(Agent):
                             updated=llm_generated_output,
                         ).model_dump()
                     )
-                else:
-                    self.stream_reasoning(
-                        {
-                            "thought": thought,
-                            "action": action,
-                            "action_input": action_input,
-                            "loop_num": loop_num,
-                        },
-                        config,
-                        **kwargs,
-                    )
+
             except ActionParsingException as e:
                 self._prompt.messages.append(
                     Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output, static=True)
@@ -1402,14 +1295,6 @@ class ReActAgent(Agent):
             raise MaxLoopsExceededException(message=error_message)
         else:
             max_loop_final_answer = self._handle_max_loops_exceeded(input_message, config, **kwargs)
-            if self.streaming.enabled:
-                self.stream_content(
-                    content=max_loop_final_answer,
-                    source=self.name,
-                    step="answer",
-                    config=config,
-                    **kwargs,
-                )
             return max_loop_final_answer
 
     def aggregate_history(self, messages: list[Message, VisionMessage]) -> str:
