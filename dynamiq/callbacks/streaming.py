@@ -662,7 +662,7 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
         field_start = self._find_field_string_value_start(
             buf, field_name, max(0, self._last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
         )
-        
+
         # If the field is found, set the state and indices
         if field_start != -1:
             self._current_state = state
@@ -764,15 +764,15 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
         if not self._buffer:
             return
 
-        mode_name = getattr(self.agent.inference_mode, "name", str(self.agent.inference_mode)).upper()
-        if mode_name == "STRUCTURED_OUTPUT":
+        if self.mode_name == InferenceMode.STRUCTURED_OUTPUT.value:
             return
+
         if force:
             keep_from = self._last_emit_index
         else:
             if (
                 self._current_state in (StreamingState.REASONING, StreamingState.ANSWER)
-                and self._state_start_index is not None
+                and self._state_start_index != -1
             ):
                 keep_from = max(0, min(self._last_emit_index - self._tail_guard, self._state_start_index - 1))
             else:

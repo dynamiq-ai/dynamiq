@@ -944,20 +944,28 @@ class ReActAgent(Agent):
                         config.callbacks = []
                     config.callbacks.append(streaming_callback)
 
-                llm_result = self._run_llm(
-                    messages=self._prompt.messages,
-                    tools=self._tools,
-                    response_format=self._response_format,
-                    config=config,
-                    **kwargs,
-                )
+                try:
+                    llm_result = self._run_llm(
+                        messages=self._prompt.messages,
+                        tools=self._tools,
+                        response_format=self._response_format,
+                        config=config,
+                        **kwargs,
+                    )
+                finally:
+                    # Remove the callback after execution and restore original streaming state
+                    if streaming_callback:
+                        try:
+                            if config and getattr(config, "callbacks", None) and streaming_callback in config.callbacks:
+                                config.callbacks.remove(streaming_callback)
+                        except Exception:
+                            logger.error("Failed to remove streaming callback from config.callbacks")
 
-                # Remove the callback after execution and restore original streaming state
-                if streaming_callback:
-                    if streaming_callback in config.callbacks:
-                        config.callbacks.remove(streaming_callback)
-                    if not original_streaming_enabled:
-                        self.llm.streaming.enabled = original_streaming_enabled
+                        if not original_streaming_enabled:
+                            try:
+                                self.llm.streaming.enabled = original_streaming_enabled
+                            except Exception:
+                                logger.error("Failed to restore llm.streaming.enabled state")
 
                 action, action_input = None, None
                 llm_generated_output = ""
