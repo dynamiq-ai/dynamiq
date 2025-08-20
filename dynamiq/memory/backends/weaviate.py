@@ -11,7 +11,7 @@ from dynamiq.prompts import Message, MessageRole
 from dynamiq.storages.vector.weaviate import WeaviateVectorStore, WeaviateWriterVectorStoreParams
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import CHARS_PER_TOKEN
+from dynamiq.utils import TruncationMethod, truncate_text_for_embedding
 
 
 class WeaviateMemoryError(Exception):
@@ -42,7 +42,8 @@ class Weaviate(MemoryBackend):
     message_truncation_enabled: bool = Field(
         default=True, description="Enable automatic message truncation for embeddings"
     )
-    max_message_tokens: int = Field(default=8192, description="Maximum tokens for message content before truncation")
+    max_message_tokens: int = Field(default=6000, description="Maximum tokens for message content before truncation")
+    truncation_method: TruncationMethod = Field(default=TruncationMethod.START, description="Method to use for message truncation")
 
     _vector_store: WeaviateVectorStore | None = PrivateAttr(default=None)
 
@@ -118,6 +119,7 @@ class Weaviate(MemoryBackend):
             # Configure embedder truncation settings
             self.embedder.document_embedder.truncation_enabled = self.message_truncation_enabled
             self.embedder.document_embedder.max_input_tokens = self.max_message_tokens
+            self.embedder.document_embedder.truncation_method = self.truncation_method
 
         except Exception as e:
             logger.error(f"Weaviate backend '{self.name}' failed to initialize vector store: {e}")
@@ -141,12 +143,18 @@ class Weaviate(MemoryBackend):
         content = message.content
         if self.message_truncation_enabled and content:
             original_length = len(content)
-            max_chars = self.max_message_tokens * CHARS_PER_TOKEN
-            if original_length > max_chars:
-                content = content[:max_chars]
+            truncated_content = truncate_text_for_embedding(
+                text=content,
+                max_tokens=self.max_message_tokens,
+                truncation_method=self.truncation_method
+            )
+            
+            if len(truncated_content) < original_length:
+                content = truncated_content
                 doc_metadata["truncated"] = True
                 doc_metadata["original_length"] = original_length
-                doc_metadata["truncated_length"] = max_chars
+                doc_metadata["truncated_length"] = len(content)
+                doc_metadata["truncation_method"] = self.truncation_method.value
 
         sanitized_metadata = {}
         for k, v in doc_metadata.items():

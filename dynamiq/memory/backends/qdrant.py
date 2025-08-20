@@ -11,7 +11,7 @@ from dynamiq.prompts import Message
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.storages.vector.qdrant import QdrantVectorStore
 from dynamiq.types import Document
-from dynamiq.utils.utils import CHARS_PER_TOKEN
+from dynamiq.utils import TruncationMethod, truncate_text_for_embedding
 
 
 class QdrantError(Exception):
@@ -37,7 +37,8 @@ class Qdrant(MemoryBackend):
     message_truncation_enabled: bool = Field(
         default=True, description="Enable automatic message truncation for embeddings"
     )
-    max_message_tokens: int = Field(default=8192, description="Maximum tokens for message content before truncation")
+    max_message_tokens: int = Field(default=6000, description="Maximum tokens for message content before truncation")
+    truncation_method: TruncationMethod = Field(default=TruncationMethod.START, description="Method to use for message truncation")
     _client: QdrantClient | None = PrivateAttr(default=None)
 
     @property
@@ -78,6 +79,7 @@ class Qdrant(MemoryBackend):
         # Configure embedder truncation settings
         self.embedder.document_embedder.truncation_enabled = self.message_truncation_enabled
         self.embedder.document_embedder.max_input_tokens = self.max_message_tokens
+        self.embedder.document_embedder.truncation_method = self.truncation_method
 
     def _message_to_document(self, message: Message) -> Document:
         """Converts a Message object to a Document object."""
@@ -86,12 +88,18 @@ class Qdrant(MemoryBackend):
 
         if self.message_truncation_enabled and content:
             original_length = len(content)
-            max_chars = self.max_message_tokens * CHARS_PER_TOKEN
-            if original_length > max_chars:
-                content = content[:max_chars]
+            truncated_content = truncate_text_for_embedding(
+                text=content,
+                max_tokens=self.max_message_tokens,
+                truncation_method=self.truncation_method
+            )
+            
+            if len(truncated_content) < original_length:
+                content = truncated_content
                 metadata["truncated"] = True
                 metadata["original_length"] = original_length
-                metadata["truncated_length"] = max_chars
+                metadata["truncated_length"] = len(content)
+                metadata["truncation_method"] = self.truncation_method.value
 
         return Document(
             id=str(uuid.uuid4()),
