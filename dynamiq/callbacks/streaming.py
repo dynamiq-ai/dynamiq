@@ -283,18 +283,16 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
         self.loop_num = loop_num
         self.kwargs = kwargs
 
-        # Aggregate streamed text from the LLM in the current loop
-        # for proper tracing inside the ReAct agent
+        # Aggregate streamed text from the LLM in the current loop for proper tracing inside the agent
         self.accumulated_content: str = ""
 
         self._buffer: str = ""
-        self._current_state: str | None = None  # None | "reasoning" | "answer"
+        self._current_state: str | None = None
         self._state_start_index: int = 0
         self._last_emit_index: int = 0
         self._answer_started: bool = False
 
-        # Set a tail guard to avoid streaming parts
-        # of the next tag that may arrive in next chunk
+        # Set a tail guard to avoid streaming parts of the next tag that may arrive in next chunk
         self._tail_guard: int = TAIL_GUARD_SIZE
 
         self.mode_name = getattr(self.agent.inference_mode, "name", str(self.agent.inference_mode)).upper()
@@ -335,7 +333,7 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
         self._trim_buffer()
 
     def on_node_execute_end(self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any):
-        # Flush and trim the remaining buffer content when the LLM streaming ends
+        # Clear the remaining buffer content when the LLM streaming ends
         if serialized.get("group") != "llms":
             return
 
@@ -419,7 +417,7 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
         if self.agent.streaming.mode == StreamingMode.FINAL and step != StreamingState.ANSWER:
             return
 
-        # Format content based on step type
+        # Format content based on the step type
         if step == "reasoning":
             content_to_stream = {
                 "thought": content,
@@ -443,7 +441,6 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
             "answer": DefaultModeTag.ANSWER,
         }
 
-        # Initialize state when first tag appears
         if self._current_state is None:
             start = self._last_emit_index
             idx_thought = self._buffer.find(tags["thought"], start) if not final_answer_only else -1
@@ -463,7 +460,6 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
         if self._current_state is None:
             return
 
-        # Determine the next transition point for the current state
         search_start = self._last_emit_index
 
         if self._current_state == StreamingState.REASONING:
@@ -476,7 +472,7 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
                     next_tag_pos, next_tag_name = pos, name
 
             if next_tag_pos != -1:
-                # If a complete next tag is found, safely emit everything up to it
+                # If a complete next tag is found, emit everything up to it
                 if next_tag_pos > self._last_emit_index:
                     self._emit(self._buffer[self._last_emit_index : next_tag_pos], step=StreamingState.REASONING)
                 if next_tag_name == "answer":
@@ -490,7 +486,7 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
                     self._last_emit_index = next_tag_pos + len(tags["action"])
                 return
 
-            # No next tag yet – emit incrementally with a small tail guard
+            # If there is no next tag yet, emit incrementally using a tail guard
             safe_end = max(self._last_emit_index, len(self._buffer) - self._tail_guard)
             if safe_end > self._last_emit_index:
                 self._emit(self._buffer[self._last_emit_index : safe_end], step=StreamingState.REASONING)
@@ -544,7 +540,6 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
                 if next_pos > self._last_emit_index:
                     self._emit(self._buffer[self._last_emit_index : next_pos], step=StreamingState.REASONING)
 
-                # Transition by tag type
                 if next_tag == open_answer:
                     self._current_state = StreamingState.ANSWER
                     self._answer_started = True
@@ -556,7 +551,7 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
                     self._last_emit_index = next_pos + len(next_tag)
                 return
 
-            # Emit incrementally with a tail guard
+            # If there is no next tag yet, emit incrementally using a tail guard
             safe_end = max(self._last_emit_index, len(self._buffer) - self._tail_guard)
             if safe_end > self._last_emit_index:
                 self._emit(self._buffer[self._last_emit_index : safe_end], step=StreamingState.REASONING)
@@ -664,10 +659,11 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
         if final_answer_only and state == StreamingState.REASONING:
             return False
 
-            # Find the start of the field string value
-            field_start = self._find_field_string_value_start(
-                buf, field_name, max(0, self._last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
-            )
+        field_start = self._find_field_string_value_start(
+            buf, field_name, max(0, self._last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
+        )
+        
+        # If the field is found, set the state and indices
         if field_start != -1:
             self._current_state = state
             self._state_start_index = field_start
