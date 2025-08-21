@@ -9,12 +9,12 @@ Your role involves understanding the overall task, breaking it down into subtask
 
 Here is the list of available specialized agents and their capabilities:
 <available_agents>
-{agents}
+{{agents}}
 </available_agents>
 
 Please consider the following chat history, which includes previous interactions and completed subtasks:
 <chat_history>
-{chat_history}
+{{chat_history}}
 </chat_history>
 
 As the Manager Agent, your primary responsibilities are:
@@ -256,12 +256,12 @@ Your role involves understanding user requests, delegating subtasks when necessa
 
 Here is the list of available specialized agents and their capabilities:
 <available_agents>
-{agents}
+{{agents}}
 </available_agents>
 
 Please consider the following chat history, which includes previous interactions and completed subtasks:
 <chat_history>
-{chat_history}
+{{chat_history}}
 </chat_history>
 
 Your task is to review the chat history and respond to the user's most recent question or request.
@@ -336,17 +336,17 @@ Important:
 
 There is a list of your available agents and their capabilities:
 <available_agents>
-{agents}
+{{agents}}
 </available_agents>
 
 There is also a chat history that includes previous interactions and completed subtasks:
 <chat_history>
-{chat_history}
+{{chat_history}}
 </chat_history>
 
 There is a plan that you need to reflect on:
 <plan>
-{plan}
+{{plan}}
 </plan>
 
 Begin your reflection now:

@@ -241,10 +241,11 @@ class XMLParser:
             elif element_found and tag in required_tags and tag_content is None:
                 raise TagNotFoundError(f"Required tag <{tag}> found but contains no text content.")
             elif not element_found and tag in required_tags:
-                raise TagNotFoundError(
+                logger.debug(
                     f"Required tag <{tag}> not found in the XML structure "
                     f"relative to the parsed root element ('{root.tag}') or its parent."
                 )
+                raise TagNotFoundError(f"Required tag <{tag}> not found in the XML structure.")
 
         missing_required_after_all = [tag for tag in required_tags if tag not in data]
         if missing_required_after_all:
@@ -340,10 +341,13 @@ class XMLParser:
 
         cleaned_text = XMLParser._clean_content(text)
         if not cleaned_text:
-            if required_tags:
-                raise ParsingError("Input text is empty or became empty after cleaning.")
+            if text and text.strip():
+                cleaned_text = text.strip()
             else:
-                return {}
+                if required_tags:
+                    raise ParsingError("Input text is empty or became empty after cleaning.")
+                else:
+                    return {}
 
         extracted_contents = XMLParser.preprocess_xml_content(cleaned_text, required_tags, optional_tags)
 
@@ -375,7 +379,7 @@ class XMLParser:
                 remaining_required = [tag for tag in remaining_required if tag not in result]
                 remaining_optional = [tag for tag in remaining_optional if tag not in result]
         except Exception as e:
-            logger.warning(f"XMLParser: XML parsing failed: {e}")
+            logger.debug(f"XMLParser: Initial XML parsing attempt: {e}")
 
         for tag in remaining_required:
             content = XMLParser.extract_content_with_regex_fallback(text, tag)
@@ -602,7 +606,8 @@ def create_message_from_input(input_data: dict) -> Message | VisionMessage:
             images.append(file)
 
     if not images:
-        return Message(role=MessageRole.USER, content=text_input)
+        # Mark user input as static to prevent template processing
+        return Message(role=MessageRole.USER, content=text_input, static=True)
 
     content = []
 
@@ -629,7 +634,7 @@ def create_message_from_input(input_data: dict) -> Message | VisionMessage:
         except Exception as e:
             logger.error(f"Error processing image: {str(e)}")
 
-    return VisionMessage(content=content, role=MessageRole.USER)
+    return VisionMessage(content=content, role=MessageRole.USER, static=True)
 
 
 def is_image_file(file) -> bool:

@@ -26,11 +26,11 @@ You are the Agent Manager. Your goal is to handle the user's request.
 
 User's request:
 <user_request>
-{task}
+{{task}}
 </user_request>
 Here is the list of available agents and their capabilities:
 <available_agents>
-{description}
+{{description}}
 </available_agents>
 
 Important guidelines:
@@ -442,9 +442,9 @@ class Agent(Node):
     def _init_prompt_blocks(self):
         """Initializes default prompt blocks and variables."""
         self._prompt_blocks = {
-            "date": "{date}",
-            "tools": "{tool_description}",
-            "files": "{file_description}",
+            "date": "{{date}}",
+            "tools": "{{tool_description}}",
+            "files": "{{file_description}}",
             "instructions": "",
         }
         self._prompt_variables = {
@@ -517,8 +517,12 @@ class Agent(Node):
 
         custom_metadata = self._prepare_metadata(dict(input_data))
 
-        input_message = input_message or self.input_message or create_message_from_input(dict(input_data))
-        input_message = input_message.format_message(**dict(input_data))
+        if input_message:
+            input_message = input_message.format_message(**dict(input_data))
+        elif self.input_message:
+            input_message = self.input_message.format_message(**dict(input_data))
+        else:
+            input_message = create_message_from_input(dict(input_data))
 
         use_memory = self.memory and (dict(input_data).get("user_id") or dict(input_data).get("session_id"))
 
@@ -904,9 +908,9 @@ class Agent(Node):
         formatted_prompt_blocks = {}
         for block, content in self._prompt_blocks.items():
             if block_names is None or block in block_names:
-
-                formatted_content = content.format(**temp_variables)
                 if content:
+                    template = Template(content)
+                    formatted_content = template.render(**temp_variables)
                     formatted_prompt_blocks[block] = formatted_content
 
         prompt = Template(self.AGENT_PROMPT_TEMPLATE).render(formatted_prompt_blocks).strip()
@@ -1008,21 +1012,27 @@ class AgentManager(Agent):
 
     def _plan(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'plan' action."""
-        prompt = self._prompt_blocks.get("plan").format(**self._prompt_variables, **kwargs)
+        template_vars = {**self._prompt_variables, **kwargs}
+        prompt_template = Template(self._prompt_blocks.get("plan", ""))
+        prompt = prompt_template.render(**template_vars)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
 
         return llm_result
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'assign' action."""
-        prompt = self._prompt_blocks.get("assign").format(**self._prompt_variables, **kwargs)
+        template_vars = {**self._prompt_variables, **kwargs}
+        prompt_template = Template(self._prompt_blocks.get("assign", ""))
+        prompt = prompt_template.render(**template_vars)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
 
         return llm_result
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'final' action."""
-        prompt = self._prompt_blocks.get("final").format(**self._prompt_variables, **kwargs)
+        template_vars = {**self._prompt_variables, **kwargs}
+        prompt_template = Template(self._prompt_blocks.get("final", ""))
+        prompt = prompt_template.render(**template_vars)
         llm_result = self._run_llm(
             [Message(role=MessageRole.USER, content=prompt)], config, by_tokens=False, **kwargs
         ).output["content"]
@@ -1042,6 +1052,8 @@ class AgentManager(Agent):
         Executes the single 'handle_input' action to either respond or plan
         based on user request complexity.
         """
-        prompt = self._prompt_blocks.get("handle_input").format(**self._prompt_variables, **kwargs)
+        template_vars = {**self._prompt_variables, **kwargs}
+        prompt_template = Template(self._prompt_blocks.get("handle_input", ""))
+        prompt = prompt_template.render(**template_vars)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         return llm_result

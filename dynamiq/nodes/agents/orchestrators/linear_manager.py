@@ -8,12 +8,12 @@ use of available resources while minimizing unnecessary steps.
 
 Here is the list of available agents and their capabilities:
 <available_agents>
-{agents}
+{{agents}}
 </available_agents>
 
 And here is the main task you need to break down:
 <input_task>
-{input_task}
+{{input_task}}
 </input_task>
 
 Please follow these instructions to create a detailed task breakdown:
@@ -111,22 +111,22 @@ Double-check that all inputs to subtasks are properly passed
 and that the final step (creating the JSON output) is performed last.
 
 Here is previous plan:
-{previous_plan}
+{{previous_plan}}
 
 Feedback from user about previous plan:
-{feedback}
+{{feedback}}
 """
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_ASSIGN = """
 You are a helpful agent responsible for recommending the best agent for a specific task.
 
 **Initial major task**
-{input_task}
+{{input_task}}
 
 **Current task**
-{task}
+{{task}}
 
 **Available agents**
-{agents}
+{{agents}}
 
 Consider the agent's role, description, tools, and task dependencies. Return only the selected agent's number.
 """  # noqa: E501
@@ -139,13 +139,13 @@ Your task is to analyze the results of subtasks and provide a cohesive response 
 Here is the initial major task that was broken down and assigned to specialized agents:
 
 <input_task>
-{input_task}
+{{input_task}}
 </input_task>
 
 Below are the outputs from the specialized agents who worked on the subtasks:
 
 <tasks_outputs>
-{tasks_outputs}
+{{tasks_outputs}}
 </tasks_outputs>
 
 Your goal is to craft a final, unified answer based on all the task outputs.
@@ -178,7 +178,7 @@ PROMPT_TEMPLATE_MANAGER_LINEAR_RUN = """
 You are a helpful agent responsible for recommending the best agent for a specific task.
 
 **Current task**
-{task}
+{{task}}
 
 Provide answer on current task.
 """  # noqa: E501
