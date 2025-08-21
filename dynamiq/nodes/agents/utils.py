@@ -733,7 +733,7 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
     if not isinstance(content, str):
         if isinstance(content, dict):
             filtered_content = {k: v for k, v in content.items() if k != "files"}
-            
+
             if "content" in filtered_content:
                 inner_content = filtered_content["content"]
                 content = inner_content if isinstance(inner_content, str) else json.dumps(inner_content, indent=2)

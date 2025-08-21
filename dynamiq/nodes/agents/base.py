@@ -574,11 +574,11 @@ class Agent(Node):
             "content": content,
             "intermediate_steps": self._intermediate_steps,
         }
-        
+
         if self._accumulated_files:
             execution_result["files"] = self._accumulated_files
             logger.info(f"Agent {self.name} - {self.id}: returning {len(self._accumulated_files)} accumulated file(s)")
-        
+
         logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(content)[:200]}...")
 
         return execution_result
@@ -865,14 +865,13 @@ class Agent(Node):
             if tool_files:
                 self._accumulated_files.update(tool_files)
                 logger.info(f"Tool '{tool.name}' generated {len(tool_files)} file(s): {list(tool_files.keys())}")
-        
+
         tool_result_content_processed = process_tool_output_for_agent(
             content=tool_result_output_content,
             max_tokens=self.tool_output_max_length,
             truncate=self.tool_output_truncate_enabled,
         )
         return tool_result_content_processed
-
 
     def _ensure_named_files(self, files):
         """Ensure all uploaded files have name and description attributes."""

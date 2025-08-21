@@ -1,7 +1,6 @@
 import base64
 import io
 import shlex
-from hashlib import sha256
 from pathlib import PurePosixPath
 from typing import Any, ClassVar, Literal
 
@@ -26,7 +25,9 @@ file upload/download, and persistent Python interpreter sessions for complex dat
 - Maintain sandbox sessions across multiple executions for workflows
 
 -Usage Strategy:-
-Always use print() statements to display results - code without output will fail. Specify required packages in the 'packages' parameter. Variables and imports persist between Python executions in the same session.
+Always use print() statements to display results - code without output will fail.
+Specify required packages in the 'packages' parameter.
+ Variables and imports persist between Python executions in the same session.
 
 -Parameter Guide:-
 - packages: Comma-separated list of Python packages to install
@@ -36,9 +37,10 @@ Always use print() statements to display results - code without output will fail
 
 -Examples:-
 - Data analysis: {"python": "import pandas as pd\\ndf = pd.read_csv('/home/user/data/file.csv')\\nprint(df.head())"}
-- Next execution: {"python": "print(df.describe())"}  # df variable persists from previous execution
-- File processing: {"packages": "requests", "python": "import requests\\nresponse = requests.get('https://api.example.com')\\nprint(response.json())"}
-- System operations: {"shell_command": "ls -la /home/user && df -h"}"""  # noqa: E501
+- Next execution: {"python": "print(df.describe())"}
+- File processing: {"packages": "requests",
+"python": "import requests\\nresponse = requests.get('https://api.example.com')\\nprint(response.json())"}
+- System operations: {"shell_command": "ls -la /home/user && df -h"}"""
 
 
 def generate_fallback_filename(file: bytes | io.BytesIO) -> str:
@@ -73,13 +75,25 @@ def generate_file_description(file: bytes | io.BytesIO, length: int = 20) -> str
 
 
 class FileData(BaseModel):
+    """Model for file data with metadata."""
     data: bytes
     name: str
     description: str
 
 
 def handle_file_upload(files: list[bytes | io.BytesIO | FileData]) -> list[FileData]:
-    """Handles file uploading with additional metadata."""
+    """
+    Handles file uploading with additional metadata.
+
+    Args:
+        files: List of file objects to upload.
+
+    Returns:
+        list[FileData]: List of processed file data objects.
+
+    Raises:
+        ValueError: If invalid file data type is provided.
+    """
     files_data = []
     for file in files:
         if isinstance(file, FileData):
@@ -95,45 +109,41 @@ def handle_file_upload(files: list[bytes | io.BytesIO | FileData]) -> list[FileD
                 )
             )
         else:
-            raise ValueError(f"Error: Invalid file data type: {type(file)}. Expected bytes or BytesIO or FileData.")
+            raise ValueError(f"Error: Invalid file data type: {type(file)}. " f"Expected bytes or BytesIO or FileData.")
 
     return files_data
 
 
 class E2BInterpreterInputSchema(BaseModel):
-    # Allow unknown fields if you want to support "just pass extra keys"
+    """Input schema for E2B interpreter tool."""
+
     model_config = ConfigDict(extra="allow")
 
     packages: str = Field(default="", description="Comma-separated pip packages to install.")
     shell_command: str = Field(default="", description="Shell command to execute.")
     python: str = Field(default="", description="Python code to execute.")
     download_files: list[str] = Field(default_factory=list, description="Exact file paths to fetch as base64.")
-
     files: list[FileData] | None = Field(
         default=None,
         description="Files to upload to the sandbox.",
         json_schema_extra={"is_accessible_to_agent": False},
     )
-
     params: dict[str, Any] = Field(
         default_factory=dict, description="Arbitrary variables to inject as Python globals before executing 'python'."
     )
-
     env: dict[str, str] = Field(default_factory=dict, description="Environment variables for shell commands.")
     cwd: str = Field(default="/home/user", description="Working directory for shell commands.")
-
     artifact_mode: Literal["diff", "none"] = Field(
         default="diff", description="How to collect artifacts: 'diff' (new/changed files in cwd) or 'none'."
     )
     artifact_max_bytes: int = Field(
         default=5_000_000, description="Maximum total bytes to download via artifacts. Use 0 to disable size limit."
     )
-
     timeout: int | None = Field(default=None, description="Override sandbox timeout for this execution (seconds)")
 
     @model_validator(mode="after")
     def validate_execution_commands(self):
-        """Validate that either shell command, python code, or download files is specified"""
+        """Validate that either shell command, python code, or download files is specified."""
         if not self.shell_command and not self.python and not self.download_files:
             raise ValueError("shell_command, python code, or download_files has to be specified.")
         return self
@@ -141,6 +151,7 @@ class E2BInterpreterInputSchema(BaseModel):
     @field_validator("files", mode="before")
     @classmethod
     def files_validator(cls, files):
+        """Validate and process files."""
         if files in (None, [], ()):
             return None
         return handle_file_upload(files)
@@ -154,15 +165,15 @@ class E2BInterpreterTool(ConnectionNode):
     shell commands, and managing file operations.
 
     Attributes:
-        group (Literal[NodeGroup.TOOLS]): The node group identifier.
-        name (str): The unique name of the tool.
-        description (str): Detailed usage instructions and capabilities.
-        connection (E2BConnection): Configuration for E2B connection.
-        installed_packages (List[str]): Pre-installed packages in the sandbox.
-        files (Optional[List[Union[io.BytesIO, bytes]]]): Files to be uploaded.
-        persistent_sandbox (bool): Whether to maintain sandbox between executions.
-        is_files_allowed (bool): Whether file uploads are permitted.
-        _sandbox (Optional[Sandbox]): Internal sandbox instance for persistent mode.
+        group: The node group identifier.
+        name: The unique name of the tool.
+        description: Detailed usage instructions and capabilities.
+        connection: Configuration for E2B connection.
+        installed_packages: Pre-installed packages in the sandbox.
+        files: Files to be uploaded.
+        persistent_sandbox: Whether to maintain sandbox between executions.
+        is_files_allowed: Whether file uploads are permitted.
+        _sandbox: Internal sandbox instance for persistent mode.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -178,6 +189,7 @@ class E2BInterpreterTool(ConnectionNode):
     input_schema: ClassVar[type[E2BInterpreterInputSchema]] = E2BInterpreterInputSchema
 
     def __init__(self, **kwargs):
+        """Initialize the E2B interpreter tool."""
         super().__init__(**kwargs)
         if self.persistent_sandbox and self.connection.api_key:
             self._initialize_persistent_sandbox()
@@ -202,7 +214,7 @@ class E2BInterpreterTool(ConnectionNode):
             **kwargs: Additional keyword arguments.
 
         Returns:
-            Dict[str, Any]: Dictionary representation of the instance.
+            dict[str, Any]: Dictionary representation of the instance.
         """
         data = super().to_dict(**kwargs)
         if self.files:
@@ -210,21 +222,30 @@ class E2BInterpreterTool(ConnectionNode):
         return data
 
     def _initialize_persistent_sandbox(self):
-        """Initializes the persistent sandbox, installs packages, and uploads initial files."""
-        logger.debug(f"Tool {self.name} - {self.id}: Initializing Persistent Sandbox with timeout {self.timeout}s")
+        """Initialize the persistent sandbox, install packages, and upload initial files."""
+        logger.debug(f"Tool {self.name} - {self.id}: " f"Initializing Persistent Sandbox with timeout {self.timeout}s")
         self._sandbox = Sandbox(api_key=self.connection.api_key, timeout=self.timeout)
         self._install_default_packages(self._sandbox)
         if self.files:
             self._upload_files(files=self.files, sandbox=self._sandbox)
 
     def _install_default_packages(self, sandbox: Sandbox) -> None:
-        """Installs the default packages in the specified sandbox."""
+        """Install the default packages in the specified sandbox."""
         if self.installed_packages:
             for package in self.installed_packages:
                 self._install_packages(sandbox, package)
 
     def _install_packages(self, sandbox: Sandbox, packages: str) -> None:
-        """Installs the specified packages in the given sandbox."""
+        """
+        Install the specified packages in the given sandbox.
+
+        Args:
+            sandbox: The sandbox instance to install packages in.
+            packages: Comma-separated string of package names.
+
+        Raises:
+            ToolExecutionException: If package installation fails.
+        """
         if packages:
             logger.debug(f"Tool {self.name} - {self.id}: Installing packages: {packages}")
             try:
@@ -236,7 +257,16 @@ class E2BInterpreterTool(ConnectionNode):
                 raise ToolExecutionException(f"Error during package installation: {process.stderr}", recoverable=True)
 
     def _upload_files(self, files: list[FileData], sandbox: Sandbox) -> str:
-        """Uploads multiple files to the sandbox and returns details for each file."""
+        """
+        Upload multiple files to the sandbox and return details for each file.
+
+        Args:
+            files: List of file data objects to upload.
+            sandbox: The sandbox instance to upload files to.
+
+        Returns:
+            str: Details of uploaded files.
+        """
         upload_details = []
         for file in files:
             uploaded_path = self._upload_file(file, sandbox)
@@ -251,14 +281,26 @@ class E2BInterpreterTool(ConnectionNode):
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
     def _upload_file(self, file: FileData, sandbox: Sandbox | None = None) -> str:
-        """Uploads a single file to the specified sandbox and returns the uploaded path."""
+        """
+        Upload a single file to the specified sandbox and return the uploaded path.
+
+        Args:
+            file: The file data to upload.
+            sandbox: The sandbox instance to upload to.
+
+        Returns:
+            str: The path where the file was uploaded.
+
+        Raises:
+            ValueError: If sandbox instance is not provided.
+        """
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
         target_path = f"/home/user/data/{file.name}"
         dir_path = "/".join(target_path.split("/")[:-1])
         sandbox.commands.run(f"mkdir -p {shlex.quote(dir_path)}")
-        
+
         file_like_object = io.BytesIO(file.data)
         file_like_object.name = file.name
 
@@ -268,7 +310,12 @@ class E2BInterpreterTool(ConnectionNode):
         return uploaded_info.path
 
     def _update_description_with_files(self, upload_details: list[dict]) -> None:
-        """Updates the tool description with detailed information about the uploaded files."""
+        """
+        Update the tool description with detailed information about the uploaded files.
+
+        Args:
+            upload_details: List of dictionaries containing file upload details.
+        """
         if upload_details:
             self.description = self.description.strip().replace("</tool_description>", "")
             self.description += "\n\n**Uploaded Files Details:**"
@@ -281,7 +328,21 @@ class E2BInterpreterTool(ConnectionNode):
             self.description += "\n</tool_description>"
 
     def _execute_python_code(self, code: str, sandbox: Sandbox | None = None, tool_params_vars: dict = None) -> str:
-        """Executes Python code in the specified sandbox with persistent session state."""
+        """
+        Execute Python code in the specified sandbox with persistent session state.
+
+        Args:
+            code: The Python code to execute.
+            sandbox: The sandbox instance to execute code in.
+            tool_params_vars: Variables to inject into the execution environment.
+
+        Returns:
+            str: The output from code execution.
+
+        Raises:
+            ValueError: If sandbox instance is not provided.
+            ToolExecutionException: If code execution fails.
+        """
         if not sandbox:
             raise ValueError("Sandbox instance is required for code execution.")
 
@@ -301,17 +362,18 @@ class E2BInterpreterTool(ConnectionNode):
 
         try:
             execution = sandbox.run_code(code)
-            
             output_parts = []
-            
+
             if execution.text:
                 output_parts.append(execution.text)
-            
+
             if execution.error:
                 if "NameError" in str(execution.error) and self.persistent_sandbox:
-                    logger.debug(f"Tool {self.name}: Recoverable NameError in persistent session: {execution.error}")
+                    logger.debug(
+                        f"Tool {self.name}: Recoverable NameError in persistent session: " f"{execution.error}"
+                    )
                 raise ToolExecutionException(f"Error during Python code execution: {execution.error}", recoverable=True)
-            
+
             if hasattr(execution, 'logs') and execution.logs:
                 if hasattr(execution.logs, 'stdout') and execution.logs.stdout:
                     for log in execution.logs.stdout:
@@ -319,16 +381,31 @@ class E2BInterpreterTool(ConnectionNode):
                 if hasattr(execution.logs, 'stderr') and execution.logs.stderr:
                     for log in execution.logs.stderr:
                         output_parts.append(f"[stderr] {log}")
-            
+
             return "\n".join(output_parts) if output_parts else ""
-            
+
         except Exception as e:
             raise ToolExecutionException(f"Error during Python code execution: {e}", recoverable=True)
 
     def _execute_shell_command(
         self, command: str, sandbox: Sandbox | None = None, env: dict | None = None, cwd: str | None = None
     ) -> str:
-        """Executes a shell command in the specified sandbox."""
+        """
+        Execute a shell command in the specified sandbox.
+
+        Args:
+            command: The shell command to execute.
+            sandbox: The sandbox instance to execute command in.
+            env: Environment variables for the command.
+            cwd: Working directory for the command.
+
+        Returns:
+            str: The output from command execution.
+
+        Raises:
+            ValueError: If sandbox instance is not provided.
+            ToolExecutionException: If command execution fails.
+        """
         if not sandbox:
             raise ValueError("Sandbox instance is required for command execution.")
 
@@ -343,7 +420,19 @@ class E2BInterpreterTool(ConnectionNode):
         return output.stdout
 
     def _download_files(self, file_paths: list[str], sandbox: Sandbox | None = None) -> dict[str, str]:
-        """Downloads files from sandbox and returns them as base64 encoded strings."""
+        """
+        Download files from sandbox and return them as base64 encoded strings.
+
+        Args:
+            file_paths: List of file paths to download.
+            sandbox: The sandbox instance to download from.
+
+        Returns:
+            dict[str, str]: Dictionary mapping file paths to base64 encoded content.
+
+        Raises:
+            ValueError: If sandbox instance is not provided.
+        """
         if not sandbox:
             raise ValueError("Sandbox instance is required for file download.")
 
@@ -360,7 +449,9 @@ class E2BInterpreterTool(ConnectionNode):
 
                 base64_content = base64.b64encode(file_content).decode("utf-8")
                 downloaded_files[file_path] = base64_content
-                logger.info(f"Tool {self.name} - {self.id}: Downloaded file {file_path} ({len(file_content)} bytes)")
+                logger.info(
+                    f"Tool {self.name} - {self.id}: Downloaded file {file_path} " f"({len(file_content)} bytes)"
+                )
             except Exception as e:
                 logger.warning(f"Tool {self.name} - {self.id}: Failed to download {file_path}: {e}")
                 downloaded_files[file_path] = f"Error: {str(e)}"
@@ -368,7 +459,16 @@ class E2BInterpreterTool(ConnectionNode):
         return downloaded_files
 
     def _is_simple_structure(self, obj: Any, max_depth: int = 3) -> bool:
-        """Check if object contains only simple, serializable types."""
+        """
+        Check if object contains only simple, serializable types.
+
+        Args:
+            obj: The object to check.
+            max_depth: Maximum depth to check for nested structures.
+
+        Returns:
+            bool: True if object contains only simple types.
+        """
         if max_depth <= 0:
             return False
         if isinstance(obj, (str, int, float, bool, type(None))):
@@ -384,14 +484,23 @@ class E2BInterpreterTool(ConnectionNode):
             return False
 
     def _collect_output_files(self, sandbox: Sandbox, base_dir: str = "/home/user/data") -> dict[str, str]:
-        """Collect common output files from /home/user and /home/user/data directories."""
+        """
+        Collect common output files from /home/user and /home/user/data directories.
+
+        Args:
+            sandbox: The sandbox instance to collect files from.
+            base_dir: Base directory to search for files.
+
+        Returns:
+            dict[str, str]: Dictionary mapping file paths to base64 encoded content.
+        """
         try:
             collected_files = {}
             extensions = ["csv", "xlsx", "xls", "txt", "json", "png", "jpg", "jpeg", "gif", "pdf", "html", "md"]
             patterns = " -o ".join([f"-name '*.{ext}'" for ext in extensions])
-            
+
             search_dirs = ["/home/user", "/home/user/data"]
-            
+
             for search_dir in search_dirs:
                 check_cmd = f"test -d {shlex.quote(search_dir)} && echo exists"
                 check_res = sandbox.commands.run(check_cmd)
@@ -399,43 +508,59 @@ class E2BInterpreterTool(ConnectionNode):
                     check_out = check_res.wait()
                 else:
                     check_out = check_res
-                    
+
                 if check_out.exit_code != 0 or "exists" not in check_out.stdout:
                     continue
-                
+
                 max_depth = "1" if search_dir == "/home/user" else "3"
-                cmd = f"cd {shlex.quote(search_dir)} && find . -maxdepth {max_depth} -type f \\( {patterns} \\) -printf '%P\\n' 2>/dev/null | head -20"
+                cmd = (
+                    f"cd {shlex.quote(search_dir)} && find . -maxdepth {max_depth} "
+                    f"-type f \\( {patterns} \\) -printf '%P\\n' 2>/dev/null | head -20"
+                )
                 res = sandbox.commands.run(cmd)
-                
+
                 if hasattr(res, 'wait'):
                     out = res.wait()
                 else:
                     out = res
-                    
+
                 if out.exit_code != 0 or not out.stdout.strip():
                     continue
-                    
+
                 file_paths = [f for f in out.stdout.splitlines() if f.strip()]
                 if file_paths:
                     abs_paths = [str(PurePosixPath(search_dir) / p) for p in file_paths]
                     files = self._download_files(abs_paths, sandbox=sandbox)
                     collected_files.update(files)
-            
+
             return collected_files
-            
+
         except Exception as e:
             logger.warning(f"Failed to collect output files: {e}")
             return {}
 
-
     def execute(
         self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
-        """Executes the requested action based on the input data."""
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+        """
+        Execute the requested action based on the input data.
+
+        Args:
+            input_data: The input schema containing execution parameters.
+            config: Optional runnable configuration.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            dict[str, Any]: Dictionary containing execution results.
+
+        Raises:
+            ToolExecutionException: If execution fails or invalid input provided.
+        """
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n" f"{input_data.model_dump()}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
+        # Prepare tool parameters
         tool_params_vars = {}
         tool_params_vars.update(input_data.params or {})
         if getattr(input_data, "model_extra", None):
@@ -463,23 +588,28 @@ class E2BInterpreterTool(ConnectionNode):
 
         try:
             content = {}
+
             if files := input_data.files:
                 content["files_uploaded"] = self._upload_files(files=files, sandbox=sandbox)
+
             if packages := input_data.packages:
                 self._install_packages(sandbox=sandbox, packages=packages)
                 content["packages_installation"] = f"Installed packages: {input_data.packages}"
+
             if shell_command := input_data.shell_command:
                 content["shell_command_execution"] = self._execute_shell_command(
                     shell_command, sandbox=sandbox, env=input_data.env, cwd=input_data.cwd
                 )
+
             if python := input_data.python:
                 content["code_execution"] = self._execute_python_code(
                     python, sandbox=sandbox, tool_params_vars=tool_params_vars
                 )
+
             if download_files := input_data.download_files:
                 downloaded_files = self._download_files(download_files, sandbox=sandbox)
                 content.setdefault("files", {}).update(downloaded_files)
-            
+
             if shell_command or python:
                 collected_files = self._collect_output_files(sandbox)
                 if collected_files:
@@ -495,8 +625,7 @@ class E2BInterpreterTool(ConnectionNode):
             if python and not content.get("code_execution") and not content.get("files"):
                 raise ToolExecutionException(
                     "Error: No output from Python execution. "
-                    "Please use 'print()' to display "
-                    "the result of your Python code.",
+                    "Please use 'print()' to display the result of your Python code.",
                     recoverable=True,
                 )
 
@@ -507,40 +636,40 @@ class E2BInterpreterTool(ConnectionNode):
 
         if self.is_optimized_for_agents:
             result_text = ""
-            
+
             if code_execution := content.get("code_execution"):
                 result_text += "## Output\n\n" + code_execution + "\n\n"
-            
+
             if shell_command_execution := content.get("shell_command_execution"):
                 result_text += "## Shell Output\n\n" + shell_command_execution + "\n\n"
-            
+
             all_files = content.get("files", {})
-            
+
             uploaded_files = set()
             if files_uploaded := content.get("files_uploaded"):
                 for line in files_uploaded.split('\n'):
                     if ' -> ' in line:
                         uploaded_path = line.split(' -> ')[1].strip()
                         uploaded_files.add(uploaded_path)
-            
+
             new_files = {k: v for k, v in all_files.items() if k not in uploaded_files}
-            
+
             if new_files:
-                    result_text += "## Generated Files (ready for download)\n\n"
-                    for file_path, file_content in new_files.items():
-                        if file_content.startswith("Error:"):
-                            result_text += f"- {file_path}: {file_content}\n"
-                        else:
-                            file_name = file_path.split('/')[-1]
-                            file_size = len(base64.b64decode(file_content))
-                            result_text += f"- **{file_name}** ({file_size:,} bytes)\n"
-                    result_text += "\n"
-            
+                result_text += "## Generated Files (ready for download)\n\n"
+                for file_path, file_content in new_files.items():
+                    if file_content.startswith("Error:"):
+                        result_text += f"- {file_path}: {file_content}\n"
+                    else:
+                        file_name = file_path.split("/")[-1]
+                        file_size = len(base64.b64decode(file_content))
+                        result_text += f"- **{file_name}** ({file_size:,} bytes)\n"
+                result_text += "\n"
+
             if packages_installation := content.get("packages_installation"):
                 packages = packages_installation.replace("Installed packages: ", "")
                 if packages:
                     result_text += f"*Packages installed: {packages}*\n\n"
-            
+
             if files_uploaded := content.get("files_uploaded"):
                 files_list = []
                 for line in files_uploaded.split('\n'):
@@ -550,14 +679,19 @@ class E2BInterpreterTool(ConnectionNode):
                 if files_list:
                     result_text += f"*Files uploaded: {', '.join(files_list)}*\n\n"
 
-            logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result_text)[:200]}...")
+            logger.info(f"Tool {self.name} - {self.id}: finished with result:\n" f"{str(result_text)[:200]}...")
 
-            return {"content": result_text, "files": new_files }
+            return {"content": result_text, "files": new_files}
 
         return {"content": content}
 
     def set_timeout(self, timeout: int) -> None:
-        """Updates the timeout for the sandbox during runtime."""
+        """
+        Update the timeout for the sandbox during runtime.
+
+        Args:
+            timeout: New timeout value in seconds.
+        """
         self.timeout = timeout
         if self._sandbox and self.persistent_sandbox:
             try:
@@ -567,7 +701,7 @@ class E2BInterpreterTool(ConnectionNode):
                 logger.warning(f"Tool {self.name} - {self.id}: Failed to update sandbox timeout: {e}")
 
     def close(self) -> None:
-        """Closes the persistent sandbox if it exists."""
+        """Close the persistent sandbox if it exists."""
         if self._sandbox and self.persistent_sandbox:
             logger.debug(f"Tool {self.name} - {self.id}: Closing Sandbox")
             self._sandbox.kill()

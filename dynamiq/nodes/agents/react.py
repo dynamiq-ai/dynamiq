@@ -1282,7 +1282,6 @@ class ReActAgent(Agent):
                                 updated=llm_generated_output,
                             )
 
-
                             self._intermediate_steps[loop_num]["model_observation"].update(
                                 step_observation.model_dump()
                             )
@@ -1396,7 +1395,6 @@ class ReActAgent(Agent):
                         tool_output=tool_result,
                         updated=llm_generated_output,
                     )
-
 
                     self._intermediate_steps[loop_num]["model_observation"].update(step_observation.model_dump())
                 else:

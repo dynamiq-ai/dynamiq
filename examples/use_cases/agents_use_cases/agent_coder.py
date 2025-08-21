@@ -1,11 +1,11 @@
 import io
 
-from dynamiq.connections import E2B, Anthropic
+from dynamiq.connections import E2B
 from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 
 AGENT_ROLE = """
 Senior Data Scientist and Programmer with the ability to write well-structured Python code.
@@ -107,7 +107,7 @@ def run_workflow(prompt: str, files_to_upload: list[io.BytesIO]) -> tuple[str, d
         content = result.output.get("content")
         intermediate_steps = result.output.get("intermediate_steps", {})
         files = result.output.get("files", {})
-        
+
         return content, intermediate_steps, files
     except Exception as e:
         logger.error(f"An error occurred: {e}")
@@ -117,7 +117,7 @@ def run_workflow(prompt: str, files_to_upload: list[io.BytesIO]) -> tuple[str, d
 if __name__ == "__main__":
     import base64
     import os
-    
+
     csv_file_io = read_file_as_bytesio(
         file_path=FILE_PATH, filename=FILE_PATH.split("/")[-1], description=FILE_DESCRIPTION
     )
@@ -126,24 +126,24 @@ if __name__ == "__main__":
 
     logger.info("---------------------------------Result-------------------------------------")
     logger.info(output)
-    
+
     if files:
         logger.info("\n---------------------------------Generated Files-------------------------------------")
         logger.info(f"Agent generated {len(files)} file(s):")
-        
+
         output_dir = "./agent_outputs"
         os.makedirs(output_dir, exist_ok=True)
-        
+
         for file_path, file_content in files.items():
             file_name = file_path.split('/')[-1]
-            
+
             try:
                 file_data = base64.b64decode(file_content)
                 output_path = os.path.join(output_dir, file_name)
-                
+
                 with open(output_path, 'wb') as f:
                     f.write(file_data)
-                
+
                 logger.info(f"  ✓ Saved: {file_name} ({len(file_data):,} bytes) -> {output_path}")
             except Exception as e:
                 logger.error(f"  ✗ Failed to save {file_name}: {e}")
