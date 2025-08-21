@@ -63,7 +63,7 @@ def create_agent():
     Returns:
         ReActAgent: A configured Dynamiq ReActAgent ready to run.
     """
-    tool = E2BInterpreterTool(connection=E2B())
+    tool = E2BInterpreterTool(name="code-executor", connection=E2B())
     llm = AnthropicLLM(
         name="claude",
         model="claude-sonnet-4-20250514",
@@ -99,8 +99,12 @@ def run_workflow(prompt: str, files_to_upload: list[io.BytesIO]) -> tuple[str, d
     try:
         agent = create_agent()
 
+        tool_params = {
+            "by_name": {"code-executor": {"params": {"my_variable": "my_value"}}},
+        }
+
         result = agent.run(
-            input_data={"input": prompt, "files": files_to_upload},
+            input_data={"input": prompt, "files": files_to_upload, "tool_params": tool_params},
         )
 
         content = result.output.get("content")

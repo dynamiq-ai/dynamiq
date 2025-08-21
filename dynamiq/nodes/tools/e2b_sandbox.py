@@ -425,14 +425,14 @@ class E2BInterpreterTool(ConnectionNode):
                 )
             self.description += "\n</tool_description>"
 
-    def _execute_python_code(self, code: str, sandbox: Sandbox | None = None, tool_params_vars: dict = None) -> str:
+    def _execute_python_code(self, code: str, sandbox: Sandbox | None = None, params: dict = None) -> str:
         """
         Execute Python code in the specified sandbox with persistent session state.
 
         Args:
             code: The Python code to execute.
             sandbox: The sandbox instance to execute code in.
-            tool_params_vars: Variables to inject into the execution environment.
+            params: Variables to inject into the execution environment.
 
         Returns:
             str: The output from code execution.
@@ -444,9 +444,9 @@ class E2BInterpreterTool(ConnectionNode):
         if not sandbox:
             raise ValueError("Sandbox instance is required for code execution.")
 
-        if tool_params_vars:
+        if params:
             vars_code = "\n# Tool params variables injected by framework\n"
-            for key, value in tool_params_vars.items():
+            for key, value in params.items():
                 if isinstance(value, str):
                     vars_code += f'{key} = {repr(value)}\n'
                 elif isinstance(value, (int, float, bool)) or value is None:
@@ -459,6 +459,7 @@ class E2BInterpreterTool(ConnectionNode):
             code = vars_code + "\n" + code
 
         try:
+            logger.info(f"Executing Python code: {code}")
             execution = sandbox.run_code(code)
             output_parts = []
 
@@ -673,16 +674,6 @@ class E2BInterpreterTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        tool_params_vars = {}
-        tool_params_vars.update(input_data.params or {})
-        if getattr(input_data, "model_extra", None):
-            tool_params_vars.update(input_data.model_extra)
-        for k, v in kwargs.items():
-            if isinstance(v, (str, int, float, bool, type(None))) or (
-                isinstance(v, (list, dict)) and self._is_simple_structure(v)
-            ):
-                tool_params_vars.setdefault(k, v)
-
         if self.persistent_sandbox and self._sandbox:
             sandbox = self._sandbox
         else:
@@ -714,9 +705,7 @@ class E2BInterpreterTool(ConnectionNode):
                 )
 
             if python := input_data.python:
-                content["code_execution"] = self._execute_python_code(
-                    python, sandbox=sandbox, tool_params_vars=tool_params_vars
-                )
+                content["code_execution"] = self._execute_python_code(python, sandbox=sandbox, params=input_data.params)
 
             if download_files := input_data.download_files:
                 downloaded_files = self._download_files(download_files, sandbox=sandbox)
