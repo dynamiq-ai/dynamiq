@@ -108,6 +108,8 @@ def get_restricted_globals() -> dict:
             "_getattr_": default_guarded_getattr,
             "_getitem_": default_guarded_getitem,
             "_getiter_": default_guarded_getiter,
+            "__metaclass__": type,
+            "__name__": "__main__",
         },
         "_getattr_": default_guarded_getattr,
         "_unpack_sequence_": guarded_unpack_sequence,
