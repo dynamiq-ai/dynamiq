@@ -24,7 +24,7 @@ ALLOWED_MODULES = [
     "datetime",
     "dynamiq",
     "functools",
-    "itertools",
+    "io",
     "json",
     "math",
     "operator",
@@ -57,6 +57,29 @@ def restricted_import(name: str, globals=None, locals=None, fromlist=(), level=0
         raise
 
 
+def safe_hasattr(obj: Any, name: str) -> bool:
+    """
+    Safe version of hasattr that uses guarded getattr.
+    """
+    try:
+        default_guarded_getattr(obj, name)
+        return True
+    except (AttributeError, TypeError):
+        return False
+
+
+def safe_getattr(obj: Any, name: str, default=None) -> Any:
+    """
+    Safe version of getattr that uses guarded getattr.
+    """
+    try:
+        return default_guarded_getattr(obj, name)
+    except (AttributeError, TypeError):
+        if default is not None:
+            return default
+        raise
+
+
 def get_restricted_globals() -> dict:
     """
     Return globals dict configured for restricted code execution.
@@ -70,25 +93,33 @@ def get_restricted_globals() -> dict:
             "any": any,
             "bin": bin,
             "bool": bool,
+            "bytes": bytes,
+            "callable": callable,
             "chr": chr,
             "complex": complex,
             "dict": dict,
+            "dir": dir,
             "divmod": divmod,
             "enumerate": enumerate,
             "filter": filter,
             "float": float,
             "format": format,
             "frozenset": frozenset,
+            "getattr": safe_getattr,
+            "globals": globals,
+            "hasattr": safe_hasattr,
             "hex": hex,
             "int": int,
             "isinstance": isinstance,
             "issubclass": issubclass,
             "len": len,
             "list": list,
+            "locals": locals,
             "map": map,
             "max": max,
             "min": min,
             "next": next,
+            "object": object,
             "oct": oct,
             "ord": ord,
             "pow": pow,
@@ -96,6 +127,7 @@ def get_restricted_globals() -> dict:
             "reversed": reversed,
             "round": round,
             "set": set,
+            "setattr": setattr,
             "slice": slice,
             "sorted": sorted,
             "str": str,
@@ -103,11 +135,14 @@ def get_restricted_globals() -> dict:
             "super": super,
             "tuple": tuple,
             "type": type,
+            "vars": vars,
             "zip": zip,
             "__import__": restricted_import,
             "_getattr_": default_guarded_getattr,
             "_getitem_": default_guarded_getitem,
             "_getiter_": default_guarded_getiter,
+            "__metaclass__": type,
+            "__name__": "__main__",
         },
         "_getattr_": default_guarded_getattr,
         "_unpack_sequence_": guarded_unpack_sequence,
@@ -213,7 +248,6 @@ class Python(Node):
             if self.is_optimized_for_agents:
                 return {"content": str(result)}
             else:
-
                 return {"content": result}
 
     @staticmethod
