@@ -390,11 +390,9 @@ class E2BInterpreterTool(ConnectionNode):
             extensions = ["csv", "xlsx", "xls", "txt", "json", "png", "jpg", "jpeg", "gif", "pdf", "html", "md"]
             patterns = " -o ".join([f"-name '*.{ext}'" for ext in extensions])
             
-            # Collect from both /home/user and /home/user/data
             search_dirs = ["/home/user", "/home/user/data"]
             
             for search_dir in search_dirs:
-                # Skip if directory doesn't exist
                 check_cmd = f"test -d {shlex.quote(search_dir)} && echo exists"
                 check_res = sandbox.commands.run(check_cmd)
                 if hasattr(check_res, 'wait'):
@@ -507,9 +505,6 @@ class E2BInterpreterTool(ConnectionNode):
                 logger.debug(f"Tool {self.name} - {self.id}: Closing Sandbox")
                 sandbox.kill()
 
-        logger.info("CONTENT keys")
-        logger.info(content.keys())
-
         if self.is_optimized_for_agents:
             result_text = ""
             
@@ -519,10 +514,8 @@ class E2BInterpreterTool(ConnectionNode):
             if shell_command_execution := content.get("shell_command_execution"):
                 result_text += "## Shell Output\n\n" + shell_command_execution + "\n\n"
             
-            # Get all files that were collected (generated or downloaded)
             all_files = content.get("files", {})
             
-            # Filter out files that were uploaded by the user
             uploaded_files = set()
             if files_uploaded := content.get("files_uploaded"):
                 for line in files_uploaded.split('\n'):
@@ -530,7 +523,6 @@ class E2BInterpreterTool(ConnectionNode):
                         uploaded_path = line.split(' -> ')[1].strip()
                         uploaded_files.add(uploaded_path)
             
-            # Only include files that were NOT uploaded (i.e., generated/created files)
             new_files = {k: v for k, v in all_files.items() if k not in uploaded_files}
             
             if new_files:
@@ -558,8 +550,6 @@ class E2BInterpreterTool(ConnectionNode):
                 if files_list:
                     result_text += f"*Files uploaded: {', '.join(files_list)}*\n\n"
 
-            logger.info("New files")
-            logger.info(new_files)
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result_text)[:200]}...")
 
             return {"content": result_text, "files": new_files }

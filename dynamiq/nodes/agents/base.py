@@ -320,6 +320,7 @@ class Agent(Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
     _json_schema_fields: ClassVar[list[str]] = ["role"]
+    _accumulated_files: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     @classmethod
     def _generate_json_schema(
@@ -561,14 +562,24 @@ class Agent(Node):
 
         result = self._run_agent(input_message, history_messages, config=config, **kwargs)
 
+        if isinstance(result, dict) and "files" in result:
+            content = result["content"]
+        else:
+            content = result
+
         if use_memory:
-            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
+            self.memory.add(role=MessageRole.ASSISTANT, content=content, metadata=custom_metadata)
 
         execution_result = {
-            "content": result,
+            "content": content,
             "intermediate_steps": self._intermediate_steps,
         }
-        logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
+        
+        if self._accumulated_files:
+            execution_result["files"] = self._accumulated_files
+            logger.info(f"Agent {self.name} - {self.id}: returning {len(self._accumulated_files)} accumulated file(s)")
+        
+        logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(content)[:200]}...")
 
         return execution_result
 
@@ -847,9 +858,16 @@ class Agent(Node):
                 raise ToolExecutionException({error_message})
             else:
                 raise ValueError({error_message})
-        tool_result_content = tool_result.output.get("content")
+        tool_result_output_content = tool_result.output.get("content")
+
+        if isinstance(tool_result.output, dict) and "files" in tool_result.output:
+            tool_files = tool_result.output.get("files", {})
+            if tool_files:
+                self._accumulated_files.update(tool_files)
+                logger.info(f"Tool '{tool.name}' generated {len(tool_files)} file(s): {list(tool_files.keys())}")
+        
         tool_result_content_processed = process_tool_output_for_agent(
-            content=tool_result_content,
+            content=tool_result_output_content,
             max_tokens=self.tool_output_max_length,
             truncate=self.tool_output_truncate_enabled,
         )
@@ -915,6 +933,7 @@ class Agent(Node):
         """Resets the agent's run state."""
         self._intermediate_steps = {}
         self._run_depends = []
+        self._accumulated_files = {}
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """Generates the prompt using specified blocks and variables."""
