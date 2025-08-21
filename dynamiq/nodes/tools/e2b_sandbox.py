@@ -43,6 +43,104 @@ Specify required packages in the 'packages' parameter.
 - System operations: {"shell_command": "ls -la /home/user && df -h"}"""
 
 
+def detect_mime_type(file_content: bytes, file_path: str) -> str:
+    """
+    Detect MIME type using magic numbers and file extension.
+
+    Args:
+        file_content: The raw file content as bytes
+        file_path: The file path to extract extension from
+
+    Returns:
+        str: The detected MIME type
+    """
+    magic_signatures = {
+        # Images
+        b"\x89PNG\r\n\x1a\n": "image/png",
+        b"\xff\xd8\xff": "image/jpeg",
+        b"GIF87a": "image/gif",
+        b"GIF89a": "image/gif",
+        b"RIFF": "image/webp",
+        b"BM": "image/bmp",
+        b"\x00\x00\x01\x00": "image/x-icon",
+        # Documents
+        b"%PDF": "application/pdf",
+        b"PK\x03\x04": "application/zip",
+        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1": "application/vnd.ms-office",
+        # Text/Data
+        b"{\n": "application/json",
+        b'{"': "application/json",
+        b"[\n": "application/json",
+        b"[{": "application/json",
+    }
+
+    for signature, mime_type in magic_signatures.items():
+        if file_content.startswith(signature):
+            if signature == b"RIFF" and len(file_content) > 12:
+                if file_content[8:12] == b"WEBP":
+                    return "image/webp"
+                else:
+                    continue
+            return mime_type
+
+    extension = file_path.lower().split(".")[-1] if "." in file_path else ""
+
+    extension_map = {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+        "webp": "image/webp",
+        "bmp": "image/bmp",
+        "ico": "image/x-icon",
+        "svg": "image/svg+xml",
+        "pdf": "application/pdf",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xls": "application/vnd.ms-excel",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "doc": "application/msword",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "ppt": "application/vnd.ms-powerpoint",
+        "txt": "text/plain",
+        "csv": "text/csv",
+        "json": "application/json",
+        "xml": "application/xml",
+        "html": "text/html",
+        "htm": "text/html",
+        "css": "text/css",
+        "js": "application/javascript",
+        "md": "text/markdown",
+        "zip": "application/zip",
+        "tar": "application/x-tar",
+        "gz": "application/gzip",
+        "rar": "application/vnd.rar",
+    }
+
+    return extension_map.get(extension, "application/octet-stream")
+
+
+def should_use_data_uri(mime_type: str) -> bool:
+    """
+    Determine if a file should be returned as a data URI.
+
+    Args:
+        mime_type: The MIME type of the file
+
+    Returns:
+        bool: True if should use data URI format
+    """
+    # Use data URIs for images and other web-renderable content
+    data_uri_types = [
+        "image/",
+        "text/html",
+        "text/css",
+        "application/javascript",
+        "image/svg+xml",
+    ]
+
+    return any(mime_type.startswith(prefix) for prefix in data_uri_types)
+
+
 def generate_fallback_filename(file: bytes | io.BytesIO) -> str:
     """
     Generate a unique fallback filename for uploaded files.
@@ -421,14 +519,14 @@ class E2BInterpreterTool(ConnectionNode):
 
     def _download_files(self, file_paths: list[str], sandbox: Sandbox | None = None) -> dict[str, str]:
         """
-        Download files from sandbox and return them as base64 encoded strings.
+        Download files from sandbox and return them with proper MIME types and data URIs.
 
         Args:
             file_paths: List of file paths to download.
             sandbox: The sandbox instance to download from.
 
         Returns:
-            dict[str, str]: Dictionary mapping file paths to base64 encoded content.
+            dict[str, str]: Dictionary mapping file paths to base64 or data URI content.
 
         Raises:
             ValueError: If sandbox instance is not provided.
@@ -447,11 +545,26 @@ class E2BInterpreterTool(ConnectionNode):
                 else:
                     file_content = str(file_content).encode("utf-8")
 
+                mime_type = detect_mime_type(file_content, file_path)
+
                 base64_content = base64.b64encode(file_content).decode("utf-8")
-                downloaded_files[file_path] = base64_content
-                logger.info(
-                    f"Tool {self.name} - {self.id}: Downloaded file {file_path} " f"({len(file_content)} bytes)"
-                )
+
+                # Format as data URI for supported types
+                if should_use_data_uri(mime_type):
+                    final_content = f"data:{mime_type};base64,{base64_content}"
+                    logger.info(
+                        f"Tool {self.name} - {self.id}: Downloaded file {file_path} "
+                        f"({len(file_content)} bytes) as data URI with MIME type {mime_type}"
+                    )
+                else:
+                    final_content = base64_content
+                    logger.info(
+                        f"Tool {self.name} - {self.id}: Downloaded file {file_path} "
+                        f"({len(file_content)} bytes) as base64 with MIME type {mime_type}"
+                    )
+
+                downloaded_files[file_path] = final_content
+
             except Exception as e:
                 logger.warning(f"Tool {self.name} - {self.id}: Failed to download {file_path}: {e}")
                 downloaded_files[file_path] = f"Error: {str(e)}"
@@ -492,7 +605,7 @@ class E2BInterpreterTool(ConnectionNode):
             base_dir: Base directory to search for files.
 
         Returns:
-            dict[str, str]: Dictionary mapping file paths to base64 encoded content.
+            dict[str, str]: Dictionary mapping file paths to base64 or data URI content.
         """
         try:
             collected_files = {}
@@ -560,7 +673,6 @@ class E2BInterpreterTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        # Prepare tool parameters
         tool_params_vars = {}
         tool_params_vars.update(input_data.params or {})
         if getattr(input_data, "model_extra", None):
@@ -659,6 +771,12 @@ class E2BInterpreterTool(ConnectionNode):
                 for file_path, file_content in new_files.items():
                     if file_content.startswith("Error:"):
                         result_text += f"- {file_path}: {file_content}\n"
+                    elif file_content.startswith("data:"):
+                        mime_part = file_content.split(";")[0].replace("data:", "")
+                        base64_part = file_content.split(",", 1)[1]
+                        file_size = len(base64.b64decode(base64_part))
+                        file_name = file_path.split("/")[-1]
+                        result_text += f"- **{file_name}** ({file_size:,} bytes, {mime_part})\n"
                     else:
                         file_name = file_path.split("/")[-1]
                         file_size = len(base64.b64decode(file_content))
