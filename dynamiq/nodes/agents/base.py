@@ -549,7 +549,7 @@ class Agent(Node):
 
         files = input_data.files
         if files:
-            self.files = files
+            self.files = self._ensure_named_files(files)
             self._prompt_variables["file_description"] = self.file_description
 
         if input_data.tool_params:
@@ -854,6 +854,26 @@ class Agent(Node):
             truncate=self.tool_output_truncate_enabled,
         )
         return tool_result_content_processed
+
+
+    def _ensure_named_files(self, files):
+        """Ensure all uploaded files have name and description attributes."""
+        named = []
+        for i, f in enumerate(files):
+            if isinstance(f, bytes):
+                bio = io.BytesIO(f)
+                bio.name = f"file_{i}.bin"
+                bio.description = "User-provided file"
+                named.append(bio)
+            elif isinstance(f, io.BytesIO):
+                if not hasattr(f, "name"):
+                    f.name = f"file_{i}"
+                if not hasattr(f, "description"):
+                    f.description = "User-provided file"
+                named.append(f)
+            else:
+                named.append(f)
+        return named
 
     @property
     def tool_description(self) -> str:

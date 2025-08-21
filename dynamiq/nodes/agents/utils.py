@@ -721,7 +721,6 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
     It handles dictionaries (with or without a 'content' key), lists, tuples, and other
     types by converting them to a string. If the resulting string exceeds the maximum
     allowed length (calculated from max_tokens), it is truncated.
-
     Args:
         content: The output from tool execution, which can be of various types.
         max_tokens: Maximum allowed token count for the content. The effective character
@@ -733,11 +732,13 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
     """
     if not isinstance(content, str):
         if isinstance(content, dict):
-            if "content" in content:
-                inner_content = content["content"]
+            filtered_content = {k: v for k, v in content.items() if k != "files"}
+            
+            if "content" in filtered_content:
+                inner_content = filtered_content["content"]
                 content = inner_content if isinstance(inner_content, str) else json.dumps(inner_content, indent=2)
             else:
-                content = json.dumps(content, indent=2)
+                content = json.dumps(filtered_content, indent=2) if filtered_content else ""
         elif isinstance(content, (list, tuple)):
             content = "\n".join(str(item) for item in content)
         else:

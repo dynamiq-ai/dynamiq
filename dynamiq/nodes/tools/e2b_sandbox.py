@@ -1,10 +1,12 @@
 import base64
 import io
+import shlex
 from hashlib import sha256
+from pathlib import PurePosixPath
 from typing import Any, ClassVar, Literal
 
 from e2b_code_interpreter import Sandbox
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes import NodeGroup
@@ -15,16 +17,16 @@ from dynamiq.utils.logger import logger
 
 DESCRIPTION_E2B = """Executes Python code and shell commands in a secure cloud sandbox environment.
 Provides isolated execution with package installation,
-file upload/download, and persistent sessions for complex data analysis and system operations.
+file upload/download, and persistent Python interpreter sessions for complex data analysis and system operations.
 
 -Key Capabilities:-
-- Execute Python code with full library support and package installation
+- Execute Python code with stateful interpreter (variables persist between executions)
 - Run shell commands and system operations with file system access
 - Upload and process files (CSV, JSON, images) with persistent storage
 - Maintain sandbox sessions across multiple executions for workflows
 
 -Usage Strategy:-
-Always use print() statements to display results - code without output will fail. Specify required packages in the 'packages' parameter. Handle errors gracefully and validate code syntax before execution.
+Always use print() statements to display results - code without output will fail. Specify required packages in the 'packages' parameter. Variables and imports persist between Python executions in the same session.
 
 -Parameter Guide:-
 - packages: Comma-separated list of Python packages to install
@@ -33,7 +35,8 @@ Always use print() statements to display results - code without output will fail
 - files: Binary files to upload for processing
 
 -Examples:-
-- Data analysis: {"packages": "pandas,numpy", "python": "import pandas as pd\\ndata = pd.read_csv('data.csv')\\nprint(data.describe())"}
+- Data analysis: {"python": "import pandas as pd\\ndf = pd.read_csv('/home/user/data/file.csv')\\nprint(df.head())"}
+- Next execution: {"python": "print(df.describe())"}  # df variable persists from previous execution
 - File processing: {"packages": "requests", "python": "import requests\\nresponse = requests.get('https://api.example.com')\\nprint(response.json())"}
 - System operations: {"shell_command": "ls -la /home/user && df -h"}"""  # noqa: E501
 
@@ -98,16 +101,35 @@ def handle_file_upload(files: list[bytes | io.BytesIO | FileData]) -> list[FileD
 
 
 class E2BInterpreterInputSchema(BaseModel):
-    packages: str = Field(default="", description="Parameter to provide packages to install.")
-    shell_command: str = Field(default="", description="Parameter to provide shell command to execute.")
-    python: str = Field(default="", description="Parameter to provide python code to execute.")
-    download_files: list[str] = Field(default=[], description="List of file paths to download from sandbox as base64.")
+    # Allow unknown fields if you want to support "just pass extra keys"
+    model_config = ConfigDict(extra="allow")
 
-    files: list[FileData] = Field(
+    packages: str = Field(default="", description="Comma-separated pip packages to install.")
+    shell_command: str = Field(default="", description="Shell command to execute.")
+    python: str = Field(default="", description="Python code to execute.")
+    download_files: list[str] = Field(default_factory=list, description="Exact file paths to fetch as base64.")
+
+    files: list[FileData] | None = Field(
         default=None,
-        description="Parameter to provide files for uploading to the sandbox.",
+        description="Files to upload to the sandbox.",
         json_schema_extra={"is_accessible_to_agent": False},
     )
+
+    params: dict[str, Any] = Field(
+        default_factory=dict, description="Arbitrary variables to inject as Python globals before executing 'python'."
+    )
+
+    env: dict[str, str] = Field(default_factory=dict, description="Environment variables for shell commands.")
+    cwd: str = Field(default="/home/user", description="Working directory for shell commands.")
+
+    artifact_mode: Literal["diff", "none"] = Field(
+        default="diff", description="How to collect artifacts: 'diff' (new/changed files in cwd) or 'none'."
+    )
+    artifact_max_bytes: int = Field(
+        default=5_000_000, description="Maximum total bytes to download via artifacts. Use 0 to disable size limit."
+    )
+
+    timeout: int | None = Field(default=None, description="Override sandbox timeout for this execution (seconds)")
 
     @model_validator(mode="after")
     def validate_execution_commands(self):
@@ -118,7 +140,9 @@ class E2BInterpreterInputSchema(BaseModel):
 
     @field_validator("files", mode="before")
     @classmethod
-    def files_validator(cls, files: list[bytes | io.BytesIO | FileData]) -> list[FileData]:
+    def files_validator(cls, files):
+        if files in (None, [], ()):
+            return None
         return handle_file_upload(files)
 
 
@@ -148,15 +172,10 @@ class E2BInterpreterTool(ConnectionNode):
     installed_packages: list = []
     files: list[FileData] | None = None
     persistent_sandbox: bool = True
-    timeout: int = Field(default=300, description="Sandbox timeout in seconds (default: 300 seconds / 5 minutes)")
+    timeout: int = Field(default=600, description="Sandbox timeout in seconds (default: 600 seconds)")
     _sandbox: Sandbox | None = None
     is_files_allowed: bool = True
     input_schema: ClassVar[type[E2BInterpreterInputSchema]] = E2BInterpreterInputSchema
-
-    @field_validator("files", mode="before")
-    @classmethod
-    def files_validator(cls, files: list[bytes | io.BytesIO | FileData]) -> list[FileData]:
-        return handle_file_upload(files)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -236,10 +255,14 @@ class E2BInterpreterTool(ConnectionNode):
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
+        target_path = f"/home/user/data/{file.name}"
+        dir_path = "/".join(target_path.split("/")[:-1])
+        sandbox.commands.run(f"mkdir -p {shlex.quote(dir_path)}")
+        
         file_like_object = io.BytesIO(file.data)
         file_like_object.name = file.name
 
-        uploaded_info = sandbox.files.write(f"/home/user/{file.name}", file_like_object)
+        uploaded_info = sandbox.files.write(target_path, file_like_object)
         logger.debug(f"Tool {self.name} - {self.id}: Uploaded file info: {uploaded_info}")
 
         return uploaded_info.path
@@ -258,7 +281,7 @@ class E2BInterpreterTool(ConnectionNode):
             self.description += "\n</tool_description>"
 
     def _execute_python_code(self, code: str, sandbox: Sandbox | None = None, tool_params_vars: dict = None) -> str:
-        """Executes Python code in the specified sandbox."""
+        """Executes Python code in the specified sandbox with persistent session state."""
         if not sandbox:
             raise ValueError("Sandbox instance is required for code execution.")
 
@@ -276,30 +299,41 @@ class E2BInterpreterTool(ConnectionNode):
 
             code = vars_code + "\n" + code
 
-        code_hash = sha256(code.encode()).hexdigest()
-        filename = f"/home/user/{code_hash}.py"
-        sandbox.files.write(filename, code)
         try:
-            process = sandbox.commands.run(f"python3 {filename}")
+            execution = sandbox.run_code(code)
+            
+            output_parts = []
+            
+            if execution.text:
+                output_parts.append(execution.text)
+            
+            if execution.error:
+                if "NameError" in str(execution.error) and self.persistent_sandbox:
+                    logger.debug(f"Tool {self.name}: Recoverable NameError in persistent session: {execution.error}")
+                raise ToolExecutionException(f"Error during Python code execution: {execution.error}", recoverable=True)
+            
+            if hasattr(execution, 'logs') and execution.logs:
+                if hasattr(execution.logs, 'stdout') and execution.logs.stdout:
+                    for log in execution.logs.stdout:
+                        output_parts.append(log)
+                if hasattr(execution.logs, 'stderr') and execution.logs.stderr:
+                    for log in execution.logs.stderr:
+                        output_parts.append(f"[stderr] {log}")
+            
+            return "\n".join(output_parts) if output_parts else ""
+            
         except Exception as e:
             raise ToolExecutionException(f"Error during Python code execution: {e}", recoverable=True)
 
-        if not (process.stdout or process.stderr):
-            raise ToolExecutionException(
-                "Error: No output. Please use 'print()' to display the result of your Python code.",
-                recoverable=True,
-            )
-        if process.exit_code != 0:
-            raise ToolExecutionException(f"Error during Python code execution: {process.stderr}", recoverable=True)
-        return process.stdout
-
-    def _execute_shell_command(self, command: str, sandbox: Sandbox | None = None) -> str:
+    def _execute_shell_command(
+        self, command: str, sandbox: Sandbox | None = None, env: dict | None = None, cwd: str | None = None
+    ) -> str:
         """Executes a shell command in the specified sandbox."""
         if not sandbox:
             raise ValueError("Sandbox instance is required for command execution.")
 
         try:
-            process = sandbox.commands.run(command, background=True)
+            process = sandbox.commands.run(command, background=True, envs=env or {}, cwd=cwd or "/home/user")
         except Exception as e:
             raise ToolExecutionException(f"Error during shell command execution: {e}", recoverable=True)
 
@@ -326,12 +360,75 @@ class E2BInterpreterTool(ConnectionNode):
 
                 base64_content = base64.b64encode(file_content).decode("utf-8")
                 downloaded_files[file_path] = base64_content
-                logger.debug(f"Tool {self.name} - {self.id}: Downloaded file {file_path} ({len(file_content)} bytes)")
+                logger.info(f"Tool {self.name} - {self.id}: Downloaded file {file_path} ({len(file_content)} bytes)")
             except Exception as e:
                 logger.warning(f"Tool {self.name} - {self.id}: Failed to download {file_path}: {e}")
                 downloaded_files[file_path] = f"Error: {str(e)}"
 
         return downloaded_files
+
+    def _is_simple_structure(self, obj: Any, max_depth: int = 3) -> bool:
+        """Check if object contains only simple, serializable types."""
+        if max_depth <= 0:
+            return False
+        if isinstance(obj, (str, int, float, bool, type(None))):
+            return True
+        elif isinstance(obj, list):
+            return all(self._is_simple_structure(item, max_depth - 1) for item in obj[:10])  # Limit list size
+        elif isinstance(obj, dict):
+            return all(
+                isinstance(k, str) and self._is_simple_structure(v, max_depth - 1)
+                for k, v in list(obj.items())[:10]  # Limit dict size
+            )
+        else:
+            return False
+
+    def _collect_output_files(self, sandbox: Sandbox, base_dir: str = "/home/user/data") -> dict[str, str]:
+        """Collect common output files from /home/user and /home/user/data directories."""
+        try:
+            collected_files = {}
+            extensions = ["csv", "xlsx", "xls", "txt", "json", "png", "jpg", "jpeg", "gif", "pdf", "html", "md"]
+            patterns = " -o ".join([f"-name '*.{ext}'" for ext in extensions])
+            
+            # Collect from both /home/user and /home/user/data
+            search_dirs = ["/home/user", "/home/user/data"]
+            
+            for search_dir in search_dirs:
+                # Skip if directory doesn't exist
+                check_cmd = f"test -d {shlex.quote(search_dir)} && echo exists"
+                check_res = sandbox.commands.run(check_cmd)
+                if hasattr(check_res, 'wait'):
+                    check_out = check_res.wait()
+                else:
+                    check_out = check_res
+                    
+                if check_out.exit_code != 0 or "exists" not in check_out.stdout:
+                    continue
+                
+                max_depth = "1" if search_dir == "/home/user" else "3"
+                cmd = f"cd {shlex.quote(search_dir)} && find . -maxdepth {max_depth} -type f \\( {patterns} \\) -printf '%P\\n' 2>/dev/null | head -20"
+                res = sandbox.commands.run(cmd)
+                
+                if hasattr(res, 'wait'):
+                    out = res.wait()
+                else:
+                    out = res
+                    
+                if out.exit_code != 0 or not out.stdout.strip():
+                    continue
+                    
+                file_paths = [f for f in out.stdout.splitlines() if f.strip()]
+                if file_paths:
+                    abs_paths = [str(PurePosixPath(search_dir) / p) for p in file_paths]
+                    files = self._download_files(abs_paths, sandbox=sandbox)
+                    collected_files.update(files)
+            
+            return collected_files
+            
+        except Exception as e:
+            logger.warning(f"Failed to collect output files: {e}")
+            return {}
+
 
     def execute(
         self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **kwargs
@@ -342,14 +439,16 @@ class E2BInterpreterTool(ConnectionNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         tool_params_vars = {}
-        input_dict = input_data.model_dump() if hasattr(input_data, "model_dump") else dict(input_data)
-        schema_fields = {"packages", "shell_command", "python", "files", "download_files"}
+        tool_params_vars.update(input_data.params or {})
+        if getattr(input_data, "model_extra", None):
+            tool_params_vars.update(input_data.model_extra)
+        for k, v in kwargs.items():
+            if isinstance(v, (str, int, float, bool, type(None))) or (
+                isinstance(v, (list, dict)) and self._is_simple_structure(v)
+            ):
+                tool_params_vars.setdefault(k, v)
 
-        for key, value in input_dict.items():
-            if key not in schema_fields and value is not None:
-                tool_params_vars[key] = value
-
-        if self.persistent_sandbox:
+        if self.persistent_sandbox and self._sandbox:
             sandbox = self._sandbox
         else:
             sandbox = Sandbox(api_key=self.connection.api_key, timeout=self.timeout)
@@ -357,26 +456,49 @@ class E2BInterpreterTool(ConnectionNode):
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
 
+        if input_data.timeout and sandbox:
+            try:
+                sandbox.set_timeout(input_data.timeout)
+                logger.debug(f"Set per-call timeout to {input_data.timeout}s")
+            except Exception as e:
+                logger.warning(f"Failed to set per-call timeout: {e}")
+
         try:
             content = {}
             if files := input_data.files:
-                content["files_installation"] = self._upload_files(files=files, sandbox=sandbox)
+                content["files_uploaded"] = self._upload_files(files=files, sandbox=sandbox)
             if packages := input_data.packages:
                 self._install_packages(sandbox=sandbox, packages=packages)
                 content["packages_installation"] = f"Installed packages: {input_data.packages}"
             if shell_command := input_data.shell_command:
-                content["shell_command_execution"] = self._execute_shell_command(shell_command, sandbox=sandbox)
+                content["shell_command_execution"] = self._execute_shell_command(
+                    shell_command, sandbox=sandbox, env=input_data.env, cwd=input_data.cwd
+                )
             if python := input_data.python:
                 content["code_execution"] = self._execute_python_code(
                     python, sandbox=sandbox, tool_params_vars=tool_params_vars
                 )
             if download_files := input_data.download_files:
                 downloaded_files = self._download_files(download_files, sandbox=sandbox)
-                content["files"] = downloaded_files
+                content.setdefault("files", {}).update(downloaded_files)
+            
+            if shell_command or python:
+                collected_files = self._collect_output_files(sandbox)
+                if collected_files:
+                    content.setdefault("files", {}).update(collected_files)
+
             if not (packages or files or shell_command or python or download_files):
                 raise ToolExecutionException(
                     "Error: Invalid input data. Please provide packages, files, shell_command, "
                     "python code, or download_files.",
+                    recoverable=True,
+                )
+
+            if python and not content.get("code_execution") and not content.get("files"):
+                raise ToolExecutionException(
+                    "Error: No output from Python execution. "
+                    "Please use 'print()' to display "
+                    "the result of your Python code.",
                     recoverable=True,
                 )
 
@@ -385,28 +507,63 @@ class E2BInterpreterTool(ConnectionNode):
                 logger.debug(f"Tool {self.name} - {self.id}: Closing Sandbox")
                 sandbox.kill()
 
-        if self.is_optimized_for_agents:
-            result = ""
-            if files_installation := content.get("files_installation"):
-                result += "## Files Installation\n\n" + files_installation + "\n\n"
-            if packages_installation := content.get("packages_installation"):
-                result += "## Package Installation\n\n" + packages_installation + "\n\n"
-            if shell_command_execution := content.get("shell_command_execution"):
-                result += "## Shell Command Execution\n\n" + shell_command_execution + "\n\n"
-            if code_execution := content.get("code_execution"):
-                result += "## Code Execution\n\n" + code_execution + "\n\n"
-            if downloaded_files := content.get("files"):
-                result += "## Downloaded Files\n\n"
-                for file_path, file_content in downloaded_files.items():
-                    if file_content.startswith("Error:"):
-                        result += f"- **{file_path}**: {file_content}\n"
-                    else:
-                        result += f"- **{file_path}**: Downloaded as base64 " f"({len(file_content)} characters)\n"
-                result += "\n"
-            if result:
-                content = result
+        logger.info("CONTENT keys")
+        logger.info(content.keys())
 
-        logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
+        if self.is_optimized_for_agents:
+            result_text = ""
+            
+            if code_execution := content.get("code_execution"):
+                result_text += "## Output\n\n" + code_execution + "\n\n"
+            
+            if shell_command_execution := content.get("shell_command_execution"):
+                result_text += "## Shell Output\n\n" + shell_command_execution + "\n\n"
+            
+            # Get all files that were collected (generated or downloaded)
+            all_files = content.get("files", {})
+            
+            # Filter out files that were uploaded by the user
+            uploaded_files = set()
+            if files_uploaded := content.get("files_uploaded"):
+                for line in files_uploaded.split('\n'):
+                    if ' -> ' in line:
+                        uploaded_path = line.split(' -> ')[1].strip()
+                        uploaded_files.add(uploaded_path)
+            
+            # Only include files that were NOT uploaded (i.e., generated/created files)
+            new_files = {k: v for k, v in all_files.items() if k not in uploaded_files}
+            
+            if new_files:
+                    result_text += "## Generated Files (ready for download)\n\n"
+                    for file_path, file_content in new_files.items():
+                        if file_content.startswith("Error:"):
+                            result_text += f"- {file_path}: {file_content}\n"
+                        else:
+                            file_name = file_path.split('/')[-1]
+                            file_size = len(base64.b64decode(file_content))
+                            result_text += f"- **{file_name}** ({file_size:,} bytes)\n"
+                    result_text += "\n"
+            
+            if packages_installation := content.get("packages_installation"):
+                packages = packages_installation.replace("Installed packages: ", "")
+                if packages:
+                    result_text += f"*Packages installed: {packages}*\n\n"
+            
+            if files_uploaded := content.get("files_uploaded"):
+                files_list = []
+                for line in files_uploaded.split('\n'):
+                    if ' -> ' in line:
+                        file_name = line.split(' -> ')[0].strip()
+                        files_list.append(file_name)
+                if files_list:
+                    result_text += f"*Files uploaded: {', '.join(files_list)}*\n\n"
+
+            logger.info("New files")
+            logger.info(new_files)
+            logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result_text)[:200]}...")
+
+            return {"content": result_text, "files": new_files }
+
         return {"content": content}
 
     def set_timeout(self, timeout: int) -> None:
