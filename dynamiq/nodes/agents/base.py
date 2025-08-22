@@ -263,12 +263,11 @@ class AgentInputSchema(BaseModel):
 
     @model_validator(mode="after")
     def validate_input_fields(self, context):
-        ctx_msg = context.context.get("role") or ""
-        messages = [Message(role=MessageRole.USER, content=ctx_msg)]
+        messages = []
         if message := context.context.get("input_message"):
             messages.append(message)
 
-        required_parameters = Prompt(messages=messages).get_required_parameters()
+        required_parameters = Prompt(messages=messages).get_required_parameters() if messages else set()
 
         parameters = self.model_dump()
         provided_parameters = set(parameters.keys())
