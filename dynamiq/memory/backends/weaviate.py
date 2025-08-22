@@ -42,8 +42,8 @@ class Weaviate(MemoryBackend):
     message_truncation_enabled: bool = Field(
         default=True, description="Enable automatic message truncation for embeddings"
     )
-    max_message_tokens: int = Field(default=6000, description="Maximum tokens for message content before truncation")
-    truncation_method: TruncationMethod = Field(
+    message_max_tokens: int = Field(default=6000, description="Maximum tokens for message content before truncation")
+    message_truncation_method: TruncationMethod = Field(
         default=TruncationMethod.START, description="Method to use for message truncation"
     )
 
@@ -120,8 +120,8 @@ class Weaviate(MemoryBackend):
 
             # Configure embedder truncation settings
             self.embedder.document_embedder.truncation_enabled = self.message_truncation_enabled
-            self.embedder.document_embedder.max_input_tokens = self.max_message_tokens
-            self.embedder.document_embedder.truncation_method = self.truncation_method
+            self.embedder.document_embedder.max_input_tokens = self.message_max_tokens
+            self.embedder.document_embedder.truncation_method = self.message_truncation_method
 
         except Exception as e:
             logger.error(f"Weaviate backend '{self.name}' failed to initialize vector store: {e}")
@@ -147,8 +147,8 @@ class Weaviate(MemoryBackend):
             original_length = len(content)
             truncated_content = truncate_text_for_embedding(
                 text=content,
-                max_tokens=self.max_message_tokens,
-                truncation_method=self.truncation_method
+                max_tokens=self.message_max_tokens,
+                truncation_method=self.message_truncation_method
             )
 
             if len(truncated_content) < original_length:
@@ -156,7 +156,7 @@ class Weaviate(MemoryBackend):
                 doc_metadata["truncated"] = True
                 doc_metadata["original_length"] = original_length
                 doc_metadata["truncated_length"] = len(content)
-                doc_metadata["truncation_method"] = self.truncation_method.value
+                doc_metadata["truncation_method"] = self.message_truncation_method.value
 
         sanitized_metadata = {}
         for k, v in doc_metadata.items():

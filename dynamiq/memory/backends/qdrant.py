@@ -37,8 +37,8 @@ class Qdrant(MemoryBackend):
     message_truncation_enabled: bool = Field(
         default=True, description="Enable automatic message truncation for embeddings"
     )
-    max_message_tokens: int = Field(default=6000, description="Maximum tokens for message content before truncation")
-    truncation_method: TruncationMethod = Field(
+    message_max_tokens: int = Field(default=6000, description="Maximum tokens for message content before truncation")
+    message_truncation_method: TruncationMethod = Field(
         default=TruncationMethod.START, description="Method to use for message truncation"
     )
     _client: QdrantClient | None = PrivateAttr(default=None)
@@ -80,8 +80,8 @@ class Qdrant(MemoryBackend):
 
         # Configure embedder truncation settings
         self.embedder.document_embedder.truncation_enabled = self.message_truncation_enabled
-        self.embedder.document_embedder.max_input_tokens = self.max_message_tokens
-        self.embedder.document_embedder.truncation_method = self.truncation_method
+        self.embedder.document_embedder.max_input_tokens = self.message_max_tokens
+        self.embedder.document_embedder.truncation_method = self.message_truncation_method
 
     def _message_to_document(self, message: Message) -> Document:
         """Converts a Message object to a Document object."""
@@ -92,8 +92,8 @@ class Qdrant(MemoryBackend):
             original_length = len(content)
             truncated_content = truncate_text_for_embedding(
                 text=content,
-                max_tokens=self.max_message_tokens,
-                truncation_method=self.truncation_method
+                max_tokens=self.message_max_tokens,
+                truncation_method=self.message_truncation_method
             )
 
             if len(truncated_content) < original_length:
@@ -101,7 +101,7 @@ class Qdrant(MemoryBackend):
                 metadata["truncated"] = True
                 metadata["original_length"] = original_length
                 metadata["truncated_length"] = len(content)
-                metadata["truncation_method"] = self.truncation_method.value
+                metadata["truncation_method"] = self.message_truncation_method.value
 
         return Document(
             id=str(uuid.uuid4()),
