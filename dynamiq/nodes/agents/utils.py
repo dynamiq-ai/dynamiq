@@ -340,10 +340,13 @@ class XMLParser:
 
         cleaned_text = XMLParser._clean_content(text)
         if not cleaned_text:
-            if required_tags:
-                raise ParsingError("Input text is empty or became empty after cleaning.")
+            if text and text.strip():
+                cleaned_text = text.strip()
             else:
-                return {}
+                if required_tags:
+                    raise ParsingError("Input text is empty or became empty after cleaning.")
+                else:
+                    return {}
 
         extracted_contents = XMLParser.preprocess_xml_content(cleaned_text, required_tags, optional_tags)
 
