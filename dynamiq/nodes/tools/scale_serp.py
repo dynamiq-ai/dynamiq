@@ -156,26 +156,35 @@ class ScaleSerpTool(ConnectionNode):
             raise ToolExecutionException(
                 "Either 'query' or 'url' must be provided in input data or node parameters.", recoverable=True
             )
-
-        response = self.client.request(
-            method=self.connection.method,
-            url=urljoin(self.connection.url, "/search"),
-            params=self.get_params(
-                query=query,
-                url=url,
-                num=limit,
-                search_type=search_type,
-                output=output_format,
-                include_html=include_html,
-            ),
-        )
-        search_result = response.json()
-        if response.status_code >= 400:
-            error_message = search_result.get("request_info", {}).get("message")
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(error_message)}")
+        try:
+            response = self.client.request(
+                method=self.connection.method,
+                url=urljoin(self.connection.url, "/search"),
+                params=self.get_params(
+                    query=query,
+                    url=url,
+                    num=limit,
+                    search_type=search_type,
+                    output=output_format,
+                    include_html=include_html,
+                ),
+            )
+            search_result = response.json()
+            if response.status_code >= 400:
+                error_message = search_result.get("request_info", {}).get("message")
+                logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {str(error_message)}")
+                raise ToolExecutionException(
+                    f"Tool '{self.name}' failed to retrieve search results. "
+                    f"Error: {str(error_message)}. Please analyze the error and take appropriate action.",
+                    recoverable=True,
+                )
+        except ToolExecutionException:
+            raise
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {str(e)}")
             raise ToolExecutionException(
-                f"Tool '{self.name}' failed to retrieve search results. "
-                f"Error: {str(error_message)}. Please analyze the error and take appropriate action.",
+                f"Tool '{self.name}' encountered an unexpected error. "
+                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
 
