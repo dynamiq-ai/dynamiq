@@ -1,7 +1,5 @@
-import base64
 import io
 import shlex
-from pathlib import PurePosixPath
 from typing import Any, ClassVar, Literal
 
 from e2b_code_interpreter import Sandbox
@@ -16,7 +14,7 @@ from dynamiq.utils.logger import logger
 
 DESCRIPTION_E2B = """Executes Python code and shell commands in a secure cloud sandbox environment.
 Provides isolated execution with package installation,
-file upload/download, and persistent Python interpreter sessions for complex data analysis and system operations.
+file upload, and persistent Python interpreter sessions for complex data analysis and system operations.
 
 -Key Capabilities:-
 - Execute Python code with stateful interpreter (variables persist between executions)
@@ -41,104 +39,6 @@ Specify required packages in the 'packages' parameter.
 - File processing: {"packages": "requests",
 "python": "import requests\\nresponse = requests.get('https://api.example.com')\\nprint(response.json())"}
 - System operations: {"shell_command": "ls -la /home/user && df -h"}"""
-
-
-def detect_mime_type(file_content: bytes, file_path: str) -> str:
-    """
-    Detect MIME type using magic numbers and file extension.
-
-    Args:
-        file_content: The raw file content as bytes
-        file_path: The file path to extract extension from
-
-    Returns:
-        str: The detected MIME type
-    """
-    magic_signatures = {
-        # Images
-        b"\x89PNG\r\n\x1a\n": "image/png",
-        b"\xff\xd8\xff": "image/jpeg",
-        b"GIF87a": "image/gif",
-        b"GIF89a": "image/gif",
-        b"RIFF": "image/webp",
-        b"BM": "image/bmp",
-        b"\x00\x00\x01\x00": "image/x-icon",
-        # Documents
-        b"%PDF": "application/pdf",
-        b"PK\x03\x04": "application/zip",
-        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1": "application/vnd.ms-office",
-        # Text/Data
-        b"{\n": "application/json",
-        b'{"': "application/json",
-        b"[\n": "application/json",
-        b"[{": "application/json",
-    }
-
-    for signature, mime_type in magic_signatures.items():
-        if file_content.startswith(signature):
-            if signature == b"RIFF" and len(file_content) > 12:
-                if file_content[8:12] == b"WEBP":
-                    return "image/webp"
-                else:
-                    continue
-            return mime_type
-
-    extension = file_path.lower().split(".")[-1] if "." in file_path else ""
-
-    extension_map = {
-        "png": "image/png",
-        "jpg": "image/jpeg",
-        "jpeg": "image/jpeg",
-        "gif": "image/gif",
-        "webp": "image/webp",
-        "bmp": "image/bmp",
-        "ico": "image/x-icon",
-        "svg": "image/svg+xml",
-        "pdf": "application/pdf",
-        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "xls": "application/vnd.ms-excel",
-        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "doc": "application/msword",
-        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "ppt": "application/vnd.ms-powerpoint",
-        "txt": "text/plain",
-        "csv": "text/csv",
-        "json": "application/json",
-        "xml": "application/xml",
-        "html": "text/html",
-        "htm": "text/html",
-        "css": "text/css",
-        "js": "application/javascript",
-        "md": "text/markdown",
-        "zip": "application/zip",
-        "tar": "application/x-tar",
-        "gz": "application/gzip",
-        "rar": "application/vnd.rar",
-    }
-
-    return extension_map.get(extension, "application/octet-stream")
-
-
-def should_use_data_uri(mime_type: str) -> bool:
-    """
-    Determine if a file should be returned as a data URI.
-
-    Args:
-        mime_type: The MIME type of the file
-
-    Returns:
-        bool: True if should use data URI format
-    """
-    # Use data URIs for images and other web-renderable content
-    data_uri_types = [
-        "image/",
-        "text/html",
-        "text/css",
-        "application/javascript",
-        "image/svg+xml",
-    ]
-
-    return any(mime_type.startswith(prefix) for prefix in data_uri_types)
 
 
 def generate_fallback_filename(file: bytes | io.BytesIO) -> str:
@@ -220,7 +120,6 @@ class E2BInterpreterInputSchema(BaseModel):
     packages: str = Field(default="", description="Comma-separated pip packages to install.")
     shell_command: str = Field(default="", description="Shell command to execute.")
     python: str = Field(default="", description="Python code to execute.")
-    download_files: list[str] = Field(default_factory=list, description="Exact file paths to fetch as base64.")
     files: list[FileData] | None = Field(
         default=None,
         description="Files to upload to the sandbox.",
@@ -231,19 +130,13 @@ class E2BInterpreterInputSchema(BaseModel):
     )
     env: dict[str, str] = Field(default_factory=dict, description="Environment variables for shell commands.")
     cwd: str = Field(default="/home/user", description="Working directory for shell commands.")
-    artifact_mode: Literal["diff", "none"] = Field(
-        default="diff", description="How to collect artifacts: 'diff' (new/changed files in cwd) or 'none'."
-    )
-    artifact_max_bytes: int = Field(
-        default=5_000_000, description="Maximum total bytes to download via artifacts. Use 0 to disable size limit."
-    )
     timeout: int | None = Field(default=None, description="Override sandbox timeout for this execution (seconds)")
 
     @model_validator(mode="after")
     def validate_execution_commands(self):
-        """Validate that either shell command, python code, or download files is specified."""
-        if not self.shell_command and not self.python and not self.download_files:
-            raise ValueError("shell_command, python code, or download_files has to be specified.")
+        """Validate that either shell command or python code is specified."""
+        if not self.shell_command and not self.python:
+            raise ValueError("shell_command or python code has to be specified.")
         return self
 
     @field_validator("files", mode="before")
@@ -518,137 +411,6 @@ class E2BInterpreterTool(ConnectionNode):
             raise ToolExecutionException(f"Error during shell command execution: {output.stderr}", recoverable=True)
         return output.stdout
 
-    def _download_files(self, file_paths: list[str], sandbox: Sandbox | None = None) -> dict[str, str]:
-        """
-        Download files from sandbox and return them with proper MIME types and data URIs.
-
-        Args:
-            file_paths: List of file paths to download.
-            sandbox: The sandbox instance to download from.
-
-        Returns:
-            dict[str, str]: Dictionary mapping file paths to base64 or data URI content.
-
-        Raises:
-            ValueError: If sandbox instance is not provided.
-        """
-        if not sandbox:
-            raise ValueError("Sandbox instance is required for file download.")
-
-        downloaded_files = {}
-        for file_path in file_paths:
-            try:
-                file_content = sandbox.files.read(file_path)
-                if isinstance(file_content, str):
-                    file_content = file_content.encode("utf-8")
-                elif isinstance(file_content, bytes):
-                    pass
-                else:
-                    file_content = str(file_content).encode("utf-8")
-
-                mime_type = detect_mime_type(file_content, file_path)
-
-                base64_content = base64.b64encode(file_content).decode("utf-8")
-
-                if should_use_data_uri(mime_type):
-                    final_content = f"data:{mime_type};base64,{base64_content}"
-                    logger.info(
-                        f"Tool {self.name} - {self.id}: Downloaded file {file_path} "
-                        f"({len(file_content)} bytes) as data URI with MIME type {mime_type}"
-                    )
-                else:
-                    final_content = base64_content
-                    logger.info(
-                        f"Tool {self.name} - {self.id}: Downloaded file {file_path} "
-                        f"({len(file_content)} bytes) as base64 with MIME type {mime_type}"
-                    )
-
-                downloaded_files[file_path] = final_content
-
-            except Exception as e:
-                logger.warning(f"Tool {self.name} - {self.id}: Failed to download {file_path}: {e}")
-                downloaded_files[file_path] = f"Error: {str(e)}"
-
-        return downloaded_files
-
-    def _is_simple_structure(self, obj: Any, max_depth: int = 3) -> bool:
-        """
-        Check if object contains only simple, serializable types.
-
-        Args:
-            obj: The object to check.
-            max_depth: Maximum depth to check for nested structures.
-
-        Returns:
-            bool: True if object contains only simple types.
-        """
-        if max_depth <= 0:
-            return False
-        if isinstance(obj, (str, int, float, bool, type(None))):
-            return True
-        elif isinstance(obj, list):
-            return all(self._is_simple_structure(item, max_depth - 1) for item in obj)
-        elif isinstance(obj, dict):
-            return all(isinstance(k, str) and self._is_simple_structure(v, max_depth - 1) for k, v in list(obj.items()))
-        else:
-            return False
-
-    def _collect_output_files(self, sandbox: Sandbox, base_dir: str = "/home/user/data") -> dict[str, str]:
-        """
-        Collect common output files from /home/user and /home/user/data directories.
-
-        Args:
-            sandbox: The sandbox instance to collect files from.
-            base_dir: Base directory to search for files.
-
-        Returns:
-            dict[str, str]: Dictionary mapping file paths to base64 or data URI content.
-        """
-        try:
-            collected_files = {}
-            extensions = ["csv", "xlsx", "xls", "txt", "json", "png", "jpg", "jpeg", "gif", "pdf", "html", "md"]
-            patterns = " -o ".join([f"-name '*.{ext}'" for ext in extensions])
-
-            search_dirs = ["/home/user", "/home/user/data"]
-
-            for search_dir in search_dirs:
-                check_cmd = f"test -d {shlex.quote(search_dir)} && echo exists"
-                check_res = sandbox.commands.run(check_cmd)
-                if hasattr(check_res, "wait"):
-                    check_out = check_res.wait()
-                else:
-                    check_out = check_res
-
-                if check_out.exit_code != 0 or "exists" not in check_out.stdout:
-                    continue
-
-                max_depth = "1" if search_dir == "/home/user" else "3"
-                cmd = (
-                    f"cd {shlex.quote(search_dir)} && find . -maxdepth {max_depth} "
-                    f"-type f \\( {patterns} \\) -printf '%P\\n' 2>/dev/null | head -20"
-                )
-                res = sandbox.commands.run(cmd)
-
-                if hasattr(res, "wait"):
-                    out = res.wait()
-                else:
-                    out = res
-
-                if out.exit_code != 0 or not out.stdout.strip():
-                    continue
-
-                file_paths = [f for f in out.stdout.splitlines() if f.strip()]
-                if file_paths:
-                    abs_paths = [str(PurePosixPath(search_dir) / p) for p in file_paths]
-                    files = self._download_files(abs_paths, sandbox=sandbox)
-                    collected_files.update(files)
-
-            return collected_files
-
-        except Exception as e:
-            logger.warning(f"Failed to collect output files: {e}")
-            return {}
-
     def execute(
         self, input_data: E2BInterpreterInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
@@ -703,23 +465,13 @@ class E2BInterpreterTool(ConnectionNode):
             if python := input_data.python:
                 content["code_execution"] = self._execute_python_code(python, sandbox=sandbox, params=input_data.params)
 
-            if download_files := input_data.download_files:
-                downloaded_files = self._download_files(download_files, sandbox=sandbox)
-                content.setdefault("files", {}).update(downloaded_files)
-
-            if shell_command or python:
-                collected_files = self._collect_output_files(sandbox)
-                if collected_files:
-                    content.setdefault("files", {}).update(collected_files)
-
-            if not (packages or files or shell_command or python or download_files):
+            if not (packages or files or shell_command or python):
                 raise ToolExecutionException(
-                    "Error: Invalid input data. Please provide packages, files, shell_command, "
-                    "python code, or download_files.",
+                    "Error: Invalid input data. Please provide packages, files, shell_command, " "or python code.",
                     recoverable=True,
                 )
 
-            if python and not content.get("code_execution") and not content.get("files"):
+            if python and not content.get("code_execution"):
                 raise ToolExecutionException(
                     "Error: No output from Python execution. "
                     "Please use 'print()' to display the result of your Python code.",
@@ -740,34 +492,6 @@ class E2BInterpreterTool(ConnectionNode):
             if shell_command_execution := content.get("shell_command_execution"):
                 result_text += "## Shell Output\n\n" + shell_command_execution + "\n\n"
 
-            all_files = content.get("files", {})
-
-            uploaded_files = set()
-            if files_uploaded := content.get("files_uploaded"):
-                for line in files_uploaded.split("\n"):
-                    if " -> " in line:
-                        uploaded_path = line.split(" -> ")[1].strip()
-                        uploaded_files.add(uploaded_path)
-
-            new_files = {k: v for k, v in all_files.items() if k not in uploaded_files}
-
-            if new_files:
-                result_text += "## Generated Files (ready for download)\n\n"
-                for file_path, file_content in new_files.items():
-                    if file_content.startswith("Error:"):
-                        result_text += f"- {file_path}: {file_content}\n"
-                    elif file_content.startswith("data:"):
-                        mime_part = file_content.split(";")[0].replace("data:", "")
-                        base64_part = file_content.split(",", 1)[1]
-                        file_size = len(base64.b64decode(base64_part))
-                        file_name = file_path.split("/")[-1]
-                        result_text += f"- **{file_name}** ({file_size:,} bytes, {mime_part})\n"
-                    else:
-                        file_name = file_path.split("/")[-1]
-                        file_size = len(base64.b64decode(file_content))
-                        result_text += f"- **{file_name}** ({file_size:,} bytes)\n"
-                result_text += "\n"
-
             if packages_installation := content.get("packages_installation"):
                 packages = packages_installation.replace("Installed packages: ", "")
                 if packages:
@@ -784,7 +508,7 @@ class E2BInterpreterTool(ConnectionNode):
 
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n" f"{str(result_text)[:200]}...")
 
-            return {"content": result_text, "files": new_files}
+            return {"content": result_text}
 
         return {"content": content}
 
