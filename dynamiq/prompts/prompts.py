@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.types.llm_tool import Tool
 from dynamiq.utils import generate_uuid
-from dynamiq.utils.logger import logger
 
 
 class MessageRole(str, enum.Enum):
@@ -75,25 +74,9 @@ class Message(BaseModel):
 
     def format_message(self, **kwargs) -> "Message":
         "Returns formated copy of message"
-        if self.static:
-            return Message(
-                role=self.role,
-                content=self.content,
-                metadata=self.metadata,
-                static=self.static,
-            )
-
-        try:
-            formatted_content = self._Template(self.content).render(**kwargs)
-        except Exception as e:
-            logger.warning(f"Failed to format message template: {e}")
-            formatted_content = self.content
-
         return Message(
             role=self.role,
-            content=formatted_content,
-            metadata=self.metadata,
-            static=False,
+            content=self._Template(self.content).render(**kwargs),
         )
 
 
@@ -213,21 +196,16 @@ class VisionMessage(BaseModel):
             kwargs[param] = processed_value
 
     def format_message(self, **kwargs):
-        if self.static:
-            return VisionMessage(
-                content=self.content,
-                role=self.role,
-                static=self.static,
-            )
-
         out_msg_content = []
         for content in self.content:
             if isinstance(content, VisionMessageTextContent):
-                try:
-                    formatted_text = self._Template(content.text).render(**kwargs)
-                    out_msg_content.append(VisionMessageTextContent(text=formatted_text))
-                except Exception as e:
-                    logger.warning(f"Failed to format vision message text: {e}")
+                if not self.static:
+                    out_msg_content.append(
+                        VisionMessageTextContent(
+                            text=self._Template(content.text).render(**kwargs),
+                        )
+                    )
+                else:
                     out_msg_content.append(content)
             elif isinstance(content, VisionMessageImageContent):
                 self.parse_image_url_parameters(content.image_url.url, kwargs)

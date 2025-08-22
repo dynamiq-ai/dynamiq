@@ -6,7 +6,7 @@ from typing import Any, Sequence
 
 import filetype
 from lxml import etree as LET  # nosec: B410
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, model_validator, ConfigDict
 
 from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
 from dynamiq.prompts import (
@@ -241,11 +241,10 @@ class XMLParser:
             elif element_found and tag in required_tags and tag_content is None:
                 raise TagNotFoundError(f"Required tag <{tag}> found but contains no text content.")
             elif not element_found and tag in required_tags:
-                logger.debug(
+                raise TagNotFoundError(
                     f"Required tag <{tag}> not found in the XML structure "
                     f"relative to the parsed root element ('{root.tag}') or its parent."
                 )
-                raise TagNotFoundError(f"Required tag <{tag}> not found in the XML structure.")
 
         missing_required_after_all = [tag for tag in required_tags if tag not in data]
         if missing_required_after_all:
@@ -341,13 +340,10 @@ class XMLParser:
 
         cleaned_text = XMLParser._clean_content(text)
         if not cleaned_text:
-            if text and text.strip():
-                cleaned_text = text.strip()
+            if required_tags:
+                raise ParsingError("Input text is empty or became empty after cleaning.")
             else:
-                if required_tags:
-                    raise ParsingError("Input text is empty or became empty after cleaning.")
-                else:
-                    return {}
+                return {}
 
         extracted_contents = XMLParser.preprocess_xml_content(cleaned_text, required_tags, optional_tags)
 
@@ -379,7 +375,7 @@ class XMLParser:
                 remaining_required = [tag for tag in remaining_required if tag not in result]
                 remaining_optional = [tag for tag in remaining_optional if tag not in result]
         except Exception as e:
-            logger.debug(f"XMLParser: Initial XML parsing attempt: {e}")
+            logger.warning(f"XMLParser: XML parsing failed: {e}")
 
         for tag in remaining_required:
             content = XMLParser.extract_content_with_regex_fallback(text, tag)
@@ -605,21 +601,6 @@ def create_message_from_input(input_data: dict) -> Message | VisionMessage:
             logger.debug(f"File detected as image, adding to vision processing: {getattr(file, 'name', 'unnamed')}")
             images.append(file)
 
-    from jinja2 import DebugUndefined, Template
-
-    try:
-        template_params = {
-            k: v
-            for k, v in input_data.items()
-            if k not in {"input", "images", "files", "user_id", "session_id", "metadata", "tool_params"}
-        }
-
-        if template_params:
-            template = Template(text_input, undefined=DebugUndefined)
-            text_input = template.render(**template_params)
-    except Exception as e:
-        logger.warning(f"Failed to format input message template: {e}")
-
     if not images:
         return Message(role=MessageRole.USER, content=text_input)
 
@@ -648,7 +629,7 @@ def create_message_from_input(input_data: dict) -> Message | VisionMessage:
         except Exception as e:
             logger.error(f"Error processing image: {str(e)}")
 
-    return VisionMessage(content=content, role=MessageRole.USER, static=True)
+    return VisionMessage(content=content, role=MessageRole.USER)
 
 
 def is_image_file(file) -> bool:

@@ -32,7 +32,7 @@ from dynamiq.nodes.llms.gemini import Gemini
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 Thought: [Your detailed reasoning about what to do next]
-Action: [Tool name from ONLY [{{tools_name}}]]
+Action: [Tool name from ONLY [{tools_name}]]
 Action Input: [JSON input for the tool]
 
 After each action, you'll receive:
@@ -63,7 +63,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in you
         [Your detailed reasoning about what to do next]
     </thought>
     <action>
-        [Tool name from ONLY [{{tools_name}}]]
+        [Tool name from ONLY [{tools_name}]]
     </action>
     <action_input>
         [JSON input for the tool]
@@ -272,7 +272,7 @@ REACT_BLOCK_INSTRUCTIONS_MULTI = (
 **RESPONSE FORMAT:**
 
 Thought: [Your detailed reasoning about what to do next, including your multi-tool strategy if applicable]
-Action: [Tool name from ONLY [{{tools_name}}]]
+Action: [Tool name from ONLY [{tools_name}]]
 Action Input: [JSON input for the tool]
 
 After each action, you'll receive:
@@ -317,7 +317,7 @@ For Tool Usage (Single or Multiple):
     </thought>
     <tool_calls>
         <tool>
-            <name>[Tool name from ONLY [{{tools_name}}]]</name>
+            <name>[Tool name from ONLY [{tools_name}]]</name>
             <input>[JSON input for the tool]</input>
         </tool>
         <!-- Add more tool elements as needed based on your strategy -->
@@ -365,10 +365,10 @@ REACT_BLOCK_TOOLS = """
 You have access to a variety of tools,
 and you are responsible for using
 them in any order you choose to complete the task:\n
-{{tool_description}}
+{tool_description}
 
 Input formats for tools:
-{{input_formats}}
+{input_formats}
 
 Note: For tools not listed in the input formats section,
 refer to their descriptions in the
@@ -379,7 +379,7 @@ REACT_BLOCK_TOOLS_NO_FORMATS = """
 You have access to a variety of tools,
 and you are responsible for using
 them in any order you choose to complete the task:\n
-{{tool_description}}
+{tool_description}
 """
 
 REACT_BLOCK_NO_TOOLS = """Always follow this exact format in your responses:
@@ -423,7 +423,7 @@ REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient informati
 Always structure your responses in this JSON format:
 
 {{thought: [Your reasoning about the next step],
-action: [The tool you choose to use, if any from ONLY [{{tools_name}}]],
+action: [The tool you choose to use, if any from ONLY [{tools_name}]],
 action_input: [JSON input in correct format you provide to the tool]}}
 
 After each action, you'll receive:
@@ -455,7 +455,7 @@ Use the function `provide_final_answer` when you can give a clear answer to the 
  and no extra steps, tools, or work are needed.
 Call this function if the user's input is simple and doesn't require additional help or tools.
 
-If the user's request requires the use of specific tools, such as [{{tools_name}}],
+If the user's request requires the use of specific tools, such as [{tools_name}],
  you must first call the appropriate function to invoke those tools.
 Only after utilizing the necessary tools and gathering the required information should
  you call `provide_final_answer` to deliver the final response.
@@ -1131,11 +1131,11 @@ class ReActAgent(Agent):
 
                             except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
                                 self._prompt.messages.append(
-                                    Message(role=MessageRole.USER, content=llm_generated_output)
+                                    Message(role=MessageRole.ASSISTANT, content=llm_generated_output)
                                 )
                                 self._prompt.messages.append(
                                     Message(
-                                        role=MessageRole.USER,
+                                        role=MessageRole.ASSISTANT,
                                         content=f"Correction Instruction: "
                                         f"The previous response could not be parsed due to "
                                         f"the following error: '{type(e).__name__}: {e}'. "
@@ -1368,17 +1368,17 @@ class ReActAgent(Agent):
                         **kwargs,
                     )
             except ActionParsingException as e:
-                error_context = llm_generated_output if llm_generated_output else "No response generated"
                 self._prompt.messages.append(
-                    Message(role=MessageRole.USER, content=f"Previous response:\n{error_context}", static=True)
+                    Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output, static=True)
                 )
                 self._prompt.messages.append(
                     Message(
-                        role=MessageRole.USER,
-                        content=f"Error occurred: {type(e).__name__}: {e}\n\n"
-                        f"Please provide a new response following the required format exactly. "
-                        f"Remember to use the correct XML structure with <output>, <thought>, "
-                        f"and either <action>/<action_input> tags for tool use, or <answer> tag for final responses.",
+                        role=MessageRole.ASSISTANT,
+                        content=f"Correction Instruction: The previous response could not be parsed due to "
+                        f"the following error: '{type(e).__name__}: {e}'. "
+                        f"Please regenerate the response strictly following the "
+                        f"required XML format, ensuring all tags are present and "
+                        f"correctly structured, and that any JSON content (like action_input) is valid.",
                         static=True,
                     )
                 )
