@@ -318,6 +318,66 @@ class E2BInterpreterTool(ConnectionNode):
                 )
             self.description += "\n</tool_description>"
 
+    def get_custom_vars(self, params: dict[str, Any]) -> str:
+        """
+        Generate custom variable assignment code from parameters.
+
+        Args:
+            params: Dictionary of variables to inject into the execution environment.
+
+        Returns:
+            str: Python code string for variable assignments.
+        """
+        if not params:
+            return ""
+        
+        vars_code = "\n# Tool params variables injected by framework\n"
+        for key, value in params.items():
+            if isinstance(value, str):
+                vars_code += f'{key} = "{value}"\n'
+            elif isinstance(value, (int, float, bool)) or value is None:
+                vars_code += f"{key} = {value}\n"
+            elif isinstance(value, (list, dict)):
+                vars_code += f"{key} = {value}\n"
+            else:
+                vars_code += f'{key} = "{str(value)}"\n'
+        
+        return vars_code
+
+    def prepare_agent_output(self, content: dict[str, Any]) -> str:
+        """
+        Prepare formatted output for agent consumption.
+
+        Args:
+            content: Dictionary containing execution results.
+
+        Returns:
+            str: Formatted text output for agents.
+        """
+        result_text = ""
+
+        if code_execution := content.get("code_execution"):
+            result_text += "## Output\n\n" + code_execution + "\n\n"
+
+        if shell_command_execution := content.get("shell_command_execution"):
+            result_text += "## Shell Output\n\n" + shell_command_execution + "\n\n"
+
+        if packages_installation := content.get("packages_installation"):
+            packages = packages_installation.replace("Installed packages: ", "")
+            if packages:
+                result_text += f"*Packages installed: {packages}*\n\n"
+
+        if files_uploaded := content.get("files_uploaded"):
+            files_list = []
+            for line in files_uploaded.split("\n"):
+                if " -> " in line:
+                    file_name = line.split(" -> ")[0].strip()
+                    files_list.append(file_name)
+            if files_list:
+                result_text += f"*Files uploaded: {', '.join(files_list)}*\n\n"
+
+        return result_text
+
     def _execute_python_code(self, code: str, sandbox: Sandbox | None = None, params: dict = None) -> str:
         """
         Execute Python code in the specified sandbox with persistent session state.
@@ -338,17 +398,7 @@ class E2BInterpreterTool(ConnectionNode):
             raise ValueError("Sandbox instance is required for code execution.")
 
         if params:
-            vars_code = "\n# Tool params variables injected by framework\n"
-            for key, value in params.items():
-                if isinstance(value, str):
-                    vars_code += f"{key} = {repr(value)}\n"
-                elif isinstance(value, (int, float, bool)) or value is None:
-                    vars_code += f"{key} = {value}\n"
-                elif isinstance(value, (list, dict)):
-                    vars_code += f"{key} = {repr(value)}\n"
-                else:
-                    vars_code += f"{key} = {repr(str(value))}\n"
-
+            vars_code = self.get_custom_vars(params)
             code = vars_code + "\n" + code
 
         try:
@@ -360,9 +410,8 @@ class E2BInterpreterTool(ConnectionNode):
                 output_parts.append(execution.text)
 
             if execution.error:
-                if "NameError" in str(execution.error) and self.persistent_sandbox:
-                    logger.debug(
-                        f"Tool {self.name}: Recoverable NameError in persistent session: " f"{execution.error}"
+                logger.debug(
+                        f"Tool {self.name}: Error in persistent session: " f"{execution.error}"
                     )
                 raise ToolExecutionException(f"Error during Python code execution: {execution.error}", recoverable=True)
 
@@ -484,30 +533,8 @@ class E2BInterpreterTool(ConnectionNode):
                 sandbox.kill()
 
         if self.is_optimized_for_agents:
-            result_text = ""
-
-            if code_execution := content.get("code_execution"):
-                result_text += "## Output\n\n" + code_execution + "\n\n"
-
-            if shell_command_execution := content.get("shell_command_execution"):
-                result_text += "## Shell Output\n\n" + shell_command_execution + "\n\n"
-
-            if packages_installation := content.get("packages_installation"):
-                packages = packages_installation.replace("Installed packages: ", "")
-                if packages:
-                    result_text += f"*Packages installed: {packages}*\n\n"
-
-            if files_uploaded := content.get("files_uploaded"):
-                files_list = []
-                for line in files_uploaded.split("\n"):
-                    if " -> " in line:
-                        file_name = line.split(" -> ")[0].strip()
-                        files_list.append(file_name)
-                if files_list:
-                    result_text += f"*Files uploaded: {', '.join(files_list)}*\n\n"
-
+            result_text = self.prepare_agent_output(content)
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n" f"{str(result_text)[:200]}...")
-
             return {"content": result_text}
 
         return {"content": content}
