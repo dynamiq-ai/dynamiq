@@ -330,7 +330,7 @@ class E2BInterpreterTool(ConnectionNode):
         """
         if not params:
             return ""
-        
+
         vars_code = "\n# Tool params variables injected by framework\n"
         for key, value in params.items():
             if isinstance(value, str):
@@ -341,7 +341,7 @@ class E2BInterpreterTool(ConnectionNode):
                 vars_code += f"{key} = {value}\n"
             else:
                 vars_code += f'{key} = "{str(value)}"\n'
-        
+
         return vars_code
 
     def prepare_agent_output(self, content: dict[str, Any]) -> str:
