@@ -6,7 +6,7 @@ from typing import Any, Sequence
 
 import filetype
 from lxml import etree as LET  # nosec: B410
-from pydantic import BaseModel, model_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
 from dynamiq.prompts import (
@@ -605,9 +605,23 @@ def create_message_from_input(input_data: dict) -> Message | VisionMessage:
             logger.debug(f"File detected as image, adding to vision processing: {getattr(file, 'name', 'unnamed')}")
             images.append(file)
 
+    from jinja2 import DebugUndefined, Template
+
+    try:
+        template_params = {
+            k: v
+            for k, v in input_data.items()
+            if k not in {"input", "images", "files", "user_id", "session_id", "metadata", "tool_params"}
+        }
+
+        if template_params:
+            template = Template(text_input, undefined=DebugUndefined)
+            text_input = template.render(**template_params)
+    except Exception as e:
+        logger.warning(f"Failed to format input message template: {e}")
+
     if not images:
-        # Mark user input as static to prevent template processing
-        return Message(role=MessageRole.USER, content=text_input, static=True)
+        return Message(role=MessageRole.USER, content=text_input)
 
     content = []
 
