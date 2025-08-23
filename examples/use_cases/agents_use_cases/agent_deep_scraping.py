@@ -9,7 +9,7 @@ from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
 AGENT_ROLE = """A helpful and general-purpose AI assistant with access to filesystem.
- Save usefull information page by page in filesystem."""
+ Save useful information page by page in filesystem."""
 
 PROMPT1 = """Parse all aws partners having by scraping pages of
 https://clutch.co/developers/artificial-intelligence/generative?page=1
