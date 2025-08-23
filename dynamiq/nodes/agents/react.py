@@ -4,7 +4,6 @@ import types
 from enum import Enum
 from typing import Any, Union, get_args, get_origin
 
-from dynamiq.nodes.tools.core_memory_tools import CoreMemoryWriteTool, CoreMemoryRemoveTool
 from dynamiq.storages.file_storage.base import FileStorage
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
@@ -28,7 +27,6 @@ from dynamiq.nodes.agents.utils import (
     ToolCacheEntry,
     XMLParser,
     create_chunked_tool_output,
-    CoreMemory,
 )
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
@@ -458,26 +456,6 @@ REACT_BLOCK_OUTPUT_FORMAT = (
 )
 
 
-REACT_BLOCK_MEMORY_GUIDANCE = """
-MEMORY MANAGEMENT GUIDANCE:
-
-Before starting your execution, you should use CoreMemoryWriteTool to store your initial plan in memory.
-
-You have access to core memory tools that you should use strategically throughout your execution:
-    - Store your current plan and progress in memory
-    - Use descriptive keys like "execution_plan", "completed_steps", "current_status"
-    - Use memory to avoid repeating work or losing context
-    - Save some information in memory that you think is important for your execution.
-
-MEMORY TOOLS AVAILABLE:
-   - CoreMemoryWriteTool: Store information in memory
-   - CoreMemoryRemoveTool: Remove information from memory
-
-
-Use memory proactively to maintain context and ensure efficient, organized execution.
-"""
-
-
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
 Your goal is to analyze the given context and formulate a clear, concise response.
@@ -634,6 +612,7 @@ Guidelines:
 * Preserve as much important details as possible.
 * Do not merge or combine content from different sections.
 * Maintain the numbering to match the original section order.
+* Do not leave tag empty.
 
 Input request:
 """
@@ -692,21 +671,15 @@ class ReActAgent(Agent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
-    is_memory_tool_enabled: bool = Field(default=False, description="Enable or disable core memory tools.")
     filestorage: FileStorage | None = Field(default=None, description="Filesystem storage to use for agent.")
 
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
     _tool_chunked_outputs: dict[str, ChunkedToolOutput] = {}
-    _core_memory: CoreMemory = CoreMemory()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if self.is_memory_tool_enabled:
-            self.tools.append(CoreMemoryWriteTool(agent=self))
-            self.tools.append(CoreMemoryRemoveTool(agent=self))
-
         if self.filestorage:
             self.tools.append(FileReadTool(file_storage=self.filestorage))
             self.tools.append(FileWriteTool(file_storage=self.filestorage))
@@ -715,11 +688,9 @@ class ReActAgent(Agent):
             files_string = "Files currently available in the filesystem storage:\n"
             for file in files_list:
                 files_string += f"File: {file.name} | Path: {file.path} | Size: {file.size} bytes\n"
-            self._core_memory.add_block("filesystem", files_string)
 
     def reset_run_state(self):
         super().reset_run_state()
-        self._core_memory = CoreMemory()
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self._tool_chunked_outputs: dict[str, ChunkedToolOutput] = {}
 
@@ -950,7 +921,7 @@ class ReActAgent(Agent):
         summary_offset: int,
         config: RunnableConfig | None = None,
         **kwargs,
-    ) -> None:
+    ) -> int:
         """
         Summarizes history and saves relevant information in the context
 
@@ -964,7 +935,7 @@ class ReActAgent(Agent):
         Returns:
             int: Number of summarized messages.
         """
-
+        print(f"Summary offset {summary_offset}")
         logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output started.")
         messages_history = "\nHistory to extract information from: \n"
         summary_sections = []
@@ -1002,6 +973,11 @@ class ReActAgent(Agent):
 
             output = llm_result.output["content"]
             summary_messages.append(Message(content=output, role=MessageRole.ASSISTANT, static=True))
+
+            print("))))))))))))))))))))))))))))))))))))))))))))))")
+            print(output)
+            print("))))))))))))))))))))))))))))))))))))))))))))))")
+
             try:
                 parsed_data = XMLParser.parse(
                     f"<root>{output}</root>",
@@ -1009,7 +985,9 @@ class ReActAgent(Agent):
                     optional_tags=[],
                 )
             except ParsingError as e:
-                logger.error(f"Error: {e}. Make sure you have provided all tags at once: {summary_tags}")
+                logger.error(
+                    f"Error: {e}. Make sure you have provided all tags at once and they are not empty: {summary_tags}"
+                )
                 summary_messages.append(Message(content=str(e), role=MessageRole.USER, static=True))
                 continue
 
@@ -1828,8 +1806,6 @@ class ReActAgent(Agent):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
 
-        self._prompt_variables["core_memory"] = self._core_memory.get_formatted_memory()
-
         if self.parallel_tool_calls_enabled:
             instructions_default = REACT_BLOCK_INSTRUCTIONS_MULTI
             instructions_xml = REACT_BLOCK_XML_INSTRUCTIONS_MULTI
@@ -1862,9 +1838,6 @@ class ReActAgent(Agent):
                 prompt_blocks["instructions"] = (
                     REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS if not self.tools else instructions_xml
                 )
-
-        if self.is_memory_tool_enabled:
-            prompt_blocks["instructions"] += REACT_BLOCK_MEMORY_GUIDANCE
 
         self._prompt_blocks.update(prompt_blocks)
 
