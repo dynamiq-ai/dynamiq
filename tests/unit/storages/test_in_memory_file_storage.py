@@ -111,9 +111,8 @@ def test_list_files_recursive_and_directory_behavior(storage, sample_text_conten
     files_recursive = storage.list_files(recursive=True)
 
     # Non-recursive should only show root-level files
-    assert len(files_non_recursive) == 2
+    assert len(files_non_recursive) == 1
     assert "file1.txt" in [f.path for f in files_non_recursive]
-    assert "docs/file2.txt" in [f.path for f in files_non_recursive]
     assert "docs/sub/file3.txt" not in [f.path for f in files_non_recursive]
 
     # Recursive should show all files

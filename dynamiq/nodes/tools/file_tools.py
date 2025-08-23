@@ -154,3 +154,53 @@ class FileWriteTool(Node):
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
+
+
+class FileListInputSchema(BaseModel):
+    """Schema for file list input parameters."""
+
+    file_path: str = Field(default="", description="Path of the file to list. Default is the root path.")
+    recursive: bool = Field(default=True, description="Whether to list files recursively. Default is True.")
+
+
+class FileListTool(Node):
+    """
+    A tool for listing files in storage.
+    """
+
+    group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    name: str = "File List Tool"
+    description: str = """Lists files in storage based on the provided file path."""
+
+    file_storage: FileStorage = Field(..., description="File storage to list from.")
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_schema: ClassVar[type[FileListInputSchema]] = FileListInputSchema
+
+    def execute(
+        self,
+        input_data: FileListInputSchema,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
+
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        try:
+            files_list = self.file_storage.list_files(directory=input_data.file_path, recursive=input_data.recursive)
+            files_string = "Files currently available in the filesystem storage:\n"
+            for file in files_list:
+                files_string += f"File: {file.name} | Path: {file.path} | Size: {file.size} bytes\n"
+
+            logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{files_string}")
+            return {"content": files_string}
+
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: failed to list files. Error: {str(e)}")
+            raise ToolExecutionException(
+                f"Tool '{self.name}' failed to list files. Error: {str(e)}. "
+                f"Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )

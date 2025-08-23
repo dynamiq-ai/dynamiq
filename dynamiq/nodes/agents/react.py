@@ -4,11 +4,9 @@ import types
 from enum import Enum
 from typing import Any, Union, get_args, get_origin
 
-from dynamiq.storages.file_storage.base import FileStorage
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
-from dynamiq.nodes.tools.file_tools import FileReadTool, FileWriteTool
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -20,7 +18,6 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-
 from dynamiq.nodes.agents.utils import (
     ChunkedToolOutput,
     SummarizationConfig,
@@ -30,9 +27,11 @@ from dynamiq.nodes.agents.utils import (
 )
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
+from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
+from dynamiq.storages.file_storage.base import FileStorage
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
@@ -683,11 +682,7 @@ class ReActAgent(Agent):
         if self.filestorage:
             self.tools.append(FileReadTool(file_storage=self.filestorage))
             self.tools.append(FileWriteTool(file_storage=self.filestorage))
-
-            files_list = self.filestorage.list_files()
-            files_string = "Files currently available in the filesystem storage:\n"
-            for file in files_list:
-                files_string += f"File: {file.name} | Path: {file.path} | Size: {file.size} bytes\n"
+            self.tools.append(FileListTool(file_storage=self.filestorage))
 
     def reset_run_state(self):
         super().reset_run_state()
@@ -935,7 +930,6 @@ class ReActAgent(Agent):
         Returns:
             int: Number of summarized messages.
         """
-        print(f"Summary offset {summary_offset}")
         logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output started.")
         messages_history = "\nHistory to extract information from: \n"
         summary_sections = []
@@ -973,11 +967,6 @@ class ReActAgent(Agent):
 
             output = llm_result.output["content"]
             summary_messages.append(Message(content=output, role=MessageRole.ASSISTANT, static=True))
-
-            print("))))))))))))))))))))))))))))))))))))))))))))))")
-            print(output)
-            print("))))))))))))))))))))))))))))))))))))))))))))))")
-
             try:
                 parsed_data = XMLParser.parse(
                     f"<root>{output}</root>",
@@ -985,9 +974,7 @@ class ReActAgent(Agent):
                     optional_tags=[],
                 )
             except ParsingError as e:
-                logger.error(
-                    f"Error: {e}. Make sure you have provided all tags at once and they are not empty: {summary_tags}"
-                )
+                logger.error(f"Error: {e}. Make sure you have provided all tags at once: {summary_tags}")
                 summary_messages.append(Message(content=str(e), role=MessageRole.USER, static=True))
                 continue
 
@@ -1278,7 +1265,7 @@ class ReActAgent(Agent):
 
                             except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
                                 self._prompt.messages.append(
-                                    Message(role=MessageRole.USER, content=llm_generated_output)
+                                    Message(role=MessageRole.ASSISTANT, content=llm_generated_output)
                                 )
                                 self._prompt.messages.append(
                                     Message(
@@ -1537,10 +1524,11 @@ class ReActAgent(Agent):
                 self._prompt.messages.append(
                     Message(
                         role=MessageRole.USER,
-                        content=f"Error occurred: {type(e).__name__}: {e}\n\n"
-                        f"Please provide a new response following the required format exactly. "
-                        f"Remember to use the correct XML structure with <output>, <thought>, "
-                        f"and either <action>/<action_input> tags for tool use, or <answer> tag for final responses.",
+                        content=f"Correction Instruction: The previous response could not be parsed due to "
+                        f"the following error: '{type(e).__name__}: {e}'. "
+                        f"Please regenerate the response strictly following the "
+                        f"required XML format, ensuring all tags are present and "
+                        f"correctly structured, and that any JSON content (like action_input) is valid.",
                         static=True,
                     )
                 )
