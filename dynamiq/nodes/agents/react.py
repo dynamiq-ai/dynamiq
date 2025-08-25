@@ -1091,6 +1091,16 @@ class ReActAgent(Agent):
                                 else:
                                     self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
 
+                                self.stream_reasoning(
+                                    {
+                                        "thought": thought,
+                                        "tools": tools_data,
+                                        "loop_num": loop_num,
+                                    },
+                                    config,
+                                    **kwargs,
+                                )
+
                             except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
                                 self._prompt.messages.append(
                                     Message(role=MessageRole.ASSISTANT, content=llm_generated_output)
@@ -1167,6 +1177,17 @@ class ReActAgent(Agent):
 
                                 tools_data.append({"name": tool_call["tool_name"], "input": tool_call["tool_input"]})
 
+                            self.stream_reasoning(
+                                {
+                                    "thought": thought,
+                                    "action": "multiple_tools",
+                                    "tools": tools_data,
+                                    "loop_num": loop_num,
+                                },
+                                config,
+                                **kwargs,
+                            )
+
                             tool_result = self._execute_tools(tools_data, config, **kwargs)
 
                             action_input_json = json.dumps(action_input)
@@ -1191,6 +1212,18 @@ class ReActAgent(Agent):
                                         "Please correct the action field or state that you cannot answer the question. "
                                     )
 
+                                self.stream_reasoning(
+                                    {
+                                        "thought": thought,
+                                        "action": action,
+                                        "tool": tool,
+                                        "action_input": action_input,
+                                        "loop_num": loop_num,
+                                    },
+                                    config,
+                                    **kwargs,
+                                )
+
                                 tool_result = self._run_tool(tool, action_input, config, **kwargs)
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
@@ -1205,6 +1238,18 @@ class ReActAgent(Agent):
                                     "Do not include any additional reasoning. "
                                     "Please correct the action field or state that you cannot answer the question."
                                 )
+
+                            self.stream_reasoning(
+                                {
+                                    "thought": thought,
+                                    "action": action,
+                                    "tool": tool,
+                                    "action_input": action_input,
+                                    "loop_num": loop_num,
+                                },
+                                config,
+                                **kwargs,
+                            )
 
                             # Check tool cache first
                             tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
@@ -1267,7 +1312,17 @@ class ReActAgent(Agent):
                             updated=llm_generated_output,
                         ).model_dump()
                     )
-
+                else:
+                    self.stream_reasoning(
+                        {
+                            "thought": thought,
+                            "action": action,
+                            "action_input": action_input,
+                            "loop_num": loop_num,
+                        },
+                        config,
+                        **kwargs,
+                    )
             except ActionParsingException as e:
                 self._prompt.messages.append(
                     Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output, static=True)
@@ -1303,6 +1358,14 @@ class ReActAgent(Agent):
             raise MaxLoopsExceededException(message=error_message)
         else:
             max_loop_final_answer = self._handle_max_loops_exceeded(input_message, config, **kwargs)
+            if self.streaming.enabled:
+                self.stream_content(
+                    content=max_loop_final_answer,
+                    source=self.name,
+                    step="answer",
+                    config=config,
+                    **kwargs,
+                )
             return max_loop_final_answer
 
     def aggregate_history(self, messages: list[Message, VisionMessage]) -> str:
