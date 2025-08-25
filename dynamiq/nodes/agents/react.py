@@ -1103,11 +1103,11 @@ class ReActAgent(Agent):
 
                             except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
                                 self._prompt.messages.append(
-                                    Message(role=MessageRole.ASSISTANT, content=llm_generated_output)
+                                    Message(role=MessageRole.USER, content=llm_generated_output)
                                 )
                                 self._prompt.messages.append(
                                     Message(
-                                        role=MessageRole.ASSISTANT,
+                                        role=MessageRole.USER,
                                         content=f"Correction Instruction: "
                                         f"The previous response could not be parsed due to "
                                         f"the following error: '{type(e).__name__}: {e}'. "
@@ -1324,17 +1324,17 @@ class ReActAgent(Agent):
                         **kwargs,
                     )
             except ActionParsingException as e:
+                error_context = llm_generated_output if llm_generated_output else "No response generated"
                 self._prompt.messages.append(
-                    Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output, static=True)
+                    Message(role=MessageRole.USER, content=f"Previous response:\n{error_context}", static=True)
                 )
                 self._prompt.messages.append(
                     Message(
-                        role=MessageRole.ASSISTANT,
-                        content=f"Correction Instruction: The previous response could not be parsed due to "
-                        f"the following error: '{type(e).__name__}: {e}'. "
-                        f"Please regenerate the response strictly following the "
-                        f"required XML format, ensuring all tags are present and "
-                        f"correctly structured, and that any JSON content (like action_input) is valid.",
+                        role=MessageRole.USER,
+                        content=f"Error occurred: {type(e).__name__}: {e}\n\n"
+                        f"Please provide a new response following the required format exactly. "
+                        f"Remember to use the correct XML structure with <output>, <thought>, "
+                        f"and either <action>/<action_input> tags for tool use, or <answer> tag for final responses.",
                         static=True,
                     )
                 )
