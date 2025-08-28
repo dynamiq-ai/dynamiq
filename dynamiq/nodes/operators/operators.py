@@ -1,3 +1,5 @@
+import copy
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar, Literal
 from uuid import uuid4
@@ -182,13 +184,79 @@ class Map(Node):
         data["node"] = self.node.to_dict(**kwargs)
         return data
 
+    def regenerate_ids(self, obj):
+        if isinstance(obj, BaseModel):
+            if hasattr(obj, "id"):
+                setattr(obj, "id", str(uuid.uuid4()))
+
+            for field_name in obj.model_fields:
+                value = getattr(obj, field_name)
+                if isinstance(value, list):
+                    new_list = [self.regenerate_ids(item) for item in value]
+                    setattr(obj, field_name, new_list)
+                elif isinstance(value, dict):
+                    new_dict = {k: self.regenerate_ids(v) for k, v in value.items()}
+                    setattr(obj, field_name, new_dict)
+                else:
+                    setattr(obj, field_name, self.regenerate_ids(value))
+            return obj
+        elif isinstance(obj, list):
+            return [self.regenerate_ids(item) for item in obj]
+        elif isinstance(obj, dict):
+            return {k: self.regenerate_ids(v) for k, v in obj.items()}
+        else:
+            return obj
+
     def execute_workflow(self, index, data, config, merged_kwargs):
         """Execute a single workflow and handle errors."""
-        result = self.node.run(data, config, **merged_kwargs)
+        node_copy = self._clone_node_for_iteration(self.node)
+        result = node_copy.run(data, copy.deepcopy(config), **merged_kwargs)
         if result.status != RunnableStatus.SUCCESS:
             if self.behavior == Behavior.RAISE:
                 raise ValueError(f"Node under iteration index {index + 1} has failed.")
         return result.output
+
+    def _clone_node_for_iteration(self, node: Node) -> Node:
+        """Safely clone a node for a single Map iteration.
+
+        - Avoid deep-copying objects that hold locks (e.g., Queues/Events/clients)
+        - Create a shallow model copy and reset per-run mutable state
+        - If the node is an Agent, clone its llm instance shallowly to avoid shared `stop` mutation
+        """
+        node_copy = node.model_copy(deep=False)
+        try:
+            node_copy = self.regenerate_ids(node_copy)
+        except Exception:
+            pass  # nosec
+
+        if hasattr(node_copy, "reset_run_state"):
+            try:
+                node_copy.reset_run_state()
+            except Exception:
+                pass  # nosec
+        if hasattr(node_copy, "_init_prompt_blocks"):
+            try:
+                node_copy._init_prompt_blocks()
+            except Exception:
+                pass  # nosec
+        if hasattr(node_copy, "_prompt"):
+            try:
+                from dynamiq.prompts import Prompt
+
+                node_copy._prompt = Prompt(messages=[])
+            except Exception:
+                pass  # nosec
+
+        if hasattr(node_copy, "llm") and getattr(node_copy, "llm", None) is not None:
+            llm_obj = getattr(node_copy, "llm")
+            try:
+                if hasattr(llm_obj, "model_copy"):
+                    llm_copy = llm_obj.model_copy(deep=False)
+                    node_copy.llm = llm_copy
+            except Exception:
+                pass  # nosec
+
+        return node_copy
 
     def execute(self, input_data: MapInputSchema, config: RunnableConfig = None, **kwargs):
         """
@@ -215,7 +283,8 @@ class Map(Node):
         try:
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 results = executor.map(
-                    lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs), enumerate(input_data)
+                    lambda args: self.execute_workflow(args[0], args[1], config, merged_kwargs),
+                    enumerate(input_data),
                 )
         except Exception as e:
             logger.error(str(e))
