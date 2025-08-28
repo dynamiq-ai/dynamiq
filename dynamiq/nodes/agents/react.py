@@ -1091,10 +1091,24 @@ class ReActAgent(Agent):
                                 else:
                                     self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
 
+                                tools_data_streaming = []
+                                for tool in tools_data:
+                                    tool_name = tool.get("name")
+                                    if tool_name:
+                                        tool_instance = self.tool_by_names.get(tool_name)
+                                        if tool_instance:
+                                            tools_data_streaming.append(
+                                                {
+                                                    "name": tool_name,
+                                                    "type": tool_instance.type,
+                                                    "input": tool.get("input", {}),
+                                                }
+                                            )
+
                                 self.stream_reasoning(
                                     {
                                         "thought": thought,
-                                        "tools": tools_data,
+                                        "tools": tools_data_streaming,
                                         "loop_num": loop_num,
                                     },
                                     config,
@@ -1216,7 +1230,7 @@ class ReActAgent(Agent):
                                     {
                                         "thought": thought,
                                         "action": action,
-                                        "tool": tool,
+                                        "tool": {"name": tool.name, "type": tool.type},
                                         "action_input": action_input,
                                         "loop_num": loop_num,
                                     },
@@ -1243,7 +1257,7 @@ class ReActAgent(Agent):
                                 {
                                     "thought": thought,
                                     "action": action,
-                                    "tool": tool,
+                                    "tool": {"name": tool.name, "type": tool.type},
                                     "action_input": action_input,
                                     "loop_num": loop_num,
                                 },
