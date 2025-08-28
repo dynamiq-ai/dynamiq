@@ -1,4 +1,3 @@
-import copy
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar, Literal
@@ -209,54 +208,13 @@ class Map(Node):
 
     def execute_workflow(self, index, data, config, merged_kwargs):
         """Execute a single workflow and handle errors."""
-        node_copy = self._clone_node_for_iteration(self.node)
-        result = node_copy.run(data, copy.deepcopy(config), **merged_kwargs)
+        node_copy = self.node.clone()
+        node_copy = self.regenerate_ids(node_copy)
+        result = node_copy.run(data, config, **merged_kwargs)
         if result.status != RunnableStatus.SUCCESS:
             if self.behavior == Behavior.RAISE:
                 raise ValueError(f"Node under iteration index {index + 1} has failed.")
         return result.output
-
-    def _clone_node_for_iteration(self, node: Node) -> Node:
-        """Safely clone a node for a single Map iteration.
-
-        - Avoid deep-copying objects that hold locks (e.g., Queues/Events/clients)
-        - Create a shallow model copy and reset per-run mutable state
-        - If the node is an Agent, clone its llm instance shallowly to avoid shared `stop` mutation
-        """
-        node_copy = node.model_copy(deep=False)
-        try:
-            node_copy = self.regenerate_ids(node_copy)
-        except Exception:
-            pass  # nosec
-
-        if hasattr(node_copy, "reset_run_state"):
-            try:
-                node_copy.reset_run_state()
-            except Exception:
-                pass  # nosec
-        if hasattr(node_copy, "_init_prompt_blocks"):
-            try:
-                node_copy._init_prompt_blocks()
-            except Exception:
-                pass  # nosec
-        if hasattr(node_copy, "_prompt"):
-            try:
-                from dynamiq.prompts import Prompt
-
-                node_copy._prompt = Prompt(messages=[])
-            except Exception:
-                pass  # nosec
-
-        if hasattr(node_copy, "llm") and getattr(node_copy, "llm", None) is not None:
-            llm_obj = getattr(node_copy, "llm")
-            try:
-                if hasattr(llm_obj, "model_copy"):
-                    llm_copy = llm_obj.model_copy(deep=False)
-                    node_copy.llm = llm_copy
-            except Exception:
-                pass  # nosec
-
-        return node_copy
 
     def execute(self, input_data: MapInputSchema, config: RunnableConfig = None, **kwargs):
         """

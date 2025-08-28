@@ -239,6 +239,8 @@ class Node(BaseModel, Runnable, ABC):
     input_schema: type[BaseModel] | None = None
     callbacks: list[NodeCallbackHandler] = []
     _json_schema_fields: ClassVar[list[str]] = []
+    clone_reset_methods: ClassVar[list[str]] = ["reset_run_state"]
+    clone_reset_attr_initializers: ClassVar[dict[str, Callable[["Node"], Any]]] = {}
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -523,6 +525,48 @@ class Node(BaseModel, Runnable, ABC):
             Any: Transformed output data.
         """
         return self.transform(output_data, self.output_transformer)
+
+    def get_clone_reset_methods(self) -> list[str]:
+        """List of method names to call on the clone to reset per-run state."""
+        return list(self.clone_reset_methods)
+
+    def get_clone_reset_attrs(self) -> list[str]:
+        """List of attribute names to re-initialize on the clone."""
+        return []
+
+    def get_clone_attr_initializers(self) -> dict[str, Callable[["Node"], Any]]:
+        """Mapping of attribute name -> initializer callable(node) -> value."""
+        return dict(self.clone_reset_attr_initializers)
+
+    def clone(self) -> "Node":
+        """Create a safe clone of the node."""
+        clone_node = self.model_copy(deep=False)
+
+        init_map = self.get_clone_attr_initializers()
+        for attr_name in self.get_clone_reset_attrs():
+            try:
+                if hasattr(clone_node, attr_name):
+                    init_fn = init_map.get(attr_name)
+                    value = init_fn(clone_node) if callable(init_fn) else None
+                    if value is not None:
+                        setattr(clone_node, attr_name, value)
+                    else:
+                        try:
+                            setattr(clone_node, attr_name, None)
+                        except Exception:
+                            pass  # nosec
+            except Exception:
+                pass  # nosec
+
+        for method_name in self.get_clone_reset_methods():
+            try:
+                method = getattr(clone_node, method_name, None)
+                if callable(method):
+                    method()
+            except Exception:
+                pass  # nosec
+
+        return clone_node
 
     @property
     def to_dict_exclude_params(self):

@@ -2,7 +2,7 @@ import json
 import re
 import types
 from enum import Enum
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Callable, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
@@ -18,9 +18,8 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
-
+from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
@@ -28,7 +27,6 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.llms.gemini import Gemini
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 Thought: [Your detailed reasoning about what to do next]
@@ -881,6 +879,18 @@ class ReActAgent(Agent):
 
             logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output finished.")
             return summary_offset
+
+    def get_clone_reset_attrs(self) -> list[str]:
+        return super().get_clone_reset_attrs() + ["_tool_cache"]
+
+    def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
+        base = super().get_clone_attr_initializers()
+        base.update(
+            {
+                "_tool_cache": lambda _: {},
+            }
+        )
+        return base
 
     def _run_agent(
         self,
