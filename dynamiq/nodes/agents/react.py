@@ -929,7 +929,7 @@ class ReActAgent(Agent):
 
                 if self.streaming.enabled:
                     streaming_callback = ReActAgentStreamingParserCallback(
-                        agent_instance=self,
+                        agent=self,
                         config=config,
                         loop_num=loop_num,
                         **kwargs,
@@ -1091,24 +1091,10 @@ class ReActAgent(Agent):
                                 else:
                                     self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
 
-                                tools_data_streaming = []
-                                for tool in tools_data:
-                                    tool_name = tool.get("name")
-                                    if tool_name:
-                                        tool_instance = self.tool_by_names.get(tool_name)
-                                        if tool_instance:
-                                            tools_data_streaming.append(
-                                                {
-                                                    "name": tool_name,
-                                                    "type": tool_instance.type,
-                                                    "input": tool.get("input", {}),
-                                                }
-                                            )
-
                                 self.stream_reasoning(
                                     {
                                         "thought": thought,
-                                        "tools": tools_data_streaming,
+                                        "tools": tools_data,
                                         "loop_num": loop_num,
                                     },
                                     config,
@@ -1230,7 +1216,7 @@ class ReActAgent(Agent):
                                     {
                                         "thought": thought,
                                         "action": action,
-                                        "tool": {"name": tool.name, "type": tool.type},
+                                        "tool": tool,
                                         "action_input": action_input,
                                         "loop_num": loop_num,
                                     },
@@ -1257,7 +1243,7 @@ class ReActAgent(Agent):
                                 {
                                     "thought": thought,
                                     "action": action,
-                                    "tool": {"name": tool.name, "type": tool.type},
+                                    "tool": tool,
                                     "action_input": action_input,
                                     "loop_num": loop_num,
                                 },
