@@ -239,8 +239,7 @@ class Node(BaseModel, Runnable, ABC):
     input_schema: type[BaseModel] | None = None
     callbacks: list[NodeCallbackHandler] = []
     _json_schema_fields: ClassVar[list[str]] = []
-    clone_reset_methods: ClassVar[list[str]] = ["reset_run_state"]
-    clone_reset_attr_initializers: ClassVar[dict[str, Callable[["Node"], Any]]] = {}
+    _clone_init_methods_names: ClassVar[list[str]] = ["reset_run_state"]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -526,24 +525,46 @@ class Node(BaseModel, Runnable, ABC):
         """
         return self.transform(output_data, self.output_transformer)
 
-    def get_clone_reset_methods(self) -> list[str]:
+    def get_clone_init_methods_names(self) -> list[str]:
         """List of method names to call on the clone to reset per-run state."""
-        return list(self.clone_reset_methods)
+        return list(self._clone_init_methods_names)
 
-    def get_clone_reset_attrs(self) -> list[str]:
+    def get_clone_init_attrs(self) -> list[str]:
         """List of attribute names to re-initialize on the clone."""
         return []
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[["Node"], Any]]:
-        """Mapping of attribute name -> initializer callable(node) -> value."""
-        return dict(self.clone_reset_attr_initializers)
+        """Mapping of attribute name -> initializer callable(node) -> value.
+
+        Default: no initializers. Subclasses can override to provide per-attr init.
+        """
+        return {}
 
     def clone(self) -> "Node":
         """Create a safe clone of the node."""
         clone_node = self.model_copy(deep=False)
 
+        def _clone_nested(value: Any) -> Any:
+            if isinstance(value, Node):
+                return value.clone()
+            if isinstance(value, list):
+                return [_clone_nested(v) for v in value]
+            if isinstance(value, dict):
+                return {k: _clone_nested(v) for k, v in value.items()}
+            return value
+
+        for _field_name in getattr(clone_node, "model_fields", {}):
+            _val = getattr(clone_node, _field_name)
+            _new_val = _clone_nested(_val)
+            if _new_val is not _val:
+                try:
+                    setattr(clone_node, _field_name, _new_val)
+                except Exception as e:
+                    logger.warning(f"Clone: unable to set field '{_field_name}' during nested clone: {e}")  # nosec
+                    pass  # nosec
+
         init_map = self.get_clone_attr_initializers()
-        for attr_name in self.get_clone_reset_attrs():
+        for attr_name in self.get_clone_init_attrs():
             try:
                 if hasattr(clone_node, attr_name):
                     init_fn = init_map.get(attr_name)
@@ -553,17 +574,20 @@ class Node(BaseModel, Runnable, ABC):
                     else:
                         try:
                             setattr(clone_node, attr_name, None)
-                        except Exception:
+                        except Exception as e:
+                            logger.warning(f"Clone: failed to set attr '{attr_name}': {e}")  # nosec
                             pass  # nosec
-            except Exception:
-                pass  # nosec
+            except Exception as e:
+                logger.warning(f"Clone: initializer for attr '{attr_name}' failed: {e}")  # nosec
+                pass
 
-        for method_name in self.get_clone_reset_methods():
+        for method_name in self.get_clone_init_methods_names():
             try:
                 method = getattr(clone_node, method_name, None)
                 if callable(method):
                     method()
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Clone: method '{method_name}' invocation failed: {e}")  # nosec
                 pass  # nosec
 
         return clone_node

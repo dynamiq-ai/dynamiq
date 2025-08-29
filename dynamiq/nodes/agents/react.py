@@ -880,8 +880,8 @@ class ReActAgent(Agent):
             logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output finished.")
             return summary_offset
 
-    def get_clone_reset_attrs(self) -> list[str]:
-        return super().get_clone_reset_attrs() + ["_tool_cache"]
+    def get_clone_init_attrs(self) -> list[str]:
+        return super().get_clone_init_attrs() + ["_tool_cache"]
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         base = super().get_clone_attr_initializers()
