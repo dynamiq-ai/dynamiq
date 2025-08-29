@@ -917,9 +917,6 @@ class Agent(Node):
         cleaned = re.sub(r"\n{3,}", "\n\n", prompt_text)
         return cleaned.strip()
 
-    def get_clone_init_attrs(self) -> list[str]:
-        return super().get_clone_init_attrs() + ["_prompt"]
-
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         base = super().get_clone_attr_initializers()
         from dynamiq.prompts import Prompt

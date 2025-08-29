@@ -529,10 +529,6 @@ class Node(BaseModel, Runnable, ABC):
         """List of method names to call on the clone to reset per-run state."""
         return list(self._clone_init_methods_names)
 
-    def get_clone_init_attrs(self) -> list[str]:
-        """List of attribute names to re-initialize on the clone."""
-        return []
-
     def get_clone_attr_initializers(self) -> dict[str, Callable[["Node"], Any]]:
         """Mapping of attribute name -> initializer callable(node) -> value.
 
@@ -564,10 +560,9 @@ class Node(BaseModel, Runnable, ABC):
                     pass  # nosec
 
         init_map = self.get_clone_attr_initializers()
-        for attr_name in self.get_clone_init_attrs():
+        for attr_name, init_fn in init_map.items():
             try:
                 if hasattr(clone_node, attr_name):
-                    init_fn = init_map.get(attr_name)
                     value = init_fn(clone_node) if callable(init_fn) else None
                     if value is not None:
                         setattr(clone_node, attr_name, value)
