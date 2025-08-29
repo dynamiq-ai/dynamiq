@@ -305,7 +305,7 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
         self._buffer: str = ""
         self._current_state: str | None = None
         self._state_start_index: int = 0
-        self._last_emit_index: int = 0
+        self._state_last_emit_index: int = 0
         self._answer_started: bool = False
 
         # Set a tail guard to avoid streaming parts of the next tag that may arrive in next chunk
@@ -361,14 +361,14 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
 
     def _flush_buffer(self) -> None:
         """Flush the remaining buffer content by streaming it as one chunk."""
-        if not self._buffer or len(self._buffer) <= self._last_emit_index:
+        if not self._buffer or len(self._buffer) <= self._state_last_emit_index:
             return
 
         if self._current_state in (StreamingState.REASONING, StreamingState.ANSWER):
-            remaining_content = self._buffer[self._last_emit_index :]
+            remaining_content = self._buffer[self._state_last_emit_index :]
             if remaining_content.strip():
                 self._emit(remaining_content, step=self._current_state)
-                self._last_emit_index = len(self._buffer)
+                self._state_last_emit_index = len(self._buffer)
 
     def _extract_text_delta(self, chunk: dict[str, Any]) -> str:
         """Extract textual content from streaming chunk received from the LLM.
@@ -450,25 +450,25 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
 
     def _process_default_mode(self, final_answer_only: bool) -> None:
         if self._current_state is None:
-            start = self._last_emit_index
+            start = self._state_last_emit_index
             idx_thought = self._buffer.find(DefaultModeTag.THOUGHT, start) if not final_answer_only else -1
             idx_answer = self._buffer.find(DefaultModeTag.ANSWER, start)
 
             if not final_answer_only and idx_thought != -1 and (idx_answer == -1 or idx_thought < idx_answer):
                 self._current_state = StreamingState.REASONING
                 self._state_start_index = idx_thought + len(DefaultModeTag.THOUGHT)
-                self._last_emit_index = self._state_start_index
+                self._state_last_emit_index = self._state_start_index
             elif idx_answer != -1:
                 self._current_state = StreamingState.ANSWER
                 self._answer_started = True
                 self._state_start_index = idx_answer + len(DefaultModeTag.ANSWER)
-                self._last_emit_index = self._state_start_index
+                self._state_last_emit_index = self._state_start_index
 
         # If the state was not detected, nothing to emit yet
         if self._current_state is None:
             return
 
-        search_start = self._last_emit_index
+        search_start = self._state_last_emit_index
 
         if self._current_state == StreamingState.REASONING:
             # Check if there is a transition to Action or Answer
@@ -481,52 +481,52 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
 
             if next_tag_pos != -1:
                 # If a complete next tag is found, emit everything up to it
-                if next_tag_pos > self._last_emit_index:
-                    self._emit(self._buffer[self._last_emit_index : next_tag_pos], step=StreamingState.REASONING)
+                if next_tag_pos > self._state_last_emit_index:
+                    self._emit(self._buffer[self._state_last_emit_index : next_tag_pos], step=StreamingState.REASONING)
                 if next_tag_name == "answer":
                     self._current_state = StreamingState.ANSWER
                     self._answer_started = True
                     self._state_start_index = next_tag_pos + len(DefaultModeTag.ANSWER)
-                    self._last_emit_index = self._state_start_index
+                    self._state_last_emit_index = self._state_start_index
                 else:
                     # Wait for the next state after `action`
                     self._current_state = None
-                    self._last_emit_index = next_tag_pos + len(DefaultModeTag.ACTION)
+                    self._state_last_emit_index = next_tag_pos + len(DefaultModeTag.ACTION)
                 return
 
             # If there is no next tag yet, emit incrementally using a tail guard
-            safe_end = max(self._last_emit_index, len(self._buffer) - self._tail_guard)
-            if safe_end > self._last_emit_index:
-                self._emit(self._buffer[self._last_emit_index : safe_end], step=StreamingState.REASONING)
-                self._last_emit_index = safe_end
+            safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
+            if safe_end > self._state_last_emit_index:
+                self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.REASONING)
+                self._state_last_emit_index = safe_end
             return
 
         # If the current state is 'answer', stream up to the end
-        safe_end = max(self._last_emit_index, len(self._buffer) - self._tail_guard)
-        if safe_end > self._last_emit_index:
-            self._emit(self._buffer[self._last_emit_index : safe_end], step=StreamingState.ANSWER)
-            self._last_emit_index = safe_end
+        safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
+        if safe_end > self._state_last_emit_index:
+            self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.ANSWER)
+            self._state_last_emit_index = safe_end
 
     def _process_xml_mode(self, final_answer_only: bool) -> None:
         if self._current_state is None:
-            start = self._last_emit_index
+            start = self._state_last_emit_index
             idx_thought = self._buffer.find(XMLModeTag.OPEN_THOUGHT, start) if not final_answer_only else -1
             idx_answer = self._buffer.find(XMLModeTag.OPEN_ANSWER, start)
 
             if not final_answer_only and idx_thought != -1 and (idx_answer == -1 or idx_thought < idx_answer):
                 self._current_state = StreamingState.REASONING
                 self._state_start_index = idx_thought + len(XMLModeTag.OPEN_THOUGHT)
-                self._last_emit_index = self._state_start_index
+                self._state_last_emit_index = self._state_start_index
             elif idx_answer != -1:
                 self._current_state = StreamingState.ANSWER
                 self._answer_started = True
                 self._state_start_index = idx_answer + len(XMLModeTag.OPEN_ANSWER)
-                self._last_emit_index = self._state_start_index
+                self._state_last_emit_index = self._state_start_index
 
         if self._current_state is None:
             return
 
-        search_start = self._last_emit_index
+        search_start = self._state_last_emit_index
 
         if self._current_state == StreamingState.REASONING:
             # Check for the next boundary: either </thought>, <action>, or <answer>
@@ -539,41 +539,41 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
 
             if next_pos != -1:
                 # Emit everything up to the next tag
-                if next_pos > self._last_emit_index:
-                    self._emit(self._buffer[self._last_emit_index : next_pos], step=StreamingState.REASONING)
+                if next_pos > self._state_last_emit_index:
+                    self._emit(self._buffer[self._state_last_emit_index : next_pos], step=StreamingState.REASONING)
 
                 if next_tag == XMLModeTag.OPEN_ANSWER:
                     self._current_state = StreamingState.ANSWER
                     self._answer_started = True
                     self._state_start_index = next_pos + len(XMLModeTag.OPEN_ANSWER)
-                    self._last_emit_index = self._state_start_index
+                    self._state_last_emit_index = self._state_start_index
                 else:
                     # Stop reasoning stream due to either </thought> or <action>
                     self._current_state = None
-                    self._last_emit_index = next_pos + len(next_tag)
+                    self._state_last_emit_index = next_pos + len(next_tag)
                 return
 
             # If there is no next tag yet, emit incrementally using a tail guard
-            safe_end = max(self._last_emit_index, len(self._buffer) - self._tail_guard)
-            if safe_end > self._last_emit_index:
-                self._emit(self._buffer[self._last_emit_index : safe_end], step=StreamingState.REASONING)
-                self._last_emit_index = safe_end
+            safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
+            if safe_end > self._state_last_emit_index:
+                self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.REASONING)
+                self._state_last_emit_index = safe_end
             return
 
         # If the current state is 'answer', stream up to the </answer> tag
         end_pos = self._buffer.find(XMLModeTag.CLOSE_ANSWER, search_start)
         if end_pos != -1:
-            if end_pos > self._last_emit_index:
-                self._emit(self._buffer[self._last_emit_index : end_pos], step=StreamingState.ANSWER)
+            if end_pos > self._state_last_emit_index:
+                self._emit(self._buffer[self._state_last_emit_index : end_pos], step=StreamingState.ANSWER)
             # Close the answer
             self._current_state = None
-            self._last_emit_index = end_pos + len(XMLModeTag.CLOSE_ANSWER)
+            self._state_last_emit_index = end_pos + len(XMLModeTag.CLOSE_ANSWER)
             return
 
-        safe_end = max(self._last_emit_index, len(self._buffer) - self._tail_guard)
-        if safe_end > self._last_emit_index:
-            self._emit(self._buffer[self._last_emit_index : safe_end], step=StreamingState.ANSWER)
-            self._last_emit_index = safe_end
+        safe_end = max(self._state_last_emit_index, len(self._buffer) - self._tail_guard)
+        if safe_end > self._state_last_emit_index:
+            self._emit(self._buffer[self._state_last_emit_index : safe_end], step=StreamingState.ANSWER)
+            self._state_last_emit_index = safe_end
 
     def _process_structured_output_mode(self, final_answer_only: bool) -> None:
         """Process structured output mode."""
@@ -662,14 +662,14 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
             return False
 
         field_start = self._find_field_string_value_start(
-            buf, field_name, max(0, self._last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
+            buf, field_name, max(0, self._state_last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
         )
 
         # If the field is found, set the state and indices
         if field_start != -1:
             self._current_state = state
             self._state_start_index = field_start
-            self._last_emit_index = max(self._last_emit_index, field_start)
+            self._state_last_emit_index = max(self._state_last_emit_index, field_start)
             return True
         return False
 
@@ -686,7 +686,7 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
         if not is_function_calling and not self._answer_started:
             # If there is a "finish" action, enable answer streaming
             action_key_pos = buf.find(
-                f'"{JSONStreamingField.ACTION.value}"', max(0, self._last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
+                f'"{JSONStreamingField.ACTION.value}"', max(0, self._state_last_emit_index - FIND_JSON_FIELD_MAX_OFFSET)
             )
             if action_key_pos != -1:
                 colon_pos = buf.find(":", action_key_pos)
@@ -705,7 +705,7 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
                                 if action_input_start != -1:
                                     self._current_state = StreamingState.ANSWER
                                     self._state_start_index = action_input_start
-                                    self._last_emit_index = max(self._last_emit_index, action_input_start)
+                                    self._state_last_emit_index = max(self._state_last_emit_index, action_input_start)
 
         self._initialize_json_field_state(
             buf, JSONStreamingField.THOUGHT.value, StreamingState.REASONING, final_answer_only
@@ -743,26 +743,26 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
         end_quote = self._find_unescaped_quote_end(buf, self._state_start_index - 1)
         if end_quote != -1:
             # If the field is complete, emit it
-            if end_quote > self._last_emit_index:
-                segment_start = self._last_emit_index
+            if end_quote > self._state_last_emit_index:
+                segment_start = self._state_last_emit_index
                 while segment_start < end_quote:
                     segment_end = min(end_quote, segment_start + STREAMING_SEGMENT_SIZE)
                     self._emit(buf[segment_start:segment_end], step=step)
                     segment_start = segment_end
-                self._last_emit_index = end_quote
+                self._state_last_emit_index = end_quote
             # Reset the state
             self._current_state = None
             return True
 
         # Emit incrementally if the field is not complete
-        if len(buf) > self._last_emit_index:
-            segment_start = self._last_emit_index
+        if len(buf) > self._state_last_emit_index:
+            segment_start = self._state_last_emit_index
             segment_end_target = len(buf)
             while segment_start < segment_end_target:
                 segment_end = min(segment_end_target, segment_start + STREAMING_SEGMENT_SIZE)
                 self._emit(buf[segment_start:segment_end], step=step)
                 segment_start = segment_end
-            self._last_emit_index = segment_end_target
+            self._state_last_emit_index = segment_end_target
         return False
 
     def _trim_buffer(self, force: bool = False) -> None:
@@ -774,19 +774,19 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
             return
 
         if force:
-            keep_from = self._last_emit_index
+            keep_from = self._state_last_emit_index
         else:
             if (
                 self._current_state in (StreamingState.REASONING, StreamingState.ANSWER)
                 and self._state_start_index != -1
             ):
-                keep_from = max(0, min(self._last_emit_index - self._tail_guard, self._state_start_index - 1))
+                keep_from = max(0, min(self._state_last_emit_index - self._tail_guard, self._state_start_index - 1))
             else:
-                keep_from = max(0, self._last_emit_index - self._tail_guard)
+                keep_from = max(0, self._state_last_emit_index - self._tail_guard)
         if keep_from <= 0:
             return
         self._buffer = self._buffer[keep_from:]
 
         # Rebase the indices
         self._state_start_index = max(0, self._state_start_index - keep_from)
-        self._last_emit_index = max(0, self._last_emit_index - keep_from)
+        self._state_last_emit_index = max(0, self._state_last_emit_index - keep_from)
