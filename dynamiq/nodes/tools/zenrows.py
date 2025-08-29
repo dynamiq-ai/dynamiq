@@ -76,19 +76,27 @@ class ZenRowsTool(ConnectionNode):
             "url": input_data.url,
             "markdown_response": str(self.markdown_response).lower(),
         }
-
         try:
             response = self.client.request(
                 method=self.connection.method,
                 url=self.connection.url,
                 params={**self.connection.params, **params},
             )
-            response.raise_for_status()
+            if response.status_code >= 400:
+                error = response.json().get("detail")
+                logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {error}")
+                raise ToolExecutionException(
+                    f"Tool '{self.name}' failed to execute the requested action. "
+                    f"Error: {error}. Please analyze the error and take appropriate action.",
+                    recoverable=True,
+                )
             scrape_result = response.text
+        except ToolExecutionException:
+            raise
         except Exception as e:
-            logger.error(f"Tool {self.name} - {self.id}: failed to get results. Error: {e}")
+            logger.error(f"Tool {self.name} - {self.id}: unexpected error occurred. Error: {str(e)}")
             raise ToolExecutionException(
-                f"Tool '{self.name}' failed to execute the requested action. "
+                f"Tool '{self.name}' encountered an unexpected error. "
                 f"Error: {str(e)}. Please analyze the error and take appropriate action.",
                 recoverable=True,
             )

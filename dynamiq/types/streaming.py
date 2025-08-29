@@ -73,6 +73,18 @@ class StreamingEventMessage(BaseModel):
         return self.model_dump_json(**kwargs)
 
 
+class StreamingThought(BaseModel):
+    """Model for reasoning/thought streaming chunks."""
+
+    thought: str
+    loop_num: int
+
+    model_config = ConfigDict(extra="forbid")
+
+    def to_dict(self, **kwargs) -> dict:
+        return self.model_dump(**kwargs)
+
+
 class StreamingConfig(BaseModel):
     """Configuration for streaming.
 

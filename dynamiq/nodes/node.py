@@ -239,6 +239,7 @@ class Node(BaseModel, Runnable, ABC):
     input_schema: type[BaseModel] | None = None
     callbacks: list[NodeCallbackHandler] = []
     _json_schema_fields: ClassVar[list[str]] = []
+    _clone_init_methods_names: ClassVar[list[str]] = ["reset_run_state"]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -523,6 +524,64 @@ class Node(BaseModel, Runnable, ABC):
             Any: Transformed output data.
         """
         return self.transform(output_data, self.output_transformer)
+
+    def get_clone_init_methods_names(self) -> list[str]:
+        """List of method names to call on the clone to reset per-run state."""
+        return list(self._clone_init_methods_names)
+
+    def get_clone_attr_initializers(self) -> dict[str, Callable[["Node"], Any]]:
+        """Mapping of attribute name -> initializer callable(node) -> value.
+
+        Default: no initializers. Subclasses can override to provide per-attr init.
+        """
+        return {}
+
+    def clone(self) -> "Node":
+        """Create a safe clone of the node."""
+        clone_node = self.model_copy(deep=False)
+
+        def _clone_nested(value: Any) -> Any:
+            if isinstance(value, Node):
+                return value.clone()
+            if isinstance(value, list):
+                return [_clone_nested(v) for v in value]
+            if isinstance(value, dict):
+                return {k: _clone_nested(v) for k, v in value.items()}
+            return value
+
+        for _field_name in getattr(clone_node, "model_fields", {}):
+            _val = getattr(clone_node, _field_name)
+            _new_val = _clone_nested(_val)
+            if _new_val is not _val:
+                try:
+                    setattr(clone_node, _field_name, _new_val)
+                except Exception as e:
+                    logger.warning(f"Clone: unable to set field '{_field_name}' during nested clone: {e}")
+
+        init_map = self.get_clone_attr_initializers()
+        for attr_name, init_fn in init_map.items():
+            try:
+                if hasattr(clone_node, attr_name):
+                    value = init_fn(clone_node) if callable(init_fn) else None
+                    if value is not None:
+                        setattr(clone_node, attr_name, value)
+                    else:
+                        try:
+                            setattr(clone_node, attr_name, None)
+                        except Exception as e:
+                            logger.warning(f"Clone: failed to set attr '{attr_name}': {e}")
+            except Exception as e:
+                logger.warning(f"Clone: initializer for attr '{attr_name}' failed: {e}")
+
+        for method_name in self.get_clone_init_methods_names():
+            try:
+                method = getattr(clone_node, method_name, None)
+                if callable(method):
+                    method()
+            except Exception as e:
+                logger.warning(f"Clone: method '{method_name}' invocation failed: {e}")
+
+        return clone_node
 
     @property
     def to_dict_exclude_params(self):

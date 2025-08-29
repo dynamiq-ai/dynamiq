@@ -917,6 +917,17 @@ class Agent(Node):
         cleaned = re.sub(r"\n{3,}", "\n\n", prompt_text)
         return cleaned.strip()
 
+    def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
+        base = super().get_clone_attr_initializers()
+        from dynamiq.prompts import Prompt
+
+        base.update(
+            {
+                "_prompt": (lambda _self: Prompt(messages=[]) if Prompt else None),
+            }
+        )
+        return base
+
 
 class AgentManagerInputSchema(BaseModel):
     action: str = Field(..., description="Parameter to provide action to the manager")

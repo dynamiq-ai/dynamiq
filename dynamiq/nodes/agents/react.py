@@ -2,11 +2,12 @@ import json
 import re
 import types
 from enum import Enum
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Callable, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
+from dynamiq.callbacks import ReActAgentStreamingParserCallback
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -994,6 +995,15 @@ class ReActAgent(Agent):
             logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output finished.")
             return summary_offset
 
+    def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
+        base = super().get_clone_attr_initializers()
+        base.update(
+            {
+                "_tool_cache": lambda _: {},
+            }
+        )
+        return base
+
     def update_system_message(self):
         system_message = Message(
             role=MessageRole.SYSTEM,
@@ -1045,28 +1055,69 @@ class ReActAgent(Agent):
         self.llm.stop = stop_sequences
 
         for loop_num in range(1, self.max_loops + 1):
-
             try:
+                # Create a streaming callback
+                streaming_callback = None
+                original_streaming_enabled = self.llm.streaming.enabled
 
-                llm_result = self._run_llm(
-                    messages=self._prompt.messages,
-                    tools=self._tools,
-                    response_format=self._response_format,
-                    config=config,
-                    **kwargs,
-                )
+                if self.streaming.enabled:
+                    streaming_callback = ReActAgentStreamingParserCallback(
+                        agent=self,
+                        config=config,
+                        loop_num=loop_num,
+                        **kwargs,
+                    )
+
+                    # Temporarily enable streaming on LLM
+                    if not original_streaming_enabled:
+                        self.llm.streaming.enabled = True
+
+                    # Add the callback to the config
+                    if config.callbacks is None:
+                        config.callbacks = []
+                    config.callbacks.append(streaming_callback)
+
+                try:
+                    llm_result = self._run_llm(
+                        messages=self._prompt.messages,
+                        tools=self._tools,
+                        response_format=self._response_format,
+                        config=config,
+                        **kwargs,
+                    )
+                finally:
+                    # Remove the callback after execution and restore original streaming state
+                    if streaming_callback:
+                        try:
+                            if config and getattr(config, "callbacks", None) and streaming_callback in config.callbacks:
+                                config.callbacks.remove(streaming_callback)
+                        except Exception:
+                            logger.error("Failed to remove streaming callback from config.callbacks")
+
+                        if not original_streaming_enabled:
+                            try:
+                                self.llm.streaming.enabled = original_streaming_enabled
+                            except Exception:
+                                logger.error("Failed to restore llm.streaming.enabled state")
+
                 action, action_input = None, None
                 llm_generated_output = ""
+
+                # Use content from callback if available
+                if streaming_callback and streaming_callback.accumulated_content:
+                    llm_generated_output = streaming_callback.accumulated_content
+                else:
+                    llm_generated_output = llm_result.output.get("content", "")
+
                 llm_reasoning = (
-                    llm_result.output.get("content")[:200]
-                    if llm_result.output.get("content")
+                    llm_generated_output[:200]
+                    if llm_generated_output
                     else str(llm_result.output.get("tool_calls", ""))[:200]
                 )
                 logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, " f"reasoning:\n{llm_reasoning}...")
 
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
-                        llm_generated_output = llm_result.output.get("content", "")
 
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
 
@@ -1078,24 +1129,6 @@ class ReActAgent(Agent):
 
                             self.log_final_output(thought, final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-
-                            if self.streaming.enabled:
-                                if self.streaming.mode == StreamingMode.ALL:
-                                    self.stream_content(
-                                        content={"thought": thought, "loop_num": loop_num},
-                                        source=self.name,
-                                        step="reasoning",
-                                        config=config,
-                                        **kwargs,
-                                    )
-                                self.stream_content(
-                                    content=final_answer,
-                                    source=self.name,
-                                    step="answer",
-                                    config=config,
-                                    **kwargs,
-                                )
-
                             return final_answer
 
                         thought, action, action_input = self._parse_action(llm_generated_output)
@@ -1123,22 +1156,6 @@ class ReActAgent(Agent):
                             final_answer = llm_generated_output_json["answer"]
                             self.log_final_output(thought, final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled:
-                                if self.streaming.mode == StreamingMode.ALL:
-                                    self.stream_content(
-                                        content={"thought": thought, "loop_num": loop_num},
-                                        source=self.name,
-                                        step="reasoning",
-                                        config=config,
-                                        **kwargs,
-                                    )
-                                self.stream_content(
-                                    content=final_answer,
-                                    source=self.name,
-                                    step="answer",
-                                    config=config,
-                                    **kwargs,
-                                )
                             return final_answer
 
                         action_input = llm_generated_output_json["action_input"]
@@ -1157,7 +1174,6 @@ class ReActAgent(Agent):
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
 
-                        llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         try:
                             if isinstance(llm_generated_output, str):
@@ -1174,23 +1190,6 @@ class ReActAgent(Agent):
                         if action == "finish":
                             self.log_final_output(thought, action_input, loop_num)
                             self.tracing_final(loop_num, action_input, config, kwargs)
-                            if self.streaming.enabled:
-                                if self.streaming.mode == StreamingMode.ALL:
-                                    self.stream_content(
-                                        content={"thought": thought, "loop_num": loop_num},
-                                        source=self.name,
-                                        step="reasoning",
-                                        config=config,
-                                        **kwargs,
-                                    )
-
-                                self.stream_content(
-                                    content=action_input,
-                                    source=self.name,
-                                    step="answer",
-                                    config=config,
-                                    **kwargs,
-                                )
                             return action_input
 
                         try:
@@ -1206,7 +1205,6 @@ class ReActAgent(Agent):
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
 
-                        llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
 
                         if self.parallel_tool_calls_enabled:
@@ -1221,23 +1219,6 @@ class ReActAgent(Agent):
                                         final_answer = self._process_direct_tool_output_return(final_answer)
                                     self.log_final_output(thought, final_answer, loop_num)
                                     self.tracing_final(loop_num, final_answer, config, kwargs)
-
-                                    if self.streaming.enabled:
-                                        if self.streaming.mode == StreamingMode.ALL:
-                                            self.stream_content(
-                                                content={"thought": thought, "loop_num": loop_num},
-                                                source=self.name,
-                                                step="reasoning",
-                                                config=config,
-                                                **kwargs,
-                                            )
-                                        self.stream_content(
-                                            content=final_answer,
-                                            source=self.name,
-                                            step="answer",
-                                            config=config,
-                                            **kwargs,
-                                        )
                                     return final_answer
 
                                 tools_data = parsed_result.get("tools", [])
@@ -1253,10 +1234,19 @@ class ReActAgent(Agent):
                                 else:
                                     self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
 
+                                tools_data_for_streaming = [
+                                    {
+                                        "name": tool.get("name", ""),
+                                        "type": self.tool_by_names.get(tool.get("name", "")).type,
+                                    }
+                                    for tool in tools_data
+                                    if tool.get("name", "") and self.tool_by_names.get(tool.get("name", ""))
+                                ]
+
                                 self.stream_reasoning(
                                     {
                                         "thought": thought,
-                                        "tools": tools_data,
+                                        "tools": tools_data_for_streaming,
                                         "loop_num": loop_num,
                                     },
                                     config,
@@ -1288,22 +1278,6 @@ class ReActAgent(Agent):
                                 final_answer = parsed_data.get("answer")
                                 self.log_final_output(thought, final_answer, loop_num)
                                 self.tracing_final(loop_num, final_answer, config, kwargs)
-                                if self.streaming.enabled:
-                                    if self.streaming.mode == StreamingMode.ALL:
-                                        self.stream_content(
-                                            content={"thought": thought, "loop_num": loop_num},
-                                            source=self.name,
-                                            step="reasoning",
-                                            config=config,
-                                            **kwargs,
-                                        )
-                                    self.stream_content(
-                                        content=final_answer,
-                                        source=self.name,
-                                        step="answer",
-                                        config=config,
-                                        **kwargs,
-                                    )
                                 return final_answer
 
                             except TagNotFoundError:
@@ -1394,7 +1368,7 @@ class ReActAgent(Agent):
                                     {
                                         "thought": thought,
                                         "action": action,
-                                        "tool": tool,
+                                        "tool": {"name": tool.name, "type": tool.type},
                                         "action_input": action_input,
                                         "loop_num": loop_num,
                                     },
@@ -1429,7 +1403,7 @@ class ReActAgent(Agent):
                                 {
                                     "thought": thought,
                                     "action": action,
-                                    "tool": tool,
+                                    "tool": {"name": tool.name, "type": tool.type},
                                     "action_input": action_input,
                                     "loop_num": loop_num,
                                 },
