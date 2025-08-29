@@ -2,7 +2,7 @@ import json
 import re
 import types
 from enum import Enum
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Callable, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
@@ -880,6 +880,15 @@ class ReActAgent(Agent):
 
             logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output finished.")
             return summary_offset
+
+    def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
+        base = super().get_clone_attr_initializers()
+        base.update(
+            {
+                "_tool_cache": lambda _: {},
+            }
+        )
+        return base
 
     def _run_agent(
         self,
