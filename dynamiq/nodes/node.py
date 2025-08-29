@@ -556,8 +556,7 @@ class Node(BaseModel, Runnable, ABC):
                 try:
                     setattr(clone_node, _field_name, _new_val)
                 except Exception as e:
-                    logger.warning(f"Clone: unable to set field '{_field_name}' during nested clone: {e}")  # nosec
-                    pass  # nosec
+                    logger.warning(f"Clone: unable to set field '{_field_name}' during nested clone: {e}")
 
         init_map = self.get_clone_attr_initializers()
         for attr_name, init_fn in init_map.items():
@@ -570,11 +569,9 @@ class Node(BaseModel, Runnable, ABC):
                         try:
                             setattr(clone_node, attr_name, None)
                         except Exception as e:
-                            logger.warning(f"Clone: failed to set attr '{attr_name}': {e}")  # nosec
-                            pass  # nosec
+                            logger.warning(f"Clone: failed to set attr '{attr_name}': {e}")
             except Exception as e:
-                logger.warning(f"Clone: initializer for attr '{attr_name}' failed: {e}")  # nosec
-                pass
+                logger.warning(f"Clone: initializer for attr '{attr_name}' failed: {e}")
 
         for method_name in self.get_clone_init_methods_names():
             try:
@@ -582,8 +579,7 @@ class Node(BaseModel, Runnable, ABC):
                 if callable(method):
                     method()
             except Exception as e:
-                logger.warning(f"Clone: method '{method_name}' invocation failed: {e}")  # nosec
-                pass  # nosec
+                logger.warning(f"Clone: method '{method_name}' invocation failed: {e}")
 
         return clone_node
 
