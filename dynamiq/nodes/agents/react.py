@@ -1091,10 +1091,19 @@ class ReActAgent(Agent):
                                 else:
                                     self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
 
+                                tools_data_for_streaming = [
+                                    {
+                                        "name": tool.get("name", ""),
+                                        "type": self.tool_by_names.get(tool.get("name", "")).type,
+                                    }
+                                    for tool in tools_data
+                                    if tool.get("name", "") and self.tool_by_names.get(tool.get("name", ""))
+                                ]
+
                                 self.stream_reasoning(
                                     {
                                         "thought": thought,
-                                        "tools": tools_data,
+                                        "tools": tools_data_for_streaming,
                                         "loop_num": loop_num,
                                     },
                                     config,
@@ -1216,7 +1225,7 @@ class ReActAgent(Agent):
                                     {
                                         "thought": thought,
                                         "action": action,
-                                        "tool": tool,
+                                        "tool": {"name": tool.name, "type": tool.type},
                                         "action_input": action_input,
                                         "loop_num": loop_num,
                                     },
@@ -1243,7 +1252,7 @@ class ReActAgent(Agent):
                                 {
                                     "thought": thought,
                                     "action": action,
-                                    "tool": tool,
+                                    "tool": {"name": tool.name, "type": tool.type},
                                     "action_input": action_input,
                                     "loop_num": loop_num,
                                 },
