@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
+from types import FunctionType, ModuleType
 from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
@@ -542,6 +543,9 @@ class Node(BaseModel, Runnable, ABC):
         cloned_node = self.model_copy(deep=False)
 
         def _clone_nested(value: Any) -> Any:
+            # Do not attempt to copy modules/functions/classes or other callables
+            if isinstance(value, (ModuleType, FunctionType)) or isinstance(value, type) or callable(value):
+                return value
             if isinstance(value, Node):
                 return value.clone()
             elif isinstance(value, BaseModel):
