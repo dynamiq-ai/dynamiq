@@ -5,6 +5,7 @@ import pytest
 from dynamiq import Workflow, connections
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.flows import Flow
+from dynamiq.nodes import Behavior
 from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.operators import Map
@@ -36,6 +37,7 @@ def run():
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="map_react_stream", mode=StreamingMode.ALL, by_tokens=True),
         max_loops=20,
+        behaviour_on_max_loops=Behavior.RETURN,
     )
 
     map_node = Map(node=agent, max_workers=3)
@@ -54,7 +56,7 @@ def run():
         if event.entity_id == wf.id:
             continue
         source = getattr(event, "source", None)
-        if getattr(source, "group", None) == "llms":
+        if getattr(source, "group", None) == "agents":
             text = ""
             if isinstance(event.data, dict):
                 if (choices := event.data.get("choices")) and choices[0].get("delta"):

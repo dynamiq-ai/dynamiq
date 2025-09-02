@@ -36,7 +36,7 @@ def run():
         inference_mode=InferenceMode.DEFAULT,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="react_map_stream", mode=StreamingMode.ALL, by_tokens=True),
-        max_loops=2,
+        max_loops=20,
         behaviour_on_max_loops=Behavior.RETURN,
     )
 
@@ -54,7 +54,7 @@ def run():
         if event.entity_id == wf.id:
             continue
         source = getattr(event, "source", None)
-        if getattr(source, "group", None) == "llms":
+        if getattr(source, "group", None) == "agents":
             text = ""
             if isinstance(event.data, dict):
                 if (choices := event.data.get("choices")) and choices[0].get("delta"):
@@ -91,7 +91,7 @@ def run():
         streaming=StreamingConfig(
             enabled=True, event="react_map_stream_final", mode=StreamingMode.FINAL, by_tokens=True
         ),
-        max_loops=2,
+        max_loops=20,
         behaviour_on_max_loops=Behavior.RETURN,
     )
 
@@ -109,7 +109,7 @@ def run():
         if event.entity_id == wf.id:
             continue
         source = getattr(event, "source", None)
-        if getattr(source, "group", None) == "llms":
+        if getattr(source, "group", None) == "agents":
             text = ""
             if isinstance(event.data, dict):
                 if (choices := event.data.get("choices")) and choices[0].get("delta"):
