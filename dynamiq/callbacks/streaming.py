@@ -321,6 +321,10 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
         if serialized.get("group") != "llms":
             return
 
+        agent_run_id = kwargs.get("run_id") or kwargs.get("parent_run_id")
+        if agent_run_id and serialized.get("id") != getattr(self.agent, "llm", object()).id:
+            return
+
         if self.mode_name == InferenceMode.FUNCTION_CALLING.value:
             text_delta, function_name = self._extract_function_calling_text(chunk)
 
