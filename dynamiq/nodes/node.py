@@ -544,9 +544,9 @@ class Node(BaseModel, Runnable, ABC):
         def _clone_nested(value: Any) -> Any:
             if isinstance(value, Node):
                 return value.clone()
-            if isinstance(value, BaseModel):
+            elif isinstance(value, BaseModel):
                 try:
-                    bm_copy = value.model_copy(deep=True)
+                    bm_copy = value.model_copy(deep=False)
                     for fname in getattr(value, "model_fields", {}):
                         try:
                             setattr(bm_copy, fname, _clone_nested(getattr(value, fname)))
@@ -557,11 +557,15 @@ class Node(BaseModel, Runnable, ABC):
                 except Exception as e:
                     logger.warning(f"Clone: BaseModel copy failed, falling back to shallow copy: {e}")
                     return copy.copy(value)
-            if isinstance(value, list):
+            elif isinstance(value, list):
                 return [_clone_nested(v) for v in value]
-            if isinstance(value, dict):
+            elif isinstance(value, dict):
                 return {k: _clone_nested(v) for k, v in value.items()}
-            return copy.copy(value)
+            try:
+                return copy.copy(value)
+            except Exception as e:
+                logger.warning(f"Clone: failed to clone field '{value}': {e}")
+                return value
 
         for _field_name in getattr(cloned_node, "model_fields", {}):
             _val = getattr(cloned_node, _field_name)
