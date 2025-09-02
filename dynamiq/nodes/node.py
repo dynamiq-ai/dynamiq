@@ -6,7 +6,8 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
-from queue import Empty
+from queue import Empty, Queue
+from threading import Event
 from types import FunctionType, ModuleType
 from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
@@ -534,9 +535,32 @@ class Node(BaseModel, Runnable, ABC):
     def get_clone_attr_initializers(self) -> dict[str, Callable[["Node"], Any]]:
         """Mapping of attribute name -> initializer callable(node) -> value.
 
-        Default: no initializers. Subclasses can override to provide per-attr init.
+        Default: provides streaming isolation so clones do not share runtime state.
         """
-        return {}
+
+        def _init_streaming(_: "Node"):
+            try:
+                streaming = getattr(self, "streaming", None)
+                if streaming is None:
+                    return None
+
+                unique_event = f"{streaming.event}-{uuid4()}" if streaming.event else str(uuid4())
+                input_enabled = getattr(streaming, "input_streaming_enabled", False)
+                return StreamingConfig(
+                    enabled=streaming.enabled,
+                    event=unique_event,
+                    timeout=streaming.timeout,
+                    input_queue=Queue() if input_enabled else None,
+                    input_queue_done_event=Event() if input_enabled else None,
+                    mode=streaming.mode,
+                    by_tokens=streaming.by_tokens,
+                    include_usage=streaming.include_usage,
+                )
+            except Exception as e:
+                logger.warning(f"Clone: streaming initializer failed: {e}")
+                return None
+
+        return {"streaming": _init_streaming}
 
     def clone(self) -> "Node":
         """Create a safe clone of the node."""

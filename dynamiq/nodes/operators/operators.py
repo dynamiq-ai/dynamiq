@@ -10,6 +10,7 @@ from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.runnables.base import NodeRunnableConfig
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
@@ -210,7 +211,17 @@ class Map(Node):
         """Execute a single workflow and handle errors."""
         node_copy = self.node.clone()
         node_copy = self.regenerate_ids(node_copy)
-        result = node_copy.run(data, config, **merged_kwargs)
+
+        # Create an isolated config per iteration with unique streaming override for the cloned node
+        local_config = config
+        try:
+            local_config = config.model_copy(deep=True) if config is not None else RunnableConfig()
+            local_config.nodes_override = dict(local_config.nodes_override or {})
+            local_config.nodes_override[node_copy.id] = NodeRunnableConfig(streaming=self.streaming)
+        except Exception as e:
+            logger.warning(f"Map: failed to prepare isolated streaming config for iteration {index}: {e}")
+
+        result = node_copy.run(data, local_config, **merged_kwargs)
         if result.status != RunnableStatus.SUCCESS:
             if self.behavior == Behavior.RAISE:
                 raise ValueError(f"Node under iteration index {index + 1} has failed.")
