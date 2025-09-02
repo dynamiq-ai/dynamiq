@@ -1,6 +1,5 @@
 from collections import defaultdict
 
-import pytest
 
 from dynamiq import Workflow, connections
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
@@ -16,7 +15,6 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 
 
-@pytest.mark.integration
 def test_react_agent_map_streaming_all_mode_isolated(mock_llm_executor):
     """Ensure parallel ReAct agents under Map stream independently in ALL mode (with tools)."""
     python_tool = Python(
@@ -69,7 +67,6 @@ def run():
         assert "mocked_response" in "".join(chunk for _, chunk in items)
 
 
-@pytest.mark.integration
 def test_react_agent_map_streaming_final_mode_isolated(mock_llm_executor):
     """Ensure parallel ReAct agents under Map stream only final content in FINAL mode (with tools)."""
     python_tool = Python(

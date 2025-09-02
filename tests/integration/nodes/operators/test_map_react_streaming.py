@@ -1,6 +1,5 @@
 from collections import defaultdict
 
-import pytest
 
 from dynamiq import Workflow, connections
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
@@ -16,7 +15,6 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 
 
-@pytest.mark.integration
 def test_map_react_agent_parallel_streams_isolated(mock_llm_executor):
     python_tool = Python(
         name="NoOp Tool",
