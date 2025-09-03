@@ -1,4 +1,4 @@
-from dynamiq.connections import Firecrawl, Tavily
+from dynamiq.connections import Firecrawl
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
