@@ -774,7 +774,7 @@ class ReActAgent(Agent):
             thought_match = re.search(thought_pattern, output, re.DOTALL)
             thought = thought_match.group(1).strip() if thought_match else None
 
-            action_pattern = r"Action:\s*(.*?)\nAction Input:\s*((?:[\[{][\s\S]*?[\]}]))"
+            action_pattern = r'Action:\s*(.*?)\nAction Input:\s*([\[{][\s\S]*[\]}])'
 
             remaining_text = output
             actions = []
