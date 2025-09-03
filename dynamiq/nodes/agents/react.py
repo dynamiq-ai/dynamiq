@@ -7,7 +7,7 @@ from typing import Any, Callable, Union, get_args, get_origin
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
-from dynamiq.callbacks import ReActAgentStreamingParserCallback
+from dynamiq.callbacks import ReActAgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -948,33 +948,30 @@ class ReActAgent(Agent):
                     if not original_streaming_enabled:
                         self.llm.streaming.enabled = True
 
-                    # Add the callback to the config
-                    if config.callbacks is None:
-                        config.callbacks = []
-                    config.callbacks.append(streaming_callback)
+                    # Create a config for the LLM that uses proper streaming callback
+                    llm_config = config.model_copy(deep=False)
+                    llm_config.callbacks = [
+                        callback
+                        for callback in llm_config.callbacks
+                        if not isinstance(callback, StreamingQueueCallbackHandler)
+                    ]
+                    llm_config.callbacks.append(streaming_callback)
 
                 try:
                     llm_result = self._run_llm(
                         messages=self._prompt.messages,
                         tools=self._tools,
                         response_format=self._response_format,
-                        config=config,
+                        config=(llm_config if streaming_callback else config),
                         **kwargs,
                     )
                 finally:
-                    # Remove the callback after execution and restore original streaming state
-                    if streaming_callback:
+                    # Restore original streaming state
+                    if not original_streaming_enabled:
                         try:
-                            if config and getattr(config, "callbacks", None) and streaming_callback in config.callbacks:
-                                config.callbacks.remove(streaming_callback)
+                            self.llm.streaming.enabled = original_streaming_enabled
                         except Exception:
-                            logger.error("Failed to remove streaming callback from config.callbacks")
-
-                        if not original_streaming_enabled:
-                            try:
-                                self.llm.streaming.enabled = original_streaming_enabled
-                            except Exception:
-                                logger.error("Failed to restore llm.streaming.enabled state")
+                            logger.error("Failed to restore llm.streaming.enabled state")
 
                 action, action_input = None, None
                 llm_generated_output = ""
