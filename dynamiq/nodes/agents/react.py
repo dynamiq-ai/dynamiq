@@ -7,7 +7,7 @@ from typing import Any, Callable, Union, get_args, get_origin
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
-from dynamiq.callbacks import ReActAgentStreamingParserCallback
+from dynamiq.callbacks import ReActAgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -948,9 +948,14 @@ class ReActAgent(Agent):
                     if not original_streaming_enabled:
                         self.llm.streaming.enabled = True
 
-                    # Create a config for the LLM that only has the streaming callback
+                    # Create a config for the LLM that uses proper streaming callback
                     llm_config = config.model_copy(deep=False)
-                    llm_config.callbacks = [streaming_callback]
+                    llm_config.callbacks = [
+                        callback
+                        for callback in llm_config.callbacks
+                        if not isinstance(callback, StreamingQueueCallbackHandler)
+                    ]
+                    llm_config.callbacks.append(streaming_callback)
 
                 try:
                     llm_result = self._run_llm(
