@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import inspect
 import time
 from abc import ABC, abstractmethod
@@ -6,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
+from types import FunctionType, ModuleType
 from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
@@ -532,42 +534,62 @@ class Node(BaseModel, Runnable, ABC):
     def get_clone_attr_initializers(self) -> dict[str, Callable[["Node"], Any]]:
         """Mapping of attribute name -> initializer callable(node) -> value.
 
-        Default: no initializers. Subclasses can override to provide per-attr init.
+        Default: provides streaming isolation so clones do not share runtime state.
         """
         return {}
 
     def clone(self) -> "Node":
         """Create a safe clone of the node."""
-        clone_node = self.model_copy(deep=False)
+        cloned_node = self.model_copy(deep=False)
 
         def _clone_nested(value: Any) -> Any:
+            # Do not attempt to copy modules/functions/classes or other callables
+            if isinstance(value, (ModuleType, FunctionType)) or isinstance(value, type) or callable(value):
+                return value
             if isinstance(value, Node):
                 return value.clone()
-            if isinstance(value, list):
-                return [_clone_nested(v) for v in value]
-            if isinstance(value, dict):
-                return {k: _clone_nested(v) for k, v in value.items()}
-            return value
+            elif isinstance(value, BaseModel):
+                try:
+                    bm_copy = value.model_copy(deep=False)
+                    for fname in getattr(value, "model_fields", {}):
+                        try:
+                            setattr(bm_copy, fname, _clone_nested(getattr(value, fname)))
+                        except Exception as e:
+                            logger.warning(f"Clone: failed to clone BaseModel field '{fname}': {e}")
 
-        for _field_name in getattr(clone_node, "model_fields", {}):
-            _val = getattr(clone_node, _field_name)
+                    return bm_copy
+                except Exception as e:
+                    logger.warning(f"Clone: BaseModel copy failed, falling back to shallow copy: {e}")
+                    return copy.copy(value)
+            elif isinstance(value, list):
+                return [_clone_nested(v) for v in value]
+            elif isinstance(value, dict):
+                return {k: _clone_nested(v) for k, v in value.items()}
+            try:
+                return copy.copy(value)
+            except Exception as e:
+                logger.warning(f"Clone: failed to clone field '{value}': {e}")
+                return value
+
+        for _field_name in getattr(cloned_node, "model_fields", {}):
+            _val = getattr(cloned_node, _field_name)
             _new_val = _clone_nested(_val)
             if _new_val is not _val:
                 try:
-                    setattr(clone_node, _field_name, _new_val)
+                    setattr(cloned_node, _field_name, _new_val)
                 except Exception as e:
                     logger.warning(f"Clone: unable to set field '{_field_name}' during nested clone: {e}")
 
         init_map = self.get_clone_attr_initializers()
         for attr_name, init_fn in init_map.items():
             try:
-                if hasattr(clone_node, attr_name):
-                    value = init_fn(clone_node) if callable(init_fn) else None
+                if hasattr(cloned_node, attr_name):
+                    value = init_fn(cloned_node) if callable(init_fn) else None
                     if value is not None:
-                        setattr(clone_node, attr_name, value)
+                        setattr(cloned_node, attr_name, value)
                     else:
                         try:
-                            setattr(clone_node, attr_name, None)
+                            setattr(cloned_node, attr_name, None)
                         except Exception as e:
                             logger.warning(f"Clone: failed to set attr '{attr_name}': {e}")
             except Exception as e:
@@ -575,13 +597,13 @@ class Node(BaseModel, Runnable, ABC):
 
         for method_name in self.get_clone_init_methods_names():
             try:
-                method = getattr(clone_node, method_name, None)
+                method = getattr(cloned_node, method_name, None)
                 if callable(method):
                     method()
             except Exception as e:
                 logger.warning(f"Clone: method '{method_name}' invocation failed: {e}")
 
-        return clone_node
+        return cloned_node
 
     @property
     def to_dict_exclude_params(self):

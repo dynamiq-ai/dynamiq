@@ -210,7 +210,17 @@ class Map(Node):
         """Execute a single workflow and handle errors."""
         node_copy = self.node.clone()
         node_copy = self.regenerate_ids(node_copy)
-        result = node_copy.run(data, config, **merged_kwargs)
+
+        # Create an isolated config per iteration with unique streaming override for the cloned node
+        local_config = config
+        try:
+            local_config = config.model_copy(deep=True) if config is not None else RunnableConfig()
+            if node_config := local_config.nodes_override.get(self.node.id):
+                local_config.nodes_override[node_copy.id] = node_config
+        except Exception as e:
+            logger.warning(f"Map: failed to prepare isolated streaming config for iteration {index}: {e}")
+
+        result = node_copy.run(data, local_config, **merged_kwargs)
         if result.status != RunnableStatus.SUCCESS:
             if self.behavior == Behavior.RAISE:
                 raise ValueError(f"Node under iteration index {index + 1} has failed.")
