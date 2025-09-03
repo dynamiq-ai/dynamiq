@@ -663,7 +663,7 @@ class ReActAgent(Agent):
         description="Enable multi-tool execution in a single step. "
         "When True, the agent can call multiple tools in parallel.",
     )
-    direct_tool_return_enabled: bool = Field(
+    direct_tool_output_enabled: bool = Field(
         default=False,
         description="Allow agent to return raw tool outputs as final answers. "
         "When True, agent can use special XML format to return tool outputs directly.",
@@ -1121,7 +1121,7 @@ class ReActAgent(Agent):
                         if "Answer:" in llm_generated_output:
                             thought, final_answer = self._extract_final_answer(llm_generated_output)
 
-                            if self.direct_tool_return_enabled:
+                            if self.direct_tool_output_enabled:
                                 final_answer = self._process_direct_tool_output_return(final_answer)
 
                             self.log_final_output(thought, final_answer, loop_num)
@@ -1212,7 +1212,7 @@ class ReActAgent(Agent):
 
                                 if parsed_result.get("is_final", False):
                                     final_answer = parsed_result.get("answer", "")
-                                    if self.direct_tool_return_enabled:
+                                    if self.direct_tool_output_enabled:
                                         final_answer = self._process_direct_tool_output_return(final_answer)
                                     self.log_final_output(thought, final_answer, loop_num)
                                     self.tracing_final(loop_num, final_answer, config, kwargs)
@@ -1273,6 +1273,8 @@ class ReActAgent(Agent):
                                 )
                                 thought = parsed_data.get("thought")
                                 final_answer = parsed_data.get("answer")
+                                if self.direct_tool_output_enabled:
+                                    final_answer = self._process_direct_tool_output_return(final_answer)
                                 self.log_final_output(thought, final_answer, loop_num)
                                 self.tracing_final(loop_num, final_answer, config, kwargs)
                                 return final_answer
@@ -1772,7 +1774,7 @@ class ReActAgent(Agent):
             instructions_default = REACT_BLOCK_INSTRUCTIONS_SINGLE
             instructions_xml = REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
 
-        if self.direct_tool_return_enabled:
+        if self.direct_tool_output_enabled:
             instructions_default += "\n" + DEFAULT_DIRECT_OUTPUT_CAPABILITIES
             instructions_xml += "\n" + XML_DIRECT_OUTPUT_CAPABILITIES
 

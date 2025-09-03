@@ -67,7 +67,7 @@ def create_enhanced_context_agent() -> ReActAgent:
         role=AGENT_ROLE,
         inference_mode=InferenceMode.DEFAULT,
         parallel_tool_calls_enabled=True,
-        direct_tool_return_enabled=True,
+        direct_tool_output_enabled=True,
         summarization_config=context_config,
         max_loops=15,
         verbose=True,
