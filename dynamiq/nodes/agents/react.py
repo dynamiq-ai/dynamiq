@@ -30,6 +30,7 @@ from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
+
 Thought: [Your detailed reasoning about what to do next]
 Action: [Tool name from ONLY [{tools_name}]]
 Action Input: [JSON input for the tool]
@@ -54,9 +55,15 @@ IMPORTANT RULES:
 - Never use markdown code blocks (```) around your JSON
 - JSON must be properly formatted with correct commas and brackets
 - Only use tools from the provided list
-- If you can answer directly, use only Thought followed by Answer"""  # noqa: E501
+- If you can answer directly, use only Thought followed by Answer
+
+FILE HANDLING:
+- Tools may generate or process files (images, CSVs, PDFs, etc.)
+- Files are automatically collected and will be returned with your final answer
+- Mention created files in your final answer so users know what was generated"""  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
+
 <output>
     <thought>
         [Your detailed reasoning about what to do next]
@@ -100,10 +107,15 @@ IMPORTANT RULES:
 - For direct answers, only include thought and answer tags
 - Ensure action_input contains valid JSON with double quotes
 - Properly close all XML tags
-- For all tags other than <answer>, text content should ideally be XML-escaped.
+- For all tags other than <answer>, text content should ideally be XML-escaped
 - Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
-- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
-- You can get "Observation (shortened)" this indicates that output from this tool is shortened.
+- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag
+- You may receive "Observation (shortened)" indicating that tool output was truncated
+
+FILE HANDLING:
+- Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
+- Generated files are automatically collected and returned with your final answer
+- File operations are handled transparently - focus on the task, not file management
 """  # noqa: E501
 
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
@@ -301,6 +313,12 @@ Answer: [Your direct response]
 - Proper JSON syntax with commas and brackets
 - List each Action and Action Input separately
 - Only use tools from the provided list
+
+**FILE HANDLING:**
+- Tools may generate multiple files during execution
+- All generated files are automatically collected and returned
+- When using multiple tools, files from all tools are aggregated
+- Reference all created files in your final Answer
 """  # noqa: E501
 )
 
@@ -355,6 +373,11 @@ XML FORMAT RULES:
 - Group parallel tool calls in single <tool_calls> block
 - Use sequential outputs only when dependencies exist
 - Synthesize all results in final answer
+
+FILE HANDLING WITH MULTIPLE TOOLS:
+- Each tool may generate files independently
+- Files from all tools are automatically aggregated
+- Generated files are returned with the final answer
 """  # noqa: E501
 )
 
@@ -394,7 +417,11 @@ IMPORTANT RULES:
 - Do not mention tools or actions since you don't have access to any
 """
 
-REACT_BLOCK_OUTPUT_FORMAT = "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
+REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
+- Avoid phrases like 'based on the information gathered or provided.'
+- Clearly mention any files that were generated during the process.
+- Provide file names and brief descriptions of their contents.
+"""
 
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
@@ -418,25 +445,24 @@ Your response should be clear, concise, and professional.
 </answer>
 """  # noqa: E501
 
-REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
-Always structure your responses in this JSON format:
+REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
-{{thought: [Your reasoning about the next step],
-action: [The tool you choose to use, if any from ONLY [{tools_name}]],
-action_input: [JSON input in correct format you provide to the tool]}}
+{{"thought": "[Your reasoning about the next step]",
+"action": "[The tool you choose to use, if any from ONLY [{tools_name}]]",
+"action_input": "[JSON input in correct format you provide to the tool]"}}
 
 After each action, you'll receive:
 Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
-{{thought: [Your reasoning for the final answer],
-action: finish
-action_input: [Response for initial request]}}
+{{"thought": "[Your reasoning for the final answer]",
+"action": "finish",
+"action_input": "[Response for initial request]"}}
 
 For questions that don't require tools:
-{{thought: [Your reasoning for the final answer],
-action: finish
-action_input: [Your direct response]}}
+{{"thought": "[Your reasoning for the final answer]",
+"action": "finish",
+"action_input": "[Your direct response]"}}
 
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
@@ -444,22 +470,35 @@ IMPORTANT RULES:
 - In action_input field, provide properly formatted JSON with double quotes
 - Avoid using extra backslashes
 - Do not use markdown code blocks around your JSON
-- Never keep action_input empty.
+- Never leave action_input empty
+- Ensure proper JSON syntax with quoted keys and values
+
+FILE HANDLING:
+- Tools may generate files that are automatically collected
+- Generated files will be included in the final response
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
 You need to use the right functions based on what the user asks.
 
 Use the function `provide_final_answer` when you can give a clear answer to the user's first question,
- and no extra steps, tools, or work are needed.
+and no extra steps, tools, or work are needed.
 Call this function if the user's input is simple and doesn't require additional help or tools.
 
 If the user's request requires the use of specific tools, such as [{tools_name}],
- you must first call the appropriate function to invoke those tools.
+you must first call the appropriate function to invoke those tools.
 Only after utilizing the necessary tools and gathering the required information should
- you call `provide_final_answer` to deliver the final response.
+you call `provide_final_answer` to deliver the final response.
 
-Make sure to check each request carefully to see if you can answer it right away or if you need to use tools to help.
+FUNCTION CALLING GUIDELINES:
+- Analyze the request carefully to determine if tools are needed
+- Call functions with properly formatted arguments
+- Handle tool responses appropriately before providing final answer
+- Chain multiple tool calls when necessary for complex tasks
+
+FILE HANDLING:
+- Tools may generate files that will be included in the final response
+- Files created by tools are automatically collected and returned
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
@@ -497,9 +536,9 @@ IMPORTANT RULES:
 """
 
 
-REACT_BLOCK_OUTPUT_FORMAT = (
-    "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
-)
+REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
+- Avoid phrases like 'based on the information gathered or provided.'
+"""
 
 
 REACT_MAX_LOOPS_PROMPT = """
@@ -1207,13 +1246,15 @@ class ReActAgent(Agent):
 
                             action_input_json = json.dumps(action_input)
 
+                            step_observation = AgentIntermediateStepModelObservation(
+                                tool_using="multiple_tools",
+                                tool_input=str(action_input_json),
+                                tool_output=str(tool_result),
+                                updated=llm_generated_output,
+                            )
+
                             self._intermediate_steps[loop_num]["model_observation"].update(
-                                AgentIntermediateStepModelObservation(
-                                    tool_using="multiple_tools",
-                                    tool_input=str(action_input_json),
-                                    tool_output=str(tool_result),
-                                    updated=llm_generated_output,
-                                ).model_dump()
+                                step_observation.model_dump()
                             )
                         else:
                             try:
@@ -1319,14 +1360,14 @@ class ReActAgent(Agent):
                             **kwargs,
                         )
 
-                    self._intermediate_steps[loop_num]["model_observation"].update(
-                        AgentIntermediateStepModelObservation(
-                            tool_using=action,
-                            tool_input=action_input,
-                            tool_output=tool_result,
-                            updated=llm_generated_output,
-                        ).model_dump()
+                    step_observation = AgentIntermediateStepModelObservation(
+                        tool_using=action,
+                        tool_input=action_input,
+                        tool_output=tool_result,
+                        updated=llm_generated_output,
                     )
+
+                    self._intermediate_steps[loop_num]["model_observation"].update(step_observation.model_dump())
                 else:
                     self.stream_reasoning(
                         {
@@ -1671,10 +1712,22 @@ class ReActAgent(Agent):
                     all_results.append({"tool_name": tool_name, "success": False, "result": error_message})
                     continue
 
-                tool_result = self._run_tool(tool, tool_input, config, **kwargs)
+                result_raw = self._run_tool(tool, tool_input, config, **kwargs)
+                if isinstance(result_raw, dict) and "text" in result_raw:
+                    tool_result = result_raw["text"]
+                    tool_files = result_raw.get("files", {})
+                else:
+                    tool_result = result_raw
+                    tool_files = {}
 
                 all_results.append(
-                    {"tool_name": tool_name, "success": True, "tool_input": tool_input, "result": tool_result}
+                    {
+                        "tool_name": tool_name,
+                        "success": True,
+                        "tool_input": tool_input,
+                        "result": tool_result,
+                        "files": tool_files,
+                    }
                 )
 
                 if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
@@ -1700,12 +1753,21 @@ class ReActAgent(Agent):
                 )
 
         observation_parts = []
+        all_files = {}
+
         for result in all_results:
             tool_name = result["tool_name"]
             result_content = result["result"]
             success_status = "SUCCESS" if result["success"] else "ERROR"
             observation_parts.append(f"--- {tool_name} has resulted in {success_status} ---\n{result_content}")
 
+            # Collect files from all tools
+            if result.get("files"):
+                all_files.update(result["files"])
+
         combined_observation = "\n\n".join(observation_parts)
 
+        # Return structured result if any files were generated
+        if all_files:
+            return {"content": combined_observation, "files": all_files}
         return combined_observation
