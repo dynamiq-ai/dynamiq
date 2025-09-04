@@ -2,11 +2,12 @@ import base64
 import io
 import json
 import re
+from enum import Enum
 from typing import Any, Sequence
 
 import filetype
 from lxml import etree as LET  # nosec: B410
-from pydantic import BaseModel, model_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
 from dynamiq.prompts import (
@@ -20,6 +21,18 @@ from dynamiq.prompts import (
 from dynamiq.utils.logger import logger
 
 TOOL_MAX_TOKENS = 64000
+
+
+class ChunkedToolOutput(BaseModel):
+    """Structure for storing chunked tool outputs with summaries."""
+
+    tool_iteration_number: int
+    tool_chunks: list[str]
+    chunk_summaries: list[str]
+    overall_summary: str
+    original_size: int
+    chunk_method: str
+    is_chunked: bool
 
 
 class XMLParser:
@@ -716,22 +729,169 @@ def bytes_to_data_url(image_bytes: bytes) -> str:
         raise ValueError(f"Failed to convert image to data URL: {str(e)}")
 
 
+def _create_chunked_content(content: str, max_chunk_size: int = 8000) -> list[str]:
+    """
+    Split content into manageable chunks.
+
+    Args:
+        content: The content to chunk
+        max_chunk_size: Maximum size per chunk in characters
+
+    Returns:
+        List of content chunks
+    """
+    if len(content) <= max_chunk_size:
+        return [content]
+
+    chunks = []
+    remaining = content
+
+    while remaining:
+        if len(remaining) <= max_chunk_size:
+            chunks.append(remaining)
+            break
+
+        chunk = remaining[:max_chunk_size]
+
+        last_paragraph = chunk.rfind("\n\n")
+        if last_paragraph > max_chunk_size // 2:
+            split_pos = last_paragraph + len("\n\n")
+        else:
+            last_newline = chunk.rfind("\n")
+            if last_newline > max_chunk_size // 2:
+                split_pos = last_newline + len("\n")
+            else:
+                last_sentence = max(chunk.rfind(". "), chunk.rfind(".\n"))
+                if last_sentence > max_chunk_size // 2:
+                    split_pos = last_sentence + len(". ")
+                else:
+                    last_space = chunk.rfind(" ")
+                    split_pos = last_space + len(" ") if last_space > max_chunk_size // 2 else max_chunk_size
+
+        chunks.append(remaining[:split_pos].strip())
+        remaining = remaining[split_pos:].strip()
+
+    return chunks
+
+
+def _create_chunked_summary(chunks: list[str]) -> str:
+    """
+    Create a summary showing first, middle, and last chunks with chunking indicator.
+
+    Args:
+        chunks: List of content chunks
+
+    Returns:
+        Summary string showing representative parts
+    """
+    NUM_OF_SUMMARY_CHUNKS = 3
+
+    if len(chunks) < NUM_OF_SUMMARY_CHUNKS:
+        return "\n".join(chunks)
+
+    summary_parts = []
+    summary_parts.append(f"[CHUNK 1/{len(chunks)}]\n{chunks[0]}")
+
+    if len(chunks) > NUM_OF_SUMMARY_CHUNKS:
+        middle_idx = len(chunks) // 2
+        summary_parts.append(f"\n[CHUNK {middle_idx + 1}/{len(chunks)}]\n{chunks[middle_idx]}")
+        omitted_count = len(chunks) - NUM_OF_SUMMARY_CHUNKS
+        summary_parts.append(f"\n... [{omitted_count} chunks omitted] ...")
+    elif len(chunks) == NUM_OF_SUMMARY_CHUNKS:
+        summary_parts.append(f"\n[CHUNK 2/{len(chunks)}]\n{chunks[1]}")
+
+    summary_parts.append(f"\n[CHUNK {len(chunks)}/{len(chunks)}]\n{chunks[-1]}")
+
+    return "".join(summary_parts)
+
+
+def create_chunked_tool_output(
+    content: Any, iteration_number: int, max_chars: int = 32000, chunk_strategy: str = "smart"
+) -> ChunkedToolOutput:
+    """
+    Create a ChunkedToolOutput object from tool content.
+
+    Args:
+        content: The output from tool execution
+        iteration_number: The iteration number for this tool (e.g., 1 for tool_1)
+        max_chars: Maximum characters before chunking
+        chunk_strategy: Chunking strategy ("smart" or "simple")
+
+    Returns:
+        ChunkedToolOutput object with all the chunking information
+    """
+    if not isinstance(content, str):
+        if isinstance(content, dict):
+            if "content" in content:
+                inner_content = content["content"]
+                content = inner_content if isinstance(inner_content, str) else json.dumps(inner_content, indent=2)
+            else:
+                content = json.dumps(content, indent=2)
+        elif isinstance(content, (list, tuple)):
+            content = "\n".join(str(item) for item in content)
+        else:
+            content = str(content)
+
+    content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", content)
+    original_size = len(content)
+
+    if len(content) > max_chars:
+        if chunk_strategy == "smart":
+            chunk_size = max_chars // 3
+            chunks = _create_chunked_content(content, chunk_size)
+        else:
+            chunk_size = max_chars
+            chunks = [content[i : i + chunk_size] for i in range(0, len(content), chunk_size)]
+
+        if len(chunks) > 1:
+            chunk_summaries = [f"Chunk {i+1}: {len(chunk)} chars" for i, chunk in enumerate(chunks)]
+            overall_summary = _create_chunked_summary(chunks)
+
+            return ChunkedToolOutput(
+                tool_iteration_number=iteration_number,
+                tool_chunks=chunks,
+                chunk_summaries=chunk_summaries,
+                overall_summary=overall_summary,
+                original_size=original_size,
+                chunk_method=chunk_strategy,
+                is_chunked=True,
+            )
+        else:
+            if len(content) > max_chars:
+                half_length = (max_chars - 100) // 2
+                truncation_message = "\n...[Content truncated]...\n"
+                content = content[:half_length] + truncation_message + content[-half_length:]
+
+    return ChunkedToolOutput(
+        tool_iteration_number=iteration_number,
+        tool_chunks=[content],
+        chunk_summaries=[f"Single content: {len(content)} chars"],
+        overall_summary=content,
+        original_size=original_size,
+        chunk_method="none",
+        is_chunked=False,
+    )
+
+
 def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKENS, truncate: bool = True) -> str:
     """
-    Process tool output for agent consumption.
+    Process tool output for agent consumption with chunking.
 
     This function converts various types of tool outputs into a string representation.
     It handles dictionaries (with or without a 'content' key), lists, tuples, and other
     types by converting them to a string. If the resulting string exceeds the maximum
-    allowed length (calculated from max_tokens), it is truncated.
+    allowed length, it uses chunking to show representative parts
+    (first, middle, and last chunks) instead of simple truncation.
+
     Args:
         content: The output from tool execution, which can be of various types.
         max_tokens: Maximum allowed token count for the content. The effective character
             limit is computed as max_tokens * 4 (assuming ~4 characters per token).
-        truncate: Whether to truncate the content if it exceeds the maximum length.
+        truncate: Whether to chunk/truncate the content if it exceeds the maximum length.
 
     Returns:
-        A processed string suitable for agent consumption.
+        A processed string suitable for agent consumption. For large content, returns
+        a chunked summary with [CHUNK X/Y] indicators showing representative sections.
     """
     if not isinstance(content, str):
         if isinstance(content, dict):
@@ -747,13 +907,19 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
         else:
             content = str(content)
 
-    max_len_in_char: int = max_tokens * 4  # This assumes an average of 4 characters per token.
+    max_len_in_char: int = max_tokens * 4
     content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", content)
 
     if len(content) > max_len_in_char and truncate:
-        half_length: int = (max_len_in_char - 100) // 2
-        truncation_message: str = "\n...[Content truncated]...\n"
-        content = content[:half_length] + truncation_message + content[-half_length:]
+        chunk_size = max_len_in_char // 3
+        chunks = _create_chunked_content(content, chunk_size)
+
+        if len(chunks) > 1:
+            content = _create_chunked_summary(chunks)
+        elif len(content) > max_len_in_char:
+            half_length: int = (max_len_in_char - 100) // 2
+            truncation_message: str = "\n...[Content truncated]...\n"
+            content = content[:half_length] + truncation_message + content[-half_length:]
 
     return content
 
@@ -807,6 +973,19 @@ class ToolCacheEntry(BaseModel):
         return data
 
 
+class ChunkStrategy(Enum):
+    SIMPLE = "simple"
+    SMART = "smart"
+
+
+class ToolOutputConfig(BaseModel):
+    """Configuration for tool output processing and chunking."""
+
+    max_chars: int = 32000
+    chunk_strategy: ChunkStrategy = ChunkStrategy.SMART  # "smart" or "simple"
+    summary_strategy: str = "structured"  # "structured" or "simple"
+
+
 class SummarizationConfig(BaseModel):
     """Configuration for agent history summarization.
 
@@ -816,9 +995,11 @@ class SummarizationConfig(BaseModel):
           which summarization will be applied. Defaults to None.
         context_usage_ratio (float): Relative percentage of tokens in prompt after which summarization will be applied.
         context_history_length (int): Number of history messages that will be prepended.
+        tool_output (ToolOutputConfig): Configuration for tool output processing.
     """
 
     enabled: bool = False
     max_token_context_length: int | None = None
     context_usage_ratio: float = 0.8
     context_history_length: int = 4
+    tool_output: ToolOutputConfig = ToolOutputConfig()
