@@ -16,7 +16,7 @@ def create_openai_llm():
     connection = OpenAIConnection()
     return OpenAI(
         connection=connection,
-        model="gpt-4o-mini",
+        model="o3-mini",
         max_tokens=1000,
         temperature=0,
     )
@@ -36,7 +36,7 @@ def create_gemini_llm():
     connection = GeminiConnection()
     return Gemini(
         connection=connection,
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         max_tokens=1000,
         temperature=0,
     )
