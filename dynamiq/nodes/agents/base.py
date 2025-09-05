@@ -20,6 +20,7 @@ from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionM
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
+from dynamiq.storages.file_storage.base import FileStorage
 
 PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT = """
 You are the Agent Manager. Your goal is to handle the user's request.
@@ -309,6 +310,7 @@ class Agent(Node):
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
+    filestorage: FileStorage | None = Field(default=None, description="Filesystem storage to use for agent.")
 
     input_message: Message | VisionMessage | None = None
     role: str | None = ""
@@ -320,6 +322,7 @@ class Agent(Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
     _json_schema_fields: ClassVar[list[str]] = ["role"]
+    _accumulated_files: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     @classmethod
     def _generate_json_schema(
@@ -549,7 +552,7 @@ class Agent(Node):
 
         files = input_data.files
         if files:
-            self.files = files
+            self.files = self._ensure_named_files(files)
             self._prompt_variables["file_description"] = self.file_description
 
         if input_data.tool_params:
@@ -561,14 +564,24 @@ class Agent(Node):
 
         result = self._run_agent(input_message, history_messages, config=config, **kwargs)
 
+        if isinstance(result, dict) and "files" in result:
+            content = result["content"]
+        else:
+            content = result
+
         if use_memory:
-            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
+            self.memory.add(role=MessageRole.ASSISTANT, content=content, metadata=custom_metadata)
 
         execution_result = {
-            "content": result,
+            "content": content,
             "intermediate_steps": self._intermediate_steps,
         }
-        logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
+
+        if self._accumulated_files:
+            execution_result["files"] = self._accumulated_files
+            logger.info(f"Agent {self.name} - {self.id}: returning {len(self._accumulated_files)} accumulated file(s)")
+
+        logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(content)[:200]}...")
 
         return execution_result
 
@@ -808,6 +821,21 @@ class Agent(Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
+        for _, field in tool.input_schema.model_fields.items():
+            if getattr(field, "map_from_storage", False):
+                if isinstance(merged_input[field.name], list):
+                    merged_input[field.name] = [self.filestorage.retrieve(file) for file in merged_input[field.name]]
+                elif isinstance(merged_input[field.name], str):
+                    merged_input[field.name] = self.filestorage.retrieve(merged_input[field.name])
+                elif isinstance(merged_input[field.name], dict):
+                    # Handle dict[str, str] -> dict[str, bytes] for files
+                    merged_input[field.name] = {
+                        filename: self.filestorage.retrieve(file_id) 
+                        for filename, file_id in merged_input[field.name].items()
+                    }
+                else:
+                    raise ValueError(f"Unsupported type for {field.name}: {type(merged_input[field.name])}")
+
         if tool_params:
             debug_info = []
             if self.verbose:
@@ -834,6 +862,8 @@ class Agent(Node):
             if self.verbose and debug_info:
                 logger.debug("\n".join(debug_info))
 
+
+        
         tool_result = tool.run(
             input_data=merged_input,
             config=config,
@@ -847,13 +877,39 @@ class Agent(Node):
                 raise ToolExecutionException({error_message})
             else:
                 raise ValueError({error_message})
-        tool_result_content = tool_result.output.get("content")
+        tool_result_output_content = tool_result.output.get("content")
+
+        if isinstance(tool_result.output, dict) and "files" in tool_result.output:
+            tool_files = tool_result.output.get("files", {})
+            if tool_files:
+                self._accumulated_files.update(tool_files)
+                logger.info(f"Tool '{tool.name}' generated {len(tool_files)} file(s): {list(tool_files.keys())}")
+
         tool_result_content_processed = process_tool_output_for_agent(
-            content=tool_result_content,
+            content=tool_result_output_content,
             max_tokens=self.tool_output_max_length,
             truncate=self.tool_output_truncate_enabled,
         )
         return tool_result_content_processed
+
+    def _ensure_named_files(self, files):
+        """Ensure all uploaded files have name and description attributes."""
+        named = []
+        for i, f in enumerate(files):
+            if isinstance(f, bytes):
+                bio = io.BytesIO(f)
+                bio.name = f"file_{i}.bin"
+                bio.description = "User-provided file"
+                named.append(bio)
+            elif isinstance(f, io.BytesIO):
+                if not hasattr(f, "name"):
+                    f.name = f"file_{i}"
+                if not hasattr(f, "description"):
+                    f.description = "User-provided file"
+                named.append(f)
+            else:
+                named.append(f)
+        return named
 
     @property
     def tool_description(self) -> str:
@@ -895,6 +951,7 @@ class Agent(Node):
         """Resets the agent's run state."""
         self._intermediate_steps = {}
         self._run_depends = []
+        self._accumulated_files = {}
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """Generates the prompt using specified blocks and variables."""
