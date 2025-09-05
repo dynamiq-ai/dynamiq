@@ -20,6 +20,7 @@ from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionM
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
+from dynamiq.storages.file_storage.base import FileStorage
 
 PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT = """
 You are the Agent Manager. Your goal is to handle the user's request.
@@ -309,6 +310,7 @@ class Agent(Node):
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
+    filestorage: FileStorage | None = Field(default=None, description="Filesystem storage to use for agent.")
 
     input_message: Message | VisionMessage | None = None
     role: str | None = ""
@@ -819,6 +821,21 @@ class Agent(Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
+        for _, field in tool.input_schema.model_fields.items():
+            if getattr(field, "map_from_storage", False):
+                if isinstance(merged_input[field.name], list):
+                    merged_input[field.name] = [self.filestorage.retrieve(file) for file in merged_input[field.name]]
+                elif isinstance(merged_input[field.name], str):
+                    merged_input[field.name] = self.filestorage.retrieve(merged_input[field.name])
+                elif isinstance(merged_input[field.name], dict):
+                    # Handle dict[str, str] -> dict[str, bytes] for files
+                    merged_input[field.name] = {
+                        filename: self.filestorage.retrieve(file_id) 
+                        for filename, file_id in merged_input[field.name].items()
+                    }
+                else:
+                    raise ValueError(f"Unsupported type for {field.name}: {type(merged_input[field.name])}")
+
         if tool_params:
             debug_info = []
             if self.verbose:
@@ -845,6 +862,8 @@ class Agent(Node):
             if self.verbose and debug_info:
                 logger.debug("\n".join(debug_info))
 
+
+        
         tool_result = tool.run(
             input_data=merged_input,
             config=config,

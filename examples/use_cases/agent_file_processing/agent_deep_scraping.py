@@ -1,41 +1,46 @@
-from dynamiq.connections import Firecrawl, Tavily
+from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.agents.utils import SummarizationConfig
-from dynamiq.nodes.tools.firecrawl import FirecrawlTool
-from dynamiq.nodes.tools.tavily import TavilyTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
+from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
+from dynamiq.storages.file_storage import InMemoryFileStorage
+
+PORT = 5000
 
 AGENT_ROLE = "A helpful and general-purpose AI assistant"
 
-PROMPT1 = """Parse 5 pages of https://clutch.co/developers/artificial-intelligence/generative?page=1
- and generate csv like file with this structure
- Company Name,Rating,Reviews,Location,Minimum Project Size,Hourly Rate,Company Size,Services Focus."""
-
-PROMPT2 = """Create long research on state of AI in EU. Give report for each country."""
-
+PROMPT1 = """Create test.txt file and upload it to the server. Return the content of the file. Send file to localhost:5000/upload"""
 
 if __name__ == "__main__":
-    connection_tavily = Tavily()
-    connection_firecrawl = Firecrawl()
+    connection = HttpConnection(
+        method="POST",
+        url=f"https://localhost:{PORT}/upload",
+    )
+    file_storage = InMemoryFileStorage()
 
-    tool_search = TavilyTool(connection=connection_tavily)
-    tool_scrape = FirecrawlTool(connection=connection_firecrawl)
+    file_upload_api = HttpApiCall(
+        id="file-upload-api",
+        connection=connection,
+        response_type=ResponseType.JSON,
+        name="FileUploadApi",
+        description="Tool to uploads a file to the server. Provide parameter file with ",
+    )
+
     llm = setup_llm(model_provider="claude", model_name="claude-3-7-sonnet-20250219", temperature=0)
 
     agent = ReActAgent(
         name="Agent",
         id="Agent",
         llm=llm,
-        tools=[tool_search, tool_scrape],
+        tools=[file_upload_api],
         role=AGENT_ROLE,
+        filestorage=file_storage,
         max_loops=30,
         inference_mode=InferenceMode.XML,
-        summarization_config=SummarizationConfig(enabled=True, max_token_context_length=50000),
     )
 
-    result = agent.run(input_data={"input": PROMPT1, "files": None})
+    result = agent.run(input_data={"input": PROMPT1})
 
     output_content = result.output.get("content")
     logger.info("RESULT")

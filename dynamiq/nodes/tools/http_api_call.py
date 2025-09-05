@@ -11,6 +11,7 @@ from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutio
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
+import io
 
 DESCRIPTION_HTTP = """Makes HTTP API requests with support for all methods and configurable parameters.
 
@@ -35,7 +36,7 @@ Parameter Guide:
 Examples:
 - {"url": "https://api.example.com/data", "method": "GET", "headers": {"Authorization": "Bearer token"}}
 - {"url": "https://api.com/users", "method": "POST", "body": {"name": "John"}}
-- {"url": "https://api.com/upload", "method": "PUT", "files": {"file": "data.csv"}}"""
+- {"url": "https://api.com/upload", "method": "PUT", "files": {"file1.txt": "content1", "file2.pdf": "content2"}}"""
 
 
 class ResponseType(str, enum.Enum):
@@ -55,6 +56,7 @@ class HttpApiCallInputSchema(BaseModel):
     payload_type: RequestPayloadType = Field(default=None, description="Parameter to specify the type of payload data.")
     headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
+    files: dict[str, bytes] = Field(default={}, description="Parameter to provide files to the request. Dictionary mapping filename to file content from filestorage", map_from_storage=True)
 
     @field_validator("data", "headers", "params", mode="before")
     @classmethod
@@ -126,6 +128,8 @@ class HttpApiCall(ConnectionNode):
 
         data = self.connection.data | self.data | input_data.data
         payload_type = input_data.payload_type or self.payload_type
+        files = {file, for file in input_data.data}
+
         extras = {"data": data} if payload_type == RequestPayloadType.RAW else {"json": data}
         url = input_data.url or self.url or self.connection.url
         if not url:
@@ -141,6 +145,7 @@ class HttpApiCall(ConnectionNode):
                 headers=self.connection.headers | self.headers | headers,
                 params=self.connection.params | self.params | params,
                 timeout=self.timeout,
+                files=files
                 **extras,
             )
         except Exception as e:
