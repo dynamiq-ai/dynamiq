@@ -147,3 +147,116 @@ def test_react_agent_in_workflow(
     assert expected_answer in content, f"Expected '{expected_answer}' in the agent output, got: {content!r}"
 
     logger.info("--- Test test_react_agent_in_workflow PASSED ---")
+
+
+@pytest.mark.unit
+def test_react_agent_role_with_curly_braces_json_example(test_llm):
+    """
+    Ensure that agent roles containing literal curly braces inside code blocks
+    (e.g., ```json {code:sasadsd}```) do not break prompt rendering.
+    """
+    role_with_json_example = (
+        "You are a helpful assistant.\n"
+        "Return FINAL ANSWER TO USER  ALWAYS in JSON format like\n"
+        "```json\n{'object':'...'}```"
+    )
+
+    agent = ReActAgent(
+        name="TestReactAgentRoleCurlyBraces",
+        id="test_react_agent_role_curly_braces",
+        llm=test_llm,
+        role=role_with_json_example,
+        inference_mode=InferenceMode.DEFAULT,
+        tools=[],
+        memory=None,
+        verbose=False,
+        max_loops=3,
+    )
+
+    input_data = {"input": "What is 2 + 2?"}
+    config = RunnableConfig(request_timeout=30)
+    result = agent.run(input_data=input_data, config=config)
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert isinstance(content, str)
+    assert "4" in content, f"Expected '4' in the output, got: {content!r}"
+
+
+@pytest.mark.unit
+def test_react_agent_role_with_double_braces_and_raw_block(test_llm):
+    """
+    Ensure roles that mix literal double-braces (escaped with Jinja raw)
+    and Jinja variables (like {{ input }}) render without errors.
+    """
+    role_with_mixed = (
+        "You are a helpful assistant.\n"
+        "Include this literal snippet exactly as-is in your persona: \n\n"
+        "```json\n"
+        '{% raw %}\n{\n  "example": "{{should_not_render}}"\n}\n{% endraw %}\n'
+        "```\n\n"
+        "Also, reference the current task inline: {{ input }}\n"
+    )
+
+    agent = ReActAgent(
+        name="TestReactAgentRoleMixed",
+        id="test_react_agent_role_mixed",
+        llm=test_llm,
+        role=role_with_mixed,
+        inference_mode=InferenceMode.DEFAULT,
+        tools=[],
+        memory=None,
+        verbose=False,
+        max_loops=3,
+    )
+
+    input_data = {"input": "What is 2 + 2?"}
+    config = RunnableConfig(request_timeout=30)
+    result = agent.run(input_data=input_data, config=config)
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert isinstance(content, str)
+    assert "4" in content, f"Expected '4' in the output, got: {content!r}"
+
+
+@pytest.mark.unit
+def test_react_agent_role_literal_mode_double_braces_visible_in_prompt(test_llm):
+    """
+    When role_is_template=False, the role is treated as literal. Double-braces should not be interpreted.
+    Verify that the system prompt contains the literal snippet and agent still answers.
+    """
+    literal_snippet = "{{should_not_render}}"
+    role_literal = (
+        "You are a helpful assistant.\n"
+        "Show this literal tag in your persona: " + literal_snippet + "\n"
+        "Do not attempt to interpret it."
+    )
+
+    agent = ReActAgent(
+        name="TestReactAgentRoleLiteral",
+        id="test_react_agent_role_literal",
+        llm=test_llm,
+        role=role_literal,
+        role_is_template=False,
+        inference_mode=InferenceMode.DEFAULT,
+        tools=[],
+        memory=None,
+        verbose=False,
+        max_loops=3,
+    )
+
+    input_data = {"input": "What is 2 + 2?"}
+    config = RunnableConfig(request_timeout=30)
+    result = agent.run(input_data=input_data, config=config)
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert isinstance(content, str)
+    assert "4" in content, f"Expected '4' in the output, got: {content!r}"
+
+    # Ensure the role literal made it into the system message
+    system_message = agent._prompt.messages[0].content
+    assert (
+        literal_snippet in system_message
+    ), f"Expected literal snippet '{literal_snippet}' in system message, got: {system_message!r}"

@@ -51,6 +51,38 @@ agent = ReActAgent(
     role="Senior Data Scientist",
     max_loops=10,
 )
+
+"""
+Role templating vs literal content
+---------------------------------
+By default, `role` is treated as a Jinja template, so you can include variables like `{{ input }}`.
+If you need to include literal braces or double-braces (e.g., in JSON code blocks), set `role_is_template=False` to disable templating for the role only:
+
+```python
+agent = ReActAgent(
+    name="react-agent",
+    llm=llm,
+    tools=[e2b_tool],
+    role=(
+        "You are a helpful assistant.\n"
+        "Example JSON:```json\n{\"example\": \"{{should_not_render}}\"}\n```\n"
+    ),
+    role_is_template=False,
+)
+```
+
+Alternatively, you can wrap any snippet inside `{% raw %}...{% endraw %}` within the role when `role_is_template=True`:
+
+```python
+role = (
+    "You are a helpful assistant.\n"
+    "```json\n"
+    "{% raw %}{ \"example\": \"{{should_not_render}}\" }{% endraw %}\n"
+    "```\n"
+)
+agent = ReActAgent(name="react-agent", llm=llm, tools=[e2b_tool], role=role)
+```
+"""
 ```
 
 **Run the Agent with an Input**
