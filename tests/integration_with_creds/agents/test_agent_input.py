@@ -221,9 +221,9 @@ def test_react_agent_role_with_double_braces_and_raw_block(test_llm):
 
 
 @pytest.mark.unit
-def test_react_agent_role_literal_mode_double_braces_visible_in_prompt(test_llm):
+def test_react_agent_role_double_braces_visible_in_prompt(test_llm):
     """
-    When role_is_template=False, the role is treated as literal. Double-braces should not be interpreted.
+    Role is treated as literal. Double-braces should not be interpreted.
     Verify that the system prompt contains the literal snippet and agent still answers.
     """
     literal_snippet = "{{should_not_render}}"
@@ -238,7 +238,6 @@ def test_react_agent_role_literal_mode_double_braces_visible_in_prompt(test_llm)
         id="test_react_agent_role_literal",
         llm=test_llm,
         role=role_literal,
-        role_is_template=False,
         inference_mode=InferenceMode.DEFAULT,
         tools=[],
         memory=None,

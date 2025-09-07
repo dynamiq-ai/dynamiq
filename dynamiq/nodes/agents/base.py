@@ -324,14 +324,6 @@ class Agent(Node):
 
     input_message: Message | VisionMessage | None = None
     role: str | None = ""
-    role_is_template: bool = Field(
-        True,
-        description=(
-            "When True, the role is treated as a Jinja template. "
-            "When False, the role is inserted literally (no Jinja rendering), "
-            "so any double-braces or braces are preserved."
-        ),
-    )
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
@@ -339,7 +331,7 @@ class Agent(Node):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
-    _json_schema_fields: ClassVar[list[str]] = ["role", "role_is_template"]
+    _json_schema_fields: ClassVar[list[str]] = ["role"]
 
     @classmethod
     def _generate_json_schema(
@@ -410,7 +402,7 @@ class Agent(Node):
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
         role_for_validation = self.role or ""
-        if role_for_validation and not self.role_is_template:
+        if role_for_validation:
             role_for_validation = f"{{% raw %}}{role_for_validation}{{% endraw %}}"
         return {"input_message": self.input_message, "role": role_for_validation}
 
@@ -568,13 +560,7 @@ class Agent(Node):
             history_messages = None
 
         if self.role:
-            # Respect role templating mode
-            if self.role_is_template:
-                # Defer role rendering to Jinja at prompt generation time
-                self._prompt_blocks["role"] = self.role
-            else:
-                # Wrap in raw to ensure literal insertion when rendering blocks
-                self._prompt_blocks["role"] = f"{{% raw %}}{self.role}{{% endraw %}}"
+            self._prompt_blocks["role"] = f"{{% raw %}}{self.role}{{% endraw %}}"
 
         files = input_data.files
         if files:
