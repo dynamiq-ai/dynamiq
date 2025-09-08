@@ -32,7 +32,6 @@ from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWrite
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file_storage.base import FileStorage
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
@@ -678,6 +677,7 @@ TYPE_MAPPING = {
     float: "float",
     bool: "boolean",
     str: "string",
+    dict: "object",
 }
 
 UNKNOWN_TOOL_NAME = "unknown_tool"
@@ -706,7 +706,6 @@ class ReActAgent(Agent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
-    filestorage: FileStorage | None = Field(default=None, description="Filesystem storage to use for agent.")
 
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _tools: list[Tool] = []
@@ -1653,6 +1652,10 @@ class ReActAgent(Agent):
                     else:
                         type_str = getattr(field.annotation, "__name__", str(field.annotation))
 
+                    # If field has map_from_storage=True, change type to tuple of strings
+                    if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
+                        type_str = "tuple[str, ...]"
+
                     description = field.description or "No description"
                     params.append(f"{name} ({type_str}): {description}")
             if params:
@@ -1733,6 +1736,9 @@ class ReActAgent(Agent):
                 elif getattr(param, "__origin__", None) is list:
                     properties[name]["type"].append("array")
                     properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
+
+                elif getattr(param, "__origin__", None) is dict:
+                    properties[name]["type"].append("object")
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""

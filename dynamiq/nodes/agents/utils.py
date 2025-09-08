@@ -18,9 +18,17 @@ from dynamiq.prompts import (
     VisionMessageImageURL,
     VisionMessageTextContent,
 )
+from dynamiq.storages.file_storage.base import FileInfo
 from dynamiq.utils.logger import logger
 
 TOOL_MAX_TOKENS = 64000
+
+
+class FileMappedInput(BaseModel):
+    """Structure for storing file mapped inputs."""
+
+    input: Any
+    filestorage: list[FileInfo]
 
 
 class ChunkedToolOutput(BaseModel):

@@ -12,6 +12,7 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.storages.file_storage.base import FileInfo
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_E2B = """Executes Python code and shell commands in a secure cloud sandbox environment.
@@ -206,6 +207,14 @@ def handle_file_upload(files: list[bytes | io.BytesIO | FileData]) -> list[FileD
                     description=description,
                 )
             )
+        elif isinstance(file, FileInfo):
+            files_data.append(
+                FileData(
+                    data=file.content,
+                    name=file.name,
+                    description=file.metadata.get("description", ""),
+                )
+            )
         else:
             raise ValueError(f"Error: Invalid file data type: {type(file)}. " f"Expected bytes or BytesIO or FileData.")
 
@@ -248,10 +257,11 @@ class E2BInterpreterInputSchema(BaseModel):
 
     @field_validator("files", mode="before")
     @classmethod
-    def files_validator(cls, files):
+    def files_validator(cls, files: list[FileData | bytes | io.BytesIO | FileInfo] | dict[str, Any], **kwargs):
         """Validate and process files."""
         if files in (None, [], ()):
             return None
+
         return handle_file_upload(files)
 
 

@@ -118,7 +118,7 @@ class InMemoryFileStorage(FileStorage):
                 if '/' in rel_path:
                     continue
 
-            files_list.append(self._create_file_info(file_path, self._files[file_path]))
+            files_list.append(self._files[file_path])
 
         return files_list
 
@@ -127,8 +127,12 @@ class InMemoryFileStorage(FileStorage):
         return FileInfo(
             name=os.path.basename(file_path),
             path=file_path,
-            size=file_data['size'],
-            content_type=file_data['content_type'],
-            created_at=file_data['created_at'],
-            metadata=file_data.get('metadata', {})
+            size=file_data["size"],
+            content_type=file_data["content_type"],
+            created_at=file_data["created_at"],
+            metadata=file_data.get("metadata", {}),
         )
+
+    def is_empty(self) -> bool:
+        """Check if the storage is empty."""
+        return len(self._files) == 0

@@ -1,4 +1,5 @@
 import enum
+import io
 import json
 from typing import Any, ClassVar, Literal
 
@@ -8,10 +9,11 @@ from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import HTTPMethod
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutionException
+from dynamiq.nodes.agents.utils import FileMappedInput
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.storages.file_storage.base import FileInfo
 from dynamiq.utils.logger import logger
-import io
 
 DESCRIPTION_HTTP = """Makes HTTP API requests with support for all methods and configurable parameters.
 
@@ -50,13 +52,60 @@ class RequestPayloadType(str, enum.Enum):
     JSON = "json"
 
 
+def handle_file_upload(input_data: dict[str, str | bytes] | FileMappedInput) -> dict[str, bytes]:
+    """
+    Handles file uploading with additional metadata.
+
+    Args:
+        input_data: Dictionary mapping parameter names to file objects to upload or FileMappedInput object.
+
+    Returns:
+        dict[str, bytes]: Dictionary mapping parameter names to file content as bytes.
+
+    Raises:
+        ValueError: If invalid file data type is provided.
+    """
+    files_data = {}
+    if isinstance(input_data, FileMappedInput):
+        files = input_data.input
+        filestorage = input_data.filestorage
+    else:
+        files = input_data
+        filestorage = None
+
+    for param_name, file in files.items():
+        if isinstance(file, bytes):
+            files_data[param_name] = file
+        elif isinstance(file, io.BytesIO):
+            files_data[param_name] = file.getvalue()
+        elif isinstance(file, FileInfo):
+            files_data[param_name] = file.content
+        elif isinstance(file, str):
+            if filestorage:
+                files_data[param_name] = filestorage.retrieve(file)
+            else:
+                raise ValueError(
+                    f"Error: Invalid file data type: {type(file)}. "
+                    "If you want to use file path from filestorage, provide FileMappedInput object."
+                )
+        else:
+            raise ValueError(f"Error: Invalid file data type: {type(file)}. Expected bytes, BytesIO, or FileInfo.")
+
+    return files_data
+
+
 class HttpApiCallInputSchema(BaseModel):
     data: dict = Field(default={}, description="Parameter to provide payload.")
     url: str = Field(default="", description="Parameter to provide endpoint url.")
     payload_type: RequestPayloadType = Field(default=None, description="Parameter to specify the type of payload data.")
     headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
-    files: dict[str, bytes] = Field(default={}, description="Parameter to provide files to the request. Dictionary mapping filename to file content from filestorage", map_from_storage=True)
+    files: dict[str, str | bytes] = Field(
+        default={},
+        description="Parameter to provide files to the request. Maps parameter names to file paths for file uploads. "
+        "Provide strings for file IDs from filestorage.",
+        map_from_storage=True,
+    )
 
     @field_validator("data", "headers", "params", mode="before")
     @classmethod
@@ -70,6 +119,12 @@ class HttpApiCallInputSchema(BaseModel):
             return value
         else:
             raise ActionParsingException(f"Expected a dictionary or a JSON string for '{field}'.")
+
+    @field_validator("files", mode="before")
+    @classmethod
+    def files_validator(cls, input_data: dict[str, str | bytes] | FileMappedInput):
+        """Validate and process files."""
+        return handle_file_upload(input_data)
 
 
 class HttpApiCall(ConnectionNode):
@@ -128,7 +183,7 @@ class HttpApiCall(ConnectionNode):
 
         data = self.connection.data | self.data | input_data.data
         payload_type = input_data.payload_type or self.payload_type
-        files = {file, for file in input_data.data}
+        files = input_data.files
 
         extras = {"data": data} if payload_type == RequestPayloadType.RAW else {"json": data}
         url = input_data.url or self.url or self.connection.url
@@ -145,7 +200,7 @@ class HttpApiCall(ConnectionNode):
                 headers=self.connection.headers | self.headers | headers,
                 params=self.connection.params | self.params | params,
                 timeout=self.timeout,
-                files=files
+                files=files,
                 **extras,
             )
         except Exception as e:

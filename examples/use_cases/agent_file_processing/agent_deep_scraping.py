@@ -6,11 +6,12 @@ from examples.llm_setup import setup_llm
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
 from dynamiq.storages.file_storage import InMemoryFileStorage
 
-PORT = 5000
+PORT = 5100
 
 AGENT_ROLE = "A helpful and general-purpose AI assistant"
 
-PROMPT1 = """Create test.txt file and upload it to the server. Return the content of the file. Send file to localhost:5000/upload"""
+PROMPT1 = f"""Create test.txt file and upload it to the server. Return the content of the file.
+            Send file to http://localhost:{PORT}/upload"""
 
 if __name__ == "__main__":
     connection = HttpConnection(
@@ -37,7 +38,7 @@ if __name__ == "__main__":
         role=AGENT_ROLE,
         filestorage=file_storage,
         max_loops=30,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
     result = agent.run(input_data={"input": PROMPT1})

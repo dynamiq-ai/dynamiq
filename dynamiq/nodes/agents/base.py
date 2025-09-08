@@ -18,9 +18,10 @@ from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.storages.file_storage.base import FileStorage
+from dynamiq.storages.file_storage.in_memory import InMemoryFileStorage
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
-from dynamiq.storages.file_storage.base import FileStorage
 
 PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT = """
 You are the Agent Manager. Your goal is to handle the user's request.
@@ -310,7 +311,7 @@ class Agent(Node):
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
-    filestorage: FileStorage | None = Field(default=None, description="Filesystem storage to use for agent.")
+    filestorage: FileStorage = Field(default=InMemoryFileStorage(), description="Filesystem storage to use for agent.")
 
     input_message: Message | VisionMessage | None = None
     role: str | None = ""
@@ -813,9 +814,17 @@ class Agent(Node):
         """Runs a specific tool with the given input."""
         if self.files:
             if tool.is_files_allowed is True:
-                tool_input["files"] = self.files
+                # Provide file IDs for tools that support filestorage
+                file_ids = {}
+                for file_obj in self.files:
+                    if hasattr(file_obj, "file_id"):
+                        file_ids[file_obj.name] = file_obj.file_id
+                tool_input["files"] = file_ids
 
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
+
+        # Pass filestorage to tools that need it
+
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
@@ -823,14 +832,9 @@ class Agent(Node):
 
         for _, field in tool.input_schema.model_fields.items():
             if getattr(field, "map_from_storage", False):
-                if isinstance(merged_input[field.name], list):
-                    merged_input[field.name] = [self.filestorage.retrieve(file) for file in merged_input[field.name]]
-                elif isinstance(merged_input[field.name], str):
-                    merged_input[field.name] = self.filestorage.retrieve(merged_input[field.name])
-                elif isinstance(merged_input[field.name], dict):
-                    # Handle dict[str, str] -> dict[str, bytes] for files
+                if isinstance(merged_input[field.name], dict):
                     merged_input[field.name] = {
-                        filename: self.filestorage.retrieve(file_id) 
+                        filename: self.filestorage.retrieve(file_id)
                         for filename, file_id in merged_input[field.name].items()
                     }
                 else:
@@ -862,8 +866,6 @@ class Agent(Node):
             if self.verbose and debug_info:
                 logger.debug("\n".join(debug_info))
 
-
-        
         tool_result = tool.run(
             input_data=merged_input,
             config=config,
@@ -893,19 +895,53 @@ class Agent(Node):
         return tool_result_content_processed
 
     def _ensure_named_files(self, files):
-        """Ensure all uploaded files have name and description attributes."""
+        """Ensure all uploaded files have name and description attributes and store them in filestorage if available."""
         named = []
         for i, f in enumerate(files):
             if isinstance(f, bytes):
                 bio = io.BytesIO(f)
                 bio.name = f"file_{i}.bin"
                 bio.description = "User-provided file"
+
+                # Store in filestorage
+                try:
+                    file_id = self.filestorage.store(
+                        file_path=bio.name,
+                        content=f,
+                        content_type="application/octet-stream",
+                        metadata={"description": bio.description, "source": "user_upload"},
+                    )
+                    # Store the file ID for later retrieval
+                    bio.file_id = file_id.id
+                    self._accumulated_files[file_id.id] = file_id
+                except Exception as e:
+                    logger.warning(f"Failed to store file {bio.name} in filestorage: {e}")
+
                 named.append(bio)
             elif isinstance(f, io.BytesIO):
                 if not hasattr(f, "name"):
                     f.name = f"file_{i}"
                 if not hasattr(f, "description"):
                     f.description = "User-provided file"
+
+                # Store in filestorage
+                try:
+                    # Read the content for storage
+                    content = f.read()
+                    f.seek(0)  # Reset position
+
+                    file_id = self.filestorage.store(
+                        file_path=f.name,
+                        content=content,
+                        content_type="application/octet-stream",
+                        metadata={"description": f.description, "source": "user_upload"},
+                    )
+                    # Store the file ID for later retrieval
+                    f.file_id = file_id.id
+                    self._accumulated_files[file_id.id] = file_id
+                except Exception as e:
+                    logger.warning(f"Failed to store file {f.name} in filestorage: {e}")
+
                 named.append(f)
             else:
                 named.append(f)

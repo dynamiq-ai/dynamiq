@@ -18,10 +18,10 @@ Generally, you follow these rules:
 """
 
 PROMPT = """
-Read the data, and create markdown file - formatted with osme analysis.
+Read the data, and create markdown file - formatted with some analysis.
 """
 
-FILE_PATH = "./data/house_prices.csv"
+FILE_PATH = "./examples/use_cases/agents_use_cases/data/house_prices.csv"
 
 FILE_DESCRIPTION = f"""
 - The file is `{FILE_PATH}`.
