@@ -402,7 +402,9 @@ class Agent(Node):
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
         role_for_validation = self.role or ""
-        if role_for_validation:
+        if role_for_validation and (
+            "{% raw %}" not in role_for_validation and "{% endraw %}" not in role_for_validation
+        ):
             role_for_validation = f"{{% raw %}}{role_for_validation}{{% endraw %}}"
         return {"input_message": self.input_message, "role": role_for_validation}
 
@@ -561,7 +563,14 @@ class Agent(Node):
             history_messages = None
 
         if self.role:
-            self._prompt_blocks["role"] = f"{{% raw %}}{self.role}{{% endraw %}}"
+            # Only auto-wrap the entire role in a raw block if the user did not
+            # provide explicit raw/endraw markers. This allows roles to mix
+            # literal sections (via raw) with Jinja variables like {{ input }}
+            # without creating nested raw blocks.
+            if ("{% raw %}" in self.role) or ("{% endraw %}" in self.role):
+                self._prompt_blocks["role"] = self.role
+            else:
+                self._prompt_blocks["role"] = f"{{% raw %}}{self.role}{{% endraw %}}"
 
         files = input_data.files
         if files:
