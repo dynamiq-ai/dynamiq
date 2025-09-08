@@ -6,10 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from .base import FileExistsError, FileInfo, FileNotFoundError, FileStorage, StorageError
+from .base import FileExistsError, FileInfo, FileNotFoundError, FileStore, StorageError
 
 
-class InMemoryFileStorage(FileStorage):
+class InMemoryFileStore(FileStore):
     """In-memory file storage implementation.
 
     This implementation stores files in memory using Python dictionaries.
@@ -27,33 +27,25 @@ class InMemoryFileStorage(FileStorage):
         content: str | bytes | BinaryIO,
         content_type: str = None,
         metadata: dict[str, Any] = None,
-        overwrite: bool = False
+        overwrite: bool = False,
     ) -> FileInfo:
         """Store a file in memory."""
         file_path = str(file_path)
 
         if file_path in self._files and not overwrite:
-            raise FileExistsError(
-                f"File '{file_path}' already exists",
-                operation="store",
-                path=file_path
-            )
+            raise FileExistsError(f"File '{file_path}' already exists", operation="store", path=file_path)
 
         # Convert content to bytes
         if isinstance(content, str):
-            content_bytes = content.encode('utf-8')
+            content_bytes = content.encode("utf-8")
         elif isinstance(content, bytes):
             content_bytes = content
-        elif hasattr(content, 'read'):  # BinaryIO-like object
+        elif hasattr(content, "read"):  # BinaryIO-like object
             content_bytes = content.read()
-            if hasattr(content, 'seek'):
+            if hasattr(content, "seek"):
                 content.seek(0)  # Reset position for future reads
         else:
-            raise StorageError(
-                f"Unsupported content type: {type(content)}",
-                operation="store",
-                path=file_path
-            )
+            raise StorageError(f"Unsupported content type: {type(content)}", operation="store", path=file_path)
 
         if content_type is None:
             content_type, _ = mimetypes.guess_type(file_path)
@@ -62,11 +54,11 @@ class InMemoryFileStorage(FileStorage):
 
         now = datetime.now()
         file_info = {
-            'content': content_bytes,
-            'size': len(content_bytes),
-            'content_type': content_type,
-            'created_at': now,
-            'metadata': metadata or {},
+            "content": content_bytes,
+            "size": len(content_bytes),
+            "content_type": content_type,
+            "created_at": now,
+            "metadata": metadata or {},
         }
 
         self._files[file_path] = file_info
@@ -78,13 +70,9 @@ class InMemoryFileStorage(FileStorage):
         file_path = str(file_path)
 
         if file_path not in self._files:
-            raise FileNotFoundError(
-                f"File '{file_path}' not found",
-                operation="retrieve",
-                path=file_path
-            )
+            raise FileNotFoundError(f"File '{file_path}' not found", operation="retrieve", path=file_path)
 
-        return self._files[file_path]['content']
+        return self._files[file_path]["content"]
 
     def exists(self, file_path: str | Path) -> bool:
         """Check if file exists."""
@@ -114,8 +102,8 @@ class InMemoryFileStorage(FileStorage):
                 continue
 
             if not recursive:
-                rel_path = file_path[len(directory):].lstrip('/')
-                if '/' in rel_path:
+                rel_path = file_path[len(directory) :].lstrip("/")
+                if "/" in rel_path:
                     continue
 
             files_list.append(self._create_file_info(file_path, self._files[file_path]))
@@ -127,8 +115,8 @@ class InMemoryFileStorage(FileStorage):
         return FileInfo(
             name=os.path.basename(file_path),
             path=file_path,
-            size=file_data['size'],
-            content_type=file_data['content_type'],
-            created_at=file_data['created_at'],
-            metadata=file_data.get('metadata', {})
+            size=file_data["size"],
+            content_type=file_data["content_type"],
+            created_at=file_data["created_at"],
+            metadata=file_data.get("metadata", {}),
         )

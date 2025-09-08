@@ -6,7 +6,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file_storage.base import FileStorage
+from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.logger import logger
 
 
@@ -49,7 +49,7 @@ class FileReadTool(Node):
             - Save intermediate results.
     """
 
-    file_storage: FileStorage = Field(..., description="File storage to read from.")
+    file_storage: FileStore = Field(..., description="File storage to read from.")
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileReadInputSchema]] = FileReadInputSchema
 
@@ -99,7 +99,7 @@ class FileWriteTool(Node):
         group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
         name (str): The name of the tool.
         description (str): A brief description of the tool.
-        file_storage (FileStorage): File storage to write to.
+        file_storage (FileStore): File storage to write to.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -111,7 +111,7 @@ class FileWriteTool(Node):
     - Write JSON: {"file_path": "config.json", "content": {"key": "value"}}
     - Overwrite file: {"file_path": "existing.txt", "content": "new content"}"""
 
-    file_storage: FileStorage = Field(..., description="File storage to write to.")
+    file_storage: FileStore = Field(..., description="File storage to write to.")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileWriteInputSchema]] = FileWriteInputSchema
@@ -172,7 +172,7 @@ class FileListTool(Node):
     name: str = "File List Tool"
     description: str = """Lists files in storage based on the provided file path."""
 
-    file_storage: FileStorage = Field(..., description="File storage to list from.")
+    file_storage: FileStore = Field(..., description="File storage to list from.")
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileListInputSchema]] = FileListInputSchema
 

@@ -7,7 +7,7 @@ from typing import Any, Sequence
 
 import filetype
 from lxml import etree as LET  # nosec: B410
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
 from dynamiq.prompts import (
@@ -19,8 +19,13 @@ from dynamiq.prompts import (
     VisionMessageTextContent,
 )
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import CHARS_PER_TOKEN
 
 TOOL_MAX_TOKENS = 64000
+
+# Number of representative chunks to show in smart chunking
+# Shows first, middle, and last chunks for context preservation
+NUM_REPRESENTATIVE_CHUNKS = 3
 
 
 class ChunkedToolOutput(BaseModel):
@@ -784,20 +789,18 @@ def _create_chunked_summary(chunks: list[str]) -> str:
     Returns:
         Summary string showing representative parts
     """
-    NUM_OF_SUMMARY_CHUNKS = 3
-
-    if len(chunks) < NUM_OF_SUMMARY_CHUNKS:
+    if len(chunks) < NUM_REPRESENTATIVE_CHUNKS:
         return "\n".join(chunks)
 
     summary_parts = []
     summary_parts.append(f"[CHUNK 1/{len(chunks)}]\n{chunks[0]}")
 
-    if len(chunks) > NUM_OF_SUMMARY_CHUNKS:
+    if len(chunks) > NUM_REPRESENTATIVE_CHUNKS:
         middle_idx = len(chunks) // 2
         summary_parts.append(f"\n[CHUNK {middle_idx + 1}/{len(chunks)}]\n{chunks[middle_idx]}")
-        omitted_count = len(chunks) - NUM_OF_SUMMARY_CHUNKS
+        omitted_count = len(chunks) - NUM_REPRESENTATIVE_CHUNKS
         summary_parts.append(f"\n... [{omitted_count} chunks omitted] ...")
-    elif len(chunks) == NUM_OF_SUMMARY_CHUNKS:
+    elif len(chunks) == NUM_REPRESENTATIVE_CHUNKS:
         summary_parts.append(f"\n[CHUNK 2/{len(chunks)}]\n{chunks[1]}")
 
     summary_parts.append(f"\n[CHUNK {len(chunks)}/{len(chunks)}]\n{chunks[-1]}")
@@ -837,7 +840,7 @@ def create_chunked_tool_output(
 
     if len(content) > max_chars:
         if chunk_strategy == "smart":
-            chunk_size = max_chars // 3
+            chunk_size = max_chars // NUM_REPRESENTATIVE_CHUNKS
             chunks = _create_chunked_content(content, chunk_size)
         else:
             chunk_size = max_chars
@@ -886,7 +889,7 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
     Args:
         content: The output from tool execution, which can be of various types.
         max_tokens: Maximum allowed token count for the content. The effective character
-            limit is computed as max_tokens * 4 (assuming ~4 characters per token).
+            limit is computed as max_tokens * CHARS_PER_TOKEN (assuming ~4 characters per token).
         truncate: Whether to chunk/truncate the content if it exceeds the maximum length.
 
     Returns:
@@ -905,11 +908,11 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
         else:
             content = str(content)
 
-    max_len_in_char: int = max_tokens * 4
+    max_len_in_char: int = max_tokens * CHARS_PER_TOKEN
     content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", content)
 
     if len(content) > max_len_in_char and truncate:
-        chunk_size = max_len_in_char // 3
+        chunk_size = max_len_in_char // NUM_REPRESENTATIVE_CHUNKS
         chunks = _create_chunked_content(content, chunk_size)
 
         if len(chunks) > 1:
@@ -1000,4 +1003,4 @@ class SummarizationConfig(BaseModel):
     max_token_context_length: int | None = None
     context_usage_ratio: float = 0.8
     context_history_length: int = 4
-    tool_output: ToolOutputConfig = ToolOutputConfig()
+    tool_output: ToolOutputConfig = Field(default_factory=ToolOutputConfig)

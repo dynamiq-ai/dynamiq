@@ -1,25 +1,27 @@
 """Base file storage interface and common data structures."""
 
 import abc
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from pydantic import BaseModel, Field
 
-@dataclass
-class FileInfo:
+
+class FileInfo(BaseModel):
     """Information about a stored file."""
+
     name: str
     path: str
     size: int
     content_type: str = "text/plain"
-    created_at: datetime = field(default_factory=datetime.now)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.now)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class StorageError(Exception):
     """Base exception for storage operations."""
+
     def __init__(self, message: str, operation: str = None, path: str = None):
         self.message = message
         self.operation = operation
@@ -29,20 +31,23 @@ class StorageError(Exception):
 
 class FileNotFoundError(StorageError):
     """Raised when a file is not found in storage."""
+
     pass
 
 
 class FileExistsError(StorageError):
     """Raised when trying to create a file that already exists."""
+
     pass
 
 
 class PermissionError(StorageError):
     """Raised when permission is denied for a storage operation."""
+
     pass
 
 
-class FileStorage(abc.ABC):
+class FileStore(abc.ABC):
     """Abstract base class for file storage implementations.
 
     This interface provides a unified way to interact with different
@@ -56,7 +61,7 @@ class FileStorage(abc.ABC):
         content: str | bytes | BinaryIO,
         content_type: str = None,
         metadata: dict[str, Any] = None,
-        overwrite: bool = False
+        overwrite: bool = False,
     ) -> FileInfo:
         """Store a file in the storage backend.
 

@@ -2,13 +2,13 @@ import pytest
 
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.runnables import RunnableResult, RunnableStatus
-from dynamiq.storages.file_storage.in_memory import InMemoryFileStorage
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
 @pytest.fixture
 def file_storage():
     """Create an in-memory file storage instance for testing."""
-    return InMemoryFileStorage()
+    return InMemoryFileStore()
 
 
 @pytest.fixture
@@ -129,7 +129,7 @@ def test_file_tools_integration(file_storage):
     assert read_result.output["content"].decode("utf-8") == "Integration test content"
 
     # Test different storage instances
-    storage2 = InMemoryFileStorage()
+    storage2 = InMemoryFileStore()
     storage2.store("test.txt", "Content from storage 2")
 
     read_tool2 = FileReadTool(file_storage=storage2)

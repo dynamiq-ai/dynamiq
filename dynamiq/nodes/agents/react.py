@@ -32,7 +32,7 @@ from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWrite
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file_storage.base import FileStorage
+from dynamiq.storages.file.base import FileStore
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
@@ -505,6 +505,7 @@ IMPORTANT RULES:
 - Avoid using extra backslashes
 - Do not use markdown code blocks around your JSON
 - Never keep action_input empty.
+- Never return empty response.
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
@@ -671,7 +672,7 @@ class ReActAgent(Agent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
-    filestorage: FileStorage | None = Field(default=None, description="Filesystem storage to use for agent.")
+    file_storage: FileStore | None = Field(default=None, description="Filesystem storage to use for agent.")
 
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _tools: list[Tool] = []
@@ -680,10 +681,10 @@ class ReActAgent(Agent):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if self.filestorage:
-            self.tools.append(FileReadTool(file_storage=self.filestorage))
-            self.tools.append(FileWriteTool(file_storage=self.filestorage))
-            self.tools.append(FileListTool(file_storage=self.filestorage))
+        if self.file_storage:
+            self.tools.append(FileReadTool(file_storage=self.file_storage))
+            self.tools.append(FileWriteTool(file_storage=self.file_storage))
+            self.tools.append(FileListTool(file_storage=self.file_storage))
 
     def reset_run_state(self):
         super().reset_run_state()
@@ -849,7 +850,7 @@ class ReActAgent(Agent):
         else:
             return "", ""
 
-    def _process_direct_tool_output_return(self, final_answer: str) -> str:
+    def _process_direct_tool_output_return_xml(self, final_answer: str) -> str:
         """
         Process direct tool output return format.
         Looks for XML format: <answer type="tool_output" tool_id="tool_X">
@@ -1122,7 +1123,7 @@ class ReActAgent(Agent):
                             thought, final_answer = self._extract_final_answer(llm_generated_output)
 
                             if self.direct_tool_output_enabled:
-                                final_answer = self._process_direct_tool_output_return(final_answer)
+                                final_answer = self._process_direct_tool_output_return_xml(final_answer)
 
                             self.log_final_output(thought, final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
@@ -1180,6 +1181,9 @@ class ReActAgent(Agent):
                         except json.JSONDecodeError as e:
                             raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
 
+                        if "action" not in llm_generated_output_json or "thought" not in llm_generated_output_json:
+                            raise ActionParsingException("No action or thought provided.", recoverable=True)
+
                         thought = llm_generated_output_json["thought"]
                         action = llm_generated_output_json["action"]
                         action_input = llm_generated_output_json["action_input"]
@@ -1213,7 +1217,7 @@ class ReActAgent(Agent):
                                 if parsed_result.get("is_final", False):
                                     final_answer = parsed_result.get("answer", "")
                                     if self.direct_tool_output_enabled:
-                                        final_answer = self._process_direct_tool_output_return(final_answer)
+                                        final_answer = self._process_direct_tool_output_return_xml(final_answer)
                                     self.log_final_output(thought, final_answer, loop_num)
                                     self.tracing_final(loop_num, final_answer, config, kwargs)
                                     return final_answer
@@ -1274,7 +1278,7 @@ class ReActAgent(Agent):
                                 thought = parsed_data.get("thought")
                                 final_answer = parsed_data.get("answer")
                                 if self.direct_tool_output_enabled:
-                                    final_answer = self._process_direct_tool_output_return(final_answer)
+                                    final_answer = self._process_direct_tool_output_return_xml(final_answer)
                                 self.log_final_output(thought, final_answer, loop_num)
                                 self.tracing_final(loop_num, final_answer, config, kwargs)
                                 return final_answer

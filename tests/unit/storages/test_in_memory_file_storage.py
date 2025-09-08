@@ -1,13 +1,13 @@
 import pytest
 
-from dynamiq.storages.file_storage.in_memory import InMemoryFileStorage
-from dynamiq.storages.file_storage.base import FileInfo, FileNotFoundError, FileExistsError
+from dynamiq.storages.file.base import FileExistsError, FileInfo, FileNotFoundError
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
 @pytest.fixture
 def storage():
     """Create a fresh storage instance for each test."""
-    return InMemoryFileStorage()
+    return InMemoryFileStore()
 
 
 @pytest.fixture
