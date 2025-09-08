@@ -1,8 +1,15 @@
 import io
+import random
 import shlex
+import time
 from typing import Any, ClassVar, Literal
 
 from e2b_code_interpreter import Sandbox
+
+try:
+    from e2b import RateLimitException as E2BRateLimitException  # optional, if base SDK is available
+except Exception:  # pragma: no cover - best effort import
+    E2BRateLimitException = None
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from dynamiq.connections import E2B as E2BConnection
@@ -221,7 +228,7 @@ class E2BInterpreterTool(ConnectionNode):
     def _initialize_persistent_sandbox(self):
         """Initialize the persistent sandbox, install packages, and upload initial files."""
         logger.debug(f"Tool {self.name} - {self.id}: " f"Initializing Persistent Sandbox with timeout {self.timeout}s")
-        self._sandbox = Sandbox(api_key=self.connection.api_key, timeout=self.timeout)
+        self._sandbox = self._create_sandbox_with_retry()
         self._install_default_packages(self._sandbox)
         if self.files:
             self._upload_files(files=self.files, sandbox=self._sandbox)
@@ -490,7 +497,7 @@ class E2BInterpreterTool(ConnectionNode):
         if self.persistent_sandbox and self._sandbox:
             sandbox = self._sandbox
         else:
-            sandbox = Sandbox(api_key=self.connection.api_key, timeout=self.timeout)
+            sandbox = self._create_sandbox_with_retry()
             self._install_default_packages(sandbox)
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
@@ -544,6 +551,116 @@ class E2BInterpreterTool(ConnectionNode):
             return {"content": result_text}
 
         return {"content": content}
+
+    def _is_rate_limit_error(self, exc: Exception) -> bool:
+        """Return True if the exception indicates a 429 / rate limit error."""
+        # Prefer explicit SDK exception type when available
+        try:
+            if E2BRateLimitException and isinstance(exc, E2BRateLimitException):
+                return True
+        except Exception as err:
+            logger.debug(f"Rate-limit check via SDK exception failed: {err}")
+        try:
+            status_code = getattr(exc, "status_code", None)
+            if status_code == 429:
+                return True
+            response = getattr(exc, "response", None)
+            if response is not None and getattr(response, "status_code", None) == 429:
+                return True
+        except Exception as err:
+            logger.debug(f"Rate-limit check via status code failed: {err}")
+        message = str(exc).lower()
+        return ("429" in message) or ("too many requests" in message) or ("rate limit" in message)
+
+    def _parse_retry_after_seconds(self, exc: Exception) -> float | None:
+        """Try to extract Retry-After seconds from the exception if available."""
+        # Common places where SDKs expose retry info
+        try:
+            # Headers directly on the exception
+            headers = getattr(exc, "headers", None)
+            if isinstance(headers, dict):
+                header_value = headers.get("Retry-After") or headers.get("retry-after")
+                if header_value is not None:
+                    try:
+                        return float(header_value)
+                    except Exception:
+                        return None
+
+            # Direct attribute
+            retry_after = getattr(exc, "retry_after", None)
+            if isinstance(retry_after, (int, float)):
+                return float(retry_after)
+
+            # HTTP response header
+            response = getattr(exc, "response", None)
+            if response is not None:
+                headers = getattr(response, "headers", {}) or {}
+                header_value = headers.get("Retry-After") or headers.get("retry-after")
+                if header_value is not None:
+                    try:
+                        return float(header_value)
+                    except Exception:
+                        return None
+        except Exception as err:
+            logger.debug(f"Retry-After parsing failed: {err}")
+            return None
+        return None
+
+    def _create_sandbox_with_retry(self) -> Sandbox:
+        """Create E2B Sandbox with exponential backoff and jitter on 429 responses.
+
+        Follows E2B guidance for handling 429s by backing off between sandbox creations
+        and respecting any Retry-After hints if provided by the API/SDK.
+        """
+        # Use node-level error handling config when available to avoid hardcoding
+        configured_max_retries = getattr(self, "error_handling", None) and self.error_handling.max_retries
+        max_retries = configured_max_retries if isinstance(configured_max_retries, int) else 5
+        if max_retries < 1:
+            max_retries = 1
+
+        # Base delay and backoff rate from node config with sensible defaults for E2B
+        base_delay_seconds = (
+            getattr(self, "error_handling", None) and self.error_handling.retry_interval_seconds
+        ) or 1.0
+        configured_rate = getattr(self, "error_handling", None) and self.error_handling.backoff_rate
+        backoff_rate = configured_rate if isinstance(configured_rate, (int, float)) else 2.0
+
+        # Optional cap per wait using node timeout_seconds if configured
+        cap_seconds = (getattr(self, "error_handling", None) and self.error_handling.timeout_seconds) or None
+        last_exc: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                return Sandbox(api_key=self.connection.api_key, timeout=self.timeout)
+            except Exception as exc:  # noqa: BLE001 - we intentionally inspect generic SDK exceptions
+                last_exc = exc
+                if not self._is_rate_limit_error(exc):
+                    # Preserve original behavior for non-429 errors
+                    raise
+
+                if attempt == max_retries - 1:
+                    break
+
+                retry_after = self._parse_retry_after_seconds(exc)
+                delay = retry_after if retry_after is not None else (base_delay_seconds * (backoff_rate**attempt))
+                if cap_seconds is not None:
+                    try:
+                        delay = min(delay, float(cap_seconds))
+                    except Exception as err:
+                        logger.debug(f"Delay capping failed: {err}")
+                # Add +/-20% jitter to avoid thundering herd
+                jitter = delay * 0.2
+                sleep_seconds = max(0.0, delay + random.uniform(-jitter, jitter))  # nosec B311: non-crypto jitter
+                logger.warning(
+                    f"Tool {self.name} - {self.id}: Sandbox creation rate-limited "
+                    f"(attempt {attempt + 1}/{max_retries}). Retrying in {sleep_seconds:.2f}s"
+                )
+                time.sleep(sleep_seconds)
+
+        # Exhausted retries; re-raise the last exception to keep failure semantics unchanged
+        if last_exc is None:  # defensive: should not happen
+            raise RuntimeError("Sandbox creation failed without an exception captured")
+        raise last_exc
 
     def set_timeout(self, timeout: int) -> None:
         """
