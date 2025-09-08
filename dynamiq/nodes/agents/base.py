@@ -461,6 +461,9 @@ class Agent(Node):
             "tools": "{{ tool_description }}",
             "files": "{{ file_description }}",
             "instructions": "",
+            # Ensure context can be injected via input_data["context"].
+            # This renders into the AGENT_PROMPT_TEMPLATE's optional CONTEXT section.
+            "context": "{{ context }}",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
@@ -919,7 +922,6 @@ class Agent(Node):
         formatted_prompt_blocks = {}
         for block, content in self._prompt_blocks.items():
             if block_names is None or block in block_names:
-                # Render each block using Jinja to avoid Python format conflicts with {}
                 formatted_content = Template(content).render(**temp_variables)
                 if content:
                     formatted_prompt_blocks[block] = formatted_content
