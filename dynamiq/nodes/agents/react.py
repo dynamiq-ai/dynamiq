@@ -68,7 +68,7 @@ ADVANCED FEATURES:
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 Thought: [Your detailed reasoning about what to do next]
-Action: [Tool name from ONLY [{tools_name}]]
+Action: [Tool name from ONLY [{{ tools_name }}]]
 Action Input: [JSON input for the tool]
 
 After each action, you'll receive:
@@ -100,7 +100,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in you
         [Your detailed reasoning about what to do next]
     </thought>
     <action>
-        [Tool name from ONLY [{tools_name}]]
+        [Tool name from ONLY [{{ tools_name }}]]
     </action>
     <action_input>
         [JSON input for the tool - single line, properly escaped]
@@ -318,7 +318,7 @@ REACT_BLOCK_INSTRUCTIONS_MULTI = (
 **RESPONSE FORMAT:**
 
 Thought: [Your detailed reasoning about what to do next, including your multi-tool strategy if applicable]
-Action: [Tool name from ONLY [{tools_name}]]
+Action: [Tool name from ONLY [{{ tools_name }}]]
 Action Input: [JSON input for the tool]
 
 After each action, you'll receive:
@@ -363,7 +363,7 @@ For Tool Usage (Single or Multiple):
     </thought>
     <tool_calls>
         <tool>
-            <name>[Tool name from ONLY [{tools_name}]]</name>
+            <name>[Tool name from ONLY [{{ tools_name }}]]</name>
             <input>[JSON input for the tool - single line, properly escaped]</input>
         </tool>
         <!-- Add more tool elements as needed based on your strategy -->
@@ -421,10 +421,10 @@ REACT_BLOCK_TOOLS = """
 You have access to a variety of tools,
 and you are responsible for using
 them in any order you choose to complete the task:\n
-{tool_description}
+{{ tool_description }}
 
 Input formats for tools:
-{input_formats}
+{{ input_formats }}
 
 Note: For tools not listed in the input formats section,
 refer to their descriptions in the
@@ -435,7 +435,7 @@ REACT_BLOCK_TOOLS_NO_FORMATS = """
 You have access to a variety of tools,
 and you are responsible for using
 them in any order you choose to complete the task:\n
-{tool_description}
+{{ tool_description }}
 """
 
 REACT_BLOCK_NO_TOOLS = """Always follow this exact format in your responses:
@@ -481,22 +481,22 @@ Your response should be clear, concise, and professional.
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
 Always structure your responses in this JSON format:
 
-{{thought: [Your reasoning about the next step],
-action: [The tool you choose to use, if any from ONLY [{tools_name}]],
-action_input: [JSON input in correct format you provide to the tool]}}
+{thought: [Your reasoning about the next step],
+action: [The tool you choose to use, if any from ONLY [{{ tools_name }}]],
+action_input: [JSON input in correct format you provide to the tool]}
 
 After each action, you'll receive:
 Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
-{{thought: [Your reasoning for the final answer],
+{thought: [Your reasoning for the final answer],
 action: finish
-action_input: [Response for initial request]}}
+action_input: [Response for initial request]}
 
 For questions that don't require tools:
-{{thought: [Your reasoning for the final answer],
+{thought: [Your reasoning for the final answer],
 action: finish
-action_input: [Your direct response]}}
+action_input: [Your direct response]}
 
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
@@ -514,7 +514,7 @@ Use the function `provide_final_answer` when you can give a clear answer to the 
  and no extra steps, tools, or work are needed.
 Call this function if the user's input is simple and doesn't require additional help or tools.
 
-If the user's request requires the use of specific tools, such as [{tools_name}],
+If the user's request requires the use of specific tools, such as [{{ tools_name }}],
  you must first call the appropriate function to invoke those tools.
 Only after utilizing the necessary tools and gathering the required information should
  you call `provide_final_answer` to deliver the final response.
