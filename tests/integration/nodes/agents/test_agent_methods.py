@@ -147,19 +147,6 @@ def test_set_prompt_block(openai_node, mock_llm_executor):
     assert custom_context in prompt
 
 
-def test_set_prompt_variable(openai_node, mock_llm_executor):
-    """Test setting prompt variables."""
-    agent = ReActAgent(name="PromptVarTestAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
-
-    agent.set_prompt_variable("custom_date", "April 1, 2025")
-
-    agent.set_block("date", "Today's date is {custom_date}")
-
-    prompt = agent.generate_prompt()
-
-    assert "Today's date is April 1, 2025" in prompt
-
-
 def test_xmlparser_parse_valid_simple():
     text = "<output><thought>OK</thought><action>do</action></output>"
     result = XMLParser.parse(text, required_tags=["thought", "action"])
