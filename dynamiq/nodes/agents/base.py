@@ -461,8 +461,6 @@ class Agent(Node):
             "tools": "{{ tool_description }}",
             "files": "{{ file_description }}",
             "instructions": "",
-            # Ensure context can be injected via input_data["context"].
-            # This renders into the AGENT_PROMPT_TEMPLATE's optional CONTEXT section.
             "context": "{{ context }}",
         }
         self._prompt_variables = {
