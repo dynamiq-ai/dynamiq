@@ -12,7 +12,12 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
-from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_input, process_tool_output_for_agent
+from dynamiq.nodes.agents.utils import (
+    TOOL_MAX_TOKENS,
+    ToolCacheEntry,
+    create_message_from_input,
+    process_tool_output_for_agent,
+)
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools.mcp import MCPServer
@@ -878,6 +883,9 @@ class Agent(Node):
             max_tokens=self.tool_output_max_length,
             truncate=self.tool_output_truncate_enabled,
         )
+
+        self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
+
         return tool_result_content_processed
 
     @property

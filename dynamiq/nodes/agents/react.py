@@ -20,11 +20,9 @@ from dynamiq.nodes.agents.exceptions import (
     XMLParsingError,
 )
 from dynamiq.nodes.agents.utils import (
-    ChunkedToolOutput,
     SummarizationConfig,
     ToolCacheEntry,
     XMLParser,
-    create_chunked_tool_output,
 )
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
@@ -39,30 +37,38 @@ from dynamiq.utils.logger import logger
 
 DEFAULT_DIRECT_OUTPUT_CAPABILITIES = """
 ADVANCED FEATURES:
-- Tool outputs are automatically chunked and stored with unique IDs (tool_1, tool_2, etc.)
+- Tool outputs are automatically cached and can be referenced directly
 - You can return raw tool observation directly using:
 Thought: [Your reasoning about using direct tool output]
-Answer: <answer type="tool_output" tool_id="tool_X">
-- Do this only after receiving output from this tool in the next loop.
+Answer: <answer type="tool_output" action="tool_name" action_input="tool_input">
+- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
+- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
+- The tool must have been called in a previous step with the exact same action and action_input
+- action_input must match exactly what you used when calling the tool (including JSON key order)
 - This bypasses summarization and returns the complete tool output to the user
 - Use this format only when the raw tool output is exactly what the user needs
+- If the tool hasn't been executed yet, you must call it first in the current step
 """
 
 XML_DIRECT_OUTPUT_CAPABILITIES = """
 ADVANCED FEATURES:
-- Tool outputs are automatically chunked and stored with unique IDs (tool_1, tool_2, etc.)
+- Tool outputs are automatically cached and can be referenced directly
 - You can return raw tool outputs directly using:
 <output>
     <thought>
         [Your reasoning about using direct tool output]
     </thought>
     <answer>
-        <answer type="tool_output" tool_id="tool_X">
+        <answer type="tool_output" action="tool_name" action_input="tool_input">
     </answer>
 </output>
-- Do this only after receiving output from this tool in the next loop.
+- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
+- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
+- The tool must have been called in a previous step with the exact same action and action_input
+- action_input must match exactly what you used when calling the tool (including JSON key order)
 - This bypasses summarization and returns the complete tool output to the user
 - Use this format only when the raw tool output is exactly what the user needs
+- If the tool hasn't been executed yet, you must call it first in the current step
 """
 
 
@@ -677,7 +683,6 @@ class ReActAgent(Agent):
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
-    _tool_chunked_outputs: dict[str, ChunkedToolOutput] = {}
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -689,7 +694,6 @@ class ReActAgent(Agent):
     def reset_run_state(self):
         super().reset_run_state()
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
-        self._tool_chunked_outputs: dict[str, ChunkedToolOutput] = {}
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -853,7 +857,7 @@ class ReActAgent(Agent):
     def _process_direct_tool_output_return_xml(self, final_answer: str) -> str:
         """
         Process direct tool output return format.
-        Looks for XML format: <answer type="tool_output" tool_id="tool_X">
+        Looks for XML format: <answer type="tool_output" action="tool_name" input="tool_input">
 
         Args:
             final_answer (str): The final answer to process
@@ -861,20 +865,38 @@ class ReActAgent(Agent):
         Returns:
             str: Either the raw tool output or the original final answer
         """
+
         tool_output_match = re.search(
-            r'<answer\s+type="tool_output"\s+tool_id="([^"]+)"\s*>', final_answer, re.IGNORECASE
+            r'<answer\s+type="tool_output"\s+action="([^"]+)"\s+action_input\s*=[\'"](.*?)[\'"]\s*(?:></answer>|>)',
+            final_answer,
+            re.IGNORECASE | re.DOTALL,
         )
 
         if tool_output_match:
-            tool_id = tool_output_match.group(1)
-            if tool_id in self._tool_chunked_outputs:
-                chunked_output = self._tool_chunked_outputs[tool_id]
-                return "\n".join(chunked_output.tool_chunks)
+            action = tool_output_match.group(1)
+            action_input = tool_output_match.group(2)
+
+            # Parse the action_input if it's a JSON string and normalize it
+            try:
+                parsed_action_input = json.loads(action_input)
+            except json.JSONDecodeError as e:
+                raise RecoverableAgentException(f"Invalid JSON in Action Input for {action}: {str(e)}")
+
+            # Direct dictionary lookup using ToolCacheEntry as key
+            cache_entry = ToolCacheEntry(action=action, action_input=parsed_action_input)
+            tool_output = self._tool_cache.get(cache_entry)
+
+            if tool_output is not None:
+                logger.info(f"Found tool output for action='{action}' input='{action_input}'")
+                return str(tool_output)
             else:
+                # If not found, log available tools for debugging
+                available_tools = [(entry.action, entry.action_input) for entry in self._tool_cache.keys()]
                 logger.warning(
-                    f"Tool ID '{tool_id}' not found in registry. "
-                    f"Available IDs: {list(self._tool_chunked_outputs.keys())}"
+                    f"Tool output not found for action='{action}' input='{action_input}'. "
+                    f"Available tools: {available_tools}"
                 )
+                logger.debug(f"Cache entry created: {cache_entry}")
                 return final_answer
 
         return final_answer
@@ -1381,14 +1403,6 @@ class ReActAgent(Agent):
 
                                 tool_result = self._run_tool(tool, action_input, config, **kwargs)
 
-                                tool_id = f"tool_{len(self._tool_chunked_outputs) + 1}"
-                                chunked_output = create_chunked_tool_output(
-                                    tool_result,
-                                    iteration_number=len(self._tool_chunked_outputs) + 1,
-                                    max_chars=self.summarization_config.tool_output.max_chars,
-                                    chunk_strategy=self.summarization_config.tool_output.chunk_strategy,
-                                )
-                                self._tool_chunked_outputs[tool_id] = chunked_output
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
                     else:
@@ -1418,16 +1432,7 @@ class ReActAgent(Agent):
                             tool_result = self._tool_cache.get(tool_cache_entry, None)
                             if not tool_result:
                                 tool_result = self._run_tool(tool, action_input, config, **kwargs)
-                                self._tool_cache[tool_cache_entry] = tool_result
 
-                                tool_id = f"tool_{len(self._tool_chunked_outputs) + 1}"
-                                chunked_output = create_chunked_tool_output(
-                                    tool_result,
-                                    iteration_number=len(self._tool_chunked_outputs) + 1,
-                                    max_chars=self.summarization_config.tool_output.max_chars,
-                                    chunk_strategy=self.summarization_config.tool_output.chunk_strategy,
-                                )
-                                self._tool_chunked_outputs[tool_id] = chunked_output
                             else:
                                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
 
@@ -1832,15 +1837,6 @@ class ReActAgent(Agent):
                     continue
 
                 tool_result = self._run_tool(tool, tool_input, config, **kwargs)
-
-                tool_id = f"tool_{len(self._tool_chunked_outputs) + 1}"
-                chunked_output = create_chunked_tool_output(
-                    tool_result,
-                    iteration_number=len(self._tool_chunked_outputs) + 1,
-                    max_chars=self.summarization_config.tool_output.max_chars,
-                    chunk_strategy=self.summarization_config.tool_output.chunk_strategy,
-                )
-                self._tool_chunked_outputs[tool_id] = chunked_output
 
                 all_results.append(
                     {"tool_name": tool_name, "success": True, "tool_input": tool_input, "result": tool_result}
