@@ -583,8 +583,19 @@ class Agent(Node):
             self.files = files
             self._prompt_variables["file_description"] = self.file_description
 
+        # Only attach tool_params from the input if it is explicitly non-empty
         if input_data.tool_params:
-            kwargs["tool_params"] = input_data.tool_params
+            tp = input_data.tool_params
+            try:
+                has_values = (
+                    bool(getattr(tp, "global_params", {}))
+                    or bool(getattr(tp, "by_name_params", {}))
+                    or bool(getattr(tp, "by_id_params", {}))
+                )
+            except Exception:
+                has_values = True
+            if has_values:
+                kwargs["tool_params"] = input_data.tool_params
 
         self._prompt_variables.update(dict(input_data))
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
@@ -840,36 +851,41 @@ class Agent(Node):
         )
 
         if tool_params:
-            debug_info = []
-            if self.verbose:
-                debug_info.append(f"Tool parameter merging for {tool.name} (ID: {tool.id}):")
-                debug_info.append(f"Starting with input: {merged_input}")
+            # Detect Agent-as-Tool wrappers to avoid merging sensitive tool_params
+            # directly into the agent tool's input (prevents accidental logging/tracing of secrets).
+            is_agent_tool = getattr(tool, "group", None) == NodeGroup.TOOLS and hasattr(tool, "agent")
 
-            # 1. Apply global parameters (lowest priority)
-            global_params = tool_params.global_params
-            if global_params:
-                self._apply_parameters(merged_input, global_params, "global", debug_info)
+            if not is_agent_tool:
+                debug_info = []
+                if self.verbose:
+                    debug_info.append(f"Tool parameter merging for {tool.name} (ID: {tool.id}):")
+                    debug_info.append(f"Starting with input: {merged_input}")
 
-            # 2. Apply parameters by tool name (medium priority)
-            name_params = tool_params.by_name_params.get(tool.name, {}) or tool_params.by_name_params.get(
-                self.sanitize_tool_name(tool.name), {}
-            )
-            if name_params:
-                self._apply_parameters(merged_input, name_params, f"name:{tool.name}", debug_info)
+                # 1. Apply global parameters (lowest priority)
+                global_params = tool_params.global_params
+                if global_params:
+                    self._apply_parameters(merged_input, global_params, "global", debug_info)
 
-            # 3. Apply parameters by tool ID (highest priority)
-            id_params = tool_params.by_id_params.get(tool.id, {})
-            if id_params:
-                self._apply_parameters(merged_input, id_params, f"id:{tool.id}", debug_info)
+                # 2. Apply parameters by tool name (medium priority)
+                name_params = tool_params.by_name_params.get(tool.name, {}) or tool_params.by_name_params.get(
+                    self.sanitize_tool_name(tool.name), {}
+                )
+                if name_params:
+                    self._apply_parameters(merged_input, name_params, f"name:{tool.name}", debug_info)
 
-            if self.verbose and debug_info:
-                logger.debug("\n".join(debug_info))
+                # 3. Apply parameters by tool ID (highest priority)
+                id_params = tool_params.by_id_params.get(tool.id, {})
+                if id_params:
+                    self._apply_parameters(merged_input, id_params, f"id:{tool.id}", debug_info)
+
+                if self.verbose and debug_info:
+                    logger.debug("\n".join(debug_info))
 
         tool_result = tool.run(
             input_data=merged_input,
             config=config,
             run_depends=self._run_depends,
-            **(kwargs | {"recoverable_error": True}),
+            **(kwargs | {"recoverable_error": True, "parent_memory": self.memory}),
         )
         self._run_depends = [NodeDependency(node=tool).to_dict()]
         if tool_result.status != RunnableStatus.SUCCESS:
@@ -961,6 +977,34 @@ class Agent(Node):
             }
         )
         return base
+
+    def as_tool(
+        self,
+        name: str | None = None,
+        description: str | None = None,
+        share_memory: bool = False,
+        propagate_streaming: bool = True,
+        max_depth: int = 3,
+    ) -> "Node":
+        """Wrap this agent into an AgentTool so it can be used as a tool.
+
+        Args:
+            name: Optional display name for the tool; defaults to agent name
+            description: Optional description; defaults to agent role/description
+            share_memory: If True, attach parent memory to sub-agent when available
+            propagate_streaming: If True, pass streaming config to sub-agent
+            max_depth: Prevent unbounded recursive delegation
+        """
+        from dynamiq.nodes.tools.agent_tool import AgentTool
+
+        return AgentTool.from_agent(
+            self,
+            name=name or self.name,
+            description=description or (self.role or self.description or ""),
+            share_memory=share_memory,
+            propagate_streaming=propagate_streaming,
+            max_depth=max_depth,
+        )
 
 
 class AgentManagerInputSchema(BaseModel):

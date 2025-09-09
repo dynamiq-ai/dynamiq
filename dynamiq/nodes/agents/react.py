@@ -1818,24 +1818,18 @@ class ReActAgent(Agent):
         Returns:
             str: Combined observation string with all tool results
         """
-        all_results = []
 
-        for tool_data in tools_data:
+        def run_one(tool_name: str, tool_input: dict) -> dict:
             try:
-                tool_name = tool_data["name"]
-                tool_input = tool_data["input"]
-
                 tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
                 if not tool:
-                    error_message = f"Unknown tool: {tool_name}. Please use only available tools."
-                    all_results.append({"tool_name": tool_name, "success": False, "result": error_message})
-                    continue
+                    return {
+                        "tool_name": tool_name,
+                        "success": False,
+                        "result": f"Unknown tool: {tool_name}. Please use only available tools.",
+                    }
 
                 tool_result = self._run_tool(tool, tool_input, config, **kwargs)
-
-                all_results.append(
-                    {"tool_name": tool_name, "success": True, "tool_input": tool_input, "result": tool_result}
-                )
 
                 if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                     self.stream_content(
@@ -1847,17 +1841,25 @@ class ReActAgent(Agent):
                         **kwargs,
                     )
 
+                return {"tool_name": tool_name, "success": True, "tool_input": tool_input, "result": tool_result}
             except Exception as e:
-                error_message = f"Error executing tool {tool_data['name']}: {str(e)}"
+                error_message = f"Error executing tool {tool_name}: {str(e)}"
                 logger.error(error_message)
-                all_results.append(
-                    {
-                        "tool_name": tool_data["name"],
-                        "success": False,
-                        "tool_input": tool_input,
-                        "result": error_message,
-                    }
-                )
+                return {"tool_name": tool_name, "success": False, "tool_input": tool_input, "result": error_message}
+
+        all_results: list[dict] = []
+
+        if self.parallel_tool_calls_enabled and len(tools_data) > 1:
+            import concurrent.futures
+
+            max_workers = config.max_node_workers or min(8, len(tools_data))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(run_one, td["name"], td["input"]) for td in tools_data]
+                for f in futures:
+                    all_results.append(f.result())
+        else:
+            for td in tools_data:
+                all_results.append(run_one(td["name"], td["input"]))
 
         observation_parts = []
         for result in all_results:
