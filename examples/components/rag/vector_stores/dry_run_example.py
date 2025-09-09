@@ -16,7 +16,7 @@ def weaviate_dry_run():
     ]
 
     # Create runnable config with dry run
-    dry_run_config = DryRunConfig(cleanup_collection=True, cleanup_documents=True)
+    dry_run_config = DryRunConfig(delete_collection=True, delete_documents=True)
     config = RunnableConfig(dry_run_config=dry_run_config)
 
     # Add a writer node

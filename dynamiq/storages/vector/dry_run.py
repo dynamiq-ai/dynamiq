@@ -10,12 +10,12 @@ class DryRunConfig(BaseModel):
     across different vector store implementations.
 
     Attributes:
-        cleanup_documents: If True, the ingested documents will be cleaned up after the dry run.
-        cleanup_collection: If True, the created collection will be cleaned up after the dry run.
+        delete_documents: If True, the ingested documents will be cleaned up after the dry run.
+        delete_collection: If True, the created collection will be cleaned up after the dry run.
     """
 
-    cleanup_documents: bool = Field(default=True, description="Cleanup the ingested documents")
-    cleanup_collection: bool = Field(default=False, description="Cleanup the created collection")
+    delete_documents: bool = Field(default=True, description="Cleanup the ingested documents")
+    delete_collection: bool = Field(default=False, description="Cleanup the created collection")
 
 
 class DryRunMixin:
@@ -61,7 +61,7 @@ class DryRunMixin:
             dry_run_config: Configuration for dry run behavior.
         """
 
-        if dry_run_config.cleanup_documents and self._tracked_documents:
+        if dry_run_config.delete_documents and self._tracked_documents:
             try:
                 self.delete_documents(list(self._tracked_documents))
                 logger.info(f"Cleaned up {len(self._tracked_documents)} tracked documents")
@@ -69,7 +69,7 @@ class DryRunMixin:
             except Exception as e:
                 logger.error(f"Failed to clean up tracked documents: {e}")
 
-        if dry_run_config.cleanup_collection and self._tracked_collection:
+        if dry_run_config.delete_collection and self._tracked_collection:
             try:
                 self.delete_collection(self._tracked_collection)
                 logger.info(f"Cleaned up collection: {self._tracked_collection}")
