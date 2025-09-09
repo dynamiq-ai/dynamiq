@@ -214,7 +214,7 @@ class Map(Node):
         # Create an isolated config per iteration with unique streaming override for the cloned node
         local_config = config
         try:
-            local_config = config.model_copy(deep=True) if config is not None else RunnableConfig()
+            local_config = config.model_copy(deep=False) if config is not None else RunnableConfig()
             if node_config := local_config.nodes_override.get(self.node.id):
                 local_config.nodes_override[node_copy.id] = node_config
         except Exception as e:
