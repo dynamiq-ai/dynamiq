@@ -136,7 +136,7 @@ def run_agent(
         tools=[tool_search],
         role=AGENT_ROLE,
         inference_mode=inference_mode,
-        streaming=StreamingConfig(enabled=True, mode=streaming_mode, by_tokens=False),
+        streaming=StreamingConfig(enabled=True, mode=streaming_mode),
     )
 
     flow = Workflow(

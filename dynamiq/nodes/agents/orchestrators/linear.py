@@ -160,7 +160,6 @@ class LinearOrchestrator(Orchestrator):
                         step="manager_planning",
                         source=self.manager.name,
                         config=config,
-                        by_tokens=False,
                         **kwargs,
                     )
 
@@ -260,7 +259,6 @@ class LinearOrchestrator(Orchestrator):
                                 step="manager_assigning",
                                 source=self.name,
                                 config=config,
-                                by_tokens=False,
                                 **kwargs,
                             )
 

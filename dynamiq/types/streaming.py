@@ -95,7 +95,6 @@ class StreamingConfig(BaseModel):
         input_queue (Queue | None): Input queue for streaming. Defaults to None.
         input_queue_done_event (Event | None): Event to signal input queue completion. Defaults to None.
         mode (StreamingMode): Streaming mode. Defaults to StreamingMode.ANSWER.
-        by_tokens (bool): Whether to stream  by tokens. Defaults to False.
         include_usage (bool): Whether to include usage information. Defaults to False.
     """
     enabled: bool = False
@@ -104,7 +103,6 @@ class StreamingConfig(BaseModel):
     input_queue: Queue | None = None
     input_queue_done_event: Event | None = None
     mode: StreamingMode = StreamingMode.FINAL
-    by_tokens: bool = True
     include_usage: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

@@ -115,7 +115,6 @@ class AdaptiveOrchestrator(Orchestrator):
                 step="manager_planning",
                 source=self.name,
                 config=config,
-                by_tokens=False,
                 **kwargs,
             )
         return action

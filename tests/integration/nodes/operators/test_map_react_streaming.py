@@ -33,7 +33,7 @@ def run():
         llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
         inference_mode=InferenceMode.DEFAULT,
         tools=[python_tool, exa_tool, firecrawl_tool],
-        streaming=StreamingConfig(enabled=True, event="map_react_stream", mode=StreamingMode.ALL, by_tokens=True),
+        streaming=StreamingConfig(enabled=True, event="map_react_stream", mode=StreamingMode.ALL),
         max_loops=20,
         behaviour_on_max_loops=Behavior.RETURN,
     )
