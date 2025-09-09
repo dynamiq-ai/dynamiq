@@ -680,7 +680,6 @@ class ReActAgent(Agent):
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
     file_storage: FileStore | None = Field(default=None, description="Filesystem storage to use for agent.")
 
-    _tool_cache: dict[ToolCacheEntry, Any] = {}
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
 

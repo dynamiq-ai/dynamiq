@@ -333,6 +333,7 @@ class Agent(Node):
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
+    _tool_cache: dict[ToolCacheEntry, Any] = {}
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
@@ -928,6 +929,7 @@ class Agent(Node):
         """Resets the agent's run state."""
         self._intermediate_steps = {}
         self._run_depends = []
+        self._tool_cache: dict[ToolCacheEntry, Any] = {}
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """Generates the prompt using specified blocks and variables."""

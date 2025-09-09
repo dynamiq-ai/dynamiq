@@ -81,7 +81,7 @@ def run(input_data):
 
     agent = ReActAgent(
         name="React Agent",
-        llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
+        llm=OpenAI(model="gpt-4o", connection=connections.OpenAI(api_key="test-api-key")),
         inference_mode=InferenceMode.DEFAULT,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
