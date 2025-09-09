@@ -1,3 +1,5 @@
+from jinja2 import Template
+
 from dynamiq.nodes.agents.base import PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT, AgentManager
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.runnables import RunnableConfig
@@ -9,12 +11,12 @@ Your role involves understanding the overall task, breaking it down into subtask
 
 Here is the list of available specialized agents and their capabilities:
 <available_agents>
-{agents}
+{{ agents }}
 </available_agents>
 
 Please consider the following chat history, which includes previous interactions and completed subtasks:
 <chat_history>
-{chat_history}
+{{ chat_history }}
 </chat_history>
 
 As the Manager Agent, your primary responsibilities are:
@@ -203,17 +205,17 @@ You are the Manager Agent, a highly skilled coordinator responsible for overseei
 Your role involves understanding the overall task, breaking it down into subtasks, delegating these subtasks to appropriate specialized agents, synthesizing results, and providing a final, comprehensive answer.
 You have already completed the task using various specialized agents. Here's a summary of the work done:
 <agent_work_summary>
-{chat_history}
+{{ chat_history }}
 </agent_work_summary>
 
 Here is the original task you were given:
 <original_task>
-{input_task}
+{{ input_task }}
 </original_task>
 
 Based on this work, a preliminary answer was generated:
 <preliminary_answer>
-{preliminary_answer}
+{{ preliminary_answer }}
 </preliminary_answer>
 
 Your task now is to provide a comprehensive and coherent final answer to the original task. This answer should:
@@ -256,12 +258,12 @@ Your role involves understanding user requests, delegating subtasks when necessa
 
 Here is the list of available specialized agents and their capabilities:
 <available_agents>
-{agents}
+{{ agents }}
 </available_agents>
 
 Please consider the following chat history, which includes previous interactions and completed subtasks:
 <chat_history>
-{chat_history}
+{{ chat_history }}
 </chat_history>
 
 Your task is to review the chat history and respond to the user's most recent question or request.
@@ -336,17 +338,17 @@ Important:
 
 There is a list of your available agents and their capabilities:
 <available_agents>
-{agents}
+{{ agents }}
 </available_agents>
 
 There is also a chat history that includes previous interactions and completed subtasks:
 <chat_history>
-{chat_history}
+{{ chat_history }}
 </chat_history>
 
 There is a plan that you need to reflect on:
 <plan>
-{plan}
+{{ plan }}
 </plan>
 
 Begin your reflection now:
@@ -409,7 +411,7 @@ class AdaptiveAgentManager(AgentManager):
 
     def _reflect(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'reflect' action."""
-        prompt = self._prompt_blocks.get("reflect").format(**self._prompt_variables, **kwargs)
+        prompt = Template(self._prompt_blocks.get("reflect")).render(**(self._prompt_variables | kwargs))
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(
@@ -424,7 +426,7 @@ class AdaptiveAgentManager(AgentManager):
 
     def _respond(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'respond' action."""
-        prompt = self._prompt_blocks.get("respond").format(**self._prompt_variables, **kwargs)
+        prompt = Template(self._prompt_blocks.get("respond")).render(**(self._prompt_variables | kwargs))
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(

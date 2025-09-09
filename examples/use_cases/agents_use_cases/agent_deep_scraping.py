@@ -3,7 +3,7 @@ from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.storages.file_storage import InMemoryFileStorage
+from dynamiq.storages.file import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
@@ -23,7 +23,7 @@ if __name__ == "__main__":
     tool_scrape = FirecrawlTool(connection=connection_firecrawl)
     llm = setup_llm(model_provider="claude", model_name="claude-3-7-sonnet-20250219", temperature=0)
 
-    storage = InMemoryFileStorage()
+    storage = InMemoryFileStore()
 
     agent = ReActAgent(
         name="Agent",
@@ -33,7 +33,7 @@ if __name__ == "__main__":
         role=AGENT_ROLE,
         max_loops=30,
         inference_mode=InferenceMode.XML,
-        filestorage=storage,
+        file_store=storage,
         summarization_config=SummarizationConfig(enabled=True, max_token_context_length=100000),
     )
 

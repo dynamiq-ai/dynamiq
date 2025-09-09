@@ -12,7 +12,12 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
-from dynamiq.nodes.agents.utils import TOOL_MAX_TOKENS, create_message_from_input, process_tool_output_for_agent
+from dynamiq.nodes.agents.utils import (
+    TOOL_MAX_TOKENS,
+    ToolCacheEntry,
+    create_message_from_input,
+    process_tool_output_for_agent,
+)
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools.mcp import MCPServer
@@ -28,11 +33,11 @@ You are the Agent Manager. Your goal is to handle the user's request.
 
 User's request:
 <user_request>
-{task}
+{{ task }}
 </user_request>
 Here is the list of available agents and their capabilities:
 <available_agents>
-{description}
+{{ description }}
 </available_agents>
 
 Important guidelines:
@@ -58,8 +63,10 @@ Instructions:
 
 <output>
 ```json
+{% raw %}
 "decision": "respond" or "plan",
 "message": "[If respond, put the short response text here; if plan, put an empty string or a note]"
+{% endraw %}
 </output>
 
 EXAMPLES
@@ -72,10 +79,12 @@ The user's request is a simple greeting. I will respond with a brief acknowledgm
 </analysis>
 <output>
 ```json
-{{
+{% raw %}
+{
     "decision": "respond",
     "message": "Hello! How can I assist you today?"
-}}
+}
+{% endraw %}
 </output>
 
 Scenario 2:
@@ -86,10 +95,12 @@ The user's request is a general query. I will simply respond with a brief acknow
 </analysis>
 <output>
 ```json
-{{
+{% raw %}
+{
     "decision": "respond",
     "message": "Hello! How can I assist you today?"
-}}
+}
+{% endraw %}
 </output>
 
 Scenario 3:
@@ -100,10 +111,12 @@ The user's request is complex and requires planning. I will proceed with the pla
 </analysis>
 <output>
 ```json
-{{
+{% raw %}
+{
     "decision": "plan",
     "message": ""
-}}
+}
+{% endraw %}
 </output>
 
 Scenario 4:
@@ -114,10 +127,12 @@ The user's request can be answered using planning. I will proceed with the plann
 </analysis>
 <output>
 ```json
-{{
+{% raw %}
+{
     "decision": "plan",
     "message": ""
-}}
+}
+{% endraw %}
 </output>
 
 Scenario 5:
@@ -129,10 +144,12 @@ The user's request involves scraping, which requires planning. I will proceed wi
 
 <output>
 ```json
-{{
+{% raw %}
+{
     "decision": "plan",
     "message": ""
-}}
+}
+{% endraw %}
 </output>
 """  # noqa: E501
 
@@ -319,6 +336,7 @@ class Agent(Node):
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
+    _tool_cache: dict[ToolCacheEntry, Any] = {}
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
@@ -393,7 +411,12 @@ class Agent(Node):
 
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
-        return {"input_message": self.input_message, "role": self.role}
+        role_for_validation = self.role or ""
+        if role_for_validation and (
+            "{% raw %}" not in role_for_validation and "{% endraw %}" not in role_for_validation
+        ):
+            role_for_validation = f"{{% raw %}}{role_for_validation}{{% endraw %}}"
+        return {"input_message": self.input_message, "role": role_for_validation}
 
     @property
     def to_dict_exclude_params(self):
@@ -446,10 +469,11 @@ class Agent(Node):
     def _init_prompt_blocks(self):
         """Initializes default prompt blocks and variables."""
         self._prompt_blocks = {
-            "date": "{date}",
-            "tools": "{tool_description}",
-            "files": "{file_description}",
+            "date": "{{ date }}",
+            "tools": "{{ tool_description }}",
+            "files": "{{ file_description }}",
             "instructions": "",
+            "context": "{{ context }}",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
@@ -549,7 +573,14 @@ class Agent(Node):
             history_messages = None
 
         if self.role:
-            self._prompt_blocks["role"] = Template(self.role).render(**dict(input_data))
+            # Only auto-wrap the entire role in a raw block if the user did not
+            # provide explicit raw/endraw markers. This allows roles to mix
+            # literal sections (via raw) with Jinja variables like {{ input }}
+            # without creating nested raw blocks.
+            if ("{% raw %}" in self.role) or ("{% endraw %}" in self.role):
+                self._prompt_blocks["role"] = self.role
+            else:
+                self._prompt_blocks["role"] = f"{{% raw %}}{self.role}{{% endraw %}}"
 
         files = input_data.files
         if files:
@@ -892,6 +923,9 @@ class Agent(Node):
             max_tokens=self.tool_output_max_length,
             truncate=self.tool_output_truncate_enabled,
         )
+
+        self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
+
         return tool_result_content_processed
 
     def _ensure_named_files(self, files):
@@ -987,6 +1021,7 @@ class Agent(Node):
         """Resets the agent's run state."""
         self._intermediate_steps = {}
         self._run_depends = []
+        self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self._accumulated_files = {}
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
@@ -997,8 +1032,7 @@ class Agent(Node):
         formatted_prompt_blocks = {}
         for block, content in self._prompt_blocks.items():
             if block_names is None or block in block_names:
-
-                formatted_content = content.format(**temp_variables)
+                formatted_content = Template(content).render(**temp_variables)
                 if content:
                     formatted_prompt_blocks[block] = formatted_content
 
@@ -1112,21 +1146,21 @@ class AgentManager(Agent):
 
     def _plan(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'plan' action."""
-        prompt = self._prompt_blocks.get("plan").format(**self._prompt_variables, **kwargs)
+        prompt = Template(self._prompt_blocks.get("plan")).render(**(self._prompt_variables | kwargs))
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
 
         return llm_result
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'assign' action."""
-        prompt = self._prompt_blocks.get("assign").format(**self._prompt_variables, **kwargs)
+        prompt = Template(self._prompt_blocks.get("assign")).render(**(self._prompt_variables | kwargs))
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
 
         return llm_result
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'final' action."""
-        prompt = self._prompt_blocks.get("final").format(**self._prompt_variables, **kwargs)
+        prompt = Template(self._prompt_blocks.get("final")).render(**(self._prompt_variables | kwargs))
         llm_result = self._run_llm(
             [Message(role=MessageRole.USER, content=prompt)], config, by_tokens=False, **kwargs
         ).output["content"]
@@ -1146,6 +1180,6 @@ class AgentManager(Agent):
         Executes the single 'handle_input' action to either respond or plan
         based on user request complexity.
         """
-        prompt = self._prompt_blocks.get("handle_input").format(**self._prompt_variables, **kwargs)
+        prompt = Template(self._prompt_blocks.get("handle_input")).render(**(self._prompt_variables | kwargs))
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         return llm_result

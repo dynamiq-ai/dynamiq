@@ -5,7 +5,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
 from dynamiq.nodes.tools import FileReadTool, FileWriteTool
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file_storage.in_memory import InMemoryFileStorage
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
@@ -20,10 +20,6 @@ Create a file called 'test.txt' with the content 'Hello, world!'
 Read the content of the file and return it.
 """
 
-EXAMPLE_MEMORY_QUERY = """
-Store the information 'User prefers dark theme' in memory with key 'user_preferences'.
-"""
-
 
 def setup_agent() -> ReActAgent:
     """
@@ -35,9 +31,9 @@ def setup_agent() -> ReActAgent:
 
     llm = setup_llm(model_provider="claude", model_name="claude-3-5-sonnet-20241022", temperature=0.2)
 
-    file_storage = InMemoryFileStorage()
-    read_tool = FileReadTool(file_storage=file_storage)
-    write_tool = FileWriteTool(file_storage=file_storage)
+    file_store = InMemoryFileStore()
+    read_tool = FileReadTool(file_store=file_store)
+    write_tool = FileWriteTool(file_store=file_store)
 
     agent = ReActAgent(
         name="AgentFileInteractionWithMemory",
@@ -45,9 +41,8 @@ def setup_agent() -> ReActAgent:
         llm=llm,
         tools=[read_tool, write_tool],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.DEFAULT,
         max_loops=5,
-        is_memory_tool_enabled=True,
     )
 
     return agent
@@ -82,17 +77,13 @@ def run_workflow(
         )
 
         print(f"Files in storage after {workflow_type} workflow:")
-        file_storage = agent.tools[0].file_storage
-        for file_info in file_storage.list_files():
+        file_store = agent.tools[0].file_store
+        for file_info in file_store.list_files():
             print(f"File: {file_info.name}")
             print(f"Path: {file_info.path}")
             print(f"Size: {file_info.size} bytes")
-            print(f"Content: {file_storage.retrieve(file_info.path).decode('utf-8')}")
+            print(f"Content: {file_store.retrieve(file_info.path).decode('utf-8')}")
             print("-" * 30)
-
-        print("Core Memory contents:")
-        print(agent._core_memory.get_formatted_memory())
-        print("=" * 50)
 
         return result.output[agent.id]["output"]["content"]
 
@@ -104,9 +95,5 @@ def run_workflow(
 
 if __name__ == "__main__":
     print("=== Testing Filesystem Interaction ===")
-    result1 = run_workflow(input_prompt=EXAMPLE_QUERY, workflow_type="filesystem")
-    print(f"Filesystem Result: {result1}")
-
-    print("\n=== Testing Memory Functionality ===")
-    result2 = run_workflow(input_prompt=EXAMPLE_MEMORY_QUERY, workflow_type="memory")
-    print(f"Memory Result: {result2}")
+    result = run_workflow(input_prompt=EXAMPLE_QUERY, workflow_type="filesystem")
+    print(f"Filesystem Result: {result}")

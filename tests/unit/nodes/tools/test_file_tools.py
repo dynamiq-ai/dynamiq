@@ -2,13 +2,13 @@ import pytest
 
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.runnables import RunnableResult, RunnableStatus
-from dynamiq.storages.file_storage.in_memory import InMemoryFileStorage
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
 @pytest.fixture
-def file_storage():
+def file_store():
     """Create an in-memory file storage instance for testing."""
-    return InMemoryFileStorage()
+    return InMemoryFileStore()
 
 
 @pytest.fixture
@@ -17,17 +17,17 @@ def sample_file_path():
     return "test/file.txt"
 
 
-def test_file_read_tool(file_storage, sample_file_path):
+def test_file_read_tool(file_store, sample_file_path):
     """Test FileReadTool functionality including initialization, successful read, and error handling."""
     # Test initialization
-    tool = FileReadTool(file_storage=file_storage)
+    tool = FileReadTool(file_store=file_store)
     assert tool.name == "FileReadTool"
     assert tool.group == "tools"
-    assert tool.file_storage == file_storage
+    assert tool.file_store == file_store
 
     # Create a test file first
     test_content = "Hello, this is test content!"
-    file_storage.store(sample_file_path, test_content)
+    file_store.store(sample_file_path, test_content)
 
     # Test successful read
     input_data = {"file_path": sample_file_path}
@@ -38,13 +38,13 @@ def test_file_read_tool(file_storage, sample_file_path):
     assert result.output["content"].decode("utf-8") == test_content
 
 
-def test_file_write_tool(file_storage):
+def test_file_write_tool(file_store):
     """Test FileWriteTool functionality including initialization, successful writes, and error handling."""
     # Test initialization
-    tool = FileWriteTool(file_storage=file_storage)
+    tool = FileWriteTool(file_store=file_store)
     assert tool.name == "File Write Tool"
     assert tool.group == "tools"
-    assert tool.file_storage == file_storage
+    assert tool.file_store == file_store
 
     # Test successful text write
     input_data = {"file_path": "test/output.txt", "content": "Hello, World!"}
@@ -54,8 +54,8 @@ def test_file_write_tool(file_storage):
     assert "written successfully" in result.output["content"]
 
     # Verify file was actually written
-    assert file_storage.exists("test/output.txt")
-    stored_content = file_storage.retrieve("test/output.txt")
+    assert file_store.exists("test/output.txt")
+    stored_content = file_store.retrieve("test/output.txt")
     assert stored_content == b"Hello, World!"
 
     # Test custom content type
@@ -65,23 +65,23 @@ def test_file_write_tool(file_storage):
     assert result.status == RunnableStatus.SUCCESS
 
     # Verify file with custom content type
-    assert file_storage.exists("test/data.csv")
-    stored_content = file_storage.retrieve("test/data.csv")
+    assert file_store.exists("test/data.csv")
+    stored_content = file_store.retrieve("test/data.csv")
     assert stored_content == b"name,age\nJohn,30"
 
 
-def test_file_list_tool(file_storage):
+def test_file_list_tool(file_store):
     """Test FileListTool functionality including initialization, listing files, and empty directory."""
     # Test initialization
-    tool = FileListTool(file_storage=file_storage)
+    tool = FileListTool(file_store=file_store)
     assert tool.name == "File List Tool"
     assert tool.group == "tools"
-    assert tool.file_storage == file_storage
+    assert tool.file_store == file_store
 
     # Create some test files
-    file_storage.store("test/file1.txt", "content1")
-    file_storage.store("test/file2.txt", "content2")
-    file_storage.store("docs/readme.md", "readme content")
+    file_store.store("test/file1.txt", "content1")
+    file_store.store("test/file2.txt", "content2")
+    file_store.store("docs/readme.md", "readme content")
 
     # Test listing files from root
     input_data = {"file_path": "", "recursive": True}
@@ -111,11 +111,11 @@ def test_file_list_tool(file_storage):
     assert "File: " not in result.output["content"]
 
 
-def test_file_tools_integration(file_storage):
+def test_file_tools_integration(file_store):
     """Test file tools working together."""
     # Test tools working together
-    write_tool = FileWriteTool(file_storage=file_storage)
-    read_tool = FileReadTool(file_storage=file_storage)
+    write_tool = FileWriteTool(file_store=file_store)
+    read_tool = FileReadTool(file_store=file_store)
 
     # Write file
     write_input = {"file_path": "test/integration.txt", "content": "Integration test content"}
@@ -129,10 +129,10 @@ def test_file_tools_integration(file_storage):
     assert read_result.output["content"].decode("utf-8") == "Integration test content"
 
     # Test different storage instances
-    storage2 = InMemoryFileStorage()
+    storage2 = InMemoryFileStore()
     storage2.store("test.txt", "Content from storage 2")
 
-    read_tool2 = FileReadTool(file_storage=storage2)
+    read_tool2 = FileReadTool(file_store=storage2)
     input_data = {"file_path": "test.txt"}
 
     result2 = read_tool2.run(input_data)

@@ -6,7 +6,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file_storage.base import FileStorage
+from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.logger import logger
 
 
@@ -49,7 +49,7 @@ class FileReadTool(Node):
             - Save intermediate results.
     """
 
-    file_storage: FileStorage = Field(..., description="File storage to read from.")
+    file_store: FileStore = Field(..., description="File storage to read from.")
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileReadInputSchema]] = FileReadInputSchema
 
@@ -68,13 +68,13 @@ class FileReadTool(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
-            if not self.file_storage.exists(input_data.file_path):
+            if not self.file_store.exists(input_data.file_path):
                 raise ToolExecutionException(
                     f"File '{input_data.file_path}' not found",
                     recoverable=True,
                 )
 
-            content = self.file_storage.retrieve(input_data.file_path)
+            content = self.file_store.retrieve(input_data.file_path)
 
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
             return {"content": content}
@@ -99,7 +99,7 @@ class FileWriteTool(Node):
         group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
         name (str): The name of the tool.
         description (str): A brief description of the tool.
-        file_storage (FileStorage): File storage to write to.
+        file_store (FileStore): File storage to write to.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -111,7 +111,7 @@ class FileWriteTool(Node):
     - Write JSON: {"file_path": "config.json", "content": {"key": "value"}}
     - Overwrite file: {"file_path": "existing.txt", "content": "new content"}"""
 
-    file_storage: FileStorage = Field(..., description="File storage to write to.")
+    file_store: FileStore = Field(..., description="File storage to write to.")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileWriteInputSchema]] = FileWriteInputSchema
@@ -138,7 +138,7 @@ class FileWriteTool(Node):
                 content_type = input_data.content_type
 
             # Store file
-            file_info = self.file_storage.store(
+            file_info = self.file_store.store(
                 input_data.file_path,
                 content_str,
                 content_type=content_type,
@@ -172,7 +172,7 @@ class FileListTool(Node):
     name: str = "File List Tool"
     description: str = """Lists files in storage based on the provided file path."""
 
-    file_storage: FileStorage = Field(..., description="File storage to list from.")
+    file_store: FileStore = Field(..., description="File storage to list from.")
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileListInputSchema]] = FileListInputSchema
 
@@ -189,7 +189,7 @@ class FileListTool(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
-            files_list = self.file_storage.list_files(directory=input_data.file_path, recursive=input_data.recursive)
+            files_list = self.file_store.list_files(directory=input_data.file_path, recursive=input_data.recursive)
             files_string = "Files currently available in the filesystem storage:\n"
             for file in files_list:
                 files_string += f"File: {file.name} | Path: {file.path} | Size: {file.size} bytes\n"

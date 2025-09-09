@@ -20,11 +20,9 @@ from dynamiq.nodes.agents.exceptions import (
     XMLParsingError,
 )
 from dynamiq.nodes.agents.utils import (
-    ChunkedToolOutput,
     SummarizationConfig,
     ToolCacheEntry,
     XMLParser,
-    create_chunked_tool_output,
 )
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
@@ -32,43 +30,52 @@ from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWrite
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
+from dynamiq.storages.file.base import FileStore
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 DEFAULT_DIRECT_OUTPUT_CAPABILITIES = """
 ADVANCED FEATURES:
-- Tool outputs are automatically chunked and stored with unique IDs (tool_1, tool_2, etc.)
+- Tool outputs are automatically cached and can be referenced directly
 - You can return raw tool observation directly using:
 Thought: [Your reasoning about using direct tool output]
-Answer: <answer type="tool_output" tool_id="tool_X">
-- Do this only after receiving output from this tool in the next loop.
+Answer: <answer type="tool_output" action="tool_name" action_input="tool_input">
+- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
+- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
+- The tool must have been called in a previous step with the exact same action and action_input
+- action_input must match exactly what you used when calling the tool (including JSON key order)
 - This bypasses summarization and returns the complete tool output to the user
 - Use this format only when the raw tool output is exactly what the user needs
+- If the tool hasn't been executed yet, you must call it first in the current step
 """
 
 XML_DIRECT_OUTPUT_CAPABILITIES = """
 ADVANCED FEATURES:
-- Tool outputs are automatically chunked and stored with unique IDs (tool_1, tool_2, etc.)
+- Tool outputs are automatically cached and can be referenced directly
 - You can return raw tool outputs directly using:
 <output>
     <thought>
         [Your reasoning about using direct tool output]
     </thought>
     <answer>
-        <answer type="tool_output" tool_id="tool_X">
+        <answer type="tool_output" action="tool_name" action_input="tool_input">
     </answer>
 </output>
-- Do this only after receiving output from this tool in the next loop.
+- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
+- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
+- The tool must have been called in a previous step with the exact same action and action_input
+- action_input must match exactly what you used when calling the tool (including JSON key order)
 - This bypasses summarization and returns the complete tool output to the user
 - Use this format only when the raw tool output is exactly what the user needs
+- If the tool hasn't been executed yet, you must call it first in the current step
 """
 
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 
 Thought: [Your detailed reasoning about what to do next]
-Action: [Tool name from ONLY [{tools_name}]]
+Action: [Tool name from ONLY [{{ tools_name }}]]
 Action Input: [JSON input for the tool]
 
 After each action, you'll receive:
@@ -105,7 +112,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in you
         [Your detailed reasoning about what to do next]
     </thought>
     <action>
-        [Tool name from ONLY [{tools_name}]]
+        [Tool name from ONLY [{{ tools_name }}]]
     </action>
     <action_input>
         [JSON input for the tool - single line, properly escaped]
@@ -328,7 +335,7 @@ REACT_BLOCK_INSTRUCTIONS_MULTI = (
 **RESPONSE FORMAT:**
 
 Thought: [Your detailed reasoning about what to do next, including your multi-tool strategy if applicable]
-Action: [Tool name from ONLY [{tools_name}]]
+Action: [Tool name from ONLY [{{ tools_name }}]]
 Action Input: [JSON input for the tool]
 
 After each action, you'll receive:
@@ -379,12 +386,13 @@ For Tool Usage (Single or Multiple):
     </thought>
     <tool_calls>
         <tool>
-            <name>[Tool name from ONLY [{tools_name}]]</name>
+            <name>[Tool name from ONLY [{{ tools_name }}]]</name>
             <input>[JSON input for the tool - single line, properly escaped]</input>
         </tool>
         <!-- Add more tool elements as needed based on your strategy -->
         <tool>
             <name>[Tool name]</name>
+            <input>[JSON input for the tool - single line, properly escaped]</input>
             <input>[JSON input for the tool - single line, properly escaped]</input>
         </tool>
     </tool_calls>
@@ -442,10 +450,10 @@ REACT_BLOCK_TOOLS = """
 You have access to a variety of tools,
 and you are responsible for using
 them in any order you choose to complete the task:\n
-{tool_description}
+{{ tool_description }}
 
 Input formats for tools:
-{input_formats}
+{{ input_formats }}
 
 Note: For tools not listed in the input formats section,
 refer to their descriptions in the
@@ -456,7 +464,7 @@ REACT_BLOCK_TOOLS_NO_FORMATS = """
 You have access to a variety of tools,
 and you are responsible for using
 them in any order you choose to complete the task:\n
-{tool_description}
+{{ tool_description }}
 """
 
 REACT_BLOCK_NO_TOOLS = """Always follow this exact format in your responses:
@@ -502,22 +510,22 @@ Your response should be clear, concise, and professional.
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
-{{"thought": "[Your reasoning about the next step]",
-"action": "[The tool you choose to use, if any from ONLY [{tools_name}]]",
-"action_input": "[JSON input in correct format you provide to the tool]"}}
+{thought: [Your reasoning about the next step],
+action: [The tool you choose to use, if any from ONLY [{{ tools_name }}]],
+action_input: [JSON input in correct format you provide to the tool]}
 
 After each action, you'll receive:
 Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
-{{"thought": "[Your reasoning for the final answer]",
-"action": "finish",
-"action_input": "[Response for initial request]"}}
+{thought: [Your reasoning for the final answer],
+action: finish
+action_input: [Response for initial request]}
 
 For questions that don't require tools:
-{{"thought": "[Your reasoning for the final answer]",
-"action": "finish",
-"action_input": "[Your direct response]"}}
+{thought: [Your reasoning for the final answer],
+action: finish
+action_input: [Your direct response]}
 
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
@@ -531,6 +539,7 @@ IMPORTANT RULES:
 FILE HANDLING:
 - Tools may generate files that are automatically collected
 - Generated files will be included in the final response
+- Never return empty response.
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
@@ -540,8 +549,8 @@ Use the function `provide_final_answer` when you can give a clear answer to the 
 and no extra steps, tools, or work are needed.
 Call this function if the user's input is simple and doesn't require additional help or tools.
 
-If the user's request requires the use of specific tools, such as [{tools_name}],
-you must first call the appropriate function to invoke those tools.
+If the user's request requires the use of specific tools, such as [{{ tools_name }}],
+ you must first call the appropriate function to invoke those tools.
 Only after utilizing the necessary tools and gathering the required information should
 you call `provide_final_answer` to deliver the final response.
 
@@ -706,23 +715,17 @@ class ReActAgent(Agent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
+    file_store: FileStore | None = Field(default=None, description="Filesystem storage to use for agent.")
 
-    _tool_cache: dict[ToolCacheEntry, Any] = {}
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
-    _tool_chunked_outputs: dict[str, ChunkedToolOutput] = {}
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if self.filestorage:
-            self.tools.append(FileReadTool(file_storage=self.filestorage))
-            self.tools.append(FileWriteTool(file_storage=self.filestorage))
-            self.tools.append(FileListTool(file_storage=self.filestorage))
-
-    def reset_run_state(self):
-        super().reset_run_state()
-        self._tool_cache: dict[ToolCacheEntry, Any] = {}
-        self._tool_chunked_outputs: dict[str, ChunkedToolOutput] = {}
+        if self.file_store:
+            self.tools.append(FileReadTool(file_store=self.file_store))
+            self.tools.append(FileWriteTool(file_store=self.file_store))
+            self.tools.append(FileListTool(file_store=self.file_store))
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -825,11 +828,11 @@ class ReActAgent(Agent):
                     raw_input = raw_input.replace(marker, "").strip()
 
                 try:
-                    action_input = json.loads(raw_input)
+                    action_input = json.loads(raw_input.strip())
                     actions.append({"tool_name": action_name, "tool_input": action_input})
                 except json.JSONDecodeError as e:
                     raise ActionParsingException(
-                        f"Invalid JSON in Action Input for {action_name}: {str(e)}",
+                        f"Invalid JSON in Action Input for {action_name}: {str(e)} : {raw_input}",
                         recoverable=True,
                     )
 
@@ -883,10 +886,10 @@ class ReActAgent(Agent):
         else:
             return "", ""
 
-    def _process_direct_tool_output_return(self, final_answer: str) -> str:
+    def _process_direct_tool_output_return_xml(self, final_answer: str) -> str:
         """
         Process direct tool output return format.
-        Looks for XML format: <answer type="tool_output" tool_id="tool_X">
+        Looks for XML format: <answer type="tool_output" action="tool_name" action_input="tool_input">
 
         Args:
             final_answer (str): The final answer to process
@@ -894,20 +897,38 @@ class ReActAgent(Agent):
         Returns:
             str: Either the raw tool output or the original final answer
         """
+
         tool_output_match = re.search(
-            r'<answer\s+type="tool_output"\s+tool_id="([^"]+)"\s*>', final_answer, re.IGNORECASE
+            r'<answer\s+type="tool_output"\s+action="([^"]+)"\s+action_input\s*=[\'"](.*?)[\'"]\s*(?:></answer>|>)',
+            final_answer,
+            re.IGNORECASE | re.DOTALL,
         )
 
         if tool_output_match:
-            tool_id = tool_output_match.group(1)
-            if tool_id in self._tool_chunked_outputs:
-                chunked_output = self._tool_chunked_outputs[tool_id]
-                return "\n".join(chunked_output.tool_chunks)
+            action = tool_output_match.group(1)
+            action_input = tool_output_match.group(2)
+
+            # Parse the action_input if it's a JSON string and normalize it
+            try:
+                parsed_action_input = json.loads(action_input)
+            except json.JSONDecodeError as e:
+                raise RecoverableAgentException(f"Invalid JSON in Action Input for {action}: {str(e)}")
+
+            # Direct dictionary lookup using ToolCacheEntry as key
+            cache_entry = ToolCacheEntry(action=action, action_input=parsed_action_input)
+            tool_output = self._tool_cache.get(cache_entry)
+
+            if tool_output is not None:
+                logger.info(f"Found tool output for action='{action}' action_input='{action_input}'")
+                return str(tool_output)
             else:
+                # If not found, log available tools for debugging
+                available_tools = [(entry.action, entry.action_input) for entry in self._tool_cache.keys()]
                 logger.warning(
-                    f"Tool ID '{tool_id}' not found in registry. "
-                    f"Available IDs: {list(self._tool_chunked_outputs.keys())}"
+                    f"Tool output not found for action='{action}' input='{action_input}'. "
+                    f"Available tools: {available_tools}"
                 )
+                logger.debug(f"Cache entry created: {cache_entry}")
                 return final_answer
 
         return final_answer
@@ -1156,7 +1177,7 @@ class ReActAgent(Agent):
                             thought, final_answer = self._extract_final_answer(llm_generated_output)
 
                             if self.direct_tool_output_enabled:
-                                final_answer = self._process_direct_tool_output_return(final_answer)
+                                final_answer = self._process_direct_tool_output_return_xml(final_answer)
 
                             self.log_final_output(thought, final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
@@ -1214,6 +1235,9 @@ class ReActAgent(Agent):
                         except json.JSONDecodeError as e:
                             raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
 
+                        if "action" not in llm_generated_output_json or "thought" not in llm_generated_output_json:
+                            raise ActionParsingException("No action or thought provided.", recoverable=True)
+
                         thought = llm_generated_output_json["thought"]
                         action = llm_generated_output_json["action"]
                         action_input = llm_generated_output_json["action_input"]
@@ -1247,7 +1271,7 @@ class ReActAgent(Agent):
                                 if parsed_result.get("is_final", False):
                                     final_answer = parsed_result.get("answer", "")
                                     if self.direct_tool_output_enabled:
-                                        final_answer = self._process_direct_tool_output_return(final_answer)
+                                        final_answer = self._process_direct_tool_output_return_xml(final_answer)
                                     self.log_final_output(thought, final_answer, loop_num)
                                     self.tracing_final(loop_num, final_answer, config, kwargs)
                                     return final_answer
@@ -1308,7 +1332,7 @@ class ReActAgent(Agent):
                                 thought = parsed_data.get("thought")
                                 final_answer = parsed_data.get("answer")
                                 if self.direct_tool_output_enabled:
-                                    final_answer = self._process_direct_tool_output_return(final_answer)
+                                    final_answer = self._process_direct_tool_output_return_xml(final_answer)
                                 self.log_final_output(thought, final_answer, loop_num)
                                 self.tracing_final(loop_num, final_answer, config, kwargs)
                                 return final_answer
@@ -1413,14 +1437,6 @@ class ReActAgent(Agent):
 
                                 tool_result = self._run_tool(tool, action_input, config, **kwargs)
 
-                                tool_id = f"tool_{len(self._tool_chunked_outputs) + 1}"
-                                chunked_output = create_chunked_tool_output(
-                                    tool_result,
-                                    iteration_number=len(self._tool_chunked_outputs) + 1,
-                                    max_chars=self.summarization_config.tool_output.max_chars,
-                                    chunk_strategy=self.summarization_config.tool_output.chunk_strategy,
-                                )
-                                self._tool_chunked_outputs[tool_id] = chunked_output
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
                     else:
@@ -1450,16 +1466,7 @@ class ReActAgent(Agent):
                             tool_result = self._tool_cache.get(tool_cache_entry, None)
                             if not tool_result:
                                 tool_result = self._run_tool(tool, action_input, config, **kwargs)
-                                self._tool_cache[tool_cache_entry] = tool_result
 
-                                tool_id = f"tool_{len(self._tool_chunked_outputs) + 1}"
-                                chunked_output = create_chunked_tool_output(
-                                    tool_result,
-                                    iteration_number=len(self._tool_chunked_outputs) + 1,
-                                    max_chars=self.summarization_config.tool_output.max_chars,
-                                    chunk_strategy=self.summarization_config.tool_output.chunk_strategy,
-                                )
-                                self._tool_chunked_outputs[tool_id] = chunked_output
                             else:
                                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
 

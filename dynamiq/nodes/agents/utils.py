@@ -20,6 +20,7 @@ from dynamiq.prompts import (
 )
 from dynamiq.storages.file_storage.base import FileInfo
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import CHARS_PER_TOKEN
 
 TOOL_MAX_TOKENS = 64000
 
@@ -888,14 +889,13 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
     This function converts various types of tool outputs into a string representation.
     It handles dictionaries (with or without a 'content' key), lists, tuples, and other
     types by converting them to a string. If the resulting string exceeds the maximum
-    allowed length, it uses chunking to show representative parts
-    (first, middle, and last chunks) instead of simple truncation.
+    allowed length, it truncates the content.
 
     Args:
         content: The output from tool execution, which can be of various types.
         max_tokens: Maximum allowed token count for the content. The effective character
-            limit is computed as max_tokens * 4 (assuming ~4 characters per token).
-        truncate: Whether to chunk/truncate the content if it exceeds the maximum length.
+            limit is computed as max_tokens * CHARS_PER_TOKEN (assuming ~4 characters per token).
+        truncate: Whether to truncate the content if it exceeds the maximum length.
 
     Returns:
         A processed string suitable for agent consumption. For large content, returns
@@ -915,7 +915,7 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
         else:
             content = str(content)
 
-    max_len_in_char: int = max_tokens * 4
+    max_len_in_char: int = max_tokens * CHARS_PER_TOKEN
     content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", content)
 
     if len(content) > max_len_in_char and truncate:
@@ -969,7 +969,7 @@ class ToolCacheEntry(BaseModel):
     """Single key entry in tool cache."""
 
     action: str
-    action_input: str
+    action_input: dict | str
 
     model_config = ConfigDict(frozen=True)
 

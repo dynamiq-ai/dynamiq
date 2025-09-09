@@ -5,7 +5,7 @@ You are the Manager Agent responsible for coordinating a team of specialized age
 Your role is to delegate to appropriate new state based on description
 
 Available states:
-{states_description}
+{{ states_description }}
 
 Respond with a JSON object representing your next action. Use one of the following formats:
 
@@ -14,7 +14,7 @@ For choosing next state:
 
 Provide your response in JSON format only, without any additional text.
 For the final answer this means providing the final answer as the value for the "answer" key. But text in answer keep as it is.
-{chat_history}
+{{ chat_history }}
 """  # noqa: E501
 
 PROMPT_TEMPLATE_AGENT_MANAGER_ACTIONS = """
@@ -22,7 +22,7 @@ You are the Manager Agent responsible for coordinating a team of specialized age
 Your role is to generate input query for each of the agents based on previous history
 
 Agent:
-{task}
+{{ task }}
 
 Provide your response in JSON format only, without any additional text.
 
@@ -30,7 +30,7 @@ For providing action:
 "command": "action", "agent": "<agent_name>", "input": "<input_to_agent>"
 
 Chat history:
-{chat_history}
+{{ chat_history }}
 """  # noqa: E501
 
 
@@ -39,11 +39,11 @@ You are the Graph Agent Manager. Your goal is to handle the user's request.
 
 User's request:
 <user_request>
-{task}
+{{ task }}
 </user_request>
 Here is the list of graph states and their capabilities:
 <available_states>
-{description}
+{{ description }}
 </available_states>
 
 Important guidelines:
@@ -69,8 +69,10 @@ Instructions:
 
 <output>
 ```json
+{% raw %}
 "decision": "respond" or "plan",
 "message": "[If respond, put the short response text here; if plan, put an empty string or a note]"
+{% endraw %}
 </output>
 
 EXAMPLES
@@ -83,10 +85,12 @@ The user's request is a simple greeting. I will respond with a brief acknowledgm
 </analysis>
 <output>
 ```json
-{{
+{% raw %}
+{
 "decision": "respond",
     "message": "Hello! How can I assist you today?"
-}}
+}
+{% endraw %}
 </output>
 
 Scenario 2:
@@ -97,10 +101,12 @@ The user's request is a general query. I will simply respond with a brief acknow
 </analysis>
 <output>
 ```json
-{{
+{% raw %}
+{
     "decision": "respond",
-    "message": "Hello! How can I assist you today?
-}}
+    "message": "Hello! How can I assist you today?"
+}
+{% endraw %}
 </output>
 
 Scenario 3:
@@ -111,10 +117,12 @@ The user's request is complex and requires planning. I will proceed with the pla
 </analysis>
 <output>
 ```json
-{{
+{% raw %}
+{
     "decision": "plan",
     "message": ""
-}}
+}
+{% endraw %}
 </output>
 
 Scenario 4:
@@ -125,10 +133,12 @@ The user's request can be answered using planning. I will proceed with the plann
 </analysis>
 <output>
 ```json
-{{
+{% raw %}
+{
     "decision": "plan",
     "message": ""
-}}
+}
+{% endraw %}
 </output>
 
 Scenario 5:
@@ -140,10 +150,12 @@ The user's request involves scraping, which requires planning. I will proceed wi
 
 <output>
 ```json
-{{
+{% raw %}
+{
     "decision": "plan",
     "message": ""
-}}
+}
+{% endraw %}
 </output>
 """  # noqa: E501
 
