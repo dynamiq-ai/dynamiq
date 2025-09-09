@@ -774,7 +774,7 @@ class ReActAgent(Agent):
             thought_match = re.search(thought_pattern, output, re.DOTALL)
             thought = thought_match.group(1).strip() if thought_match else None
 
-            action_pattern = r'Action:\s*(.*?)\nAction Input:\s*([\[{][\s\S]*[\]}])'
+            action_pattern = r"Action:\s*(.*?)\nAction Input:\s*((?:[\[{][\s\S]*?[\]}]))"
 
             remaining_text = output
             actions = []
@@ -791,11 +791,11 @@ class ReActAgent(Agent):
                     raw_input = raw_input.replace(marker, "").strip()
 
                 try:
-                    action_input = json.loads(raw_input)
+                    action_input = json.loads(raw_input.strip())
                     actions.append({"tool_name": action_name, "tool_input": action_input})
                 except json.JSONDecodeError as e:
                     raise ActionParsingException(
-                        f"Invalid JSON in Action Input for {action_name}: {str(e)}",
+                        f"Invalid JSON in Action Input for {action_name}: {str(e)} : {raw_input}",
                         recoverable=True,
                     )
 
