@@ -857,7 +857,7 @@ class ReActAgent(Agent):
     def _process_direct_tool_output_return_xml(self, final_answer: str) -> str:
         """
         Process direct tool output return format.
-        Looks for XML format: <answer type="tool_output" action="tool_name" input="tool_input">
+        Looks for XML format: <answer type="tool_output" action="tool_name" action_input="tool_input">
 
         Args:
             final_answer (str): The final answer to process
@@ -887,7 +887,7 @@ class ReActAgent(Agent):
             tool_output = self._tool_cache.get(cache_entry)
 
             if tool_output is not None:
-                logger.info(f"Found tool output for action='{action}' input='{action_input}'")
+                logger.info(f"Found tool output for action='{action}' action_input='{action_input}'")
                 return str(tool_output)
             else:
                 # If not found, log available tools for debugging

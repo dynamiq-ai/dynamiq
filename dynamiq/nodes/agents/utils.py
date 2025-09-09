@@ -795,7 +795,7 @@ class ToolCacheEntry(BaseModel):
     """Single key entry in tool cache."""
 
     action: str
-    action_input: str
+    action_input: dict | str
 
     model_config = ConfigDict(frozen=True)
 
