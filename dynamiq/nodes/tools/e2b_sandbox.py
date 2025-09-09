@@ -126,9 +126,15 @@ class E2BInterpreterInputSchema(BaseModel):
         json_schema_extra={"is_accessible_to_agent": False},
     )
     params: dict[str, Any] = Field(
-        default_factory=dict, description="Arbitrary variables to inject as Python globals before executing 'python'."
+        default_factory=dict,
+        description="Arbitrary variables to inject as Python globals before executing 'python'.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
-    env: dict[str, str] = Field(default_factory=dict, description="Environment variables for shell commands.")
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        description="Environment variables for shell commands.",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
     cwd: str = Field(default="/home/user", description="Working directory for shell commands.")
     timeout: int | None = Field(default=None, description="Override sandbox timeout for this execution (seconds)")
 
