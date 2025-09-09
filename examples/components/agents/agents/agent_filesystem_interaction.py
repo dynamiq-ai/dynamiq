@@ -41,7 +41,7 @@ def setup_agent() -> ReActAgent:
         llm=llm,
         tools=[read_tool, write_tool],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.STRUCTURED_OUTPUT,
+        inference_mode=InferenceMode.DEFAULT,
         max_loops=5,
     )
 
