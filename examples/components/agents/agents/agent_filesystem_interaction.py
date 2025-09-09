@@ -31,9 +31,9 @@ def setup_agent() -> ReActAgent:
 
     llm = setup_llm(model_provider="claude", model_name="claude-3-5-sonnet-20241022", temperature=0.2)
 
-    file_storage = InMemoryFileStore()
-    read_tool = FileReadTool(file_storage=file_storage)
-    write_tool = FileWriteTool(file_storage=file_storage)
+    file_store = InMemoryFileStore()
+    read_tool = FileReadTool(file_store=file_store)
+    write_tool = FileWriteTool(file_store=file_store)
 
     agent = ReActAgent(
         name="AgentFileInteractionWithMemory",
@@ -77,12 +77,12 @@ def run_workflow(
         )
 
         print(f"Files in storage after {workflow_type} workflow:")
-        file_storage = agent.tools[0].file_storage
-        for file_info in file_storage.list_files():
+        file_store = agent.tools[0].file_store
+        for file_info in file_store.list_files():
             print(f"File: {file_info.name}")
             print(f"Path: {file_info.path}")
             print(f"Size: {file_info.size} bytes")
-            print(f"Content: {file_storage.retrieve(file_info.path).decode('utf-8')}")
+            print(f"Content: {file_store.retrieve(file_info.path).decode('utf-8')}")
             print("-" * 30)
 
         return result.output[agent.id]["output"]["content"]

@@ -82,7 +82,7 @@ def run(input_data):
     agent = ReActAgent(
         name="React Agent",
         llm=OpenAI(model="gpt-4o", connection=connections.OpenAI(api_key="test-api-key")),
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="react_map_stream", mode=StreamingMode.ALL, by_tokens=True),
@@ -157,7 +157,7 @@ def run(input_data):
     agent = ReActAgent(
         name="React Agent",
         llm=OpenAI(model="gpt-4o", connection=connections.OpenAI(api_key="test-api-key")),
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(

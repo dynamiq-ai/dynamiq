@@ -678,21 +678,17 @@ class ReActAgent(Agent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
-    file_storage: FileStore | None = Field(default=None, description="Filesystem storage to use for agent.")
+    file_store: FileStore | None = Field(default=None, description="Filesystem storage to use for agent.")
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if self.file_storage:
-            self.tools.append(FileReadTool(file_storage=self.file_storage))
-            self.tools.append(FileWriteTool(file_storage=self.file_storage))
-            self.tools.append(FileListTool(file_storage=self.file_storage))
-
-    def reset_run_state(self):
-        super().reset_run_state()
-        self._tool_cache: dict[ToolCacheEntry, Any] = {}
+        if self.file_store:
+            self.tools.append(FileReadTool(file_store=self.file_store))
+            self.tools.append(FileWriteTool(file_store=self.file_store))
+            self.tools.append(FileListTool(file_store=self.file_store))
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
