@@ -7,7 +7,7 @@ from dynamiq.connections import MCPStdio
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections.managers import get_connection_manager
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
@@ -45,7 +45,7 @@ def setup_agent_with_server(path_to_server: str):
         connection=stdio_connection,
     )
 
-    agent = ReActAgent(
+    agent = Agent(
         name="react-agent",
         id="react-agent",
         llm=llm,
@@ -90,7 +90,7 @@ def setup_agent_with_tool(path_to_server: str):
 
     tools = mcp_server.get_mcp_tools()
 
-    agent = ReActAgent(
+    agent = Agent(
         name="react-agent",
         id="react-agent",
         llm=llm,

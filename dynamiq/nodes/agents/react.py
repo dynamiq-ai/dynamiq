@@ -8,7 +8,8 @@ from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
 from dynamiq.callbacks import ReActAgentStreamingParserCallback, StreamingQueueCallbackHandler
-from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
+from dynamiq.nodes.agents.base import Agent as BaseAgent
+from dynamiq.nodes.agents.base import AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     AgentUnknownToolException,
@@ -19,11 +20,7 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-from dynamiq.nodes.agents.utils import (
-    SummarizationConfig,
-    ToolCacheEntry,
-    XMLParser,
-)
+from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
@@ -655,10 +652,10 @@ TYPE_MAPPING = {
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
 
-class ReActAgent(Agent):
-    """Agent that uses the ReAct strategy for processing tasks by interacting with tools in a loop."""
+class Agent(BaseAgent):
+    """Unified Agent that uses a ReAct-style strategy for processing tasks by interacting with tools in a loop."""
 
-    name: str = "React Agent"
+    name: str = "Agent"
     max_loops: int = Field(default=15, ge=2)
     inference_mode: InferenceMode = Field(default=InferenceMode.DEFAULT)
     behaviour_on_max_loops: Behavior = Field(

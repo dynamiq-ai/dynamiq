@@ -6,7 +6,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import E2B
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
@@ -50,7 +50,7 @@ def read_file_as_bytesio(file_path: str, filename: str = None, description: str 
 
 
 def run_workflow(
-    agent: ReActAgent,
+    agent: Agent,
     input_prompt: str,
     input_files: list,
 ) -> tuple[str, dict]:
@@ -92,7 +92,7 @@ if __name__ == "__main__":
 
     llm = setup_llm()
 
-    agent = ReActAgent(
+    agent = Agent(
         name="Agent",
         id="Agent",
         llm=llm,

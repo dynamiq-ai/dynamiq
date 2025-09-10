@@ -8,7 +8,7 @@ from dynamiq import Workflow, runnables
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents import ReflectionAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils.logger import logger
@@ -40,7 +40,7 @@ def create_writer_reflexion_agent():
         temperature=TEMPERATURE,
         max_tokens=MAX_TOKENS,
     )
-    writer_agent = ReflectionAgent(
+    writer_agent = Agent(
         name="Professional Writer Agent",
         llm=llm_openai,
         role=AGENT_ROLE,

@@ -3,9 +3,7 @@ import uuid
 import pytest
 
 from dynamiq import connections
-from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.agents.reflection import ReflectionAgent
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import (
@@ -40,24 +38,20 @@ def model():
 
 
 def create_react_agent(llm, inference_mode, input_message=None, role=None):
-    """ReActAgent"""
-    return ReActAgent(
+    """Agent"""
+    return Agent(
         name="Test Agent", llm=llm, tools=[], input_message=input_message, role=role, inference_mode=inference_mode
     )
 
 
 def create_simple_agent(llm, inference_mode, input_message=None, role=None):
-    """SimpleAgent"""
-    return SimpleAgent(
-        name="Test Agent", llm=llm, inference_mode=inference_mode, role=role, input_message=input_message
-    )
+    """Agent"""
+    return Agent(name="Test Agent", llm=llm, inference_mode=inference_mode, role=role, input_message=input_message)
 
 
 def create_reflection_agent(llm, inference_mode, input_message=None, role=None):
-    """ReflectionAgent"""
-    return ReflectionAgent(
-        name="Test Agent", llm=llm, inference_mode=inference_mode, role=role, input_message=input_message
-    )
+    """Agent"""
+    return Agent(name="Test Agent", llm=llm, inference_mode=inference_mode, role=role, input_message=input_message)
 
 
 @pytest.mark.parametrize(

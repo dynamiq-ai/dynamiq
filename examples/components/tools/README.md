@@ -6,13 +6,13 @@ This directory contains examples demonstrating how to use and integrate various 
 
 ### Web Search and Scraping
 
-- **`use_react_search.py`**: Demonstrates using a `ReActAgent` with a `ScaleSerpTool` for web search. The agent answers user queries by retrieving and summarizing information from search results.
+- **`use_react_search.py`**: Demonstrates using a `Agent` with a `ScaleSerpTool` for web search. The agent answers user queries by retrieving and summarizing information from search results.
 - **`custom_tools/scraper.py`**: Implements a `ScraperSummarizerTool` that combines web scraping using ZenRows API and content summarization using an LLM.
 - **`custom_tools/search_engine.py`**: Defines a `SearchEngineTool` that combines web searching, content scraping, and summarization into a single tool.
 
 ### Code Execution
 
-- **`use_react_with_coding.py`**: Showcases a `ReActAgent` equipped with an `E2BInterpreterTool` for executing Python code. The agent solves coding tasks and provides results.
+- **`use_react_with_coding.py`**: Showcases a `Agent` equipped with an `E2BInterpreterTool` for executing Python code. The agent solves coding tasks and provides results.
 
 ### API Interaction
 
@@ -29,7 +29,7 @@ This directory contains examples demonstrating how to use and integrate various 
 ### Function Tools
 
 - **`use_function_tool.py`**: Showcases how to create and use function tools, both with and without the `@function_tool` decorator.
-- **`use_react_fc.py`**: Demonstrates using a `ReActAgent` with a custom function tool (`calculate_age`) and a `ScaleSerpTool` to answer a query involving age calculation and web search.
+- **`use_react_fc.py`**: Demonstrates using a `Agent` with a custom function tool (`calculate_age`) and a `ScaleSerpTool` to answer a query involving age calculation and web search.
 
 ### Mathematical Evaluation
 

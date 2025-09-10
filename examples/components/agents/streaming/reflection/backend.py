@@ -3,13 +3,13 @@ import re
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.in_memory import InMemory
-from dynamiq.nodes.agents.reflection import ReflectionAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from examples.llm_setup import setup_llm
 
 
-def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -> ReflectionAgent:
+def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -> Agent:
     """
     Initializes an AI agent with a specified role and streaming configuration.
     """
@@ -21,7 +21,7 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -
     mode = mode_mapping.get(streaming_mode, StreamingMode.FINAL)
     streaming_config = StreamingConfig(enabled=streaming_enabled, mode=mode)
 
-    agent = ReflectionAgent(
+    agent = Agent(
         name="Agent",
         llm=llm,
         role=agent_role,
@@ -32,7 +32,7 @@ def setup_agent(agent_role: str, streaming_enabled: bool, streaming_mode: str) -
     return agent
 
 
-def generate_agent_response(agent: ReflectionAgent, user_input: str):
+def generate_agent_response(agent: Agent, user_input: str):
     """
     Processes the user input using the agent. Supports both streaming and non-streaming responses.
     Extracts and yields only the content within <output> tags.

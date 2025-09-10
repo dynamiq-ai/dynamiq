@@ -1,9 +1,10 @@
 import pytest
 
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
@@ -67,7 +68,7 @@ def string_length_tool_instance(python_tool_code):
     return tool
 
 
-def run_and_assert_agent(agent: ReActAgent, agent_input, expected_length, run_config):
+def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config):
     """Helper function to run agent and perform common assertions."""
     logger.info(f"\n--- Running Agent: {agent.name} (Mode: {agent.inference_mode.value}) ---")
     agent_output = None
@@ -109,7 +110,7 @@ def run_and_assert_agent(agent: ReActAgent, agent_input, expected_length, run_co
 def test_react_agent_default_mode(
     llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config
 ):
-    agent = ReActAgent(
+    agent = Agent(
         name="Test Agent DEFAULT",
         llm=llm_instance,
         tools=[string_length_tool_instance],
@@ -124,7 +125,7 @@ def test_react_agent_default_mode(
 def test_react_agent_xml_mode(
     llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config
 ):
-    agent = ReActAgent(
+    agent = Agent(
         name="Test Agent XML",
         llm=llm_instance,
         tools=[string_length_tool_instance],
@@ -139,7 +140,7 @@ def test_react_agent_xml_mode(
 def test_react_agent_structured_output_mode(
     llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config
 ):
-    agent = ReActAgent(
+    agent = Agent(
         name="Test Agent STRUCTURED_OUTPUT",
         llm=llm_instance,
         tools=[string_length_tool_instance],
@@ -154,7 +155,7 @@ def test_react_agent_structured_output_mode(
 def test_react_agent_function_calling_mode(
     llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config
 ):
-    agent = ReActAgent(
+    agent = Agent(
         name="Test Agent FUNCTION_CALLING",
         llm=llm_instance,
         tools=[string_length_tool_instance],

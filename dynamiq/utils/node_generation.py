@@ -3,7 +3,7 @@ import types
 from typing import Any, Union, get_args
 
 from dynamiq.nodes import Node
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import BaseAgent as Agent
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import ConnectionNode
 from dynamiq.prompts import Message, MessageRole, Prompt

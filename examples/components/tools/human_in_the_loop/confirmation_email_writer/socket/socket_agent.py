@@ -7,7 +7,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool, MessageSenderTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.runnables import RunnableConfig
@@ -79,7 +79,7 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
         output_method=FeedbackMethod.STREAM, streaming=StreamingConfig(enabled=True, input_queue=input_queue)
     )
 
-    agent = ReActAgent(
+    agent = Agent(
         name="research_agent",
         role=(
             "You are a helpful assistant that has access to the internet using Tavily Tool."

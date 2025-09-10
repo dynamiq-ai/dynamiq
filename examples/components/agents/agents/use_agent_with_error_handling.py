@@ -1,10 +1,10 @@
 from dynamiq import Workflow
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.types import Behavior
 from dynamiq.nodes.node import ErrorHandling
+from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.runnables import RunnableConfig
 
 INPUT_PROMPT = "What is the capital of France and why is it important?"
@@ -36,12 +36,12 @@ def create_openai_llm_with_error_handling() -> OpenAI:
     )
 
 
-def create_react_agent_no_tools() -> ReActAgent:
+def create_react_agent_no_tools() -> Agent:
     """
     Create a ReAct agent without tools, using only OpenAI LLM with error handling.
 
     Returns:
-        ReActAgent: Configured ReAct agent without tools
+        Agent: Configured ReAct agent without tools
     """
     llm = create_openai_llm_with_error_handling()
 
@@ -53,7 +53,7 @@ def create_react_agent_no_tools() -> ReActAgent:
         behavior=Behavior.RAISE
     )
 
-    return ReActAgent(
+    return Agent(
         name="React Agent No Tools",
         id="react_no_tools",
         llm=llm,

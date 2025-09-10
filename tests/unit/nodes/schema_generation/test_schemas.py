@@ -1,6 +1,6 @@
 import pytest
 
-from dynamiq.nodes.agents import ReActAgent, ReflectionAgent, SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic, Gemini, OpenAI, WatsonX
 from dynamiq.nodes.tools import E2BInterpreterTool, ScaleSerpTool, TavilyTool
 from dynamiq.nodes.utils import Input, Output
@@ -12,9 +12,9 @@ from dynamiq.utils.node_generation import generate_data_from_schema, generate_no
     [
         (Input, {}),
         (Output, {}),
-        (SimpleAgent, {"llms": {OpenAI: ["model1", "model2"]}, "tools": [E2BInterpreterTool]}),
-        (ReActAgent, {"llms": {OpenAI: ["model1", "model2"]}, "tools": [E2BInterpreterTool]}),
-        (ReflectionAgent, {"llms": {OpenAI: ["model1", "model2"]}, "tools": [E2BInterpreterTool]}),
+        (Agent, {"llms": {OpenAI: ["model1", "model2"]}, "tools": [E2BInterpreterTool]}),
+        (Agent, {"llms": {OpenAI: ["model1", "model2"]}, "tools": [E2BInterpreterTool]}),
+        (Agent, {"llms": {OpenAI: ["model1", "model2"]}, "tools": [E2BInterpreterTool]}),
         (OpenAI, {"models": ["model1", "model2"]}),
         (Gemini, {"models": ["model1", "model2"]}),
         (Anthropic, {"models": ["model1", "model2"]}),

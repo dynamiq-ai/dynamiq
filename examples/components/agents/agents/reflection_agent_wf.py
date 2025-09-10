@@ -3,7 +3,7 @@ import json
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.reflection import ReflectionAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
@@ -19,7 +19,7 @@ INPUT_QUESTION = "How are sin(x) and cos(x) connected in electrodynamics?"
 
 def run_workflow() -> tuple[str, dict]:
     """
-    Set up and run a workflow using a ReflectionAgent with OpenAI's language model.
+    Set up and run a workflow using a Agent with OpenAI's language model.
 
     The workflow processes the input question "What is the capital of France?"
     using a professional writer agent.
@@ -32,7 +32,7 @@ def run_workflow() -> tuple[str, dict]:
     """
     # Set up OpenAI connection and language model
     llm = setup_llm()
-    agent = ReflectionAgent(
+    agent = Agent(
         name=AGENT_NAME,
         llm=llm,
         role=AGENT_ROLE,

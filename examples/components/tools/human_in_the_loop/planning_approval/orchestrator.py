@@ -4,9 +4,9 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Tavily as TavilyConnection
 from dynamiq.flows import Flow
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators import LinearOrchestrator
 from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools import TavilyTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.feedback import PlanApprovalConfig
@@ -47,13 +47,13 @@ def create_workflow() -> Workflow:
     search_connection = TavilyConnection()
     tool_search = TavilyTool(connection=search_connection)
 
-    agent_researcher = ReActAgent(name="Researcher Analyst", role=AGENT_RESEARCHER_ROLE, llm=llm, tools=[tool_search])
-    agent_writer = ReActAgent(
+    agent_researcher = Agent(name="Researcher Analyst", role=AGENT_RESEARCHER_ROLE, llm=llm, tools=[tool_search])
+    agent_writer = Agent(
         name="Job Description Writer",
         role=AGENT_WRITER_ROLE,
         llm=llm,
     )
-    agent_reviewer = ReActAgent(
+    agent_reviewer = Agent(
         name="Job Description Reviewer and Editor",
         role=AGENT_REVIEWER_ROLE,
         llm=llm,

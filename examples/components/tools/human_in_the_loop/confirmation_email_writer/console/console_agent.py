@@ -1,4 +1,4 @@
-from dynamiq.nodes.agents import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool, MessageSenderTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
@@ -42,7 +42,7 @@ def run_agent(query) -> dict:
 
     message_sender_tool = MessageSenderTool(output_method=FeedbackMethod.CONSOLE)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="research_agent",
         role=(
             "You are a helpful assistant that has access to the internet using Tavily Tool."

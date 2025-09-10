@@ -1,7 +1,7 @@
 import os
 
 from dynamiq import Workflow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.mcp import MCPServer, MCPSse, MCPStdio, MCPStreamableHTTP
 from examples.llm_setup import setup_llm
 
@@ -11,7 +11,7 @@ llm = setup_llm()
 def setup_wf(connection: MCPSse | MCPStdio | MCPStreamableHTTP):
     mcp_server = MCPServer(connection=connection)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="react-agent",
         id="react-agent",
         llm=llm,
@@ -28,7 +28,7 @@ def use_stdio_connection(path_to_server: str):
     """
     Initializes a Dynamiq workflow using an MCP server over stdio.
 
-    The MCPTool retrieves all available tools from the server and makes them accessible to a ReActAgent,
+    The MCPTool retrieves all available tools from the server and makes them accessible to a Agent,
     which can then use these tools to reason and respond to user queries.
 
     Args:

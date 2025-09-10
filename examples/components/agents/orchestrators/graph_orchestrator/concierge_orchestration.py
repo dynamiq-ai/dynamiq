@@ -4,9 +4,9 @@ from typing import Any
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.graph import END, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.function_tool import function_tool
 from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
 from dynamiq.prompts import Message, Prompt
@@ -45,7 +45,7 @@ def create_workflow() -> Workflow:
 
             return f"Symbol {stock_symbol} is currently trading at $100.00"
 
-        stock_lookup_agent = ReActAgent(
+        stock_lookup_agent = Agent(
             name="stock_lookup_agent",
             role="""You are a helpful assistant that is searching for stock prices.""",
             goal="Provide actions according to role",  # noqa: E501
@@ -76,7 +76,7 @@ def create_workflow() -> Workflow:
             logger.info("Checking if authenticated")
             return context.get("authenticated", False)
 
-        auth_agent = ReActAgent(
+        auth_agent = Agent(
             name="auth_agent",
             role="""You are a helpful assistant that is authenticating a user.""",
             goal="Provide actions according to role",  # noqa: E501
@@ -107,7 +107,7 @@ def create_workflow() -> Workflow:
 
             return f"Account {account_id} has a balance of $1000"
 
-        account_balance_agent = ReActAgent(
+        account_balance_agent = Agent(
             name="account_balance_agent",
             role="""
             You are a helpful assistant that is looking up account balances.
@@ -144,7 +144,7 @@ def create_workflow() -> Workflow:
             logger.info(f"Checking if there is more than {amount} on account with ID - {account_id}")
             return "Balance has sufficient amount of money."
 
-        transfer_money_agent = ReActAgent(
+        transfer_money_agent = Agent(
             name="transfer_money_agent",
             role="""
             You are a helpful assistant that transfers money between accounts.

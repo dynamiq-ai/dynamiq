@@ -6,7 +6,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.connections import Tavily as TavilyConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools import TavilyTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -83,7 +83,7 @@ def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler)
     tool_search = TavilyTool(connection=connection_tavily)
 
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0)
-    research_agent = ReActAgent(
+    research_agent = Agent(
         name="Agent",
         id="Agent",
         llm=llm,

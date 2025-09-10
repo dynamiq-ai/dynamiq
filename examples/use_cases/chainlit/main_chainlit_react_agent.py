@@ -10,7 +10,7 @@ from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import ScaleSerp, ZenRows
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.tools.zenrows import ZenRowsTool
@@ -63,7 +63,7 @@ def create_react_agent():
     )
 
     # Create the agent with tools and configuration
-    react_agent = ReActAgent(
+    react_agent = Agent(
         name="React Agent",
         llm=llm_openai,
         tools=[tool_search, tool_scrape],

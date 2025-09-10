@@ -4,7 +4,7 @@ from dynamiq import Workflow
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import NodeDependency
@@ -36,8 +36,8 @@ def run_workflow(input: str) -> str:
         is_optimized_for_agents=True,
     )
 
-    # Create a ReActAgent for handling bank documentation queries
-    agent_bank_documentation = ReActAgent(
+    # Create a Agent for handling bank documentation queries
+    agent_bank_documentation = Agent(
         name="RAG Agent",
         role="Customer support assistant for Internal Bank Documentation.",
         llm=llm,
@@ -73,8 +73,8 @@ def run_workflow(input: str) -> str:
     def combine_inputs(_: dict, outputs: dict[str, dict]):
         return f"Request: {input}\n" f"Follow this instruction: {outputs[agent_bank_documentation.id]['content']}"
 
-    # Create a ReActAgent for handling internal bank API queries
-    agent_bank_support = ReActAgent(
+    # Create a Agent for handling internal bank API queries
+    agent_bank_support = Agent(
         name="API Agent",
         role="Customer support assistant with access to Internal Bank API",
         llm=llm,

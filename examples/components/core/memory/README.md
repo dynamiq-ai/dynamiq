@@ -7,12 +7,12 @@ This directory contains examples demonstrating the usage of the `Memory` module 
 ### Basic In-Memory Storage
 
 - **`demo_memory.py`**: Demonstrates basic memory operations (add, get, search, clear) using the default in-memory storage.
-- **`demo_simple_agent_chat_memory.py`**: Showcases the integration of the `Memory` module with a `SimpleAgent` in a chat loop, utilizing in-memory storage.
+- **`demo_simple_agent_chat_memory.py`**: Showcases the integration of the `Memory` module with a `Agent` in a chat loop, utilizing in-memory storage.
 
 ### Persistent Storage with Pinecone
 
 - **`demo_memory_pinecone.py`**: Illustrates how to use Pinecone as a persistent storage backend for the `Memory` module, including embedding and search functionalities.
-- **`demo_simple_agent_chat_memory_pinecone.py`**: Integrates Pinecone-backed memory with a `SimpleAgent` in a chat loop, demonstrating persistent conversation history.
+- **`demo_simple_agent_chat_memory_pinecone.py`**: Integrates Pinecone-backed memory with a `Agent` in a chat loop, demonstrating persistent conversation history.
 
 ### Persistent Storage with SQLite
 
