@@ -88,9 +88,7 @@ class WorkflowYAMLLoader:
             try:
                 connection = conn_cls(**conn_init_data)
             except Exception as e:
-                raise WorkflowYAMLLoaderException(
-                    f"Connection '{conn_id}' data is invalid. Data: '{conn_data}'. Error: {e}"
-                )
+                raise WorkflowYAMLLoaderException(f"Connection '{conn_id}' data is invalid. Error: {e}")
 
             connections[conn_id] = connection
 
@@ -113,7 +111,7 @@ class WorkflowYAMLLoader:
         try:
             return Prompt(**prompt_init_data)
         except Exception as e:
-            raise WorkflowYAMLLoaderException(f"Prompt data is invalid. Data: {prompt_init_data}. " f"Error: {e}")
+            raise WorkflowYAMLLoaderException(f"Prompt '{prompt_init_data.get('id')}' data is invalid. Error: {e}")
 
     @classmethod
     def get_prompts(cls, data: dict[str, dict]) -> dict[str, Prompt]:
@@ -282,19 +280,19 @@ class WorkflowYAMLLoader:
                 dependency = NodeDependency(**dependency_init_data)
             except Exception as e:
                 raise WorkflowYAMLLoaderException(
-                    f"Dependency data for node '{node_id}' is invalid. Data: {dependency_data}. Error: {e}"
+                    f"Dependency '{dependency_data.get('node')}' data for node '{node_id}' " f"is invalid. Error: {e}"
                 )
 
             if dependency.option:
                 if not (dep_options := getattr(dependency_node, "options", [])):
                     raise WorkflowYAMLLoaderException(
-                        f"Dependency '{dependency.node}' with option '{dependency.option}' "
+                        f"Dependency '{dependency.node.id}' with option '{dependency.option}' "
                         f"for node '{node_id}' not found"
                     )
 
                 if not any(opt.id == dependency.option for opt in dep_options):
                     raise WorkflowYAMLLoaderException(
-                        f"Dependency '{dependency.node}' with option '{dependency.option}' "
+                        f"Dependency '{dependency.node.id}' with option '{dependency.option}' "
                         f"for node '{node_id}' not found"
                     )
 
@@ -479,7 +477,7 @@ class WorkflowYAMLLoader:
                     node.is_postponed_component_init = False
 
             except Exception as e:
-                raise WorkflowYAMLLoaderException(f"Node '{node_id}' data is invalid. Data: {node_data}. Error: {e}")
+                raise WorkflowYAMLLoaderException(f"Node '{node_id}' data is invalid. Error: {e}")
 
             new_nodes[node_id] = node
 
@@ -621,7 +619,7 @@ class WorkflowYAMLLoader:
                 continue
 
             if flow_id in new_flows:
-                raise WorkflowYAMLLoaderException(f"Flow {flow_id} already exists")
+                raise WorkflowYAMLLoaderException(f"Flow '{flow_id}' already exists")
 
             flow_node_ids = flow_data.get("nodes", [])
             flow_node_ids = set(flow_node_ids)
@@ -648,7 +646,7 @@ class WorkflowYAMLLoader:
             try:
                 flow = Flow(**flow_init_data)
             except Exception as e:
-                raise WorkflowYAMLLoaderException(f"Flow '{flow_id}' data is invalid. Data: {flow_data}. Error: {e}")
+                raise WorkflowYAMLLoaderException(f"Flow '{flow_id}' data is invalid. Error: {e}")
 
             new_flows[flow_id] = flow
         return new_flows
@@ -722,7 +720,7 @@ class WorkflowYAMLLoader:
             try:
                 wf = Workflow(id=wf_id, flow=flow, version=version)
             except Exception as e:
-                raise WorkflowYAMLLoaderException(f"Workflow '{wf_id}' data is invalid. Data: {wf_data}. Error: {e}")
+                raise WorkflowYAMLLoaderException(f"Workflow '{wf_id}' data is invalid. Error: {e}")
 
             workflows[wf_id] = wf
         return workflows
