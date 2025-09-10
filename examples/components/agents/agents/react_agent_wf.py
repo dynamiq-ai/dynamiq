@@ -6,7 +6,7 @@ from dynamiq.connections import E2B
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAITextEmbedder
 from dynamiq.nodes.retrievers import WeaviateDocumentRetriever
 from dynamiq.nodes.retrievers.retriever import VectorStoreRetriever
@@ -14,6 +14,7 @@ from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import WeaviateVectorStore
 from dynamiq.utils import JsonWorkflowEncoder
@@ -40,19 +41,19 @@ def run(inputs):
 """
 
 
-def setup_react_agent() -> ReActAgent:
+def setup_react_agent() -> Agent:
     """
     Set up and return a ReAct agent with specified LLM and tools.
 
     Returns:
-        ReActAgent: Configured ReAct agent.
+        Agent: Configured ReAct agent.
     """
     llm = setup_llm()
 
     # Create tools
     tool_search = ScaleSerpTool(connection=ScaleSerp())
 
-    return ReActAgent(
+    return Agent(
         name="ReAct Agent - Children Teacher",
         id="react",
         llm=llm,
@@ -61,12 +62,12 @@ def setup_react_agent() -> ReActAgent:
     )
 
 
-def setup_react_agent_coding() -> ReActAgent:
+def setup_react_agent_coding() -> Agent:
     """
     Set up and return a ReAct agent with specified LLM and tools.
 
     Returns:
-        ReActAgent: Configured ReAct agent.
+        Agent: Configured ReAct agent.
     """
     llm = setup_llm()
 
@@ -76,7 +77,7 @@ def setup_react_agent_coding() -> ReActAgent:
         default_packages="",
     )
 
-    return ReActAgent(
+    return Agent(
         name="ReAct Agent - Children Teacher",
         id="react",
         llm=llm,
@@ -85,12 +86,12 @@ def setup_react_agent_coding() -> ReActAgent:
     )
 
 
-def setup_react_agent_http_python() -> ReActAgent:
+def setup_react_agent_http_python() -> Agent:
     """
     Set up and return a ReAct agent with specified LLM and tools.
 
     Returns:
-        ReActAgent: Configured ReAct agent.
+        Agent: Configured ReAct agent.
     """
     llm = setup_llm()
 
@@ -118,7 +119,7 @@ def setup_react_agent_http_python() -> ReActAgent:
     )
 
     # Create the agent with the PythonTool
-    agent = ReActAgent(
+    agent = Agent(
         name="AI Agent",
         llm=llm,
         tools=[web_request_tool, api_call],
@@ -128,7 +129,7 @@ def setup_react_agent_http_python() -> ReActAgent:
     return agent
 
 
-def setup_react_agent_rag() -> ReActAgent:
+def setup_react_agent_rag() -> Agent:
     text_embedder = OpenAITextEmbedder(model="text-embedding-3-small")
     retriever_dubai = WeaviateDocumentRetriever(top_k=2, vector_store=WeaviateVectorStore(index_name="Dubai"))
     retriever_customs = WeaviateDocumentRetriever(
@@ -151,7 +152,7 @@ def setup_react_agent_rag() -> ReActAgent:
     llm = setup_llm()
 
     # Create the agent with tools and configuration
-    agent = ReActAgent(
+    agent = Agent(
         name="React Agent",
         llm=llm,
         tools=[tool_retrieval_rta, tool_retrieval_sports],
@@ -162,7 +163,7 @@ def setup_react_agent_rag() -> ReActAgent:
 
 
 def run_workflow(
-    agent: ReActAgent = setup_react_agent_http_python(), input_prompt: str = QUERY_FOR_HTTP_TOOL
+    agent: Agent = setup_react_agent_http_python(), input_prompt: str = QUERY_FOR_HTTP_TOOL
 ) -> tuple[str, dict]:
     """
     Execute a workflow using the ReAct agent to process a predefined query.

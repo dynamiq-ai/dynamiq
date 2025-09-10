@@ -11,7 +11,7 @@ connections:
 
 nodes:
   chat-agent:
-    type: dynamiq.nodes.agents.simple.SimpleAgent
+    type: dynamiq.nodes.agents.Agent
     llm:
       id: chat-agent-llm
       type: dynamiq.nodes.llms.OpenAI

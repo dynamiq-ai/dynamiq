@@ -1,5 +1,5 @@
 from dynamiq.connections import E2B
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from examples.llm_setup import setup_llm
 
@@ -16,7 +16,7 @@ if __name__ == "__main__":
     llm = setup_llm()
 
     # Create the agent with tools and configuration
-    agent = ReActAgent(name="React Agent", llm=llm, tools=[tool], role=AGENT_ROLE)
+    agent = Agent(name="React Agent", llm=llm, tools=[tool], role=AGENT_ROLE)
 
     result_dice_game = agent.run(
         input_data={

@@ -5,7 +5,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import Weaviate as WeaviateConnection
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.weaviate import Weaviate as WeaviateMemoryBackend
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.llms import OpenAI as OpenAI_LLM
 
@@ -35,7 +35,7 @@ def setup_llm_and_embedder():
 
 
 def setup_agent():
-    """Sets up the SimpleAgent with Weaviate memory."""
+    """Sets up the Agent with Weaviate memory."""
     llm, embedder = setup_llm_and_embedder()
 
     try:
@@ -57,7 +57,7 @@ def setup_agent():
     memory = Memory(backend=weaviate_backend, message_limit=MEMORY_MESSAGE_LIMIT)
 
     AGENT_ROLE = "Helpful assistant that remembers previous conversations using Weaviate."
-    agent = SimpleAgent(
+    agent = Agent(
         name="ChatAgentWeaviate",
         llm=llm,
         role=AGENT_ROLE,
@@ -67,7 +67,7 @@ def setup_agent():
     return agent
 
 
-def chat_loop(agent: SimpleAgent):
+def chat_loop(agent: Agent):
     """Runs the main chat loop."""
     print("\nWelcome to the AI Chat (Weaviate Backend)! (Type 'exit' to end)")
 

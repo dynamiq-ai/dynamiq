@@ -4,9 +4,10 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import E2B, Exa
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.exa_search import ExaTool
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
@@ -34,12 +35,12 @@ EXAMPLE_QUERY = (
 )
 
 
-def setup_multi_tool_agent() -> ReActAgent:
+def setup_multi_tool_agent() -> Agent:
     """
     Set up and return a ReAct agent with search and code interpreter tools.
 
     Returns:
-        ReActAgent: Configured ReAct agent with multi-tool capabilities.
+        Agent: Configured ReAct agent with multi-tool capabilities.
     """
     # Initialize connections
     conn_code = E2B()
@@ -53,7 +54,7 @@ def setup_multi_tool_agent() -> ReActAgent:
     llm = setup_llm(model_provider="gpt", model_name="o3-mini", temperature=0.2)
 
     # Create agent
-    agent = ReActAgent(
+    agent = Agent(
         name="MultiToolAgent",
         id="MultiToolAgent",
         llm=llm,
@@ -66,7 +67,7 @@ def setup_multi_tool_agent() -> ReActAgent:
     return agent
 
 
-def run_workflow(agent: ReActAgent = setup_multi_tool_agent(), input_prompt: str = EXAMPLE_QUERY) -> tuple[str, dict]:
+def run_workflow(agent: Agent = setup_multi_tool_agent(), input_prompt: str = EXAMPLE_QUERY) -> tuple[str, dict]:
     """
     Execute a workflow using the multi-tool ReAct agent to process a query.
 

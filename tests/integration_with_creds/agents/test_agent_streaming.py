@@ -7,9 +7,9 @@ from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections.managers import get_connection_manager
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingMode
 
@@ -41,7 +41,7 @@ def streaming_event():
 
 @pytest.fixture(scope="module")
 def react_agent_with_all_streaming(openai_llm, agent_role, streaming_event):
-    agent = ReActAgent(
+    agent = Agent(
         name="AllStreamingTestAgent",
         id="all_streaming_test_agent",
         llm=openai_llm,
@@ -61,7 +61,7 @@ def react_agent_with_all_streaming(openai_llm, agent_role, streaming_event):
 
 @pytest.fixture(scope="module")
 def react_agent_with_final_streaming(openai_llm, agent_role, streaming_event):
-    agent = ReActAgent(
+    agent = Agent(
         name="FinalStreamingTestAgent",
         id="final_streaming_test_agent",
         llm=openai_llm,
@@ -81,7 +81,7 @@ def react_agent_with_final_streaming(openai_llm, agent_role, streaming_event):
 
 @pytest.fixture(scope="module")
 def simple_agent_with_streaming(openai_llm, agent_role, streaming_event):
-    agent = SimpleAgent(
+    agent = Agent(
         name="SimpleStreamingAgent",
         id="simple_streaming_agent",
         llm=openai_llm,
@@ -121,7 +121,7 @@ def collect_streaming_events(streaming_iterator, workflow_id):
 
 @pytest.mark.integration
 def test_react_agent_all_streaming(react_agent_with_all_streaming, streaming_event):
-    """Test streaming functionality with ReActAgent in ALL mode."""
+    """Test streaming functionality with Agent in ALL mode."""
     with get_connection_manager():
         streaming = StreamingIteratorCallbackHandler()
 
@@ -149,7 +149,7 @@ def test_react_agent_all_streaming(react_agent_with_all_streaming, streaming_eve
 
 @pytest.mark.integration
 def test_react_agent_final_streaming(react_agent_with_final_streaming, streaming_event):
-    """Test streaming functionality with ReActAgent in FINAL mode."""
+    """Test streaming functionality with Agent in FINAL mode."""
     with get_connection_manager():
         streaming = StreamingIteratorCallbackHandler()
 
@@ -183,7 +183,7 @@ def test_react_agent_final_streaming(react_agent_with_final_streaming, streaming
 
 @pytest.mark.integration
 def test_simple_agent_streaming(simple_agent_with_streaming, streaming_event):
-    """Test streaming functionality with SimpleAgent."""
+    """Test streaming functionality with Agent."""
     with get_connection_manager():
         streaming = StreamingIteratorCallbackHandler()
 

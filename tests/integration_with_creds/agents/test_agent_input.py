@@ -3,8 +3,9 @@ import pytest
 from dynamiq import Workflow
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
@@ -19,7 +20,7 @@ def test_react_agent_without_tools_or_memory():
         temperature=0,
     )
 
-    agent = ReActAgent(
+    agent = Agent(
         name="TestReactAgent",
         id="test_react_agent",
         llm=llm,
@@ -66,8 +67,8 @@ def test_llm(openai_connection):
 
 @pytest.fixture
 def test_react_agent(test_llm):
-    """Provides a configured ReActAgent instance."""
-    return ReActAgent(
+    """Provides a configured Agent instance."""
+    return Agent(
         name="TestReactAgentInWorkflow",
         id="test_react_agent_workflow_node",
         llm=test_llm,
@@ -81,7 +82,7 @@ def test_react_agent(test_llm):
 
 @pytest.fixture
 def test_workflow(test_react_agent):
-    """Provides a Workflow containing the test ReActAgent."""
+    """Provides a Workflow containing the test Agent."""
     return Workflow(flow=Flow(nodes=[test_react_agent]))
 
 
@@ -104,12 +105,12 @@ def run_config():
 @pytest.mark.unit
 def test_react_agent_in_workflow(
     test_workflow: Workflow,
-    test_react_agent: ReActAgent,
+    test_react_agent: Agent,
     agent_input_data: dict,
     run_config: RunnableConfig,
 ):
     """
-    Tests running a basic ReActAgent (no tools/memory) within a Workflow.
+    Tests running a basic Agent (no tools/memory) within a Workflow.
     Verifies that the workflow executes successfully and the agent produces the expected output.
     """
     logger.info("--- Running test_react_agent_in_workflow ---")
@@ -161,7 +162,7 @@ def test_react_agent_role_with_curly_braces_json_example(test_llm):
         "```json\n{'object':'...'}```"
     )
 
-    agent = ReActAgent(
+    agent = Agent(
         name="TestReactAgentRoleCurlyBraces",
         id="test_react_agent_role_curly_braces",
         llm=test_llm,
@@ -198,7 +199,7 @@ def test_react_agent_role_with_double_braces_and_raw_block(test_llm):
         "Also, reference the current task inline: {{ input }}\n"
     )
 
-    agent = ReActAgent(
+    agent = Agent(
         name="TestReactAgentRoleMixed",
         id="test_react_agent_role_mixed",
         llm=test_llm,
@@ -233,7 +234,7 @@ def test_react_agent_role_double_braces_visible_in_prompt(test_llm):
         "Do not attempt to interpret it."
     )
 
-    agent = ReActAgent(
+    agent = Agent(
         name="TestReactAgentRoleLiteral",
         id="test_react_agent_role_literal",
         llm=test_llm,

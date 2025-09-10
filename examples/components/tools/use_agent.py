@@ -1,5 +1,5 @@
 from dynamiq.connections import Http as HttpConnection
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
 from dynamiq.nodes.tools.python import Python
 from examples.llm_setup import setup_llm
@@ -39,7 +39,7 @@ if __name__ == "__main__":
     )
 
     # Create the agent with the PythonTool
-    agent = ReActAgent(
+    agent = Agent(
         name="AI Agent",
         llm=llm,
         tools=[web_request_tool, api_call],

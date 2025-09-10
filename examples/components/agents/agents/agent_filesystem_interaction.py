@@ -2,8 +2,9 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools import FileReadTool, FileWriteTool
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -21,12 +22,12 @@ Read the content of the file and return it.
 """
 
 
-def setup_agent() -> ReActAgent:
+def setup_agent() -> Agent:
     """
     Set up and return a ReAct agent with filesystem tools and core memory tools enabled.
 
     Returns:
-        ReActAgent: Configured ReAct agent with filesystem and memory capabilities.
+        Agent: Configured ReAct agent with filesystem and memory capabilities.
     """
 
     llm = setup_llm(model_provider="claude", model_name="claude-3-5-sonnet-20241022", temperature=0.2)
@@ -35,7 +36,7 @@ def setup_agent() -> ReActAgent:
     read_tool = FileReadTool(file_store=file_store)
     write_tool = FileWriteTool(file_store=file_store)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="AgentFileInteractionWithMemory",
         id="AgentFileInteractionWithMemory",
         llm=llm,
@@ -49,7 +50,7 @@ def setup_agent() -> ReActAgent:
 
 
 def run_workflow(
-    agent: ReActAgent = None, input_prompt: str = EXAMPLE_QUERY, workflow_type: str = "filesystem"
+    agent: Agent = None, input_prompt: str = EXAMPLE_QUERY, workflow_type: str = "filesystem"
 ) -> tuple[str, dict, list]:
     """
     Run the agent workflow for either filesystem operations or memory operations.
