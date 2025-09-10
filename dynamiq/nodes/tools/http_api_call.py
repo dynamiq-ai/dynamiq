@@ -12,7 +12,7 @@ from dynamiq.nodes.agents.exceptions import ActionParsingException, ToolExecutio
 from dynamiq.nodes.agents.utils import FileMappedInput
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file_storage.base import FileInfo
+from dynamiq.storages.file.base import FileInfo
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_HTTP = """Makes HTTP API requests with support for all methods and configurable parameters.
@@ -159,6 +159,7 @@ class HttpApiCall(ConnectionNode):
     url: str = ""
     method: HTTPMethod | None = None
     response_type: ResponseType | str | None = ResponseType.RAW
+    is_files_allowed: bool = True
     input_schema: ClassVar[type[HttpApiCallInputSchema]] = HttpApiCallInputSchema
 
     def execute(self, input_data: HttpApiCallInputSchema, config: RunnableConfig = None, **kwargs):

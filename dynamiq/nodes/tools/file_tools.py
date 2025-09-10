@@ -159,7 +159,9 @@ class FileWriteTool(Node):
 class FileListInputSchema(BaseModel):
     """Schema for file list input parameters."""
 
-    file_path: str = Field(default="", description="Path of the file to list. Default is the root path.")
+    file_path: str = Field(
+        default="", description="Path of the file to list. Default is the root path. Keep empty to list all files."
+    )
     recursive: bool = Field(default=True, description="Whether to list files recursively. Default is True.")
 
 

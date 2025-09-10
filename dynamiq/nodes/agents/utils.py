@@ -18,7 +18,7 @@ from dynamiq.prompts import (
     VisionMessageImageURL,
     VisionMessageTextContent,
 )
-from dynamiq.storages.file_storage.base import FileInfo
+from dynamiq.storages.file.base import FileInfo
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import CHARS_PER_TOKEN
 

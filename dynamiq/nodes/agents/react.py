@@ -26,7 +26,6 @@ from dynamiq.nodes.agents.utils import (
 )
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
-from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
@@ -717,13 +716,6 @@ class ReActAgent(Agent):
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if self.file_store:
-            self.tools.append(FileReadTool(file_store=self.file_store))
-            self.tools.append(FileWriteTool(file_store=self.file_store))
-            self.tools.append(FileListTool(file_store=self.file_store))
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """

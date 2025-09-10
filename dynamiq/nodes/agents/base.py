@@ -14,16 +14,19 @@ from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
+    FileMappedInput,
     ToolCacheEntry,
     create_message_from_input,
     process_tool_output_for_agent,
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.file.base import FileStore
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
 
@@ -168,11 +171,6 @@ You are AI powered assistant.
 {%- if tools %}
 # AVAILABLE TOOLS
 {{tools}}
-{%- endif %}
-
-{%- if files %}
-# USER UPLOADS
-Files provided by user: {{files}}
 {%- endif %}
 
 {%- if output_format %}
@@ -327,7 +325,12 @@ class Agent(Node):
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
-    file_store: FileStore | None = Field(default=None, description="Filesystem storage to use for agent.")
+    file_store: FileStore | None = Field(
+        default_factory=InMemoryFileStore, description="Filesystem storage to use for agent."
+    )
+    enable_file_store_modification: bool = Field(
+        default=False, description="Whether to enable file store tools for the agent."
+    )
 
     input_message: Message | VisionMessage | None = None
     role: str | None = ""
@@ -396,7 +399,14 @@ class Agent(Node):
                 self._mcp_server_tool_ids.extend([subtool.id for subtool in subtools])
             else:
                 expanded_tools.append(tool)
+
         self.tools = expanded_tools
+
+        if self.enable_file_store_modification:
+            self.tools.append(FileWriteTool(file_store=self.file_store))
+
+        self.tools.append(FileReadTool(file_store=self.file_store))
+        self.tools.append(FileListTool(file_store=self.file_store))
 
         self._init_prompt_blocks()
 
@@ -469,13 +479,11 @@ class Agent(Node):
         self._prompt_blocks = {
             "date": "{{ date }}",
             "tools": "{{ tool_description }}",
-            "files": "{{ file_description }}",
             "instructions": "",
             "context": "{{ context }}",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
-            "file_description": self.file_description,
             "date": datetime.now().strftime("%d %B %Y"),
         }
 
@@ -582,8 +590,7 @@ class Agent(Node):
 
         files = input_data.files
         if files:
-            self.files = self._ensure_named_files(files)
-            self._prompt_variables["file_description"] = self.file_description
+            self._ensure_named_files(files)
 
         if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
@@ -594,26 +601,22 @@ class Agent(Node):
 
         result = self._run_agent(input_message, history_messages, config=config, **kwargs)
 
-        if isinstance(result, dict) and "files" in result:
-            content = result["content"]
-        else:
-            content = result
-
         if use_memory:
-            self.memory.add(role=MessageRole.ASSISTANT, content=content, metadata=custom_metadata)
+            self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
 
         execution_result = {
-            "content": content,
+            "content": result,
             "intermediate_steps": self._intermediate_steps,
         }
 
-        if not self.file_store.is_empty():
+        if self.file_store and not self.file_store.is_empty():
             execution_result["files"] = self.file_store.list_files_bytes()
             logger.info(
-                f"Agent {self.name} - {self.id}: returning {len(execution_result['files'])} accumulated file(s)"
+                f"Agent {self.name} - {self.id}: returning {len(execution_result['files'])}"
+                " accumulated file(s) in FileStore"
             )
 
-        logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(content)[:200]}...")
+        logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
         return execution_result
 
@@ -843,6 +846,9 @@ class Agent(Node):
 
     def _run_tool(self, tool: Node, tool_input: dict, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
+
+        print("Files in filestorage")
+        print(self.file_store._files.keys())
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
@@ -850,15 +856,16 @@ class Agent(Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
-        for _, field in tool.input_schema.model_fields.items():
-            if getattr(field, "map_from_storage", False):
-                if isinstance(merged_input[field.name], dict):
-                    merged_input[field.name] = {
-                        filename: self.file_store.retrieve(file_id)
-                        for filename, file_id in merged_input[field.name].items()
-                    }
-                else:
-                    raise ValueError(f"Unsupported type for {field.name}: {type(merged_input[field.name])}")
+        if self.file_store and not self.file_store.is_empty() and tool.is_files_allowed:
+            print("File store is not empty and tool is allowed to access files")
+            for field_name, field in tool.input_schema.model_fields.items():
+                if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
+                    if field_name in merged_input:
+                        merged_input[field_name] = FileMappedInput(
+                            input=merged_input[field_name], filestorage=self.file_store.list_files()
+                        )
+                    else:
+                        merged_input[field_name] = self.file_store.list_files()
 
         if tool_params:
             debug_info = []
@@ -902,10 +909,43 @@ class Agent(Node):
         tool_result_output_content = tool_result.output.get("content")
 
         if isinstance(tool_result.output, dict) and "files" in tool_result.output:
-            tool_files = tool_result.output.get("files", {})
+            tool_files = tool_result.output.get("files", [])
             if tool_files:
-                self.file_store.store(tool_files)
-                logger.info(f"Tool '{tool.name}' generated {len(tool_files)} file(s): {list(tool_files.keys())}")
+                stored_files = []
+                for file in tool_files:
+                    if isinstance(file, io.BytesIO):
+                        # Handle BytesIO objects with metadata
+                        file_name = getattr(file, "name", f"file_{id(file)}.bin")
+                        file_description = getattr(file, "description", "Tool-generated file")
+                        content_type = getattr(file, "content_type", "application/octet-stream")
+
+                        # Read content from BytesIO
+                        content = file.read()
+                        file.seek(0)  # Reset position for potential future reads
+
+                        # Store in file_store
+                        self.file_store.store(
+                            file_path=file_name,
+                            content=content,
+                            content_type=content_type,
+                            metadata={"description": file_description, "source": "tool_generated"},
+                        )
+                        stored_files.append(file_name)
+                    elif isinstance(file, bytes):
+                        file_name = f"file_{id(file)}.bin"
+                        file_description = f"Tool-{tool.name}-generated file"
+                        content_type = "application/octet-stream"
+                        self.file_store.store(
+                            file_path=file_name,
+                            content=file,
+                            content_type=content_type,
+                            metadata={"description": file_description, "source": "tool_generated"},
+                        )
+                        stored_files.append(file_name)
+                    else:
+                        logger.warning(f"Unsupported file type from tool '{tool.name}': {type(file)}")
+
+                logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
 
         tool_result_content_processed = process_tool_output_for_agent(
             content=tool_result_output_content,
@@ -917,7 +957,7 @@ class Agent(Node):
 
         return tool_result_content_processed
 
-    def _ensure_named_files(self, files):
+    def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
         """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
         named = []
         for i, f in enumerate(files):
@@ -974,18 +1014,6 @@ class Agent(Node):
             if self.tools
             else ""
         )
-
-    @property
-    def file_description(self) -> str:
-        """Returns a description of the files available to the agent."""
-        if self.files:
-            file_description = "You can work with the following files:\n"
-            for file in self.files:
-                name = getattr(file, "name", "Unnamed file")
-                description = getattr(file, "description", "No description")
-                file_description += f"<file>: {name} - {description} <\\file>\n"
-            return file_description
-        return ""
 
     @property
     def tool_names(self) -> str:

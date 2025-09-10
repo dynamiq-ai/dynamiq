@@ -12,7 +12,7 @@ from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file_storage.base import FileInfo
+from dynamiq.storages.file.base import FileInfo
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_E2B = """Executes Python code and shell commands in a secure cloud sandbox environment.
@@ -30,6 +30,11 @@ Always use print() statements to display results - code without output will fail
 Specify required packages in the 'packages' parameter.
  Variables and imports persist between Python executions in the same session.
 
+-File Output Strategy:-
+To return files back to the user, save them in the /home/user/data directory.
+Files saved in this directory will be automatically collected and returned.
+Use absolute paths like /home/user/data/filename.ext when saving files.
+
 -Parameter Guide:-
 - packages: Comma-separated list of Python packages to install
 - python: Python code to execute (must include print statements)
@@ -37,11 +42,13 @@ Specify required packages in the 'packages' parameter.
 - files: Binary files to upload for processing
 
 -Examples:-
-- Data analysis: {"python": "import pandas as pd\\ndf = pd.read_csv('/home/user/data/file.csv')\\nprint(df.head())"}
+- Data analysis: {"python": "import pandas as pd\\ndf = pd.read_csv('file.csv')\\nprint(df.head())"}
 - Next execution: {"python": "print(df.describe())"}
 - File processing: {"packages": "requests",
 "python": "import requests\\nresponse = requests.get('https://api.example.com')\\nprint(response.json())"}
-- System operations: {"shell_command": "ls -la /home/user && df -h"}"""
+- System operations: {"shell_command": "ls -la /home/user && df -h"}
+- File generation: {"python": "import pandas as pd\\ndf = pd.DataFrame({'A': [1,2,3], 'B': [4,5,6]})\\n
+df.to_csv('/home/user/data/output.csv')\\nprint('File saved to /home/user/data/output.csv')"}"""
 
 
 def detect_mime_type(file_content: bytes, file_path: str) -> str:
@@ -233,7 +240,7 @@ class E2BInterpreterInputSchema(BaseModel):
     files: list[FileData] | None = Field(
         default=None,
         description="Files to upload to the sandbox.",
-        json_schema_extra={"is_accessible_to_agent": False},
+        json_schema_extra={"is_accessible_to_agent": False, "map_from_storage": True},
     )
     params: dict[str, Any] = Field(
         default_factory=dict,
@@ -263,7 +270,7 @@ class E2BInterpreterInputSchema(BaseModel):
 
     @field_validator("files", mode="before")
     @classmethod
-    def files_validator(cls, files: list[FileData | bytes | io.BytesIO | FileInfo] | dict[str, Any], **kwargs):
+    def files_validator(cls, files: list[FileData | bytes | io.BytesIO | FileInfo], **kwargs):
         """Validate and process files."""
         if files in (None, [], ()):
             return None
@@ -300,6 +307,7 @@ class E2BInterpreterTool(ConnectionNode):
     timeout: int = Field(default=600, description="Sandbox timeout in seconds (default: 600 seconds)")
     _sandbox: Sandbox | None = None
     is_files_allowed: bool = True
+
     input_schema: ClassVar[type[E2BInterpreterInputSchema]] = E2BInterpreterInputSchema
 
     def __init__(self, **kwargs):
@@ -411,9 +419,10 @@ class E2BInterpreterTool(ConnectionNode):
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
-        target_path = f"/home/user/data/{file.name}"
-        dir_path = "/".join(target_path.split("/")[:-1])
-        sandbox.commands.run(f"mkdir -p {shlex.quote(dir_path)}")
+        target_path = f"{file.name}"
+        if "/" in target_path:
+            dir_path = "/".join(target_path.split("/")[:-1])
+            sandbox.commands.run(f"mkdir -p {shlex.quote(dir_path)}")
 
         file_like_object = io.BytesIO(file.data)
         file_like_object.name = file.name
@@ -613,7 +622,7 @@ class E2BInterpreterTool(ConnectionNode):
         else:
             return False
 
-    def _collect_output_files(self, sandbox: Sandbox, base_dir: str = "/home/user/data") -> dict[str, str]:
+    def _collect_output_files(self, sandbox: Sandbox, base_dir: str = "") -> dict[str, str]:
         """
         Collect common output files from /home/user and /home/user/data directories.
 
@@ -629,7 +638,7 @@ class E2BInterpreterTool(ConnectionNode):
             extensions = ["csv", "xlsx", "xls", "txt", "json", "png", "jpg", "jpeg", "gif", "pdf", "html", "md"]
             patterns = " -o ".join([f"-name '*.{ext}'" for ext in extensions])
 
-            search_dirs = ["/home/user", "/home/user/data"]
+            search_dirs = ["/home/user/data"]
 
             for search_dir in search_dirs:
                 check_cmd = f"test -d {shlex.quote(search_dir)} && echo exists"
@@ -686,7 +695,7 @@ class E2BInterpreterTool(ConnectionNode):
         Raises:
             ToolExecutionException: If execution fails or invalid input provided.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n" f"{input_data.model_dump()}")
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n" f"{input_data.model_dump()[:300]}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -771,21 +780,39 @@ class E2BInterpreterTool(ConnectionNode):
 
             new_files = {k: v for k, v in all_files.items() if k not in uploaded_files}
 
+            # Convert files to BytesIO objects for proper storage handling
+            files_bytesio = []
             if new_files:
                 result_text += "## Generated Files (ready for download)\n\n"
                 for file_path, file_content in new_files.items():
                     if file_content.startswith("Error:"):
                         result_text += f"- {file_path}: {file_content}\n"
-                    elif file_content.startswith("data:"):
-                        mime_part = file_content.split(";")[0].replace("data:", "")
-                        base64_part = file_content.split(",", 1)[1]
-                        file_size = len(base64.b64decode(base64_part))
-                        file_name = file_path.split("/")[-1]
-                        result_text += f"- **{file_name}** ({file_size:,} bytes, {mime_part})\n"
                     else:
-                        file_name = file_path.split("/")[-1]
-                        file_size = len(base64.b64decode(file_content))
-                        result_text += f"- **{file_name}** ({file_size:,} bytes)\n"
+                        # Decode content to bytes
+                        if file_content.startswith("data:"):
+                            mime_part = file_content.split(";")[0].replace("data:", "")
+                            base64_part = file_content.split(",", 1)[1]
+                            content_bytes = base64.b64decode(base64_part)
+                            file_name = file_path.split("/")[-1]
+                            file_size = len(content_bytes)
+                            result_text += f"- **{file_name}** ({file_size:,} bytes, {mime_part})\n"
+                        else:
+                            content_bytes = base64.b64decode(file_content)
+                            file_name = file_path.split("/")[-1]
+                            file_size = len(content_bytes)
+                            result_text += f"- **{file_name}** ({file_size:,} bytes)\n"
+
+                        # Create BytesIO object with metadata
+                        file_bytesio = io.BytesIO(content_bytes)
+                        file_bytesio.name = file_name
+                        file_bytesio.description = f"Generated file from E2B sandbox: {file_path}"
+                        file_bytesio.content_type = (
+                            mime_part
+                            if file_content.startswith("data:")
+                            else detect_mime_type(content_bytes, file_path)
+                        )
+                        files_bytesio.append(file_bytesio)
+
                 result_text += "\n"
 
             if packages_installation := content.get("packages_installation"):
@@ -804,7 +831,7 @@ class E2BInterpreterTool(ConnectionNode):
 
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n" f"{str(result_text)[:200]}...")
 
-            return {"content": result_text, "files": new_files}
+            return {"content": result_text, "files": files_bytesio}
 
         return {"content": content}
 

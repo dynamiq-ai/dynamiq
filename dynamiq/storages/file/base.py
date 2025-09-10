@@ -18,6 +18,7 @@ class FileInfo(BaseModel):
     content_type: str = "text/plain"
     created_at: datetime = Field(default_factory=datetime.now)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    content: bytes = Field(default=None)
 
 
 class StorageError(Exception):

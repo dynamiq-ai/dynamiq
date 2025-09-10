@@ -1,10 +1,10 @@
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.storages.file import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
-from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
-from dynamiq.storages.file_storage import InMemoryFileStorage
 
 PORT = 5100
 
@@ -18,7 +18,7 @@ if __name__ == "__main__":
         method="POST",
         url=f"https://localhost:{PORT}/upload",
     )
-    file_storage = InMemoryFileStorage()
+    file_storage = InMemoryFileStore()
 
     file_upload_api = HttpApiCall(
         id="file-upload-api",
