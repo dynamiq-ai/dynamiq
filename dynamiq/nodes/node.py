@@ -233,7 +233,6 @@ class Node(BaseModel, Runnable, ABC):
 
     is_postponed_component_init: bool = False
     is_optimized_for_agents: bool = False
-    is_files_allowed: bool = False
 
     _output_references: NodeOutputReferences = PrivateAttr()
 

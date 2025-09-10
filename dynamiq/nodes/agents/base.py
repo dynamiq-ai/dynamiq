@@ -23,8 +23,7 @@ from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.storages.file_storage.base import FileStorage
-from dynamiq.storages.file_storage.in_memory import InMemoryFileStorage
+from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
 
@@ -328,7 +327,7 @@ class Agent(Node):
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
-    filestorage: FileStorage = Field(default=InMemoryFileStorage(), description="Filesystem storage to use for agent.")
+    file_store: FileStore | None = Field(default=None, description="Filesystem storage to use for agent.")
 
     input_message: Message | VisionMessage | None = None
     role: str | None = ""
@@ -341,7 +340,6 @@ class Agent(Node):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
     _json_schema_fields: ClassVar[list[str]] = ["role"]
-    _accumulated_files: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     @classmethod
     def _generate_json_schema(
@@ -609,9 +607,11 @@ class Agent(Node):
             "intermediate_steps": self._intermediate_steps,
         }
 
-        if self._accumulated_files:
-            execution_result["files"] = self._accumulated_files
-            logger.info(f"Agent {self.name} - {self.id}: returning {len(self._accumulated_files)} accumulated file(s)")
+        if not self.file_store.is_empty():
+            execution_result["files"] = self.file_store.list_files_bytes()
+            logger.info(
+                f"Agent {self.name} - {self.id}: returning {len(execution_result['files'])} accumulated file(s)"
+            )
 
         logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(content)[:200]}...")
 
@@ -843,18 +843,7 @@ class Agent(Node):
 
     def _run_tool(self, tool: Node, tool_input: dict, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
-        if self.files:
-            if tool.is_files_allowed is True:
-                # Provide file IDs for tools that support filestorage
-                file_ids = {}
-                for file_obj in self.files:
-                    if hasattr(file_obj, "file_id"):
-                        file_ids[file_obj.name] = file_obj.file_id
-                tool_input["files"] = file_ids
-
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
-
-        # Pass filestorage to tools that need it
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
@@ -865,7 +854,7 @@ class Agent(Node):
             if getattr(field, "map_from_storage", False):
                 if isinstance(merged_input[field.name], dict):
                     merged_input[field.name] = {
-                        filename: self.filestorage.retrieve(file_id)
+                        filename: self.file_store.retrieve(file_id)
                         for filename, file_id in merged_input[field.name].items()
                     }
                 else:
@@ -915,7 +904,7 @@ class Agent(Node):
         if isinstance(tool_result.output, dict) and "files" in tool_result.output:
             tool_files = tool_result.output.get("files", {})
             if tool_files:
-                self._accumulated_files.update(tool_files)
+                self.file_store.store(tool_files)
                 logger.info(f"Tool '{tool.name}' generated {len(tool_files)} file(s): {list(tool_files.keys())}")
 
         tool_result_content_processed = process_tool_output_for_agent(
@@ -929,7 +918,7 @@ class Agent(Node):
         return tool_result_content_processed
 
     def _ensure_named_files(self, files):
-        """Ensure all uploaded files have name and description attributes and store them in filestorage if available."""
+        """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
         named = []
         for i, f in enumerate(files):
             if isinstance(f, bytes):
@@ -937,19 +926,15 @@ class Agent(Node):
                 bio.name = f"file_{i}.bin"
                 bio.description = "User-provided file"
 
-                # Store in filestorage
                 try:
-                    file_id = self.filestorage.store(
+                    self.file_store.store(
                         file_path=bio.name,
                         content=f,
                         content_type="application/octet-stream",
                         metadata={"description": bio.description, "source": "user_upload"},
                     )
-                    # Store the file ID for later retrieval
-                    bio.file_id = file_id.id
-                    self._accumulated_files[file_id.id] = file_id
                 except Exception as e:
-                    logger.warning(f"Failed to store file {bio.name} in filestorage: {e}")
+                    logger.warning(f"Failed to store file {bio.name} in file_store: {e}")
 
                 named.append(bio)
             elif isinstance(f, io.BytesIO):
@@ -958,23 +943,18 @@ class Agent(Node):
                 if not hasattr(f, "description"):
                     f.description = "User-provided file"
 
-                # Store in filestorage
                 try:
-                    # Read the content for storage
                     content = f.read()
-                    f.seek(0)  # Reset position
+                    f.seek(0)
 
-                    file_id = self.filestorage.store(
+                    self.file_store.store(
                         file_path=f.name,
                         content=content,
                         content_type="application/octet-stream",
                         metadata={"description": f.description, "source": "user_upload"},
                     )
-                    # Store the file ID for later retrieval
-                    f.file_id = file_id.id
-                    self._accumulated_files[file_id.id] = file_id
                 except Exception as e:
-                    logger.warning(f"Failed to store file {f.name} in filestorage: {e}")
+                    logger.warning(f"Failed to store file {f.name} in file_store: {e}")
 
                 named.append(f)
             else:
@@ -1022,7 +1002,6 @@ class Agent(Node):
         self._intermediate_steps = {}
         self._run_depends = []
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
-        self._accumulated_files = {}
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """Generates the prompt using specified blocks and variables."""

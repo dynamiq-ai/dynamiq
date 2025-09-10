@@ -3,6 +3,7 @@
 import mimetypes
 import os
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -20,6 +21,23 @@ class InMemoryFileStorage(FileStorage):
     def __init__(self):
         """Initialize the in-memory storage."""
         self._files: dict[str, dict[str, Any]] = {}
+
+    def list_files_bytes(self) -> list[BytesIO]:
+        """List files in storage and return the content as bytes."""
+        files_list = []
+
+        for file_path in self._files.keys():
+            files_list.append(
+                BytesIO(
+                    self._files[file_path]["content"],
+                    content_type=self._files[file_path]["content_type"],
+                    created_at=self._files[file_path]["created_at"],
+                    metadata=self._files[file_path]["metadata"],
+                    name=self._files[file_path]["name"],
+                )
+            )
+
+        return files_list
 
     def store(
         self,

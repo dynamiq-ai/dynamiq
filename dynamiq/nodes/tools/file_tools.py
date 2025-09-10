@@ -38,7 +38,7 @@ class FileReadTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "FileReadTool"
+    name: str = "File Read Tool"
     description: str = """
         Reads files from storage based on the provided file path.
         Usage Examples:

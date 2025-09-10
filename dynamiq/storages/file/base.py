@@ -2,6 +2,7 @@
 
 import abc
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -53,6 +54,15 @@ class FileStore(abc.ABC):
     This interface provides a unified way to interact with different
     file storage backends (in-memory, file system, cloud storage, etc.).
     """
+
+    @abc.abstractmethod
+    def list_files_bytes(self) -> list[BytesIO]:
+        """List files in storage and return the content as bytes in BytesIO objects.
+
+        Returns:
+            List of BytesIO objects
+        """
+        pass
 
     @abc.abstractmethod
     def store(

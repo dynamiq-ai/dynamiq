@@ -30,7 +30,6 @@ from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWrite
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file.base import FileStore
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
@@ -715,7 +714,6 @@ class ReActAgent(Agent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
-    file_store: FileStore | None = Field(default=None, description="Filesystem storage to use for agent.")
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
@@ -811,7 +809,7 @@ class ReActAgent(Agent):
             thought_match = re.search(thought_pattern, output, re.DOTALL)
             thought = thought_match.group(1).strip() if thought_match else None
 
-            action_pattern = r'Action:\s*(.*?)\nAction Input:\s*([\[{][\s\S]*[\]}])'
+            action_pattern = r"Action:\s*(.*?)\nAction Input:\s*((?:[\[{][\s\S]*?[\]}]))"
 
             remaining_text = output
             actions = []
