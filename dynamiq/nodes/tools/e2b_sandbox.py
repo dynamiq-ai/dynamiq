@@ -187,7 +187,7 @@ class FileData(BaseModel):
     description: str
 
 
-def handle_file_upload(files: list[bytes | io.BytesIO | FileData]) -> list[FileData]:
+def handle_file_upload(files: list[bytes | io.BytesIO | FileData | FileInfo]) -> list[FileData]:
     """
     Handles file uploading with additional metadata.
 
@@ -695,7 +695,7 @@ class E2BInterpreterTool(ConnectionNode):
         Raises:
             ToolExecutionException: If execution fails or invalid input provided.
         """
-        logger.info(f"Tool {self.name} - {self.id}: started with input:\n" f"{input_data.model_dump()[:300]}")
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n" f"{str(input_data.model_dump())[:300]}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 

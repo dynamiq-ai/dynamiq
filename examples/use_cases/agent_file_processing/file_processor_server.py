@@ -27,13 +27,7 @@ async def health_check():
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    # You can read the file content if needed
     contents = await file.read()
-
-    # Optionally save the file or process it here
-    # For example, to save:
-    # with open(f"/path/to/save/{file.filename}", "wb") as f:
-    #     f.write(contents)
 
     return JSONResponse(content={"filename": file.filename, "message": f"File received successfully {contents}"})
 

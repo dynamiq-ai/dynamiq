@@ -6,11 +6,11 @@ from dynamiq.storages.file import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
-PORT = 5100
+PORT = 5000
 
 AGENT_ROLE = "A helpful and general-purpose AI assistant"
 
-PROMPT1 = f"""Create test.txt file and upload it to the server. Return the content of the file.
+PROMPT1 = f"""Create test.txt file and upload it to the server. Return the response of server.
             Send file to http://localhost:{PORT}/upload"""
 
 if __name__ == "__main__":
@@ -39,6 +39,7 @@ if __name__ == "__main__":
         filestorage=file_storage,
         max_loops=30,
         inference_mode=InferenceMode.FUNCTION_CALLING,
+        enable_file_store_modification=True,
     )
 
     result = agent.run(input_data={"input": PROMPT1})

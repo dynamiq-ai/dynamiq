@@ -6,6 +6,7 @@ from dynamiq.connections import E2B
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
+from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
 
@@ -19,7 +20,7 @@ Generally, you follow these rules:
 """
 
 PROMPT = """
-Create text file using FileWrite tools and return it.
+Get required statistics from the file and compute them on provide csv file using E2B tool. Return makrdown report.
 """
 
 FILE_PATH = "./examples/use_cases/agents_use_cases/data/house_prices.csv"
@@ -32,6 +33,26 @@ FILE_DESCRIPTION = f"""
     - bathrooms: number of bathrooms
     - price: price of a house
 """
+
+
+statistics_requirements = '''
+import csv
+import io
+
+def run(input_data):
+    """
+    Count rows in CSV file and return the count in a simple file.
+    """
+
+    result_content = "mean, std, min, max"
+    result_file = io.BytesIO(result_content.encode('utf-8'))
+    result_file.name = "statistics.txt"
+
+    return {
+        "content": f"File with required statistics is created.",
+        "files": [result_file]
+    }
+'''
 
 
 def read_file_as_bytesio(file_path: str, filename: str = None, description: str = None) -> io.BytesIO:
@@ -65,6 +86,13 @@ def create_agent():
         ReActAgent: A configured Dynamiq ReActAgent ready to run.
     """
     tool = E2BInterpreterTool(name="code-executor", connection=E2B())
+
+    statistics_tool = Python(
+        name="statistics_tool",
+        code=statistics_requirements,
+        description="Get required statistics from the file.",
+    )
+
     llm = AnthropicLLM(
         name="claude",
         model="claude-sonnet-4-20250514",
@@ -77,7 +105,7 @@ def create_agent():
     agent_software = ReActAgent(
         name="Agent",
         llm=llm,
-        tools=[tool],
+        tools=[tool, statistics_tool],
         role=AGENT_ROLE,
         max_loops=10,
         inference_mode=InferenceMode.XML,

@@ -856,11 +856,13 @@ class Agent(Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
-        if self.file_store and not self.file_store.is_empty() and tool.is_files_allowed:
+        if self.file_store and tool.is_files_allowed:
             print("File store is not empty and tool is allowed to access files")
             for field_name, field in tool.input_schema.model_fields.items():
                 if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
+                    print("test")
                     if field_name in merged_input:
+                        print("test123")
                         merged_input[field_name] = FileMappedInput(
                             input=merged_input[field_name], filestorage=self.file_store.list_files()
                         )
@@ -929,6 +931,7 @@ class Agent(Node):
                             content=content,
                             content_type=content_type,
                             metadata={"description": file_description, "source": "tool_generated"},
+                            overwrite=True,
                         )
                         stored_files.append(file_name)
                     elif isinstance(file, bytes):
@@ -940,6 +943,7 @@ class Agent(Node):
                             content=file,
                             content_type=content_type,
                             metadata={"description": file_description, "source": "tool_generated"},
+                            overwrite=True,
                         )
                         stored_files.append(file_name)
                     else:
@@ -972,6 +976,7 @@ class Agent(Node):
                         content=f,
                         content_type="application/octet-stream",
                         metadata={"description": bio.description, "source": "user_upload"},
+                        overwrite=True,
                     )
                 except Exception as e:
                     logger.warning(f"Failed to store file {bio.name} in file_store: {e}")
@@ -992,6 +997,7 @@ class Agent(Node):
                         content=content,
                         content_type="application/octet-stream",
                         metadata={"description": f.description, "source": "user_upload"},
+                        overwrite=True,
                     )
                 except Exception as e:
                     logger.warning(f"Failed to store file {f.name} in file_store: {e}")

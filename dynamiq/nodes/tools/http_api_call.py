@@ -68,10 +68,10 @@ def handle_file_upload(input_data: dict[str, str | bytes] | FileMappedInput) -> 
     files_data = {}
     if isinstance(input_data, FileMappedInput):
         files = input_data.input
-        filestorage = input_data.filestorage
+        files_map = {f.name: f for f in input_data.filestorage}
     else:
         files = input_data
-        filestorage = None
+        files_map = {}
 
     for param_name, file in files.items():
         if isinstance(file, bytes):
@@ -81,8 +81,12 @@ def handle_file_upload(input_data: dict[str, str | bytes] | FileMappedInput) -> 
         elif isinstance(file, FileInfo):
             files_data[param_name] = file.content
         elif isinstance(file, str):
-            if filestorage:
-                files_data[param_name] = filestorage.retrieve(file)
+            if files_map:
+                print(f"Retrieving file {file} from filestorage")
+                if file in files_map:
+                    files_data[param_name] = files_map[file].content
+                else:
+                    raise ValueError(f"File {file} not found in filestorage.")
             else:
                 raise ValueError(
                     f"Error: Invalid file data type: {type(file)}. "

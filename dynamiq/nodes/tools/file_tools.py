@@ -38,7 +38,7 @@ class FileReadTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "File Read Tool"
+    name: str = "FileReadTool"
     description: str = """
         Reads files from storage based on the provided file path.
         Usage Examples:
@@ -103,7 +103,7 @@ class FileWriteTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "File Write Tool"
+    name: str = "FileWriteTool"
     description: str = """Writes files to storage based on the provided file path and content.
 
     Usage Examples:
@@ -171,7 +171,7 @@ class FileListTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "File List Tool"
+    name: str = "FileListTool"
     description: str = """Lists files in storage based on the provided file path."""
 
     file_store: FileStore = Field(..., description="File storage to list from.")
