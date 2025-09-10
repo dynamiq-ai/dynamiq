@@ -2,8 +2,10 @@ import io
 import shlex
 from typing import Any, ClassVar, Literal
 
+from e2b.exceptions import RateLimitException as E2BRateLimitException
 from e2b_code_interpreter import Sandbox
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes import NodeGroup
@@ -112,6 +114,16 @@ def handle_file_upload(files: list[bytes | io.BytesIO | FileData]) -> list[FileD
     return files_data
 
 
+class SandboxCreationErrorHandling(BaseModel):
+    max_retries: int = Field(default=5, description="Maximum number of creation attempts on rate-limit.")
+    initial_wait_seconds: float = Field(default=2.0, description="Initial wait before retry.")
+    max_wait_seconds: float = Field(default=32.0, description="Max wait used by exponential jitter backoff.")
+    exponential_base: float = Field(
+        default=2.0, description="Exponential base for backoff (2.0 means doubling each time)."
+    )
+    jitter: float = Field(default=1.0, description="Jitter factor to add randomness to retry timing.")
+
+
 class E2BInterpreterInputSchema(BaseModel):
     """Input schema for E2B interpreter tool."""
 
@@ -126,9 +138,15 @@ class E2BInterpreterInputSchema(BaseModel):
         json_schema_extra={"is_accessible_to_agent": False},
     )
     params: dict[str, Any] = Field(
-        default_factory=dict, description="Arbitrary variables to inject as Python globals before executing 'python'."
+        default_factory=dict,
+        description="Arbitrary variables to inject as Python globals before executing 'python'.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
-    env: dict[str, str] = Field(default_factory=dict, description="Environment variables for shell commands.")
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        description="Environment variables for shell commands.",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
     cwd: str = Field(default="/home/user", description="Working directory for shell commands.")
     timeout: int | None = Field(default=None, description="Override sandbox timeout for this execution (seconds)")
 
@@ -175,8 +193,11 @@ class E2BInterpreterTool(ConnectionNode):
     files: list[FileData] | None = None
     persistent_sandbox: bool = True
     timeout: int = Field(default=600, description="Sandbox timeout in seconds (default: 600 seconds)")
-    _sandbox: Sandbox | None = None
     is_files_allowed: bool = True
+    creation_error_handling: SandboxCreationErrorHandling = Field(default_factory=SandboxCreationErrorHandling)
+
+    _sandbox: Sandbox | None = None
+
     input_schema: ClassVar[type[E2BInterpreterInputSchema]] = E2BInterpreterInputSchema
 
     def __init__(self, **kwargs):
@@ -215,7 +236,7 @@ class E2BInterpreterTool(ConnectionNode):
     def _initialize_persistent_sandbox(self):
         """Initialize the persistent sandbox, install packages, and upload initial files."""
         logger.debug(f"Tool {self.name} - {self.id}: " f"Initializing Persistent Sandbox with timeout {self.timeout}s")
-        self._sandbox = Sandbox(api_key=self.connection.api_key, timeout=self.timeout)
+        self._sandbox = self._create_sandbox_with_retry()
         self._install_default_packages(self._sandbox)
         if self.files:
             self._upload_files(files=self.files, sandbox=self._sandbox)
@@ -484,7 +505,7 @@ class E2BInterpreterTool(ConnectionNode):
         if self.persistent_sandbox and self._sandbox:
             sandbox = self._sandbox
         else:
-            sandbox = Sandbox(api_key=self.connection.api_key, timeout=self.timeout)
+            sandbox = self._create_sandbox_with_retry()
             self._install_default_packages(sandbox)
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
@@ -538,6 +559,40 @@ class E2BInterpreterTool(ConnectionNode):
             return {"content": result_text}
 
         return {"content": content}
+
+    def _create_sandbox_with_retry(self) -> Sandbox:
+        """Create E2B Sandbox with tenacity retry on 429 responses.
+
+        Uses exponential backoff strategy for rate limit errors with configuration
+        from the node's error_handling settings.
+        """
+
+        @retry(
+            retry=retry_if_exception_type(E2BRateLimitException),
+            stop=stop_after_attempt(self.creation_error_handling.max_retries),
+            wait=wait_exponential_jitter(
+                initial=self.creation_error_handling.initial_wait_seconds,
+                max=self.creation_error_handling.max_wait_seconds,
+                exp_base=self.creation_error_handling.exponential_base,
+                jitter=self.creation_error_handling.jitter,
+            ),
+            reraise=True,
+        )
+        def create_sandbox() -> Sandbox:
+            try:
+                sandbox = Sandbox(api_key=self.connection.api_key, timeout=self.timeout)
+                logger.debug(f"Tool {self.name} - {self.id}: Successfully created sandbox")
+                return sandbox
+            except E2BRateLimitException:
+                logger.warning(
+                    f"Tool {self.name} - {self.id}: Sandbox creation rate-limited. "
+                    f"Retrying with exponential backoff."
+                )
+                raise
+            except Exception:
+                raise
+
+        return create_sandbox()
 
     def set_timeout(self, timeout: int) -> None:
         """
