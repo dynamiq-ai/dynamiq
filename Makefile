@@ -22,6 +22,9 @@ prepare:
 
 lint: prepare
 
+lock:
+	poetry lock --no-update
+
 test-integration:
 	pytest tests/integration
 
