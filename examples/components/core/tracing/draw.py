@@ -228,6 +228,21 @@ def draw_multi_tool_workflow_graph_in_png(
     return output
 
 
+def draw_agent_tool_workflow_graph_in_png(
+    output_path: str = os.path.join(os.path.dirname(__file__), "agent_tool_workflow_graph.png")
+) -> None:
+    from examples.components.agents.agents.use_react_agent_with_agent_tool import run_workflow
+
+    """Draw the execution graph of the agent-as-tool workflow."""
+    output, traces = run_workflow()
+
+    graph = get_graph_by_traces([run for _, run in traces.items()])
+    draw_graph_in_png(graph, output_path)
+
+    logger.info(f"Graph saved to {output_path}")
+    return output
+
+
 if __name__ == "__main__":
     draw_simple_agent_graph_in_png()
     draw_reflection_agent_graph_in_png()
@@ -238,3 +253,4 @@ if __name__ == "__main__":
     draw_simple_graph_orchestrator_graph_in_png()
     draw_graph_orchestrator_graph_in_png()
     draw_multi_tool_workflow_graph_in_png()
+    draw_agent_tool_workflow_graph_in_png()

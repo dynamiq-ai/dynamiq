@@ -3,7 +3,7 @@ import re
 import textwrap
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, ClassVar
+from typing import Any, Callable, ClassVar, Union
 
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
@@ -246,6 +246,12 @@ class ToolParams(BaseModel):
     global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
     by_name_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_name")
     by_id_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_id")
+    by_agent_name_params: dict[str, Union["ToolParams", dict[str, Any]]] = Field(
+        default_factory=dict, alias="by_agent_name"
+    )
+    by_agent_id_params: dict[str, Union["ToolParams", dict[str, Any]]] = Field(
+        default_factory=dict, alias="by_agent_id"
+    )
 
 
 class AgentInputSchema(BaseModel):
@@ -865,11 +871,24 @@ class Agent(Node):
             if self.verbose and debug_info:
                 logger.debug("\n".join(debug_info))
 
+        child_kwargs = kwargs | {"recoverable_error": True}
+        is_child_agent = isinstance(tool, Agent)
+
+        if is_child_agent and tool_params:
+            nested_tp = (
+                tool_params.by_agent_id_params.get(getattr(tool, "id", ""))
+                or tool_params.by_agent_name_params.get(getattr(tool, "name", ""))
+                or tool_params.by_agent_name_params.get(self.sanitize_tool_name(getattr(tool, "name", "")))
+            )
+            if nested_tp:
+                nested_tp = ToolParams.model_validate(nested_tp) if isinstance(nested_tp, dict) else nested_tp
+                child_kwargs = child_kwargs | {"tool_params": nested_tp}
+
         tool_result = tool.run(
             input_data=merged_input,
             config=config,
             run_depends=self._run_depends,
-            **(kwargs | {"recoverable_error": True}),
+            **child_kwargs,
         )
         self._run_depends = [NodeDependency(node=tool).to_dict()]
         if tool_result.status != RunnableStatus.SUCCESS:
