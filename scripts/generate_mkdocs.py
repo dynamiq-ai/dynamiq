@@ -8,9 +8,16 @@ def create_directory(path):
 
 
 def get_python_files(directory):
-    """Get all Python files in the specified directory, excluding __init__.py files."""
+    """Get all Python files in the specified directory, excluding __init__.py files and tests."""
     py_files = glob.glob(os.path.join(directory, "**", "*.py"), recursive=True)
-    return [file for file in py_files if "__init__.py" not in file]
+
+    def is_not_test_file(path: str) -> bool:
+        # Exclude anything under dynamiq/tests/** to avoid documenting test modules
+        parts = path.split(os.sep)
+        # Find a segment named 'tests' after the top-level package directory
+        return "tests" not in parts[1:]
+
+    return [file for file in py_files if "__init__.py" not in file and is_not_test_file(file)]
 
 
 def generate_documentation_file(file_path):
