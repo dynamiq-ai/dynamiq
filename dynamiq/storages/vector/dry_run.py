@@ -10,12 +10,12 @@ class DryRunConfig(BaseModel):
     across different vector store implementations.
 
     Attributes:
-        delete_documents: If True, the ingested documents will be cleaned up after the dry run.
-        delete_collection: If True, the created collection will be cleaned up after the dry run.
+        delete_documents: If True, the ingested documents will be deleted after the dry run.
+        delete_collection: If True, the created collection will be deleted after the dry run.
     """
 
-    delete_documents: bool = Field(default=True, description="Cleanup the ingested documents")
-    delete_collection: bool = Field(default=False, description="Cleanup the created collection")
+    delete_documents: bool = Field(default=True, description="Delete the ingested documents")
+    delete_collection: bool = Field(default=False, description="Delete the created collection")
 
 
 class DryRunMixin:
