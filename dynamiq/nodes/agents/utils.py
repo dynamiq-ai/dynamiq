@@ -29,7 +29,9 @@ class FileMappedInput(BaseModel):
     """Structure for storing file mapped inputs."""
 
     input: Any
-    filestorage: list[FileInfo]
+    filestorage: list[io.BytesIO]  # List of BytesIO objects or FileInfo objects
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
 
 
 class ChunkedToolOutput(BaseModel):

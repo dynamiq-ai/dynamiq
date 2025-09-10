@@ -1,6 +1,7 @@
 import importlib
 import io
 from copy import deepcopy
+from pickle import TRUE
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -187,6 +188,7 @@ class Python(Node):
     code: str
     use_multiple_params: bool = False
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
+    is_files_allowed: bool = True
 
     def execute(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
         """

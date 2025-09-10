@@ -7,7 +7,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from dynamiq.utils import logger
+from dynamiq.utils.logger import logger
 
 from .base import FileInfo, FileNotFoundError, FileStore, StorageError
 
@@ -57,7 +57,7 @@ class InMemoryFileStore(FileStore):
         file_path = str(file_path)
 
         if file_path in self._files and not overwrite:
-            logger.warning(f"File '{file_path}' already exists. Skipping...")
+            logger.info(f"File '{file_path}' already exists. Skipping...")
             return self._create_file_info(file_path, self._files[file_path])
 
         # Convert content to bytes

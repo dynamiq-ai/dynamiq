@@ -5,6 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, ClassVar
 
+from dynamiq.nodes.tools.python import Python
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
@@ -847,8 +848,6 @@ class Agent(Node):
     def _run_tool(self, tool: Node, tool_input: dict, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
 
-        print("Files in filestorage")
-        print(self.file_store._files.keys())
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
@@ -857,17 +856,16 @@ class Agent(Node):
         )
 
         if self.file_store and tool.is_files_allowed:
-            print("File store is not empty and tool is allowed to access files")
+            if isinstance(tool, Python):
+                merged_input["files"] = self.file_store.list_files_bytes()
             for field_name, field in tool.input_schema.model_fields.items():
                 if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
-                    print("test")
                     if field_name in merged_input:
-                        print("test123")
                         merged_input[field_name] = FileMappedInput(
-                            input=merged_input[field_name], filestorage=self.file_store.list_files()
+                            input=merged_input[field_name], filestorage=self.file_store.list_files_bytes()
                         )
                     else:
-                        merged_input[field_name] = self.file_store.list_files()
+                        merged_input[field_name] = self.file_store.list_files_bytes()
 
         if tool_params:
             debug_info = []

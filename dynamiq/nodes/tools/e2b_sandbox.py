@@ -33,9 +33,9 @@ Specify required packages in the 'packages' parameter.
  Variables and imports persist between Python executions in the same session.
 
 -File Output Strategy:-
-To return files back to the user, save them in the /home/user/data directory.
+To return files back to the user, save them in the /e2b_output directory.
 Files saved in this directory will be automatically collected and returned.
-Use absolute paths like /home/user/data/filename.ext when saving files.
+Use absolute paths like /e2b_output/filename.ext when saving files.
 
 -Parameter Guide:-
 - packages: Comma-separated list of Python packages to install
@@ -50,7 +50,7 @@ Use absolute paths like /home/user/data/filename.ext when saving files.
 "python": "import requests\\nresponse = requests.get('https://api.example.com')\\nprint(response.json())"}
 - System operations: {"shell_command": "ls -la /home/user && df -h"}
 - File generation: {"python": "import pandas as pd\\ndf = pd.DataFrame({'A': [1,2,3], 'B': [4,5,6]})\\n
-df.to_csv('/home/user/data/output.csv')\\nprint('File saved to /home/user/data/output.csv')"}"""
+df.to_csv('/e2b_output/output.csv')\\nprint('File saved to /e2b_output/output.csv')"}"""
 
 
 def detect_mime_type(file_content: bytes, file_path: str) -> str:
@@ -264,7 +264,7 @@ class E2BInterpreterInputSchema(BaseModel):
         description="Environment variables for shell commands.",
         json_schema_extra={"is_accessible_to_agent": False},
     )
-    cwd: str = Field(default="/home/user", description="Working directory for shell commands.")
+    cwd: str = Field(default="/e2b_output", description="Working directory for shell commands.")
     artifact_mode: Literal["diff", "none"] = Field(
         default="diff", description="How to collect artifacts: 'diff' (new/changed files in cwd) or 'none'."
     )
@@ -638,7 +638,7 @@ class E2BInterpreterTool(ConnectionNode):
 
     def _collect_output_files(self, sandbox: Sandbox, base_dir: str = "") -> dict[str, str]:
         """
-        Collect common output files from /home/user and /home/user/data directories.
+        Collect common output files from /home/user and /e2b_output directories.
 
         Args:
             sandbox: The sandbox instance to collect files from.
@@ -652,7 +652,7 @@ class E2BInterpreterTool(ConnectionNode):
             extensions = ["csv", "xlsx", "xls", "txt", "json", "png", "jpg", "jpeg", "gif", "pdf", "html", "md"]
             patterns = " -o ".join([f"-name '*.{ext}'" for ext in extensions])
 
-            search_dirs = ["/home/user/data"]
+            search_dirs = ["/e2b_output"]
 
             for search_dir in search_dirs:
                 check_cmd = f"test -d {shlex.quote(search_dir)} && echo exists"
@@ -720,6 +720,14 @@ class E2BInterpreterTool(ConnectionNode):
             self._install_default_packages(sandbox)
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
+        
+        # Setup: Create e2b_output directory
+        if sandbox:
+            try:
+                sandbox.commands.run("mkdir -p /e2b_output")
+                logger.debug("Created /e2b_output directory")
+            except Exception as e:
+                logger.warning(f"Failed to create /e2b_output directory: {e}")
 
         if input_data.timeout and sandbox:
             try:
