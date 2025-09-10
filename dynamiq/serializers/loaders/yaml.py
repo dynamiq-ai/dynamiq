@@ -280,7 +280,7 @@ class WorkflowYAMLLoader:
                 dependency = NodeDependency(**dependency_init_data)
             except Exception as e:
                 raise WorkflowYAMLLoaderException(
-                    f"Dependency '{dependency_data.get("node")}' data for node '{node_id}' " f"is invalid. Error: {e}"
+                    f"Dependency '{dependency_data.get('node')}' data for node '{node_id}' " f"is invalid. Error: {e}"
                 )
 
             if dependency.option:
