@@ -37,6 +37,8 @@ ALLOWED_MODULES = [
     "typing",
     "urllib",
     "uuid",
+    "pandas",
+    "numpy",
 ]
 
 

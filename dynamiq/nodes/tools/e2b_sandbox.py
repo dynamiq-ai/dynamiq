@@ -860,8 +860,8 @@ class E2BInterpreterTool(ConnectionNode):
                         file_name = line.split(' -> ')[0].strip()
                         files_list.append(file_name)
                 if files_list:
-                    result_text += f"*Files uploaded: {', '.join(files_list)}*\n\n"
-
+                    result_text += f"*Files uploaded: {', '.join(files_list)}*\n"
+                    result_text += "Note: Uploaded files are available under /home/user/input. "
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n" f"{str(result_text)[:200]}...")
 
             return {"content": result_text, "files": files_bytesio}
