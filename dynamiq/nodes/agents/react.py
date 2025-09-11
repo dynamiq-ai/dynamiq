@@ -911,7 +911,6 @@ class ReActAgent(Agent):
                 source=self.name,
                 step="reasoning",
                 config=config,
-                by_tokens=False,
                 **kwargs,
             )
 
@@ -1470,7 +1469,6 @@ class ReActAgent(Agent):
                             source=source_name,
                             step="tool",
                             config=config,
-                            by_tokens=False,
                             **kwargs,
                         )
 
@@ -1843,7 +1841,6 @@ class ReActAgent(Agent):
                         source=tool.name,
                         step="tool",
                         config=config,
-                        by_tokens=False,
                         **kwargs,
                     )
 
