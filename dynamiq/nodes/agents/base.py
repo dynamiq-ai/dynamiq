@@ -995,8 +995,8 @@ class Agent(Node):
                 logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
 
     @property
-    def file_store(self) -> FileStore | None:
-        """Get the file store from the configuration if enabled."""
+    def file_store_backend(self) -> FileStore | None:
+        """Get the file store backend from the configuration if enabled."""
         return self.file_store.backend if self.file_store.enabled else None
 
     @property
