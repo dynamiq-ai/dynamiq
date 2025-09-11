@@ -1714,28 +1714,36 @@ class ReActAgent(Agent):
             description += f" Defaults to: {field.default}." if field.default and not field.is_required() else ""
             params = self.filter_format_type(field.annotation)
 
-            properties[name] = {"type": [], "description": description}
+            properties[name] = {"description": description}
+            types = []
 
             for param in params:
                 if param is type(None):
-                    properties[name]["type"].append("null")
+                    types.append("null")
 
                 elif param_type := TYPE_MAPPING.get(param):
-                    properties[name]["type"].append(param_type)
+                    types.append(param_type)
 
                 elif issubclass(param, Enum):
                     element_type = TYPE_MAPPING.get(
                         self.filter_format_type(type(list(param.__members__.values())[0].value))[0]
                     )
-                    properties[name]["type"].append(element_type)
+                    types.append(element_type)
                     properties[name]["enum"] = [field.value for field in param.__members__.values()]
 
                 elif getattr(param, "__origin__", None) is list:
-                    properties[name]["type"].append("array")
+                    types.append("array")
                     properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
 
                 elif getattr(param, "__origin__", None) is dict:
-                    properties[name]["type"].append("object")
+                    types.append("object")
+
+            if len(types) == 1:
+                properties[name]["type"] = types[0]
+            elif len(types) > 1:
+                properties[name]["type"] = types
+            else:
+                properties[name]["type"] = "string"
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
