@@ -26,7 +26,7 @@ from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWrite
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.storages.file.base import FileStore
+from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
@@ -326,11 +326,9 @@ class Agent(Node):
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
-    file_store: FileStore | None = Field(
-        default_factory=InMemoryFileStore, description="Filesystem storage to use for agent."
-    )
-    enable_file_store_modification: bool = Field(
-        default=False, description="Whether to enable file store tools for the agent."
+    file_store_config: FileStoreConfig = Field(
+        default_factory=lambda: FileStoreConfig(enabled=True, backend=InMemoryFileStore()),
+        description="Configuration for file storage used by the agent.",
     )
 
     input_message: Message | VisionMessage | None = None
@@ -403,11 +401,12 @@ class Agent(Node):
 
         self.tools = expanded_tools
 
-        if self.enable_file_store_modification:
-            self.tools.append(FileWriteTool(file_store=self.file_store))
+        if self.file_store_config.enabled:
+            if self.file_store_config.agent_file_write_enabled:
+                self.tools.append(FileWriteTool(file_store=self.file_store))
 
-        self.tools.append(FileReadTool(file_store=self.file_store))
-        self.tools.append(FileListTool(file_store=self.file_store))
+            self.tools.append(FileReadTool(file_store=self.file_store))
+            self.tools.append(FileListTool(file_store=self.file_store))
 
         self._init_prompt_blocks()
 
@@ -435,6 +434,7 @@ class Agent(Node):
             "memory": True,
             "files": True,
             "images": True,
+            "file_store_config": True,
         }
 
     def to_dict(self, **kwargs) -> dict:
@@ -610,7 +610,7 @@ class Agent(Node):
             "intermediate_steps": self._intermediate_steps,
         }
 
-        if self.file_store and not self.file_store.is_empty():
+        if self.file_store_config.enabled and self.file_store and not self.file_store.is_empty():
             execution_result["files"] = self.file_store.list_files_bytes()
             logger.info(
                 f"Agent {self.name} - {self.id}: returning {len(execution_result['files'])}"
@@ -855,14 +855,14 @@ class Agent(Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
-        if self.file_store and tool.is_files_allowed:
+        if self.file_store_config.enabled and self.file_store and tool.is_files_allowed:
             if isinstance(tool, Python):
                 merged_input["files"] = self.file_store.list_files_bytes()
             for field_name, field in tool.input_schema.model_fields.items():
                 if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
                     if field_name in merged_input:
                         merged_input[field_name] = FileMappedInput(
-                            input=merged_input[field_name], filestorage=self.file_store.list_files_bytes()
+                            input=merged_input[field_name], files=self.file_store.list_files_bytes()
                         )
                     else:
                         merged_input[field_name] = self.file_store.list_files_bytes()
@@ -908,6 +908,77 @@ class Agent(Node):
                 raise ValueError({error_message})
         tool_result_output_content = tool_result.output.get("content")
 
+        self._handle_tool_generated_files(tool, tool_result)
+
+        tool_result_content_processed = process_tool_output_for_agent(
+            content=tool_result_output_content,
+            max_tokens=self.tool_output_max_length,
+            truncate=self.tool_output_truncate_enabled,
+        )
+
+        self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
+
+        return tool_result_content_processed
+
+    def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
+        """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
+        named = []
+        for i, f in enumerate(files):
+            if isinstance(f, bytes):
+                bio = io.BytesIO(f)
+                bio.name = f"file_{i}.bin"
+                bio.description = "User-provided file"
+
+                if self.file_store_config.enabled and self.file_store:
+                    try:
+                        self.file_store.store(
+                            file_path=bio.name,
+                            content=f,
+                            content_type="application/octet-stream",
+                            metadata={"description": bio.description, "source": "user_upload"},
+                            overwrite=True,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to store file {bio.name} in file_store: {e}")
+
+                named.append(bio)
+            elif isinstance(f, io.BytesIO):
+                if not hasattr(f, "name"):
+                    f.name = f"file_{i}"
+                if not hasattr(f, "description"):
+                    f.description = "User-provided file"
+
+                if self.file_store_config.enabled and self.file_store:
+                    try:
+                        content = f.read()
+                        f.seek(0)
+
+                        self.file_store.store(
+                            file_path=f.name,
+                            content=content,
+                            content_type="application/octet-stream",
+                            metadata={"description": f.description, "source": "user_upload"},
+                            overwrite=True,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to store file {f.name} in file_store: {e}")
+
+                named.append(f)
+            else:
+                named.append(f)
+        return named
+
+    def _handle_tool_generated_files(self, tool: Node, tool_result: RunnableResult) -> None:
+        """
+        Handle files generated by tools and store them in the file store.
+
+        Args:
+            tool: The tool that generated the files
+            tool_result: The result from the tool execution
+        """
+        if not self.file_store_config.enabled or not self.file_store:
+            return
+
         if isinstance(tool_result.output, dict) and "files" in tool_result.output:
             tool_files = tool_result.output.get("files", [])
             if tool_files:
@@ -949,61 +1020,10 @@ class Agent(Node):
 
                 logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
 
-        tool_result_content_processed = process_tool_output_for_agent(
-            content=tool_result_output_content,
-            max_tokens=self.tool_output_max_length,
-            truncate=self.tool_output_truncate_enabled,
-        )
-
-        self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
-
-        return tool_result_content_processed
-
-    def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
-        """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
-        named = []
-        for i, f in enumerate(files):
-            if isinstance(f, bytes):
-                bio = io.BytesIO(f)
-                bio.name = f"file_{i}.bin"
-                bio.description = "User-provided file"
-
-                try:
-                    self.file_store.store(
-                        file_path=bio.name,
-                        content=f,
-                        content_type="application/octet-stream",
-                        metadata={"description": bio.description, "source": "user_upload"},
-                        overwrite=True,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to store file {bio.name} in file_store: {e}")
-
-                named.append(bio)
-            elif isinstance(f, io.BytesIO):
-                if not hasattr(f, "name"):
-                    f.name = f"file_{i}"
-                if not hasattr(f, "description"):
-                    f.description = "User-provided file"
-
-                try:
-                    content = f.read()
-                    f.seek(0)
-
-                    self.file_store.store(
-                        file_path=f.name,
-                        content=content,
-                        content_type="application/octet-stream",
-                        metadata={"description": f.description, "source": "user_upload"},
-                        overwrite=True,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to store file {f.name} in file_store: {e}")
-
-                named.append(f)
-            else:
-                named.append(f)
-        return named
+    @property
+    def file_store(self) -> FileStore | None:
+        """Get the file store from the configuration if enabled."""
+        return self.file_store_config.backend if self.file_store_config.enabled else None
 
     @property
     def tool_description(self) -> str:

@@ -228,12 +228,12 @@ class Node(BaseModel, Runnable, ABC):
     caching: CachingConfig = Field(default_factory=CachingConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
-    is_files_allowed: bool = Field(default=False, description="Whether the node is permitted to access files.")
     depends: list[NodeDependency] = []
     metadata: NodeMetadata | None = None
 
     is_postponed_component_init: bool = False
     is_optimized_for_agents: bool = False
+    is_files_allowed: bool = Field(default=False, description="Whether the node is permitted to access files.")
 
     _output_references: NodeOutputReferences = PrivateAttr()
 

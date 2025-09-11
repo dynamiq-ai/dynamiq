@@ -68,7 +68,7 @@ def handle_file_upload(input_data: dict[str, str | bytes] | FileMappedInput) -> 
     files_data = {}
     if isinstance(input_data, FileMappedInput):
         files = input_data.input
-        files_map = {getattr(f, 'name', f'file_{id(f)}'): f for f in input_data.filestorage}
+        files_map = {getattr(f, "name", f"file_{id(f)}"): f for f in input_data.files}
     else:
         files = input_data
         files_map = {}
@@ -85,11 +85,11 @@ def handle_file_upload(input_data: dict[str, str | bytes] | FileMappedInput) -> 
                 if file in files_map:
                     files_data[param_name] = files_map[file].getvalue()
                 else:
-                    raise ValueError(f"File {file} not found in filestorage.")
+                    raise ValueError(f"File {file} not found in files.")
             else:
                 raise ValueError(
                     f"Error: Invalid file data type: {type(file)}. "
-                    "If you want to use file path from filestorage, provide FileMappedInput object."
+                    "If you want to use file path from files, provide FileMappedInput object."
                 )
         else:
             raise ValueError(f"Error: Invalid file data type: {type(file)}. Expected bytes, BytesIO, or FileInfo.")
@@ -106,7 +106,7 @@ class HttpApiCallInputSchema(BaseModel):
     files: dict[str, str | bytes] = Field(
         default={},
         description="Parameter to provide files to the request. Maps parameter names to file paths for file uploads. "
-        "Provide strings for file IDs from filestorage.",
+        "Provide strings for file IDs from files.",
         map_from_storage=True,
     )
 

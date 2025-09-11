@@ -6,7 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FileInfo(BaseModel):
@@ -151,3 +151,16 @@ class FileStore(abc.ABC):
             List of FileInfo objects
         """
         pass
+
+
+class FileStoreConfig(BaseModel):
+    """Configuration for file storage."""
+
+    enabled: bool = False
+    backend: FileStore = Field(..., description="File storage to use.")
+    agent_file_write_enabled: bool = Field(
+        default=False, description="Whether the agent is permitted to write files to the file store."
+    )
+    config: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)

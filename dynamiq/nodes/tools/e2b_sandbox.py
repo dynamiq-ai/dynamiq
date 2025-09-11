@@ -32,25 +32,34 @@ Always use print() statements to display results - code without output will fail
 Specify required packages in the 'packages' parameter.
  Variables and imports persist between Python executions in the same session.
 
--File Output Strategy:-
-To return files back to the user, save them in the /e2b_output directory.
-Files saved in this directory will be automatically collected and returned.
-Use absolute paths like /e2b_output/filename.ext when saving files.
+-File Management Strategy:-
+- Uploaded files are automatically saved to the /home/user/input directory
+- If file name contains path (e.g., "data/file.csv"), it will be saved as /home/user/input/data/file.csv
+- If file name is just a filename (e.g., "file.csv"), it will be saved as /home/user/input/file.csv
+- If file name starts with "/" (e.g., "/file.csv"), it will be saved to the root directory as "/file.csv"
+- To return files back to the user, save them in the /home/user/output directory
+- Files saved in /home/user/output will be automatically collected and returned
+- Use absolute paths like /home/user/output/filename.ext when saving files
+- Access uploaded files from /home/user/input/filename.ext in your code
 
 -Parameter Guide:-
 - packages: Comma-separated list of Python packages to install
 - python: Python code to execute (must include print statements)
 - shell_command: Shell commands to run in the sandbox
-- files: Binary files to upload for processing
+- files: Binary files to upload for processing (saved to /home/user/input)
 
 -Examples:-
-- Data analysis: {"python": "import pandas as pd\\ndf = pd.read_csv('file.csv')\\nprint(df.head())"}
+- Data analysis: {"python": "import pandas as pd\\ndf = pd.read_csv('/home/user/input/data.csv')\\nprint(df.head())"}
 - Next execution: {"python": "print(df.describe())"}
 - File processing: {"packages": "requests",
 "python": "import requests\\nresponse = requests.get('https://api.example.com')\\nprint(response.json())"}
-- System operations: {"shell_command": "ls -la /home/user && df -h"}
+- System operations: {"shell_command": "ls -la /home/user/input && ls -la /home/user/output"}
 - File generation: {"python": "import pandas as pd\\ndf = pd.DataFrame({'A': [1,2,3], 'B': [4,5,6]})\\n
-df.to_csv('/e2b_output/output.csv')\\nprint('File saved to /e2b_output/output.csv')"}"""
+df.to_csv('/home/user/output/result.csv')\\nprint('File saved to /home/user/output/result.csv')"}
+- File upload scenarios:
+  * "file.csv" → saved as /home/user/input/file.csv
+  * "data/file.csv" → saved as /home/user/input/data/file.csv
+  * "/file.csv" → saved as /file.csv (root directory)"""
 
 
 def detect_mime_type(file_content: bytes, file_path: str) -> str:
@@ -264,7 +273,7 @@ class E2BInterpreterInputSchema(BaseModel):
         description="Environment variables for shell commands.",
         json_schema_extra={"is_accessible_to_agent": False},
     )
-    cwd: str = Field(default="/e2b_output", description="Working directory for shell commands.")
+    cwd: str = Field(default="/home/user/output", description="Working directory for shell commands.")
     artifact_mode: Literal["diff", "none"] = Field(
         default="diff", description="How to collect artifacts: 'diff' (new/changed files in cwd) or 'none'."
     )
@@ -433,14 +442,17 @@ class E2BInterpreterTool(ConnectionNode):
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
-        target_path = f"{file.name}"
-        if "/" in target_path:
-            dir_path = "/".join(target_path.split("/")[:-1])
-            sandbox.commands.run(f"mkdir -p {shlex.quote(dir_path)}")
+        if "/" in file.name:
+            dir_path = "/".join(file.name.split("/")[:-1])
+            sandbox.commands.run(f"mkdir -p /home/user/input/{shlex.quote(dir_path)}")
 
         file_like_object = io.BytesIO(file.data)
-        file_like_object.name = file.name
+        file_like_object.name = file.name.split("/")[-1]
 
+        # Upload to /home/user/input directory
+        target_path = (
+            f"/home/user/input/{file.name}" if not file.name.startswith("/") else f"/home/user/input{file.name}"
+        )
         uploaded_info = sandbox.files.write(target_path, file_like_object)
         logger.debug(f"Tool {self.name} - {self.id}: Uploaded file info: {uploaded_info}")
 
@@ -638,7 +650,7 @@ class E2BInterpreterTool(ConnectionNode):
 
     def _collect_output_files(self, sandbox: Sandbox, base_dir: str = "") -> dict[str, str]:
         """
-        Collect common output files from /home/user and /e2b_output directories.
+        Collect common output files from /home/user/output directory.
 
         Args:
             sandbox: The sandbox instance to collect files from.
@@ -652,7 +664,7 @@ class E2BInterpreterTool(ConnectionNode):
             extensions = ["csv", "xlsx", "xls", "txt", "json", "png", "jpg", "jpeg", "gif", "pdf", "html", "md"]
             patterns = " -o ".join([f"-name '*.{ext}'" for ext in extensions])
 
-            search_dirs = ["/e2b_output"]
+            search_dirs = ["/home/user/output"]
 
             for search_dir in search_dirs:
                 check_cmd = f"test -d {shlex.quote(search_dir)} && echo exists"
@@ -665,7 +677,7 @@ class E2BInterpreterTool(ConnectionNode):
                 if check_out.exit_code != 0 or "exists" not in check_out.stdout:
                     continue
 
-                max_depth = "1" if search_dir == "/home/user" else "3"
+                max_depth = "3"  # Allow deeper search in /home/user/output directory
                 cmd = (
                     f"cd {shlex.quote(search_dir)} && find . -maxdepth {max_depth} "
                     f"-type f \\( {patterns} \\) -printf '%P\\n' 2>/dev/null | head -20"
@@ -721,13 +733,12 @@ class E2BInterpreterTool(ConnectionNode):
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
 
-        # Setup: Create e2b_output directory
-        if sandbox:
+        if sandbox and self.is_files_allowed:
             try:
-                sandbox.commands.run("mkdir -p /e2b_output")
-                logger.debug("Created /e2b_output directory")
+                sandbox.commands.run("mkdir -p /home/user/input /home/user/output")
+                logger.debug("Created /home/user/input and /home/user/output directories")
             except Exception as e:
-                logger.warning(f"Failed to create /e2b_output directory: {e}")
+                logger.warning(f"Failed to create directories: {e}")
 
         if input_data.timeout and sandbox:
             try:

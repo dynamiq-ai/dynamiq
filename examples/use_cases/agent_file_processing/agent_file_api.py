@@ -2,7 +2,7 @@ from dynamiq.connections import Http as HttpConnection
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.storages.file import InMemoryFileStore
+from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
@@ -36,10 +36,9 @@ if __name__ == "__main__":
         llm=llm,
         tools=[file_upload_api],
         role=AGENT_ROLE,
-        filestorage=file_storage,
+        file_store_config=FileStoreConfig(enabled=True, backend=file_storage, agent_file_write_enabled=True),
         max_loops=30,
         inference_mode=InferenceMode.FUNCTION_CALLING,
-        enable_file_store_modification=True,
     )
 
     result = agent.run(input_data={"input": PROMPT1})
