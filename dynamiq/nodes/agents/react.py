@@ -898,13 +898,11 @@ class ReActAgent(Agent):
             action = tool_output_match.group(1)
             action_input = tool_output_match.group(2)
 
-            # Parse the action_input if it's a JSON string and normalize it
             try:
                 parsed_action_input = json.loads(action_input)
             except json.JSONDecodeError as e:
                 raise RecoverableAgentException(f"Invalid JSON in Action Input for {action}: {str(e)}")
 
-            # Direct dictionary lookup using ToolCacheEntry as key
             cache_entry = ToolCacheEntry(action=action, action_input=parsed_action_input)
             tool_output = self._tool_cache.get(cache_entry)
 
@@ -912,7 +910,6 @@ class ReActAgent(Agent):
                 logger.info(f"Found tool output for action='{action}' action_input='{action_input}'")
                 return str(tool_output)
             else:
-                # If not found, log available tools for debugging
                 available_tools = [(entry.action, entry.action_input) for entry in self._tool_cache.keys()]
                 logger.warning(
                     f"Tool output not found for action='{action}' input='{action_input}'. "
@@ -1101,7 +1098,6 @@ class ReActAgent(Agent):
 
         for loop_num in range(1, self.max_loops + 1):
             try:
-                # Create a streaming callback
                 streaming_callback = None
                 original_streaming_enabled = self.llm.streaming.enabled
 
@@ -1113,11 +1109,9 @@ class ReActAgent(Agent):
                         **kwargs,
                     )
 
-                    # Temporarily enable streaming on LLM
                     if not original_streaming_enabled:
                         self.llm.streaming.enabled = True
 
-                    # Create a config for the LLM that uses proper streaming callback
                     llm_config = config.model_copy(deep=False)
                     llm_config.callbacks = [
                         callback
@@ -1135,7 +1129,6 @@ class ReActAgent(Agent):
                         **kwargs,
                     )
                 finally:
-                    # Restore original streaming state
                     if not original_streaming_enabled:
                         try:
                             self.llm.streaming.enabled = original_streaming_enabled
@@ -1145,7 +1138,6 @@ class ReActAgent(Agent):
                 action, action_input = None, None
                 llm_generated_output = ""
 
-                # Use content from callback if available
                 if streaming_callback and streaming_callback.accumulated_content:
                     llm_generated_output = streaming_callback.accumulated_content
                 else:
@@ -1240,7 +1232,6 @@ class ReActAgent(Agent):
                         try:
                             if isinstance(action_input, str):
                                 action_input = json.loads(action_input)
-                            # If it's already a dict/object, use it as-is
                         except json.JSONDecodeError as e:
                             raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
 
@@ -1649,7 +1640,6 @@ class ReActAgent(Agent):
                     else:
                         type_str = getattr(field.annotation, "__name__", str(field.annotation))
 
-                    # If field has map_from_storage=True, change type to tuple of strings
                     if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
                         type_str = "tuple[str, ...]"
 
@@ -1924,13 +1914,11 @@ class ReActAgent(Agent):
             success_status = "SUCCESS" if result["success"] else "ERROR"
             observation_parts.append(f"--- {tool_name} has resulted in {success_status} ---\n{result_content}")
 
-            # Collect files from all tools
             if result.get("files"):
                 all_files.update(result["files"])
 
         combined_observation = "\n\n".join(observation_parts)
 
-        # Return structured result if any files were generated
         if all_files:
             return {"content": combined_observation, "files": all_files}
         return combined_observation
