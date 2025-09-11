@@ -47,7 +47,7 @@ def setup_agent() -> ReActAgent:
     """
     Set up and configure the ReAct agent.
     """
-    streaming_config = StreamingConfig(enabled=True, mode=StreamingMode.FINAL, by_tokens=True)
+    streaming_config = StreamingConfig(enabled=True, mode=StreamingMode.FINAL)
 
     # Set environment variables (use secure methods in production)
 

@@ -719,7 +719,6 @@ class Agent(Node):
         source: str,
         step: str,
         config: RunnableConfig | None = None,
-        by_tokens: bool | None = None,
         **kwargs,
     ) -> str | dict:
         """
@@ -729,8 +728,6 @@ class Agent(Node):
             content (str | dict): Data that will be streamed.
             source (str): Source of the content.
             step (str): Description of the step.
-            by_tokens (Optional[bool]): Determines whether to stream content by tokens or not.
-                If None it is determined based on StreamingConfig. Defaults to None.
             config (Optional[RunnableConfig]): Configuration for the runnable.
             **kwargs: Additional keyword arguments.
 
@@ -743,30 +740,7 @@ class Agent(Node):
                 f"This likely indicates incorrect parameter passing from the calling code."
             )
 
-        if (by_tokens is None and self.streaming.by_tokens) or by_tokens:
-            return self.stream_by_tokens(content=content, source=source, step=step, config=config, **kwargs)
         return self.stream_response(content=content, source=source, step=step, config=config, **kwargs)
-
-    def stream_by_tokens(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
-        """Streams the input content to the callbacks."""
-        if isinstance(content, dict):
-            return self.stream_response(content, source, step, config, **kwargs)
-        tokens = content.split(" ")
-        final_response = []
-        for token in tokens:
-            final_response.append(token)
-            token_with_prefix = " " + token
-            token_for_stream = StreamChunk(
-                choices=[
-                    StreamChunkChoice(delta=StreamChunkChoiceDelta(content=token_with_prefix, source=source, step=step))
-                ]
-            )
-            self.run_on_node_execute_stream(
-                callbacks=config.callbacks,
-                chunk=token_for_stream.model_dump(),
-                **kwargs,
-            )
-        return " ".join(final_response)
 
     def stream_response(
         self, content: str | dict, source: str, step: str, config: RunnableConfig | None = None, **kwargs
@@ -1192,16 +1166,13 @@ class AgentManager(Agent):
     def _final(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'final' action."""
         prompt = Template(self._prompt_blocks.get("final")).render(**(self._prompt_variables | kwargs))
-        llm_result = self._run_llm(
-            [Message(role=MessageRole.USER, content=prompt)], config, by_tokens=False, **kwargs
-        ).output["content"]
+        llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled:
             return self.stream_content(
                 content=llm_result,
                 step="manager_final_output",
                 source=self.name,
                 config=config,
-                by_tokens=False,
                 **kwargs,
             )
         return llm_result
