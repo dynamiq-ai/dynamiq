@@ -19,7 +19,7 @@ Generally, you follow these rules:
 """
 
 PROMPT = """
-Get required statistics from the file and compute them on provided csv file using E2B tool. Return markdown report.
+Get required statistics from the file and compute them on a provided CSV file using E2B tool. Return markdown report.
 """
 
 FILE_PATH = "./examples/use_cases/agents_use_cases/data/house_prices.csv"

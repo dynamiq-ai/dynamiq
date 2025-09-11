@@ -11,6 +11,7 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.mcp import MCPServer, MCPSse, MCPTool
 from dynamiq.nodes.tools import FileReadTool, FileListTool
 
+
 def assert_tool_matches(tool, expected, connection):
     assert tool.name == expected["name"]
     assert tool.description == expected["description"]
@@ -198,7 +199,11 @@ def test_agent_integration_with_mcp_tools(sse_server_connection, mock_mcp_tools,
     for tool, expected in zip(agent_tools, expected_tools):
         assert_tool_matches(tool, expected, sse_server_connection)
 
-    dict_tools = [tool for tool in agent.to_dict()["tools"] if tool["type"] not in ["dynamiq.nodes.tools.FileReadTool", "dynamiq.nodes.tools.FileListTool"]]
+    dict_tools = [
+        tool
+        for tool in agent.to_dict()["tools"]
+        if tool["type"] not in ["dynamiq.nodes.tools.FileReadTool", "dynamiq.nodes.tools.FileListTool"]
+    ]
     assert len(dict_tools) == 2
     assert dict_tools[0]["name"] == "subtract"
     assert dict_tools[0]["type"] == "dynamiq.nodes.tools.MCPTool"

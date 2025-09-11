@@ -720,7 +720,7 @@ class E2BInterpreterTool(ConnectionNode):
             self._install_default_packages(sandbox)
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
-        
+
         # Setup: Create e2b_output directory
         if sandbox:
             try:

@@ -1,7 +1,6 @@
 import importlib
 import io
 from copy import deepcopy
-from pickle import TRUE
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict

@@ -25,7 +25,7 @@ if __name__ == "__main__":
         connection=connection,
         response_type=ResponseType.JSON,
         name="FileUploadApi",
-        description="Tool to uploads a file to the server. Provide parameter file with ",
+        description="Tool to upload a file to the server. Provide the parameter 'file' with the file to be uploaded. ",
     )
 
     llm = setup_llm(model_provider="claude", model_name="claude-3-7-sonnet-20250219", temperature=0)

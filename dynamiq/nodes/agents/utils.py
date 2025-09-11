@@ -18,7 +18,6 @@ from dynamiq.prompts import (
     VisionMessageImageURL,
     VisionMessageTextContent,
 )
-from dynamiq.storages.file.base import FileInfo
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import CHARS_PER_TOKEN
 
@@ -31,7 +30,6 @@ class FileMappedInput(BaseModel):
     input: Any
     filestorage: list[io.BytesIO]  # List of BytesIO objects or FileInfo objects
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
 
 
 class ChunkedToolOutput(BaseModel):

@@ -1,6 +1,6 @@
 import pytest
 
-from dynamiq.storages.file.base import FileExistsError, FileInfo, FileNotFoundError
+from dynamiq.storages.file.base import FileInfo, FileNotFoundError
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 

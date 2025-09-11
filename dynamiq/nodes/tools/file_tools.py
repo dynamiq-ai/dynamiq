@@ -12,13 +12,17 @@ from dynamiq.utils.logger import logger
 
 class FileReadInputSchema(BaseModel):
     """Schema for file read input parameters."""
-    file_path: str = Field(description="Path of the file to read")
+
+    file_path: str = Field(default="", description="Path of the file to read")
 
 
 class FileWriteInputSchema(BaseModel):
     """Schema for file write input parameters."""
-    file_path: str = Field(description="Path where the file should be written")
-    content: str | bytes | dict | list | Any = Field(description="File content (string, bytes, or serializable object)")
+
+    file_path: str = Field(..., description="Path where the file should be written")
+    content: str | bytes | dict | list | Any = Field(
+        ..., description="File content (string, bytes, or serializable object)"
+    )
     content_type: str | None = Field(default=None, description="MIME type (auto-detected if not provided)")
     metadata: dict[str, Any] | None = Field(default=None, description="Additional metadata for the file")
 

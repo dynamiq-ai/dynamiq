@@ -82,7 +82,6 @@ def handle_file_upload(input_data: dict[str, str | bytes] | FileMappedInput) -> 
             files_data[param_name] = file.content
         elif isinstance(file, str):
             if files_map:
-                print(f"Retrieving file {file} from filestorage")
                 if file in files_map:
                     files_data[param_name] = files_map[file].getvalue()
                 else:

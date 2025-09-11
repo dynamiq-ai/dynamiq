@@ -19,8 +19,9 @@ Generally, you follow these rules:
 """
 
 PROMPT = """
-Analyze the provided CSV file and compute comprehensive statistics using the Python tool. 
-Generate a detailed markdown report with statistical analysis including mean, standard deviation, min, max, and count for all numeric columns.
+Analyze the provided CSV file and compute comprehensive statistics using the Python tool.
+Generate a detailed markdown report with statistical analysis including
+ mean, standard deviation, min, max, and count for all numeric columns.
 """
 
 FILE_PATH = "./examples/use_cases/agents_use_cases/data/house_prices.csv"
@@ -45,30 +46,30 @@ def run(input_data):
     Analyze CSV file and compute statistics, then return results in a file.
     """
     files = input_data.get('files', [])
-    
+
     if not files:
         return {"error": "No files provided"}
-    
+
     # Process the first CSV file
     csv_file = files[0]
     csv_file.seek(0)
     content = csv_file.read().decode('utf-8')
     csv_file.seek(0)
-    
+
     # Read CSV data
     csv_reader = csv.reader(io.StringIO(content))
     rows = list(csv_reader)
-    
+
     if not rows:
         return {"error": "Empty CSV file"}
-    
+
     headers = rows[0]
     data_rows = rows[1:]
-    
+
     # Find numeric columns
     numeric_columns = []
     numeric_data = {}
-    
+
     for i, header in enumerate(headers):
         try:
             # Try to convert first data value to float
@@ -85,7 +86,7 @@ def run(input_data):
                 numeric_data[header] = values
         except (ValueError, IndexError):
             pass
-    
+
     # Compute statistics for each numeric column
     stats_results = {}
     for column, values in numeric_data.items():
@@ -97,7 +98,7 @@ def run(input_data):
                 "max": max(values),
                 "count": len(values)
             }
-    
+
     # Create result content
     result_lines = ["CSV Statistics Report", "=" * 50, ""]
     result_lines.append(f"File: {getattr(csv_file, 'name', 'unknown')}")
@@ -105,7 +106,7 @@ def run(input_data):
     result_lines.append(f"Data rows: {len(data_rows)}")
     result_lines.append(f"Numeric columns: {', '.join(numeric_columns)}")
     result_lines.append("")
-    
+
     for column, stats in stats_results.items():
         result_lines.append(f"{column}:")
         result_lines.append(f"  Mean: {stats['mean']:.2f}")
@@ -114,12 +115,12 @@ def run(input_data):
         result_lines.append(f"  Max: {stats['max']:.2f}")
         result_lines.append(f"  Count: {stats['count']}")
         result_lines.append("")
-    
+
     result_content = "\\n".join(result_lines)
     result_file = io.BytesIO(result_content.encode('utf-8'))
     result_file.name = "statistics_report.txt"
     result_file.description = f"Statistics report for {getattr(csv_file, 'name', 'CSV file')}"
-    
+
     return {
         "content": f"Successfully analyzed CSV file with {len(numeric_columns)} numeric columns",
         "files": [result_file]
