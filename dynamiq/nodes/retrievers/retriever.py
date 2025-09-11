@@ -19,7 +19,7 @@ class VectorStoreRetrieverInputSchema(BaseModel):
     filters: dict[str, Any] = Field(
         default_factory=dict, description="Parameter to provide filters to apply for retrieving specific documents."
     )
-    top_k: int | None = Field(default=0, description="Parameter to provide how many documents to retrieve.")
+    top_k: int | None = Field(default=None, description="Parameter to provide how many documents to retrieve.")
 
 
 class VectorStoreRetriever(Node):
