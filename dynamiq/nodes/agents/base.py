@@ -326,7 +326,7 @@ class Agent(Node):
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
-    file_store_config: FileStoreConfig = Field(
+    file_store: FileStoreConfig = Field(
         default_factory=lambda: FileStoreConfig(enabled=True, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
@@ -401,8 +401,8 @@ class Agent(Node):
 
         self.tools = expanded_tools
 
-        if self.file_store_config.enabled:
-            if self.file_store_config.agent_file_write_enabled:
+        if self.file_store.enabled:
+            if self.file_store.agent_file_write_enabled:
                 self.tools.append(FileWriteTool(file_store=self.file_store))
 
             self.tools.append(FileReadTool(file_store=self.file_store))
@@ -434,7 +434,7 @@ class Agent(Node):
             "memory": True,
             "files": True,
             "images": True,
-            "file_store_config": True,
+            "file_store": True,
         }
 
     def to_dict(self, **kwargs) -> dict:
@@ -610,7 +610,7 @@ class Agent(Node):
             "intermediate_steps": self._intermediate_steps,
         }
 
-        if self.file_store_config.enabled and self.file_store and not self.file_store.is_empty():
+        if self.file_store.enabled and self.file_store and not self.file_store.is_empty():
             execution_result["files"] = self.file_store.list_files_bytes()
             logger.info(
                 f"Agent {self.name} - {self.id}: returning {len(execution_result['files'])}"
@@ -829,7 +829,7 @@ class Agent(Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
-        if self.file_store_config.enabled and self.file_store and tool.is_files_allowed:
+        if self.file_store.enabled and self.file_store and tool.is_files_allowed:
             if isinstance(tool, Python):
                 merged_input["files"] = self.file_store.list_files_bytes()
             for field_name, field in tool.input_schema.model_fields.items():
@@ -903,7 +903,7 @@ class Agent(Node):
                 bio.name = f"file_{i}.bin"
                 bio.description = "User-provided file"
 
-                if self.file_store_config.enabled and self.file_store:
+                if self.file_store.enabled and self.file_store:
                     try:
                         self.file_store.store(
                             file_path=bio.name,
@@ -922,7 +922,7 @@ class Agent(Node):
                 if not hasattr(f, "description"):
                     f.description = "User-provided file"
 
-                if self.file_store_config.enabled and self.file_store:
+                if self.file_store.enabled and self.file_store:
                     try:
                         content = f.read()
                         f.seek(0)
@@ -950,7 +950,7 @@ class Agent(Node):
             tool: The tool that generated the files
             tool_result: The result from the tool execution
         """
-        if not self.file_store_config.enabled or not self.file_store:
+        if not self.file_store.enabled or not self.file_store:
             return
 
         if isinstance(tool_result.output, dict) and "files" in tool_result.output:
@@ -997,7 +997,7 @@ class Agent(Node):
     @property
     def file_store(self) -> FileStore | None:
         """Get the file store from the configuration if enabled."""
-        return self.file_store_config.backend if self.file_store_config.enabled else None
+        return self.file_store.backend if self.file_store.enabled else None
 
     @property
     def tool_description(self) -> str:

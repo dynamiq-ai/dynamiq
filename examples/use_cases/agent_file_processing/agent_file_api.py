@@ -36,7 +36,7 @@ if __name__ == "__main__":
         llm=llm,
         tools=[file_upload_api],
         role=AGENT_ROLE,
-        file_store_config=FileStoreConfig(enabled=True, backend=file_storage, agent_file_write_enabled=True),
+        file_store=FileStoreConfig(enabled=True, backend=file_storage, agent_file_write_enabled=True),
         max_loops=30,
         inference_mode=InferenceMode.FUNCTION_CALLING,
     )
