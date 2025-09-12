@@ -12,15 +12,19 @@ from dynamiq.utils.logger import logger
 
 class FileReadInputSchema(BaseModel):
     """Schema for file read input parameters."""
-    file_path: str = Field(description="Path of the file to read")
+
+    file_path: str = Field(default="", description="Path of the file to read")
 
 
 class FileWriteInputSchema(BaseModel):
     """Schema for file write input parameters."""
-    file_path: str = Field(description="Path where the file should be written")
-    content: str | bytes | dict | list | Any = Field(description="File content (string, bytes, or serializable object)")
+
+    file_path: str = Field(..., description="Path where the file should be written")
+    content: bytes | str = Field(
+        ..., description="File content (string, bytes)"
+    )
     content_type: str | None = Field(default=None, description="MIME type (auto-detected if not provided)")
-    metadata: dict[str, Any] | None = Field(default=None, description="Additional metadata for the file")
+    metadata: str | None = Field(default=None, description="Additional metadata for the file")
 
 
 class FileReadTool(Node):
@@ -103,7 +107,7 @@ class FileWriteTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "File Write Tool"
+    name: str = "FileWriteTool"
     description: str = """Writes files to storage based on the provided file path and content.
 
     Usage Examples:
@@ -159,7 +163,9 @@ class FileWriteTool(Node):
 class FileListInputSchema(BaseModel):
     """Schema for file list input parameters."""
 
-    file_path: str = Field(default="", description="Path of the file to list. Default is the root path.")
+    file_path: str = Field(
+        default="", description="Path of the file to list. Default is the root path. Keep empty to list all files."
+    )
     recursive: bool = Field(default=True, description="Whether to list files recursively. Default is True.")
 
 
@@ -169,7 +175,7 @@ class FileListTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "File List Tool"
+    name: str = "FileListTool"
     description: str = """Lists files in storage based on the provided file path."""
 
     file_store: FileStore = Field(..., description="File storage to list from.")

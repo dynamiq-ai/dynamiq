@@ -162,7 +162,6 @@ class Orchestrator(Node, ABC):
                 step="manager_input_handling",
                 source=self.name,
                 config=config,
-                by_tokens=False,
                 **kwargs,
             )
 

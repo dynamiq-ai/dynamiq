@@ -1,4 +1,5 @@
 from jinja2 import Template
+
 from dynamiq.nodes.agents.base import PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT, AgentManager
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.runnables import RunnableConfig
@@ -418,7 +419,6 @@ class AdaptiveAgentManager(AgentManager):
                 step="manager_reflection",
                 source=self.name,
                 config=config,
-                by_tokens=False,
                 **kwargs
             )
         return llm_result
@@ -429,6 +429,6 @@ class AdaptiveAgentManager(AgentManager):
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(
-                content=llm_result, step="manager_response", source=self.name, config=config, by_tokens=False, **kwargs
+                content=llm_result, step="manager_response", source=self.name, config=config, **kwargs
             )
         return llm_result

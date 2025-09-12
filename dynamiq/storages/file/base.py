@@ -2,10 +2,11 @@
 
 import abc
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FileInfo(BaseModel):
@@ -17,6 +18,7 @@ class FileInfo(BaseModel):
     content_type: str = "text/plain"
     created_at: datetime = Field(default_factory=datetime.now)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    content: bytes = Field(default=None)
 
 
 class StorageError(Exception):
@@ -47,12 +49,21 @@ class PermissionError(StorageError):
     pass
 
 
-class FileStore(abc.ABC):
+class FileStore(abc.ABC, BaseModel):
     """Abstract base class for file storage implementations.
 
     This interface provides a unified way to interact with different
     file storage backends (in-memory, file system, cloud storage, etc.).
     """
+
+    @abc.abstractmethod
+    def list_files_bytes(self) -> list[BytesIO]:
+        """List files in storage and return the content as bytes in BytesIO objects.
+
+        Returns:
+            List of BytesIO objects
+        """
+        pass
 
     @abc.abstractmethod
     def store(
@@ -140,3 +151,16 @@ class FileStore(abc.ABC):
             List of FileInfo objects
         """
         pass
+
+
+class FileStoreConfig(BaseModel):
+    """Configuration for file storage."""
+
+    enabled: bool = False
+    backend: FileStore = Field(..., description="File storage to use.")
+    agent_file_write_enabled: bool = Field(
+        default=False, description="Whether the agent is permitted to write files to the file store."
+    )
+    config: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
