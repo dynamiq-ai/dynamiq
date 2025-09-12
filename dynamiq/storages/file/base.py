@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -157,7 +158,7 @@ class FileStoreConfig(BaseModel):
     """Configuration for file storage."""
 
     enabled: bool = False
-    backend: FileStore = Field(..., description="File storage to use.")
+    backend: FileStore = Field(default_factory=lambda: InMemoryFileStore(), description="File storage to use.")
     agent_file_write_enabled: bool = Field(
         default=False, description="Whether the agent is permitted to write files to the file store."
     )

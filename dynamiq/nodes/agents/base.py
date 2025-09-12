@@ -327,7 +327,6 @@ class Agent(Node):
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
     file_store: FileStoreConfig = Field(
-        default_factory=lambda: FileStoreConfig(enabled=True, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
 
