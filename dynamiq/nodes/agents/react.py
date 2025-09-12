@@ -26,11 +26,9 @@ from dynamiq.nodes.agents.utils import (
 )
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
-from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file.base import FileStore
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
@@ -73,6 +71,7 @@ ADVANCED FEATURES:
 
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
+
 Thought: [Your detailed reasoning about what to do next]
 Action: [Tool name from ONLY [{{ tools_name }}]]
 Action Input: [JSON input for the tool]
@@ -98,9 +97,14 @@ IMPORTANT RULES:
 - JSON must be properly formatted with correct commas and brackets
 - Only use tools from the provided list
 - If you can answer directly, use only Thought followed by Answer
-"""  # noqa: E501
+
+FILE HANDLING:
+- Tools may generate or process files (images, CSVs, PDFs, etc.)
+- Files are automatically collected and will be returned with your final answer
+- Mention created files in your final answer so users know what was generated"""  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
+
 <output>
     <thought>
         [Your detailed reasoning about what to do next]
@@ -147,16 +151,21 @@ CRITICAL XML FORMAT RULES:
 - Use double quotes for JSON strings
 - Escape special characters in JSON (\\n for newlines, \\" for quotes)
 - Properly close all XML tags
-- For all tags other than <answer>, text content should ideally be XML-escaped.
+- For all tags other than <answer>, text content should ideally be XML-escaped
 - Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
-- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
-- You can get "Observation (shortened)" this indicates that output from this tool is shortened.
+- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag
+- You may receive "Observation (shortened)" indicating that tool output was truncated
 
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags
 - Use double quotes for all strings
 - Escape newlines as \\n, quotes as \\"
 - NO multi-line JSON formatting
+
+FILE HANDLING:
+- Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
+- Generated files are automatically collected and returned with your final answer
+- File operations are handled transparently - focus on the task, not file management
 """  # noqa: E501
 
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
@@ -354,6 +363,12 @@ Answer: [Your direct response]
 - Proper JSON syntax with commas and brackets
 - List each Action and Action Input separately
 - Only use tools from the provided list
+
+**FILE HANDLING:**
+- Tools may generate multiple files during execution
+- All generated files are automatically collected and returned
+- When using multiple tools, files from all tools are aggregated
+- Reference all created files in your final Answer
 """  # noqa: E501
 )
 
@@ -375,6 +390,7 @@ For Tool Usage (Single or Multiple):
         <!-- Add more tool elements as needed based on your strategy -->
         <tool>
             <name>[Tool name]</name>
+            <input>[JSON input for the tool - single line, properly escaped]</input>
             <input>[JSON input for the tool - single line, properly escaped]</input>
         </tool>
     </tool_calls>
@@ -418,6 +434,11 @@ JSON FORMATTING REQUIREMENTS:
 - Use double quotes for all strings
 - Escape newlines as \\n, quotes as \\"
 - NO multi-line JSON formatting
+
+FILE HANDLING WITH MULTIPLE TOOLS:
+- Each tool may generate files independently
+- Files from all tools are automatically aggregated
+- Generated files are returned with the final answer
 """  # noqa: E501
 )
 
@@ -457,10 +478,11 @@ IMPORTANT RULES:
 - Do not mention tools or actions since you don't have access to any
 """
 
-REACT_BLOCK_OUTPUT_FORMAT = (
-    "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
-)
-
+REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
+- Avoid phrases like 'based on the information gathered or provided.'
+- Clearly mention any files that were generated during the process.
+- Provide file names and brief descriptions of their contents.
+"""
 
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
@@ -484,8 +506,7 @@ Your response should be clear, concise, and professional.
 </answer>
 """  # noqa: E501
 
-REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
-Always structure your responses in this JSON format:
+REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
 {thought: [Your reasoning about the next step],
 action: [The tool you choose to use, if any from ONLY [{{ tools_name }}]],
@@ -510,7 +531,12 @@ IMPORTANT RULES:
 - In action_input field, provide properly formatted JSON with double quotes
 - Avoid using extra backslashes
 - Do not use markdown code blocks around your JSON
-- Never keep action_input empty.
+- Never leave action_input empty
+- Ensure proper JSON syntax with quoted keys and values
+
+FILE HANDLING:
+- Tools may generate files that are automatically collected
+- Generated files will be included in the final response
 - Never return empty response.
 """  # noqa: E501
 
@@ -518,15 +544,23 @@ REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
 You need to use the right functions based on what the user asks.
 
 Use the function `provide_final_answer` when you can give a clear answer to the user's first question,
- and no extra steps, tools, or work are needed.
+and no extra steps, tools, or work are needed.
 Call this function if the user's input is simple and doesn't require additional help or tools.
 
 If the user's request requires the use of specific tools, such as [{{ tools_name }}],
  you must first call the appropriate function to invoke those tools.
 Only after utilizing the necessary tools and gathering the required information should
- you call `provide_final_answer` to deliver the final response.
+you call `provide_final_answer` to deliver the final response.
 
-Make sure to check each request carefully to see if you can answer it right away or if you need to use tools to help.
+FUNCTION CALLING GUIDELINES:
+- Analyze the request carefully to determine if tools are needed
+- Call functions with properly formatted arguments
+- Handle tool responses appropriately before providing final answer
+- Chain multiple tool calls when necessary for complex tasks
+
+FILE HANDLING:
+- Tools may generate files that will be included in the final response
+- Files created by tools are automatically collected and returned
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
@@ -564,9 +598,9 @@ IMPORTANT RULES:
 """
 
 
-REACT_BLOCK_OUTPUT_FORMAT = (
-    "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
-)
+REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
+- Avoid phrases like 'based on the information gathered or provided.'
+"""
 
 
 REACT_MAX_LOOPS_PROMPT = """
@@ -650,6 +684,7 @@ TYPE_MAPPING = {
     float: "float",
     bool: "boolean",
     str: "string",
+    dict: "object",
 }
 
 UNKNOWN_TOOL_NAME = "unknown_tool"
@@ -678,17 +713,9 @@ class ReActAgent(Agent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
-    file_store: FileStore | None = Field(default=None, description="Filesystem storage to use for agent.")
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if self.file_store:
-            self.tools.append(FileReadTool(file_store=self.file_store))
-            self.tools.append(FileWriteTool(file_store=self.file_store))
-            self.tools.append(FileListTool(file_store=self.file_store))
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -871,13 +898,11 @@ class ReActAgent(Agent):
             action = tool_output_match.group(1)
             action_input = tool_output_match.group(2)
 
-            # Parse the action_input if it's a JSON string and normalize it
             try:
                 parsed_action_input = json.loads(action_input)
             except json.JSONDecodeError as e:
                 raise RecoverableAgentException(f"Invalid JSON in Action Input for {action}: {str(e)}")
 
-            # Direct dictionary lookup using ToolCacheEntry as key
             cache_entry = ToolCacheEntry(action=action, action_input=parsed_action_input)
             tool_output = self._tool_cache.get(cache_entry)
 
@@ -885,7 +910,6 @@ class ReActAgent(Agent):
                 logger.info(f"Found tool output for action='{action}' action_input='{action_input}'")
                 return str(tool_output)
             else:
-                # If not found, log available tools for debugging
                 available_tools = [(entry.action, entry.action_input) for entry in self._tool_cache.keys()]
                 logger.warning(
                     f"Tool output not found for action='{action}' input='{action_input}'. "
@@ -1073,7 +1097,6 @@ class ReActAgent(Agent):
 
         for loop_num in range(1, self.max_loops + 1):
             try:
-                # Create a streaming callback
                 streaming_callback = None
                 original_streaming_enabled = self.llm.streaming.enabled
 
@@ -1085,11 +1108,9 @@ class ReActAgent(Agent):
                         **kwargs,
                     )
 
-                    # Temporarily enable streaming on LLM
                     if not original_streaming_enabled:
                         self.llm.streaming.enabled = True
 
-                    # Create a config for the LLM that uses proper streaming callback
                     llm_config = config.model_copy(deep=False)
                     llm_config.callbacks = [
                         callback
@@ -1107,7 +1128,6 @@ class ReActAgent(Agent):
                         **kwargs,
                     )
                 finally:
-                    # Restore original streaming state
                     if not original_streaming_enabled:
                         try:
                             self.llm.streaming.enabled = original_streaming_enabled
@@ -1117,7 +1137,6 @@ class ReActAgent(Agent):
                 action, action_input = None, None
                 llm_generated_output = ""
 
-                # Use content from callback if available
                 if streaming_callback and streaming_callback.accumulated_content:
                     llm_generated_output = streaming_callback.accumulated_content
                 else:
@@ -1212,7 +1231,6 @@ class ReActAgent(Agent):
                         try:
                             if isinstance(action_input, str):
                                 action_input = json.loads(action_input)
-                            # If it's already a dict/object, use it as-is
                         except json.JSONDecodeError as e:
                             raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
 
@@ -1363,13 +1381,15 @@ class ReActAgent(Agent):
 
                             action_input_json = json.dumps(action_input)
 
+                            step_observation = AgentIntermediateStepModelObservation(
+                                tool_using="multiple_tools",
+                                tool_input=str(action_input_json),
+                                tool_output=str(tool_result),
+                                updated=llm_generated_output,
+                            )
+
                             self._intermediate_steps[loop_num]["model_observation"].update(
-                                AgentIntermediateStepModelObservation(
-                                    tool_using="multiple_tools",
-                                    tool_input=str(action_input_json),
-                                    tool_output=str(tool_result),
-                                    updated=llm_generated_output,
-                                ).model_dump()
+                                step_observation.model_dump()
                             )
                         else:
                             try:
@@ -1472,14 +1492,14 @@ class ReActAgent(Agent):
                             **kwargs,
                         )
 
-                    self._intermediate_steps[loop_num]["model_observation"].update(
-                        AgentIntermediateStepModelObservation(
-                            tool_using=action,
-                            tool_input=action_input,
-                            tool_output=tool_result,
-                            updated=llm_generated_output,
-                        ).model_dump()
+                    step_observation = AgentIntermediateStepModelObservation(
+                        tool_using=action,
+                        tool_input=action_input,
+                        tool_output=tool_result,
+                        updated=llm_generated_output,
                     )
+
+                    self._intermediate_steps[loop_num]["model_observation"].update(step_observation.model_dump())
                 else:
                     self.stream_reasoning(
                         {
@@ -1618,6 +1638,9 @@ class ReActAgent(Agent):
                     else:
                         type_str = getattr(field.annotation, "__name__", str(field.annotation))
 
+                    if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
+                        type_str = "tuple[str, ...]"
+
                     description = field.description or "No description"
                     params.append(f"{name} ({type_str}): {description}")
             if params:
@@ -1679,25 +1702,36 @@ class ReActAgent(Agent):
             description += f" Defaults to: {field.default}." if field.default and not field.is_required() else ""
             params = self.filter_format_type(field.annotation)
 
-            properties[name] = {"type": [], "description": description}
+            properties[name] = {"description": description}
+            types = []
 
             for param in params:
                 if param is type(None):
-                    properties[name]["type"].append("null")
+                    types.append("null")
 
                 elif param_type := TYPE_MAPPING.get(param):
-                    properties[name]["type"].append(param_type)
+                    types.append(param_type)
 
                 elif issubclass(param, Enum):
                     element_type = TYPE_MAPPING.get(
                         self.filter_format_type(type(list(param.__members__.values())[0].value))[0]
                     )
-                    properties[name]["type"].append(element_type)
+                    types.append(element_type)
                     properties[name]["enum"] = [field.value for field in param.__members__.values()]
 
                 elif getattr(param, "__origin__", None) is list:
-                    properties[name]["type"].append("array")
+                    types.append("array")
                     properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
+
+                elif getattr(param, "__origin__", None) is dict:
+                    types.append("object")
+
+            if len(types) == 1:
+                properties[name]["type"] = types[0]
+            elif len(types) > 1:
+                properties[name]["type"] = types
+            else:
+                properties[name]["type"] = "string"
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
@@ -1829,10 +1863,22 @@ class ReActAgent(Agent):
                     all_results.append({"tool_name": tool_name, "success": False, "result": error_message})
                     continue
 
-                tool_result = self._run_tool(tool, tool_input, config, **kwargs)
+                result_raw = self._run_tool(tool, tool_input, config, **kwargs)
+                if isinstance(result_raw, dict) and "text" in result_raw:
+                    tool_result = result_raw["text"]
+                    tool_files = result_raw.get("files", {})
+                else:
+                    tool_result = result_raw
+                    tool_files = {}
 
                 all_results.append(
-                    {"tool_name": tool_name, "success": True, "tool_input": tool_input, "result": tool_result}
+                    {
+                        "tool_name": tool_name,
+                        "success": True,
+                        "tool_input": tool_input,
+                        "result": tool_result,
+                        "files": tool_files,
+                    }
                 )
 
                 if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
@@ -1857,12 +1903,19 @@ class ReActAgent(Agent):
                 )
 
         observation_parts = []
+        all_files = {}
+
         for result in all_results:
             tool_name = result["tool_name"]
             result_content = result["result"]
             success_status = "SUCCESS" if result["success"] else "ERROR"
             observation_parts.append(f"--- {tool_name} has resulted in {success_status} ---\n{result_content}")
 
+            if result.get("files"):
+                all_files.update(result["files"])
+
         combined_observation = "\n\n".join(observation_parts)
 
+        if all_files:
+            return {"content": combined_observation, "files": all_files}
         return combined_observation

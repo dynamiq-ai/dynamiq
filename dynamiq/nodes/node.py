@@ -212,9 +212,10 @@ class Node(BaseModel, Runnable, ABC):
         metadata (NodeMetadata | None): Optional metadata for the node.
         is_postponed_component_init (bool): Whether component initialization is postponed.
         is_optimized_for_agents (bool): Whether to optimize output for agents. By default is set to False.
-        supports_files (bool): Whether the node has access to files. By default is set to False.
+        is_files_allowed (bool): Whether the node is permitted to access files. By default is set to False.
         _json_schema_fields (list[str]): List of parameter names that will be used when generating json schema
           with _generate_json_schema.
+
     """
     id: str = Field(default_factory=generate_uuid)
     name: str | None = None
@@ -227,13 +228,12 @@ class Node(BaseModel, Runnable, ABC):
     caching: CachingConfig = Field(default_factory=CachingConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
-
     depends: list[NodeDependency] = []
     metadata: NodeMetadata | None = None
 
     is_postponed_component_init: bool = False
     is_optimized_for_agents: bool = False
-    is_files_allowed: bool = False
+    is_files_allowed: bool = Field(default=False, description="Whether the node is permitted to access files.")
 
     _output_references: NodeOutputReferences = PrivateAttr()
 

@@ -1,4 +1,5 @@
 from jinja2 import Template
+
 from dynamiq.nodes.agents.base import PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT, AgentManager
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.runnables import RunnableConfig
