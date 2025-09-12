@@ -21,7 +21,7 @@ class FileWriteInputSchema(BaseModel):
 
     file_path: str = Field(..., description="Path where the file should be written")
     content: bytes | str = Field(
-        ..., description="File content (string, bytes, or serializable object)"
+        ..., description="File content (string, bytes)"
     )
     content_type: str | None = Field(default=None, description="MIME type (auto-detected if not provided)")
     metadata: str | None = Field(default=None, description="Additional metadata for the file")
