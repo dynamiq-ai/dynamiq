@@ -31,7 +31,7 @@ nodes:
     file_store:
       enabled: true
       backend:
-        type: dynamiq.storages.file.in_memory.InMemoryFileStore
+        type: dynamiq.storages.file.InMemoryFileStore
       agent_file_write_enabled: true
     max_loops: 5
     inference_mode: XML
