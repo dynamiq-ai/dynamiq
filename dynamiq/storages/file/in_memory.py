@@ -164,7 +164,7 @@ class InMemoryFileStore(FileStore):
         """
 
         return {
-            "type": "dynamiq.storages.file.in_memory.InMemoryFileStore",
+            "type": "dynamiq.storages.file.InMemoryFileStore",
             "file_count": len(self._files),
             "is_empty": self.is_empty(),
         }
