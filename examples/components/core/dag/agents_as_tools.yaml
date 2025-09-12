@@ -1,0 +1,86 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+
+nodes:
+  child-agent:
+    type: dynamiq.nodes.agents.ReActAgent
+    name: Coder Agent
+    description: Writes and runs small Python snippets to compute results.
+    role: |
+      You are a focused coding assistant. You write small, correct Python snippets using the Python tool when calculations are needed.
+      Always return a concise explanation along with results.
+    llm:
+      id: child-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+      temperature: 0.1
+      max_tokens: 2000
+    tools:
+      - id: py-tool
+        type: dynamiq.nodes.tools.Python
+        name: Sum Calculator
+        description: Computes the sum of the first n integers; expects input json input (n,"int")
+        code: |
+          def run(params: dict):
+              n = int(params.get("n", 10))
+              s = sum(range(1, n + 1))
+              return {"content": f"sum(1..{n})={s}", "n": n, "sum": s}
+        use_multiple_params: false
+    max_loops: 3
+
+  parent-agent:
+    type: dynamiq.nodes.agents.ReActAgent
+    name: Manager Agent
+    description: Delegates subtasks to a coding agent when computation is required.
+    role: |
+      You are a senior assistant who can delegate work to specialized agent tools.
+      If a tool is itself an agent, pass it a concise subtask via {"input": "..."}.
+      Summarize final results for the user.
+    llm:
+      id: parent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+      temperature: 0.1
+      max_tokens: 2000
+    tools:
+      - id: child-agent
+        type: dynamiq.nodes.agents.ReActAgent
+        name: Coder Agent
+        description: Writes and runs small Python snippets to compute results.
+        role: |
+          You are a focused coding assistant. You write small, correct Python snippets using the Python tool when calculations are needed.
+          Always return a concise explanation along with results.
+        llm:
+          id: child-llm
+          type: dynamiq.nodes.llms.OpenAI
+          connection: openai-conn
+          model: gpt-4o
+          temperature: 0.1
+          max_tokens: 2000
+        tools:
+          - id: py-tool
+            type: dynamiq.nodes.tools.Python
+            name: Sum Calculator
+            description: Computes the sum of the first n integers; expects json input ("n", int)
+            code: |
+              def run(params: dict):
+                  n = int(params.get("n", 10))
+                  s = sum(range(1, n + 1))
+                  return {"content": f"sum(1..{n})={s}", "n": n, "sum": s}
+            use_multiple_params: false
+        max_loops: 3
+    max_loops: 3
+
+flows:
+  agents-as-tools-flow:
+    name: Agents As Tools Flow
+    nodes:
+      - parent-agent
+
+workflows:
+  agents-as-tools-workflow:
+    flow: agents-as-tools-flow
+    version: 1
