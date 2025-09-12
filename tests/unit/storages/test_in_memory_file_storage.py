@@ -1,6 +1,6 @@
 import pytest
 
-from dynamiq.storages.file.base import FileExistsError, FileInfo, FileNotFoundError
+from dynamiq.storages.file.base import FileInfo, FileNotFoundError
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
@@ -42,11 +42,8 @@ def test_store_file_exists_error(storage, sample_text_content):
     file_path = "test/exists.txt"
     storage.store(file_path, sample_text_content)
 
-    with pytest.raises(FileExistsError) as exc_info:
-        storage.store(file_path, "new content")
-
-    assert exc_info.value.path == file_path
-    assert "already exists" in str(exc_info.value)
+    storage.store(file_path, "new content")
+    assert storage.retrieve(file_path) == sample_text_content.encode('utf-8')
 
 
 def test_store_text_content_full(storage, sample_text_content, sample_file_path):

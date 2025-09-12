@@ -37,6 +37,8 @@ ALLOWED_MODULES = [
     "typing",
     "urllib",
     "uuid",
+    "pandas",
+    "numpy",
 ]
 
 
@@ -187,6 +189,7 @@ class Python(Node):
     code: str
     use_multiple_params: bool = False
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
+    is_files_allowed: bool = True
 
     def execute(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
         """

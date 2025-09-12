@@ -9,6 +9,7 @@ from dynamiq import connections
 from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.mcp import MCPServer, MCPSse, MCPTool
+from dynamiq.nodes.tools import FileReadTool, FileListTool
 
 
 def assert_tool_matches(tool, expected, connection):
@@ -186,7 +187,7 @@ def test_agent_integration_with_mcp_tools(sse_server_connection, mock_mcp_tools,
 
     agent = ReActAgent(llm=llm_model, tools=[mcp_server, mcp_tool])
 
-    agent_tools = agent.tools
+    agent_tools = [tool for tool in agent.tools if not isinstance(tool, (FileReadTool, FileListTool))]
     expected_tools = [
         {"name": "add", "description": "Add two numbers", "schema": {("a", "int"), ("b", "int")}},
         {"name": "multiply", "description": "Multiply two numbers", "schema": {("a", "float"), ("b", "float")}},
@@ -198,7 +199,11 @@ def test_agent_integration_with_mcp_tools(sse_server_connection, mock_mcp_tools,
     for tool, expected in zip(agent_tools, expected_tools):
         assert_tool_matches(tool, expected, sse_server_connection)
 
-    dict_tools = agent.to_dict()["tools"]
+    dict_tools = [
+        tool
+        for tool in agent.to_dict()["tools"]
+        if tool["type"] not in ["dynamiq.nodes.tools.FileReadTool", "dynamiq.nodes.tools.FileListTool"]
+    ]
     assert len(dict_tools) == 2
     assert dict_tools[0]["name"] == "subtract"
     assert dict_tools[0]["type"] == "dynamiq.nodes.tools.MCPTool"

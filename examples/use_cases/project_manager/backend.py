@@ -22,7 +22,7 @@ def setup_agent() -> ReActAgent:
 
     llm = setup_llm()
     memory = Memory(backend=InMemory())
-    streaming_config = StreamingConfig(enabled=True, mode=StreamingMode.FINAL, by_tokens=True)
+    streaming_config = StreamingConfig(enabled=True, mode=StreamingMode.FINAL)
 
     agent = ReActAgent(
         name="PM Manager",

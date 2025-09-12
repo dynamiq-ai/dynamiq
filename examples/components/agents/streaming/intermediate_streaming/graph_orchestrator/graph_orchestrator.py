@@ -78,7 +78,7 @@ def run_orchestrator(request: str, send_handler: AsyncStreamingIteratorCallbackH
     orchestrator = GraphOrchestrator(
         name="Graph orchestrator",
         manager=GraphAgentManager(llm=llm),
-        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
+        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
     )
 
     orchestrator.add_state_by_tasks("generate_sketch", [email_writer])
