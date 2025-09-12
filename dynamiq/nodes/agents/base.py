@@ -821,9 +821,6 @@ class Agent(Node):
 
     def _run_tool(self, tool: Node, tool_input: dict, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
-        print(self.file_store.backend._files)
-        logger.info("_+++++++++++++++++++++++++++++++++++++++++++++")
-
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
