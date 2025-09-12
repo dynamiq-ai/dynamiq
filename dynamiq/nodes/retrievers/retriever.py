@@ -19,7 +19,7 @@ class VectorStoreRetrieverInputSchema(BaseModel):
     filters: dict[str, Any] = Field(
         default_factory=dict, description="Parameter to provide filters to apply for retrieving specific documents."
     )
-    top_k: int = Field(default=0, description="Parameter to provided how many documents to retrieve.")
+    top_k: int | None = Field(default=None, description="Parameter to provide how many documents to retrieve.")
 
 
 class VectorStoreRetriever(Node):
@@ -44,7 +44,7 @@ class VectorStoreRetriever(Node):
     text_embedder: TextEmbedder
     document_retriever: Retriever
     filters: dict[str, Any] = {}
-    top_k: int = 0
+    top_k: int | None = None
     alpha: float = 0.0
 
     input_schema: ClassVar[type[VectorStoreRetrieverInputSchema]] = VectorStoreRetrieverInputSchema
@@ -166,7 +166,7 @@ class VectorStoreRetriever(Node):
             document_retriever_output = self.document_retriever.run(
                 input_data={
                     "embedding": embedding,
-                    "top_k": top_k,
+                    **({"top_k": top_k} if top_k else {}),
                     "filters": filters,
                     "alpha": alpha,
                     **({"query": query} if alpha else {}),
