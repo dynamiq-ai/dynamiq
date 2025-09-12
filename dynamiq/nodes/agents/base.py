@@ -5,7 +5,6 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, ClassVar
 
-from dynamiq.nodes.tools.python import Python
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
@@ -24,9 +23,11 @@ from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
+from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
 
@@ -326,6 +327,7 @@ class Agent(Node):
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
     file_store: FileStoreConfig = Field(
+        default_factory=lambda: FileStoreConfig(enabled=True, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
 
@@ -819,6 +821,8 @@ class Agent(Node):
 
     def _run_tool(self, tool: Node, tool_input: dict, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
+        print(self.file_store.backend._files)
+        logger.info("_+++++++++++++++++++++++++++++++++++++++++++++")
 
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
@@ -828,8 +832,6 @@ class Agent(Node):
         )
 
         if self.file_store_backend and tool.is_files_allowed:
-            if isinstance(tool, Python):
-                merged_input["files"] = self.file_store_backend.list_files_bytes()
             for field_name, field in tool.input_schema.model_fields.items():
                 if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
                     if field_name in merged_input:
@@ -838,6 +840,8 @@ class Agent(Node):
                         )
                     else:
                         merged_input[field_name] = self.file_store_backend.list_files_bytes()
+            if isinstance(tool, Python):
+                merged_input["files"] = self.file_store_backend.list_files_bytes()
 
         if tool_params:
             debug_info = []

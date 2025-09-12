@@ -20,8 +20,12 @@ class InMemoryFileStore(FileStore):
 
     """
 
-    def __init__(self):
-        """Initialize the in-memory storage."""
+    def __init__(self, **kwargs):
+        """Initialize the in-memory storage.
+
+        Args:
+            **kwargs: Additional keyword arguments (ignored)
+        """
         self._files: dict[str, dict[str, Any]] = {}
 
     def list_files_bytes(self) -> list[BytesIO]:
@@ -146,3 +150,16 @@ class InMemoryFileStore(FileStore):
             metadata=file_data.get("metadata", {}),
             content=file_data["content"],
         )
+
+    def to_dict(self, **kwargs) -> dict[str, Any]:
+        """Convert the InMemoryFileStore instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the file store that is JSON serializable.
+        """
+
+        return {
+            "type": "dynamiq.storages.file.in_memory.InMemoryFileStore",
+            "file_count": len(self._files),
+            "is_empty": self.is_empty(),
+        }

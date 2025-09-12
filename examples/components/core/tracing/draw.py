@@ -228,10 +228,26 @@ def draw_multi_tool_workflow_graph_in_png(
     return output
 
 
+def draw_react_agent_filestore_graph_in_png(
+    output_path: str = os.path.join(os.path.dirname(__file__), "react_agent_filestore_graph.png")
+) -> None:
+    """Draw the execution graph of the React agent with file store workflow."""
+    from examples.components.core.dag.yaml_react_agent_example import run_yaml_react_agent_example
+
+    output, traces = run_yaml_react_agent_example()
+
+    graph = get_graph_by_traces([run for _, run in traces.items()])
+    draw_graph_in_png(graph, output_path)
+
+    logger.info(f"React agent with file store graph saved to {output_path}")
+    return output
+
+
 if __name__ == "__main__":
     draw_simple_agent_graph_in_png()
     draw_reflection_agent_graph_in_png()
     draw_react_agent_graph_in_png()
+    draw_react_agent_filestore_graph_in_png()
     draw_job_posting_linear_agent_graph_in_png()
     draw_literature_overview_adaptive_agent_graph_in_png()
     draw_adaptive_coding_react_agent_graph_in_png()
