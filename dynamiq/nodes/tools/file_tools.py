@@ -20,11 +20,11 @@ class FileWriteInputSchema(BaseModel):
     """Schema for file write input parameters."""
 
     file_path: str = Field(..., description="Path where the file should be written")
-    content: str | bytes | dict | list | Any = Field(
+    content: bytes | str = Field(
         ..., description="File content (string, bytes, or serializable object)"
     )
     content_type: str | None = Field(default=None, description="MIME type (auto-detected if not provided)")
-    metadata: dict[str, Any] | None = Field(default=None, description="Additional metadata for the file")
+    metadata: str | None = Field(default=None, description="Additional metadata for the file")
 
 
 class FileReadTool(Node):
