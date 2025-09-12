@@ -401,12 +401,12 @@ class Agent(Node):
 
         self.tools = expanded_tools
 
-        if self.file_store.enabled:
+        if self.file_store_backend:
             if self.file_store.agent_file_write_enabled:
-                self.tools.append(FileWriteTool(file_store=self.file_store))
+                self.tools.append(FileWriteTool(file_store=self.file_store_backend))
 
-            self.tools.append(FileReadTool(file_store=self.file_store))
-            self.tools.append(FileListTool(file_store=self.file_store))
+            self.tools.append(FileReadTool(file_store=self.file_store_backend))
+            self.tools.append(FileListTool(file_store=self.file_store_backend))
 
         self._init_prompt_blocks()
 
@@ -610,8 +610,8 @@ class Agent(Node):
             "intermediate_steps": self._intermediate_steps,
         }
 
-        if self.file_store.enabled and self.file_store and not self.file_store.is_empty():
-            execution_result["files"] = self.file_store.list_files_bytes()
+        if self.file_store_backend and not self.file_store_backend.is_empty():
+            execution_result["files"] = self.file_store_backend.list_files_bytes()
             logger.info(
                 f"Agent {self.name} - {self.id}: returning {len(execution_result['files'])}"
                 " accumulated file(s) in FileStore"
@@ -829,17 +829,17 @@ class Agent(Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
-        if self.file_store.enabled and self.file_store and tool.is_files_allowed:
+        if self.file_store_backend and tool.is_files_allowed:
             if isinstance(tool, Python):
-                merged_input["files"] = self.file_store.list_files_bytes()
+                merged_input["files"] = self.file_store_backend.list_files_bytes()
             for field_name, field in tool.input_schema.model_fields.items():
                 if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
                     if field_name in merged_input:
                         merged_input[field_name] = FileMappedInput(
-                            input=merged_input[field_name], files=self.file_store.list_files_bytes()
+                            input=merged_input[field_name], files=self.file_store_backend.list_files_bytes()
                         )
                     else:
-                        merged_input[field_name] = self.file_store.list_files_bytes()
+                        merged_input[field_name] = self.file_store_backend.list_files_bytes()
 
         if tool_params:
             debug_info = []
@@ -903,9 +903,9 @@ class Agent(Node):
                 bio.name = f"file_{i}.bin"
                 bio.description = "User-provided file"
 
-                if self.file_store.enabled and self.file_store:
+                if self.file_store_backend:
                     try:
-                        self.file_store.store(
+                        self.file_store_backend.store(
                             file_path=bio.name,
                             content=f,
                             content_type="application/octet-stream",
@@ -922,12 +922,12 @@ class Agent(Node):
                 if not hasattr(f, "description"):
                     f.description = "User-provided file"
 
-                if self.file_store.enabled and self.file_store:
+                if self.file_store_backend:
                     try:
                         content = f.read()
                         f.seek(0)
 
-                        self.file_store.store(
+                        self.file_store_backend.store(
                             file_path=f.name,
                             content=content,
                             content_type="application/octet-stream",
@@ -950,7 +950,7 @@ class Agent(Node):
             tool: The tool that generated the files
             tool_result: The result from the tool execution
         """
-        if not self.file_store.enabled or not self.file_store:
+        if not self.file_store_backend:
             return
 
         if isinstance(tool_result.output, dict) and "files" in tool_result.output:
@@ -959,17 +959,14 @@ class Agent(Node):
                 stored_files = []
                 for file in tool_files:
                     if isinstance(file, io.BytesIO):
-                        # Handle BytesIO objects with metadata
                         file_name = getattr(file, "name", f"file_{id(file)}.bin")
                         file_description = getattr(file, "description", "Tool-generated file")
                         content_type = getattr(file, "content_type", "application/octet-stream")
 
-                        # Read content from BytesIO
                         content = file.read()
-                        file.seek(0)  # Reset position for potential future reads
+                        file.seek(0)
 
-                        # Store in file_store
-                        self.file_store.store(
+                        self.file_store_backend.store(
                             file_path=file_name,
                             content=content,
                             content_type=content_type,
@@ -981,7 +978,7 @@ class Agent(Node):
                         file_name = f"file_{id(file)}.bin"
                         file_description = f"Tool-{tool.name}-generated file"
                         content_type = "application/octet-stream"
-                        self.file_store.store(
+                        self.file_store_backend.store(
                             file_path=file_name,
                             content=file,
                             content_type=content_type,
