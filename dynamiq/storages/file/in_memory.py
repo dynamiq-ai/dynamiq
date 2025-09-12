@@ -7,6 +7,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from pydantic import ConfigDict
+
 from dynamiq.utils.logger import logger
 
 from .base import FileInfo, FileNotFoundError, FileStore, StorageError
@@ -20,12 +22,15 @@ class InMemoryFileStore(FileStore):
 
     """
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     def __init__(self, **kwargs):
         """Initialize the in-memory storage.
 
         Args:
             **kwargs: Additional keyword arguments (ignored)
         """
+        super().__init__(**kwargs)
         self._files: dict[str, dict[str, Any]] = {}
 
     def list_files_bytes(self) -> list[BytesIO]:
