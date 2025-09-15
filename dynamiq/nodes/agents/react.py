@@ -1,6 +1,7 @@
 import json
 import re
 import types
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from typing import Any, Callable, Union, get_args, get_origin
 
@@ -19,11 +20,7 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-from dynamiq.nodes.agents.utils import (
-    SummarizationConfig,
-    ToolCacheEntry,
-    XMLParser,
-)
+from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
@@ -1838,7 +1835,7 @@ class ReActAgent(Agent):
 
         self._prompt_blocks.update(prompt_blocks)
 
-    def _execute_tools(self, tools_data: list[dict], config: RunnableConfig, **kwargs) -> str:
+    def _execute_tools(self, tools_data: list[dict[str, Any]], config: RunnableConfig, **kwargs) -> str:
         """
         Execute one or more tools and gather their results.
 
@@ -1850,62 +1847,106 @@ class ReActAgent(Agent):
         Returns:
             str: Combined observation string with all tool results
         """
-        all_results = []
+        all_results: list[dict[str, Any]] = []
 
-        for tool_data in tools_data:
-            try:
-                tool_name = tool_data["name"]
-                tool_input = tool_data["input"]
+        if not tools_data:
+            return ""
 
-                tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
-                if not tool:
-                    error_message = f"Unknown tool: {tool_name}. Please use only available tools."
-                    all_results.append({"tool_name": tool_name, "success": False, "result": error_message})
-                    continue
+        # Helper to run a single tool
+        def _run_single_tool(tool_name: str, tool_input: dict) -> dict[str, Any]:
+            tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
+            if not tool:
+                return {
+                    "tool_name": tool_name,
+                    "success": False,
+                    "tool_input": tool_input,
+                    "result": f"Unknown tool: {tool_name}. Please use only available tools.",
+                    "files": {},
+                }
 
-                result_raw = self._run_tool(tool, tool_input, config, **kwargs)
-                if isinstance(result_raw, dict) and "text" in result_raw:
-                    tool_result = result_raw["text"]
-                    tool_files = result_raw.get("files", {})
-                else:
-                    tool_result = result_raw
-                    tool_files = {}
+            result_raw = self._run_tool(tool, tool_input, config, **kwargs)
+            if isinstance(result_raw, dict) and "text" in result_raw:
+                tool_result = result_raw["text"]
+                tool_files = result_raw.get("files", {})
+            else:
+                tool_result = result_raw
+                tool_files = {}
 
-                all_results.append(
-                    {
-                        "tool_name": tool_name,
-                        "success": True,
-                        "tool_input": tool_input,
-                        "result": tool_result,
-                        "files": tool_files,
-                    }
-                )
+            return {
+                "tool_name": tool.name,
+                "success": True,
+                "tool_input": tool_input,
+                "result": tool_result,
+                "files": tool_files,
+            }
 
-                if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+        # Stream helper to avoid repetition
+        def _stream_result(res: dict[str, Any]):
+            if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+                try:
                     self.stream_content(
-                        content={"name": tool.name, "input": tool_input, "result": tool_result},
-                        source=tool.name,
+                        content={
+                            "name": res.get("tool_name"),
+                            "input": res.get("tool_input"),
+                            "result": res.get("result"),
+                        },
+                        source=str(res.get("tool_name")),
                         step="tool",
                         config=config,
                         **kwargs,
                     )
+                except Exception as stream_err:
+                    logger.error(f"Streaming error for tool {res.get('tool_name')}: {stream_err}")
 
-            except Exception as e:
-                error_message = f"Error executing tool {tool_data['name']}: {str(e)}"
-                logger.error(error_message)
-                all_results.append(
-                    {
-                        "tool_name": tool_data["name"],
+        # Use at most one worker per tool to avoid oversubscription in nested parallel contexts
+        max_workers = max(1, len(tools_data))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Attach original order index to preserve deterministic aggregation later
+            future_map = {}
+            for idx, td in enumerate(tools_data):
+                tool_name = td.get("name")
+                tool_input = td.get("input")
+                if tool_name is None or tool_input is None:
+                    error_message = "Invalid tool payload: missing 'name' or 'input'"
+                    logger.error(error_message)
+                    all_results.append(
+                        {
+                            "order": idx,
+                            "tool_name": tool_name or UNKNOWN_TOOL_NAME,
+                            "success": False,
+                            "tool_input": tool_input,
+                            "result": error_message,
+                            "files": {},
+                        }
+                    )
+                    continue
+                future = executor.submit(_run_single_tool, tool_name, tool_input)
+                future_map[future] = idx
+
+            for future in as_completed(future_map.keys()):
+                idx = future_map[future]
+                try:
+                    res = future.result()
+                except Exception as e:
+                    error_message = f"Error executing tool {tools_data[idx].get('name')}: {str(e)}"
+                    logger.error(error_message)
+                    res = {
+                        "tool_name": tools_data[idx].get("name"),
                         "success": False,
-                        "tool_input": tool_input,
+                        "tool_input": tools_data[idx].get("input"),
                         "result": error_message,
+                        "files": {},
                     }
-                )
+                # Tag with original order and collect
+                res["order"] = idx
+                all_results.append(res)
+                _stream_result(res)
 
         observation_parts = []
         all_files = {}
 
-        for result in all_results:
+        # Preserve the original LLM-specified tool order in the combined observation
+        for result in sorted(all_results, key=lambda r: r.get("order", 0)):
             tool_name = result["tool_name"]
             result_content = result["result"]
             success_status = "SUCCESS" if result["success"] else "ERROR"
