@@ -76,7 +76,7 @@ def run_workflow():
     result = wf.run(
         input_data={
             "input": "Compute the sum of the first 7 integers. Use your coding agent if needed.",
-            "tool_params": {"by_agent_name": {"Coder Agent": {"global": {"n": 7}}}},
+            "tool_params": {"by_name": {"Coder Agent": {"global": {"n": 7}}}},
         },
         config=RunnableConfig(callbacks=[tracing]),
     )
