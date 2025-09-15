@@ -31,7 +31,7 @@ class RunnableConfig(BaseModel):
     cache: CacheConfig | None = None
     max_node_workers: int | None = None
     nodes_override: dict[str, NodeRunnableConfig] = {}
-    dry_run_config: DryRunConfig | None = None
+    dry_run: DryRunConfig | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

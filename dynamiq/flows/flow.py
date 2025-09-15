@@ -206,20 +206,20 @@ class Flow(BaseFlow):
         Args:
             config (RunnableConfig, optional): Configuration for the run.
         """
-        if not config or not config.dry_run_config:
+        if not config or not config.dry_run:
             return
 
         logger.info("Starting dry run cleanup...")
         for node in self._dry_run_nodes:
             if isinstance(node, BaseVectorStore):
                 try:
-                    node.dry_run_cleanup(config.dry_run_config)
+                    node.dry_run_cleanup(config.dry_run)
                     logger.debug(f"Cleaned up dry run resources for node {node.id}")
                 except Exception as e:
                     logger.error(f"Failed to clean up dry run resources for node {node.id}: {str(e)}")
             elif isinstance(node, Writer):
                 try:
-                    node.vector_store.dry_run_cleanup(config.dry_run_config)
+                    node.vector_store.dry_run_cleanup(config.dry_run)
                     logger.debug(f"Cleaned up dry run resources for node {node.id}")
                 except Exception as e:
                     logger.error(f"Failed to clean up dry run resources for node {node.id}: {str(e)}")
