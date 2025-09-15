@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+
 from dynamiq import Workflow
 from dynamiq.connections import Weaviate
 from dynamiq.flows import Flow
@@ -8,6 +10,8 @@ from dynamiq.types import Document
 
 
 def weaviate_dry_run():
+    load_dotenv()
+
     # Create sample documents
     documents = [
         Document(id="doc1", content="Sample content 1", embedding=[0.1, 0.2, 0.3], metadata={"name": "doc1"}),
@@ -17,7 +21,7 @@ def weaviate_dry_run():
 
     # Create runnable config with dry run
     dry_run_config = DryRunConfig(delete_collection=True, delete_documents=True)
-    config = RunnableConfig(dry_run_config=dry_run_config)
+    config = RunnableConfig(dry_run=dry_run_config)
 
     # Add a writer node
     writer_node = WeaviateDocumentWriter(

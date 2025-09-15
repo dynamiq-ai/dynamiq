@@ -219,7 +219,7 @@ class WeaviateVectorStore(BaseVectorStore, DryRunMixin):
         """
         try:
             collection_to_delete = collection_name or self.index_name
-            self.client.collections.delete(collection_name=collection_to_delete)
+            self.client.collections.delete(collection_to_delete)
             logger.info(f"Deleted collection '{collection_to_delete}'.")
         except Exception as e:
             logger.error(f"Failed to delete collection '{collection_to_delete}': {e}")
