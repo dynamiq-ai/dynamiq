@@ -44,7 +44,7 @@ def run_orchestrator(request: str, send_handler: AsyncStreamingIteratorCallbackH
         tools=[tool_search],
         role=AGENT_RESEARCHER_ROLE,
         inference_mode=InferenceMode.STRUCTURED_OUTPUT,
-        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
+        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
     )
 
     writer_agent = ReActAgent(
@@ -53,7 +53,7 @@ def run_orchestrator(request: str, send_handler: AsyncStreamingIteratorCallbackH
         llm=llm,
         role=AGENT_WRITER_ROLE,
         inference_mode=InferenceMode.STRUCTURED_OUTPUT,
-        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
+        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
     )
 
     agent_manager = LinearAgentManager(llm=llm)
@@ -61,7 +61,7 @@ def run_orchestrator(request: str, send_handler: AsyncStreamingIteratorCallbackH
     linear_orchestrator = LinearOrchestrator(
         manager=agent_manager,
         agents=[research_agent, writer_agent],
-        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
+        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
         use_summarizer=True,
         summarize_all_answers=True,
     )

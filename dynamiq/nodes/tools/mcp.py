@@ -2,6 +2,7 @@ import asyncio
 import importlib.util
 import inspect
 import json
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import field
 from pathlib import Path
@@ -112,15 +113,20 @@ class MCPTool(ConnectionNode):
                 output_model_type=DataModelType.PydanticV2BaseModel,
             )
 
-            spec = importlib.util.spec_from_file_location("dynamiq.nodes.tools.MCPTool", out_path)
+            module_name = "dynamiq.nodes.tools.MCPTool.mcp_schema"
+            spec = importlib.util.spec_from_file_location(module_name, out_path)
             generated_module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = generated_module
             spec.loader.exec_module(generated_module)
             generated_classes = [
                 cls
-                for name, cls in inspect.getmembers(generated_module, inspect.isclass)
+                for _, cls in inspect.getmembers(generated_module, inspect.isclass)
                 if cls.__module__ == generated_module.__name__
             ]
-            return generated_classes[0]
+
+            model_cls = generated_classes[0]
+            model_cls.model_rebuild()
+            return model_cls
 
     def execute(self, input_data: BaseModel, config: RunnableConfig | None = None, **kwargs) -> dict[str, Any]:
         """
@@ -216,21 +222,25 @@ Usage Strategy:
         Returns:
             None
         """
-        async with self.connection.connect() as result:
-            read, write = result[:2]
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                tools = await session.list_tools()
-                for tool in tools.tools:
-                    self._mcp_tools[tool.name] = MCPTool(
-                        name=tool.name,
-                        description=tool.description or "MCP Tool",
-                        json_input_schema=tool.inputSchema,
-                        connection=self.connection,
-                        server_metadata=ServerMetadata(id=self.id, name=self.name, description=self.description),
-                    )
+        try:
+            async with self.connection.connect() as result:
+                read, write = result[:2]
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    tools = await session.list_tools()
+                    for tool in tools.tools:
+                        self._mcp_tools[tool.name] = MCPTool(
+                            name=tool.name,
+                            description=tool.description or "MCP Tool",
+                            json_input_schema=tool.inputSchema,
+                            connection=self.connection,
+                            server_metadata=ServerMetadata(id=self.id, name=self.name, description=self.description),
+                        )
 
-        logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
+            logger.info(f"Tool {self.name}: {len(self._mcp_tools)} MCP tools initialized from a server.")
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {str(e)}")
+            raise ToolExecutionException(f"Tool {self.name} - {self.id}: failed to initialize session. Error: {str(e)}")
 
     def get_mcp_tools(self, select_all: bool = False) -> list[MCPTool]:
         """

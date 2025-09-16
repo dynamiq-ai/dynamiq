@@ -6,7 +6,7 @@ from typing import Any, Sequence
 
 import filetype
 from lxml import etree as LET  # nosec: B410
-from pydantic import BaseModel, model_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
 from dynamiq.prompts import (
@@ -18,8 +18,17 @@ from dynamiq.prompts import (
     VisionMessageTextContent,
 )
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import CHARS_PER_TOKEN
 
 TOOL_MAX_TOKENS = 64000
+
+
+class FileMappedInput(BaseModel):
+    """Structure for storing file mapped inputs."""
+
+    input: Any
+    files: list[io.BytesIO]  # List of BytesIO objects or FileInfo objects
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class XMLParser:
@@ -340,10 +349,13 @@ class XMLParser:
 
         cleaned_text = XMLParser._clean_content(text)
         if not cleaned_text:
-            if required_tags:
-                raise ParsingError("Input text is empty or became empty after cleaning.")
+            if text and text.strip():
+                cleaned_text = text.strip()
             else:
-                return {}
+                if required_tags:
+                    raise ParsingError("Input text is empty or became empty after cleaning.")
+                else:
+                    return {}
 
         extracted_contents = XMLParser.preprocess_xml_content(cleaned_text, required_tags, optional_tags)
 
@@ -720,12 +732,12 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
     This function converts various types of tool outputs into a string representation.
     It handles dictionaries (with or without a 'content' key), lists, tuples, and other
     types by converting them to a string. If the resulting string exceeds the maximum
-    allowed length (calculated from max_tokens), it is truncated.
+    allowed length, it truncates the content.
 
     Args:
         content: The output from tool execution, which can be of various types.
         max_tokens: Maximum allowed token count for the content. The effective character
-            limit is computed as max_tokens * 4 (assuming ~4 characters per token).
+            limit is computed as max_tokens * CHARS_PER_TOKEN (assuming ~4 characters per token).
         truncate: Whether to truncate the content if it exceeds the maximum length.
 
     Returns:
@@ -733,17 +745,19 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
     """
     if not isinstance(content, str):
         if isinstance(content, dict):
-            if "content" in content:
-                inner_content = content["content"]
+            filtered_content = {k: v for k, v in content.items() if k != "files"}
+
+            if "content" in filtered_content:
+                inner_content = filtered_content["content"]
                 content = inner_content if isinstance(inner_content, str) else json.dumps(inner_content, indent=2)
             else:
-                content = json.dumps(content, indent=2)
+                content = json.dumps(filtered_content, indent=2) if filtered_content else ""
         elif isinstance(content, (list, tuple)):
             content = "\n".join(str(item) for item in content)
         else:
             content = str(content)
 
-    max_len_in_char: int = max_tokens * 4  # This assumes an average of 4 characters per token.
+    max_len_in_char: int = max_tokens * CHARS_PER_TOKEN
     content = re.sub(r"\{\{\s*(.*?)\s*\}\}", r"\1", content)
 
     if len(content) > max_len_in_char and truncate:
@@ -791,7 +805,7 @@ class ToolCacheEntry(BaseModel):
     """Single key entry in tool cache."""
 
     action: str
-    action_input: str
+    action_input: dict | str
 
     model_config = ConfigDict(frozen=True)
 

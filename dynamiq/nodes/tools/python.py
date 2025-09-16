@@ -1,5 +1,6 @@
 import importlib
 import io
+from copy import deepcopy
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -23,7 +24,7 @@ ALLOWED_MODULES = [
     "datetime",
     "dynamiq",
     "functools",
-    "itertools",
+    "io",
     "json",
     "math",
     "operator",
@@ -36,6 +37,8 @@ ALLOWED_MODULES = [
     "typing",
     "urllib",
     "uuid",
+    "pandas",
+    "numpy",
 ]
 
 
@@ -56,6 +59,29 @@ def restricted_import(name: str, globals=None, locals=None, fromlist=(), level=0
         raise
 
 
+def safe_hasattr(obj: Any, name: str) -> bool:
+    """
+    Safe version of hasattr that uses guarded getattr.
+    """
+    try:
+        default_guarded_getattr(obj, name)
+        return True
+    except (AttributeError, TypeError):
+        return False
+
+
+def safe_getattr(obj: Any, name: str, default=None) -> Any:
+    """
+    Safe version of getattr that uses guarded getattr.
+    """
+    try:
+        return default_guarded_getattr(obj, name)
+    except (AttributeError, TypeError):
+        if default is not None:
+            return default
+        raise
+
+
 def get_restricted_globals() -> dict:
     """
     Return globals dict configured for restricted code execution.
@@ -69,15 +95,20 @@ def get_restricted_globals() -> dict:
             "any": any,
             "bin": bin,
             "bool": bool,
+            "bytes": bytes,
+            "callable": callable,
             "chr": chr,
             "complex": complex,
             "dict": dict,
+            "dir": dir,
             "divmod": divmod,
             "enumerate": enumerate,
             "filter": filter,
             "float": float,
             "format": format,
             "frozenset": frozenset,
+            "getattr": safe_getattr,
+            "hasattr": safe_hasattr,
             "hex": hex,
             "int": int,
             "isinstance": isinstance,
@@ -88,6 +119,7 @@ def get_restricted_globals() -> dict:
             "max": max,
             "min": min,
             "next": next,
+            "object": object,
             "oct": oct,
             "ord": ord,
             "pow": pow,
@@ -95,6 +127,7 @@ def get_restricted_globals() -> dict:
             "reversed": reversed,
             "round": round,
             "set": set,
+            "setattr": setattr,
             "slice": slice,
             "sorted": sorted,
             "str": str,
@@ -102,11 +135,14 @@ def get_restricted_globals() -> dict:
             "super": super,
             "tuple": tuple,
             "type": type,
+            "vars": vars,
             "zip": zip,
             "__import__": restricted_import,
             "_getattr_": default_guarded_getattr,
             "_getitem_": default_guarded_getitem,
             "_getiter_": default_guarded_getiter,
+            "__metaclass__": type,
+            "__name__": "__main__",
         },
         "_getattr_": default_guarded_getattr,
         "_unpack_sequence_": guarded_unpack_sequence,
@@ -153,6 +189,7 @@ class Python(Node):
     code: str
     use_multiple_params: bool = False
     input_schema: ClassVar[type[PythonInputSchema]] = PythonInputSchema
+    is_files_allowed: bool = True
 
     def execute(self, input_data: PythonInputSchema, config: RunnableConfig = None, **kwargs) -> Any:
         """
@@ -194,14 +231,25 @@ class Python(Node):
                 if self.use_multiple_params
                 else restricted_globals["run"](dict(input_data))
             )
-            if self.is_optimized_for_agents:
-                result = str(result)
         except Exception as e:
             error_msg = f"Code execution error: {str(e)}"
             logger.error(error_msg)
             raise ToolExecutionException(error_msg, recoverable=True)
+
         logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n" f"{str(result)[:200]}...")
-        return {"content": result}
+
+        if isinstance(result, dict) and "content" in result:
+            if self.is_optimized_for_agents:
+                optimized_result = deepcopy(result)
+                optimized_result["content"] = str(result["content"])
+                return optimized_result
+            else:
+                return result
+        else:
+            if self.is_optimized_for_agents:
+                return {"content": str(result)}
+            else:
+                return {"content": result}
 
     @staticmethod
     def _inplacevar(op: str, x: Any, y: Any) -> Any:

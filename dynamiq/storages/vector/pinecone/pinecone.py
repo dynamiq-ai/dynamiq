@@ -1,9 +1,10 @@
 import enum
+import re
 from copy import copy
 from functools import partial
 from typing import TYPE_CHECKING, Any, Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from dynamiq.connections import Pinecone
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
@@ -17,6 +18,20 @@ if TYPE_CHECKING:
     from pinecone import Pinecone as PineconeClient
 
 
+PINECONE_VALID_INDEX_NAME_PATTERN = re.compile(r"^[a-z](?:[a-z0-9]*(-[a-z0-9]+)*)?$")
+
+
+def validate_pinecone_index_name(index_name: str) -> str:
+    if not bool(PINECONE_VALID_INDEX_NAME_PATTERN.fullmatch(index_name)):
+        msg = (
+            f"Index name '{index_name}' is invalid. "
+            f"It must match the pattern {PINECONE_VALID_INDEX_NAME_PATTERN.pattern}."
+        )
+        raise ValueError(msg)
+
+    return index_name
+
+
 class PineconeIndexType(str, enum.Enum):
     """
     This enum defines various index types for different Pinecone deployments.
@@ -28,6 +43,11 @@ class PineconeIndexType(str, enum.Enum):
 
 class PineconeVectorStoreParams(BaseVectorStoreParams):
     namespace: str = "default"
+
+    @field_validator("index_name")
+    @classmethod
+    def validate_index(cls, v):
+        return validate_pinecone_index_name(v)
 
 
 class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVectorStoreParams):
@@ -88,7 +108,7 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
                 connection = Pinecone()
             self.client = connection.connect()
 
-        self.index_name = index_name
+        self.index_name = validate_pinecone_index_name(index_name)
         self.namespace = namespace
         self.index_type = index_type
         self.content_key = content_key

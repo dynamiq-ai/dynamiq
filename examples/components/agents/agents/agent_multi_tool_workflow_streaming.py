@@ -64,7 +64,6 @@ def setup_multi_tool_streaming_agent() -> ReActAgent:
             enabled=True,
             event="multi_tool_stream",
             mode=StreamingMode.ALL,
-            by_tokens=False,
         ),
         max_loops=3,
     )

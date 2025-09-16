@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import inspect
 import time
 from abc import ABC, abstractmethod
@@ -6,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime
 from functools import cached_property
 from queue import Empty
+from types import FunctionType, ModuleType
 from typing import Any, Callable, ClassVar, Union
 from uuid import uuid4
 
@@ -210,9 +212,10 @@ class Node(BaseModel, Runnable, ABC):
         metadata (NodeMetadata | None): Optional metadata for the node.
         is_postponed_component_init (bool): Whether component initialization is postponed.
         is_optimized_for_agents (bool): Whether to optimize output for agents. By default is set to False.
-        supports_files (bool): Whether the node has access to files. By default is set to False.
+        is_files_allowed (bool): Whether the node is permitted to access files. By default is set to False.
         _json_schema_fields (list[str]): List of parameter names that will be used when generating json schema
           with _generate_json_schema.
+
     """
     id: str = Field(default_factory=generate_uuid)
     name: str | None = None
@@ -225,13 +228,12 @@ class Node(BaseModel, Runnable, ABC):
     caching: CachingConfig = Field(default_factory=CachingConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
-
     depends: list[NodeDependency] = []
     metadata: NodeMetadata | None = None
 
     is_postponed_component_init: bool = False
     is_optimized_for_agents: bool = False
-    is_files_allowed: bool = False
+    is_files_allowed: bool = Field(default=False, description="Whether the node is permitted to access files.")
 
     _output_references: NodeOutputReferences = PrivateAttr()
 
@@ -239,6 +241,7 @@ class Node(BaseModel, Runnable, ABC):
     input_schema: type[BaseModel] | None = None
     callbacks: list[NodeCallbackHandler] = []
     _json_schema_fields: ClassVar[list[str]] = []
+    _clone_init_methods_names: ClassVar[list[str]] = ["reset_run_state"]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -268,7 +271,7 @@ class Node(BaseModel, Runnable, ABC):
         fields_to_include = {}
         generated_schemas = {}
         for name in fields or cls._json_schema_fields:
-            field = cls.__fields__[name]
+            field = cls.model_fields[name]
             annotation = clear_annotation(field.annotation)
             parameter_name = name
             if field.alias:
@@ -279,7 +282,7 @@ class Node(BaseModel, Runnable, ABC):
                 fields_to_include[parameter_name] = (annotation, Field(..., description=field.description))
 
         model = create_model(cls.__name__, **fields_to_include)
-        schema = model.schema()
+        schema = model.model_json_schema()
         schema["additionalProperties"] = False
         for param, param_schema in generated_schemas.items():
             schema["properties"][param] = param_schema
@@ -523,6 +526,84 @@ class Node(BaseModel, Runnable, ABC):
             Any: Transformed output data.
         """
         return self.transform(output_data, self.output_transformer)
+
+    def get_clone_init_methods_names(self) -> list[str]:
+        """List of method names to call on the clone to reset per-run state."""
+        return list(self._clone_init_methods_names)
+
+    def get_clone_attr_initializers(self) -> dict[str, Callable[["Node"], Any]]:
+        """Mapping of attribute name -> initializer callable(node) -> value.
+
+        Default: provides streaming isolation so clones do not share runtime state.
+        """
+        return {}
+
+    def clone(self) -> "Node":
+        """Create a safe clone of the node."""
+        cloned_node = self.model_copy(deep=False)
+
+        def _clone_nested(value: Any) -> Any:
+            # Do not attempt to copy modules/functions/classes or other callables
+            if isinstance(value, (ModuleType, FunctionType)) or isinstance(value, type) or callable(value):
+                return value
+            if isinstance(value, Node):
+                return value.clone()
+            elif isinstance(value, BaseModel):
+                try:
+                    bm_copy = value.model_copy(deep=False)
+                    for fname in getattr(value, "model_fields", {}):
+                        try:
+                            setattr(bm_copy, fname, _clone_nested(getattr(value, fname)))
+                        except Exception as e:
+                            logger.warning(f"Clone: failed to clone BaseModel field '{fname}': {e}")
+
+                    return bm_copy
+                except Exception as e:
+                    logger.warning(f"Clone: BaseModel copy failed, falling back to shallow copy: {e}")
+                    return copy.copy(value)
+            elif isinstance(value, list):
+                return [_clone_nested(v) for v in value]
+            elif isinstance(value, dict):
+                return {k: _clone_nested(v) for k, v in value.items()}
+            try:
+                return copy.copy(value)
+            except Exception as e:
+                logger.warning(f"Clone: failed to clone field '{value}': {e}")
+                return value
+
+        for _field_name in getattr(cloned_node, "model_fields", {}):
+            _val = getattr(cloned_node, _field_name)
+            _new_val = _clone_nested(_val)
+            if _new_val is not _val:
+                try:
+                    setattr(cloned_node, _field_name, _new_val)
+                except Exception as e:
+                    logger.warning(f"Clone: unable to set field '{_field_name}' during nested clone: {e}")
+
+        init_map = self.get_clone_attr_initializers()
+        for attr_name, init_fn in init_map.items():
+            try:
+                if hasattr(cloned_node, attr_name):
+                    value = init_fn(cloned_node) if callable(init_fn) else None
+                    if value is not None:
+                        setattr(cloned_node, attr_name, value)
+                    else:
+                        try:
+                            setattr(cloned_node, attr_name, None)
+                        except Exception as e:
+                            logger.warning(f"Clone: failed to set attr '{attr_name}': {e}")
+            except Exception as e:
+                logger.warning(f"Clone: initializer for attr '{attr_name}' failed: {e}")
+
+        for method_name in self.get_clone_init_methods_names():
+            try:
+                method = getattr(cloned_node, method_name, None)
+                if callable(method):
+                    method()
+            except Exception as e:
+                logger.warning(f"Clone: method '{method_name}' invocation failed: {e}")
+
+        return cloned_node
 
     @property
     def to_dict_exclude_params(self):

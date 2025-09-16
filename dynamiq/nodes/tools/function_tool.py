@@ -104,7 +104,7 @@ Examples:
         return {
             "name": self.name,
             "description": self.description,
-            "input_schema": input_model.schema(),
+            "input_schema": input_model.model_json_schema(),
             "output_schema": {
                 "type": "object",
                 "properties": {"content": {"type": "any"}},

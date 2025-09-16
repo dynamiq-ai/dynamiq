@@ -11,7 +11,7 @@ from dynamiq.prompts import Message, MessageRole
 from dynamiq.storages.vector.weaviate import WeaviateVectorStore, WeaviateWriterVectorStoreParams
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import CHARS_PER_TOKEN
+from dynamiq.utils import TruncationMethod, truncate_text_for_embedding
 
 
 class WeaviateMemoryError(Exception):
@@ -42,7 +42,10 @@ class Weaviate(MemoryBackend):
     message_truncation_enabled: bool = Field(
         default=True, description="Enable automatic message truncation for embeddings"
     )
-    max_message_tokens: int = Field(default=8192, description="Maximum tokens for message content before truncation")
+    message_max_tokens: int = Field(default=6000, description="Maximum tokens for message content before truncation")
+    message_truncation_method: TruncationMethod = Field(
+        default=TruncationMethod.START, description="Method to use for message truncation"
+    )
 
     _vector_store: WeaviateVectorStore | None = PrivateAttr(default=None)
 
@@ -65,6 +68,12 @@ class Weaviate(MemoryBackend):
         return super().to_dict_exclude_params | {
             "embedder": True,
             "_vector_store": True,
+            "connection": {
+                "api_key": True,
+                "url": True,
+                "http_host": True,
+                "grpc_host": True,
+            },
         }
 
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict[str, Any]:
@@ -111,7 +120,8 @@ class Weaviate(MemoryBackend):
 
             # Configure embedder truncation settings
             self.embedder.document_embedder.truncation_enabled = self.message_truncation_enabled
-            self.embedder.document_embedder.max_input_tokens = self.max_message_tokens
+            self.embedder.document_embedder.max_input_tokens = self.message_max_tokens
+            self.embedder.document_embedder.truncation_method = self.message_truncation_method
 
         except Exception as e:
             logger.error(f"Weaviate backend '{self.name}' failed to initialize vector store: {e}")
@@ -132,13 +142,21 @@ class Weaviate(MemoryBackend):
             **(message.metadata or {}),
         }
 
-        if self.message_truncation_enabled and message.content:
-            original_length = len(message.content)
-            max_chars = self.max_message_tokens * CHARS_PER_TOKEN
-            if original_length > max_chars:
+        content = message.content
+        if self.message_truncation_enabled and content:
+            original_length = len(content)
+            truncated_content = truncate_text_for_embedding(
+                text=content,
+                max_tokens=self.message_max_tokens,
+                truncation_method=self.message_truncation_method
+            )
+
+            if len(truncated_content) < original_length:
+                content = truncated_content
                 doc_metadata["truncated"] = True
                 doc_metadata["original_length"] = original_length
-                doc_metadata["truncated_length"] = max_chars
+                doc_metadata["truncated_length"] = len(content)
+                doc_metadata["truncation_method"] = self.message_truncation_method.value
 
         sanitized_metadata = {}
         for k, v in doc_metadata.items():
@@ -151,7 +169,7 @@ class Weaviate(MemoryBackend):
 
         return Document(
             id=doc_id,
-            content=message.content,
+            content=content,
             metadata=sanitized_metadata,
             embedding=None,
         )
@@ -210,7 +228,7 @@ class Weaviate(MemoryBackend):
             if not document.embedding:
                 raise WeaviateMemoryError("Generated embedding is empty.")
 
-            self._vector_store.write_documents([document], content_property_name=self.content_property_name)
+            self._vector_store.write_documents([document], content_key=self.content_property_name)
             logger.debug(f"Weaviate Memory ({self.collection_name}): Added message {document.id}")
 
         except Exception as e:
@@ -230,7 +248,7 @@ class Weaviate(MemoryBackend):
 
         try:
             documents = self._vector_store.list_documents(
-                include_embeddings=False, content_property_name=self.content_property_name
+                include_embeddings=False, content_key=self.content_property_name
             )
 
             messages = [self._document_to_message(doc) for doc in documents]
@@ -330,13 +348,13 @@ class Weaviate(MemoryBackend):
                     top_k=effective_limit,
                     exclude_document_embeddings=True,
                     alpha=self.alpha,
-                    content_property_name=self.content_property_name,
+                    content_key=self.content_property_name,
                 )
                 retrieved_messages = [self._document_to_message(doc) for doc in documents]
 
             elif prepared_filters:
                 documents = self._vector_store.filter_documents(
-                    filters=prepared_filters, content_property_name=self.content_property_name
+                    filters=prepared_filters, content_key=self.content_property_name
                 )
                 retrieved_messages = [self._document_to_message(doc) for doc in documents]
                 if effective_limit > 0:

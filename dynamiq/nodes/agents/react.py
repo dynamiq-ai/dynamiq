@@ -2,11 +2,12 @@ import json
 import re
 import types
 from enum import Enum
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Callable, Union, get_args, get_origin
 
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
+from dynamiq.callbacks import ReActAgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
@@ -18,9 +19,12 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-
-from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
-
+from dynamiq.nodes.agents.utils import (
+    SummarizationConfig,
+    ToolCacheEntry,
+    XMLParser,
+)
+from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
@@ -28,11 +32,48 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
-from dynamiq.nodes.llms.gemini import Gemini
+
+DEFAULT_DIRECT_OUTPUT_CAPABILITIES = """
+ADVANCED FEATURES:
+- Tool outputs are automatically cached and can be referenced directly
+- You can return raw tool observation directly using:
+Thought: [Your reasoning about using direct tool output]
+Answer: <answer type="tool_output" action="tool_name" action_input="tool_input">
+- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
+- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
+- The tool must have been called in a previous step with the exact same action and action_input
+- action_input must match exactly what you used when calling the tool (including JSON key order)
+- This bypasses summarization and returns the complete tool output to the user
+- Use this format only when the raw tool output is exactly what the user needs
+- If the tool hasn't been executed yet, you must call it first in the current step
+"""
+
+XML_DIRECT_OUTPUT_CAPABILITIES = """
+ADVANCED FEATURES:
+- Tool outputs are automatically cached and can be referenced directly
+- You can return raw tool outputs directly using:
+<output>
+    <thought>
+        [Your reasoning about using direct tool output]
+    </thought>
+    <answer>
+        <answer type="tool_output" action="tool_name" action_input="tool_input">
+    </answer>
+</output>
+- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
+- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
+- The tool must have been called in a previous step with the exact same action and action_input
+- action_input must match exactly what you used when calling the tool (including JSON key order)
+- This bypasses summarization and returns the complete tool output to the user
+- Use this format only when the raw tool output is exactly what the user needs
+- If the tool hasn't been executed yet, you must call it first in the current step
+"""
+
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
+
 Thought: [Your detailed reasoning about what to do next]
-Action: [Tool name from ONLY [{tools_name}]]
+Action: [Tool name from ONLY [{{ tools_name }}]]
 Action Input: [JSON input for the tool]
 
 After each action, you'll receive:
@@ -55,18 +96,24 @@ IMPORTANT RULES:
 - Never use markdown code blocks (```) around your JSON
 - JSON must be properly formatted with correct commas and brackets
 - Only use tools from the provided list
-- If you can answer directly, use only Thought followed by Answer"""  # noqa: E501
+- If you can answer directly, use only Thought followed by Answer
+
+FILE HANDLING:
+- Tools may generate or process files (images, CSVs, PDFs, etc.)
+- Files are automatically collected and will be returned with your final answer
+- Mention created files in your final answer so users know what was generated"""  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
+
 <output>
     <thought>
         [Your detailed reasoning about what to do next]
     </thought>
     <action>
-        [Tool name from ONLY [{tools_name}]]
+        [Tool name from ONLY [{{ tools_name }}]]
     </action>
     <action_input>
-        [JSON input for the tool]
+        [JSON input for the tool - single line, properly escaped]
     </action_input>
 </output>
 
@@ -93,18 +140,32 @@ For questions that don't require tools:
     </answer>
 </output>
 
-IMPORTANT RULES:
+CRITICAL XML FORMAT RULES:
 - ALWAYS include <thought> tags with detailed reasoning
 - Begin thoughts with confidence assessment when using tools
 - Explain why this specific tool is the right choice
 - For tool use, include action and action_input tags
 - For direct answers, only include thought and answer tags
-- Ensure action_input contains valid JSON with double quotes
+- JSON in <action_input> MUST be on single line with proper escaping
+- NO line breaks or control characters inside JSON strings
+- Use double quotes for JSON strings
+- Escape special characters in JSON (\\n for newlines, \\" for quotes)
 - Properly close all XML tags
-- For all tags other than <answer>, text content should ideally be XML-escaped.
+- For all tags other than <answer>, text content should ideally be XML-escaped
 - Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
-- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
-- You can get "Observation (shortened)" this indicates that output from this tool is shortened.
+- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag
+- You may receive "Observation (shortened)" indicating that tool output was truncated
+
+JSON FORMATTING REQUIREMENTS:
+- Put JSON on single line within tags
+- Use double quotes for all strings
+- Escape newlines as \\n, quotes as \\"
+- NO multi-line JSON formatting
+
+FILE HANDLING:
+- Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
+- Generated files are automatically collected and returned with your final answer
+- File operations are handled transparently - focus on the task, not file management
 """  # noqa: E501
 
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
@@ -272,7 +333,7 @@ REACT_BLOCK_INSTRUCTIONS_MULTI = (
 **RESPONSE FORMAT:**
 
 Thought: [Your detailed reasoning about what to do next, including your multi-tool strategy if applicable]
-Action: [Tool name from ONLY [{tools_name}]]
+Action: [Tool name from ONLY [{{ tools_name }}]]
 Action Input: [JSON input for the tool]
 
 After each action, you'll receive:
@@ -302,6 +363,12 @@ Answer: [Your direct response]
 - Proper JSON syntax with commas and brackets
 - List each Action and Action Input separately
 - Only use tools from the provided list
+
+**FILE HANDLING:**
+- Tools may generate multiple files during execution
+- All generated files are automatically collected and returned
+- When using multiple tools, files from all tools are aggregated
+- Reference all created files in your final Answer
 """  # noqa: E501
 )
 
@@ -317,13 +384,14 @@ For Tool Usage (Single or Multiple):
     </thought>
     <tool_calls>
         <tool>
-            <name>[Tool name from ONLY [{tools_name}]]</name>
-            <input>[JSON input for the tool]</input>
+            <name>[Tool name from ONLY [{{ tools_name }}]]</name>
+            <input>[JSON input for the tool - single line, properly escaped]</input>
         </tool>
         <!-- Add more tool elements as needed based on your strategy -->
         <tool>
             <name>[Tool name]</name>
-            <input>[JSON input]</input>
+            <input>[JSON input for the tool - single line, properly escaped]</input>
+            <input>[JSON input for the tool - single line, properly escaped]</input>
         </tool>
     </tool_calls>
 </output>
@@ -351,11 +419,26 @@ For questions that don't require tools:
 After each tool usage, you'll receive:
 Observation: [Result(s) from the tool(s)]
 
-XML FORMAT RULES:
+CRITICAL XML FORMAT RULES:
 - Always include strategic thinking in <thought> tags
 - Group parallel tool calls in single <tool_calls> block
+- JSON in <input> tags MUST be on single line with proper escaping
+- NO line breaks or control characters inside JSON strings
+- Use double quotes for JSON strings
+- Escape special characters in JSON (\\n for newlines, \\" for quotes)
 - Use sequential outputs only when dependencies exist
 - Synthesize all results in final answer
+
+JSON FORMATTING REQUIREMENTS:
+- Put JSON on single line within tags
+- Use double quotes for all strings
+- Escape newlines as \\n, quotes as \\"
+- NO multi-line JSON formatting
+
+FILE HANDLING WITH MULTIPLE TOOLS:
+- Each tool may generate files independently
+- Files from all tools are automatically aggregated
+- Generated files are returned with the final answer
 """  # noqa: E501
 )
 
@@ -365,10 +448,10 @@ REACT_BLOCK_TOOLS = """
 You have access to a variety of tools,
 and you are responsible for using
 them in any order you choose to complete the task:\n
-{tool_description}
+{{ tool_description }}
 
 Input formats for tools:
-{input_formats}
+{{ input_formats }}
 
 Note: For tools not listed in the input formats section,
 refer to their descriptions in the
@@ -379,7 +462,7 @@ REACT_BLOCK_TOOLS_NO_FORMATS = """
 You have access to a variety of tools,
 and you are responsible for using
 them in any order you choose to complete the task:\n
-{tool_description}
+{{ tool_description }}
 """
 
 REACT_BLOCK_NO_TOOLS = """Always follow this exact format in your responses:
@@ -395,7 +478,11 @@ IMPORTANT RULES:
 - Do not mention tools or actions since you don't have access to any
 """
 
-REACT_BLOCK_OUTPUT_FORMAT = "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
+REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
+- Avoid phrases like 'based on the information gathered or provided.'
+- Clearly mention any files that were generated during the process.
+- Provide file names and brief descriptions of their contents.
+"""
 
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
@@ -419,25 +506,24 @@ Your response should be clear, concise, and professional.
 </answer>
 """  # noqa: E501
 
-REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
-Always structure your responses in this JSON format:
+REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
-{{thought: [Your reasoning about the next step],
-action: [The tool you choose to use, if any from ONLY [{tools_name}]],
-action_input: [JSON input in correct format you provide to the tool]}}
+{thought: [Your reasoning about the next step],
+action: [The tool you choose to use, if any from ONLY [{{ tools_name }}]],
+action_input: [JSON input in correct format you provide to the tool]}
 
 After each action, you'll receive:
 Observation: [Result from the tool]
 
 When you have enough information to provide a final answer:
-{{thought: [Your reasoning for the final answer],
+{thought: [Your reasoning for the final answer],
 action: finish
-action_input: [Response for initial request]}}
+action_input: [Response for initial request]}
 
 For questions that don't require tools:
-{{thought: [Your reasoning for the final answer],
+{thought: [Your reasoning for the final answer],
 action: finish
-action_input: [Your direct response]}}
+action_input: [Your direct response]}
 
 IMPORTANT RULES:
 - You MUST ALWAYS include "thought" as the FIRST field in your JSON
@@ -445,22 +531,36 @@ IMPORTANT RULES:
 - In action_input field, provide properly formatted JSON with double quotes
 - Avoid using extra backslashes
 - Do not use markdown code blocks around your JSON
-- Never keep action_input empty.
+- Never leave action_input empty
+- Ensure proper JSON syntax with quoted keys and values
+
+FILE HANDLING:
+- Tools may generate files that are automatically collected
+- Generated files will be included in the final response
+- Never return empty response.
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
 You need to use the right functions based on what the user asks.
 
 Use the function `provide_final_answer` when you can give a clear answer to the user's first question,
- and no extra steps, tools, or work are needed.
+and no extra steps, tools, or work are needed.
 Call this function if the user's input is simple and doesn't require additional help or tools.
 
-If the user's request requires the use of specific tools, such as [{tools_name}],
+If the user's request requires the use of specific tools, such as [{{ tools_name }}],
  you must first call the appropriate function to invoke those tools.
 Only after utilizing the necessary tools and gathering the required information should
- you call `provide_final_answer` to deliver the final response.
+you call `provide_final_answer` to deliver the final response.
 
-Make sure to check each request carefully to see if you can answer it right away or if you need to use tools to help.
+FUNCTION CALLING GUIDELINES:
+- Analyze the request carefully to determine if tools are needed
+- Call functions with properly formatted arguments
+- Handle tool responses appropriately before providing final answer
+- Chain multiple tool calls when necessary for complex tasks
+
+FILE HANDLING:
+- Tools may generate files that will be included in the final response
+- Files created by tools are automatically collected and returned
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
@@ -498,9 +598,9 @@ IMPORTANT RULES:
 """
 
 
-REACT_BLOCK_OUTPUT_FORMAT = (
-    "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
-)
+REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
+- Avoid phrases like 'based on the information gathered or provided.'
+"""
 
 
 REACT_MAX_LOOPS_PROMPT = """
@@ -546,11 +646,14 @@ Ensure each extracted section is enclosed in its corresponding tag based on its 
 Information that will not be included in extracted part will be removed.
 
 Guidelines:
+* Always include all required tags for every tool output.
+* If the tool output is irrelevant, provide only a general summary of it.
 * In output provide only tags and extracted information inside.
 * Try to keep information which responds for initial user request and is consistent with previous extracted information.
 * Preserve as much important details as possible.
 * Do not merge or combine content from different sections.
 * Maintain the numbering to match the original section order.
+* Do not leave tag empty.
 
 Input request:
 """
@@ -581,6 +684,7 @@ TYPE_MAPPING = {
     float: "float",
     bool: "boolean",
     str: "string",
+    dict: "object",
 }
 
 UNKNOWN_TOOL_NAME = "unknown_tool"
@@ -591,7 +695,7 @@ class ReActAgent(Agent):
 
     name: str = "React Agent"
     max_loops: int = Field(default=15, ge=2)
-    inference_mode: InferenceMode = InferenceMode.DEFAULT
+    inference_mode: InferenceMode = Field(default=InferenceMode.DEFAULT)
     behaviour_on_max_loops: Behavior = Field(
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
@@ -601,9 +705,15 @@ class ReActAgent(Agent):
         description="Enable multi-tool execution in a single step. "
         "When True, the agent can call multiple tools in parallel.",
     )
-    format_schema: list = []
+    direct_tool_output_enabled: bool = Field(
+        default=False,
+        description="Allow agent to return raw tool outputs as final answers. "
+        "When True, agent can use special XML format to return tool outputs directly.",
+    )
+
+    format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
-    _tool_cache: dict[ToolCacheEntry, Any] = {}
+
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
 
@@ -708,11 +818,11 @@ class ReActAgent(Agent):
                     raw_input = raw_input.replace(marker, "").strip()
 
                 try:
-                    action_input = json.loads(raw_input)
+                    action_input = json.loads(raw_input.strip())
                     actions.append({"tool_name": action_name, "tool_input": action_input})
                 except json.JSONDecodeError as e:
                     raise ActionParsingException(
-                        f"Invalid JSON in Action Input for {action_name}: {str(e)}",
+                        f"Invalid JSON in Action Input for {action_name}: {str(e)} : {raw_input}",
                         recoverable=True,
                     )
 
@@ -720,6 +830,7 @@ class ReActAgent(Agent):
                 remaining_text = remaining_text[end_pos:]
 
             if not actions:
+                logger.info("No valid Action and Action Input pairs found in the output ")
                 raise ActionParsingException(
                     "No valid Action and Action Input pairs found in the output.",
                     recoverable=True,
@@ -733,6 +844,7 @@ class ReActAgent(Agent):
                 return thought, "multiple_tools", actions
 
         except Exception as e:
+            logger.error(f"Error: {e}")
             if isinstance(e, ActionParsingException):
                 raise
             raise ActionParsingException(
@@ -764,6 +876,50 @@ class ReActAgent(Agent):
         else:
             return "", ""
 
+    def _process_direct_tool_output_return_xml(self, final_answer: str) -> str:
+        """
+        Process direct tool output return format.
+        Looks for XML format: <answer type="tool_output" action="tool_name" action_input="tool_input">
+
+        Args:
+            final_answer (str): The final answer to process
+
+        Returns:
+            str: Either the raw tool output or the original final answer
+        """
+
+        tool_output_match = re.search(
+            r'<answer\s+type="tool_output"\s+action="([^"]+)"\s+action_input\s*=[\'"](.*?)[\'"]\s*(?:></answer>|>)',
+            final_answer,
+            re.IGNORECASE | re.DOTALL,
+        )
+
+        if tool_output_match:
+            action = tool_output_match.group(1)
+            action_input = tool_output_match.group(2)
+
+            try:
+                parsed_action_input = json.loads(action_input)
+            except json.JSONDecodeError as e:
+                raise RecoverableAgentException(f"Invalid JSON in Action Input for {action}: {str(e)}")
+
+            cache_entry = ToolCacheEntry(action=action, action_input=parsed_action_input)
+            tool_output = self._tool_cache.get(cache_entry)
+
+            if tool_output is not None:
+                logger.info(f"Found tool output for action='{action}' action_input='{action_input}'")
+                return str(tool_output)
+            else:
+                available_tools = [(entry.action, entry.action_input) for entry in self._tool_cache.keys()]
+                logger.warning(
+                    f"Tool output not found for action='{action}' input='{action_input}'. "
+                    f"Available tools: {available_tools}"
+                )
+                logger.debug(f"Cache entry created: {cache_entry}")
+                return final_answer
+
+        return final_answer
+
     def stream_reasoning(self, content: dict[str, Any], config: RunnableConfig, **kwargs) -> None:
         """
         Streams intermediate reasoning of the Agent.
@@ -779,7 +935,6 @@ class ReActAgent(Agent):
                 source=self.name,
                 step="reasoning",
                 config=config,
-                by_tokens=False,
                 **kwargs,
             )
 
@@ -803,7 +958,7 @@ class ReActAgent(Agent):
         summary_offset: int,
         config: RunnableConfig | None = None,
         **kwargs,
-    ) -> None:
+    ) -> int:
         """
         Summarizes history and saves relevant information in the context
 
@@ -817,7 +972,6 @@ class ReActAgent(Agent):
         Returns:
             int: Number of summarized messages.
         """
-
         logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output started.")
         messages_history = "\nHistory to extract information from: \n"
         summary_sections = []
@@ -825,7 +979,7 @@ class ReActAgent(Agent):
         offset = max(history_offset, summary_offset - self.summarization_config.context_history_length)
         for index, message in enumerate(self._prompt.messages[offset:]):
             if message.role == MessageRole.USER:
-                if index + offset >= summary_offset:
+                if (index + offset >= summary_offset) and ("Observation:" in message.content):
                     messages_history += (
                         f"=== TOOL_OUTPUT: {index + offset} === \n {message.content}"
                         f"\n === TOOL_OUTPUT: {index + offset} === \n"
@@ -862,7 +1016,7 @@ class ReActAgent(Agent):
                     optional_tags=[],
                 )
             except ParsingError as e:
-                logger.error(f"Error: {e}. Make sure you have provided all tags: {summary_tags}")
+                logger.error(f"Error: {e}. Make sure you have provided all tags at once: {summary_tags}")
                 summary_messages.append(Message(content=str(e), role=MessageRole.USER, static=True))
                 continue
 
@@ -881,6 +1035,25 @@ class ReActAgent(Agent):
 
             logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output finished.")
             return summary_offset
+
+    def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
+        base = super().get_clone_attr_initializers()
+        base.update(
+            {
+                "_tool_cache": lambda _: {},
+            }
+        )
+        return base
+
+    def update_system_message(self):
+        system_message = Message(
+            role=MessageRole.SYSTEM,
+            content=self.generate_prompt(
+                tools_name=self.tool_names, input_formats=self.generate_input_formats(self.tools)
+            ),
+            static=True,
+        )
+        self._prompt.messages = [system_message, *self._prompt.messages[1:]]
 
     def _run_agent(
         self,
@@ -924,50 +1097,71 @@ class ReActAgent(Agent):
 
         for loop_num in range(1, self.max_loops + 1):
             try:
-                llm_result = self._run_llm(
-                    messages=self._prompt.messages,
-                    tools=self._tools,
-                    response_format=self._response_format,
-                    config=config,
-                    **kwargs,
-                )
+                streaming_callback = None
+                original_streaming_enabled = self.llm.streaming.enabled
+
+                if self.streaming.enabled:
+                    streaming_callback = ReActAgentStreamingParserCallback(
+                        agent=self,
+                        config=config,
+                        loop_num=loop_num,
+                        **kwargs,
+                    )
+
+                    if not original_streaming_enabled:
+                        self.llm.streaming.enabled = True
+
+                    llm_config = config.model_copy(deep=False)
+                    llm_config.callbacks = [
+                        callback
+                        for callback in llm_config.callbacks
+                        if not isinstance(callback, StreamingQueueCallbackHandler)
+                    ]
+                    llm_config.callbacks.append(streaming_callback)
+
+                try:
+                    llm_result = self._run_llm(
+                        messages=self._prompt.messages,
+                        tools=self._tools,
+                        response_format=self._response_format,
+                        config=(llm_config if streaming_callback else config),
+                        **kwargs,
+                    )
+                finally:
+                    if not original_streaming_enabled:
+                        try:
+                            self.llm.streaming.enabled = original_streaming_enabled
+                        except Exception:
+                            logger.error("Failed to restore llm.streaming.enabled state")
+
                 action, action_input = None, None
                 llm_generated_output = ""
+
+                if streaming_callback and streaming_callback.accumulated_content:
+                    llm_generated_output = streaming_callback.accumulated_content
+                else:
+                    llm_generated_output = llm_result.output.get("content", "")
+
                 llm_reasoning = (
-                    llm_result.output.get("content")[:200]
-                    if llm_result.output.get("content")
+                    llm_generated_output[:200]
+                    if llm_generated_output
                     else str(llm_result.output.get("tool_calls", ""))[:200]
                 )
                 logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, " f"reasoning:\n{llm_reasoning}...")
 
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
-                        llm_generated_output = llm_result.output.get("content", "")
 
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
 
                         if "Answer:" in llm_generated_output:
                             thought, final_answer = self._extract_final_answer(llm_generated_output)
+
+                            if self.direct_tool_output_enabled:
+                                final_answer = self._process_direct_tool_output_return_xml(final_answer)
+
                             self.log_final_output(thought, final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-
-                            if self.streaming.enabled:
-                                if self.streaming.mode == StreamingMode.ALL:
-                                    self.stream_content(
-                                        content={"thought": thought, "loop_num": loop_num},
-                                        source=self.name,
-                                        step="reasoning",
-                                        config=config,
-                                        **kwargs,
-                                    )
-                                self.stream_content(
-                                    content=final_answer,
-                                    source=self.name,
-                                    step="answer",
-                                    config=config,
-                                    **kwargs,
-                                )
-
                             return final_answer
 
                         thought, action, action_input = self._parse_action(llm_generated_output)
@@ -976,7 +1170,6 @@ class ReActAgent(Agent):
                     case InferenceMode.FUNCTION_CALLING:
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using function calling inference mode")
-
                         if "tool_calls" not in dict(llm_result.output):
                             logger.error("Error: No function called.")
                             raise ActionParsingException(
@@ -996,22 +1189,6 @@ class ReActAgent(Agent):
                             final_answer = llm_generated_output_json["answer"]
                             self.log_final_output(thought, final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
-                            if self.streaming.enabled:
-                                if self.streaming.mode == StreamingMode.ALL:
-                                    self.stream_content(
-                                        content={"thought": thought, "loop_num": loop_num},
-                                        source=self.name,
-                                        step="reasoning",
-                                        config=config,
-                                        **kwargs,
-                                    )
-                                self.stream_content(
-                                    content=final_answer,
-                                    source=self.name,
-                                    step="answer",
-                                    config=config,
-                                    **kwargs,
-                                )
                             return final_answer
 
                         action_input = llm_generated_output_json["action_input"]
@@ -1030,12 +1207,17 @@ class ReActAgent(Agent):
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
 
-                        llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
                         try:
-                            llm_generated_output_json = json.loads(llm_generated_output)
+                            if isinstance(llm_generated_output, str):
+                                llm_generated_output_json = json.loads(llm_generated_output)
+                            else:
+                                llm_generated_output_json = llm_generated_output
                         except json.JSONDecodeError as e:
                             raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
+
+                        if "action" not in llm_generated_output_json or "thought" not in llm_generated_output_json:
+                            raise ActionParsingException("No action or thought provided.", recoverable=True)
 
                         thought = llm_generated_output_json["thought"]
                         action = llm_generated_output_json["action"]
@@ -1044,27 +1226,11 @@ class ReActAgent(Agent):
                         if action == "finish":
                             self.log_final_output(thought, action_input, loop_num)
                             self.tracing_final(loop_num, action_input, config, kwargs)
-                            if self.streaming.enabled:
-                                if self.streaming.mode == StreamingMode.ALL:
-                                    self.stream_content(
-                                        content={"thought": thought, "loop_num": loop_num},
-                                        source=self.name,
-                                        step="reasoning",
-                                        config=config,
-                                        **kwargs,
-                                    )
-
-                                self.stream_content(
-                                    content=action_input,
-                                    source=self.name,
-                                    step="answer",
-                                    config=config,
-                                    **kwargs,
-                                )
                             return action_input
 
                         try:
-                            action_input = json.loads(action_input)
+                            if isinstance(action_input, str):
+                                action_input = json.loads(action_input)
                         except json.JSONDecodeError as e:
                             raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
 
@@ -1074,7 +1240,6 @@ class ReActAgent(Agent):
                         if self.verbose:
                             logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
 
-                        llm_generated_output = llm_result.output["content"]
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
 
                         if self.parallel_tool_calls_enabled:
@@ -1085,25 +1250,10 @@ class ReActAgent(Agent):
 
                                 if parsed_result.get("is_final", False):
                                     final_answer = parsed_result.get("answer", "")
+                                    if self.direct_tool_output_enabled:
+                                        final_answer = self._process_direct_tool_output_return_xml(final_answer)
                                     self.log_final_output(thought, final_answer, loop_num)
                                     self.tracing_final(loop_num, final_answer, config, kwargs)
-
-                                    if self.streaming.enabled:
-                                        if self.streaming.mode == StreamingMode.ALL:
-                                            self.stream_content(
-                                                content={"thought": thought, "loop_num": loop_num},
-                                                source=self.name,
-                                                step="reasoning",
-                                                config=config,
-                                                **kwargs,
-                                            )
-                                        self.stream_content(
-                                            content=final_answer,
-                                            source=self.name,
-                                            step="answer",
-                                            config=config,
-                                            **kwargs,
-                                        )
                                     return final_answer
 
                                 tools_data = parsed_result.get("tools", [])
@@ -1119,10 +1269,19 @@ class ReActAgent(Agent):
                                 else:
                                     self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
 
+                                tools_data_for_streaming = [
+                                    {
+                                        "name": tool.get("name", ""),
+                                        "type": self.tool_by_names.get(tool.get("name", "")).type,
+                                    }
+                                    for tool in tools_data
+                                    if tool.get("name", "") and self.tool_by_names.get(tool.get("name", ""))
+                                ]
+
                                 self.stream_reasoning(
                                     {
                                         "thought": thought,
-                                        "tools": tools_data,
+                                        "tools": tools_data_for_streaming,
                                         "loop_num": loop_num,
                                     },
                                     config,
@@ -1135,7 +1294,7 @@ class ReActAgent(Agent):
                                 )
                                 self._prompt.messages.append(
                                     Message(
-                                        role=MessageRole.SYSTEM,
+                                        role=MessageRole.USER,
                                         content=f"Correction Instruction: "
                                         f"The previous response could not be parsed due to "
                                         f"the following error: '{type(e).__name__}: {e}'. "
@@ -1152,24 +1311,10 @@ class ReActAgent(Agent):
                                 )
                                 thought = parsed_data.get("thought")
                                 final_answer = parsed_data.get("answer")
+                                if self.direct_tool_output_enabled:
+                                    final_answer = self._process_direct_tool_output_return_xml(final_answer)
                                 self.log_final_output(thought, final_answer, loop_num)
                                 self.tracing_final(loop_num, final_answer, config, kwargs)
-                                if self.streaming.enabled:
-                                    if self.streaming.mode == StreamingMode.ALL:
-                                        self.stream_content(
-                                            content={"thought": thought, "loop_num": loop_num},
-                                            source=self.name,
-                                            step="reasoning",
-                                            config=config,
-                                            **kwargs,
-                                        )
-                                    self.stream_content(
-                                        content=final_answer,
-                                        source=self.name,
-                                        step="answer",
-                                        config=config,
-                                        **kwargs,
-                                    )
                                 return final_answer
 
                             except TagNotFoundError:
@@ -1236,13 +1381,15 @@ class ReActAgent(Agent):
 
                             action_input_json = json.dumps(action_input)
 
+                            step_observation = AgentIntermediateStepModelObservation(
+                                tool_using="multiple_tools",
+                                tool_input=str(action_input_json),
+                                tool_output=str(tool_result),
+                                updated=llm_generated_output,
+                            )
+
                             self._intermediate_steps[loop_num]["model_observation"].update(
-                                AgentIntermediateStepModelObservation(
-                                    tool_using="multiple_tools",
-                                    tool_input=str(action_input_json),
-                                    tool_output=str(tool_result),
-                                    updated=llm_generated_output,
-                                ).model_dump()
+                                step_observation.model_dump()
                             )
                         else:
                             try:
@@ -1260,7 +1407,7 @@ class ReActAgent(Agent):
                                     {
                                         "thought": thought,
                                         "action": action,
-                                        "tool": tool,
+                                        "tool": {"name": tool.name, "type": tool.type},
                                         "action_input": action_input,
                                         "loop_num": loop_num,
                                     },
@@ -1269,10 +1416,10 @@ class ReActAgent(Agent):
                                 )
 
                                 tool_result = self._run_tool(tool, action_input, config, **kwargs)
+
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
                     else:
-                        # Handle single tool execution
                         try:
                             tool = self.tool_by_names.get(self.sanitize_tool_name(action))
                             if not tool:
@@ -1287,7 +1434,7 @@ class ReActAgent(Agent):
                                 {
                                     "thought": thought,
                                     "action": action,
-                                    "tool": tool,
+                                    "tool": {"name": tool.name, "type": tool.type},
                                     "action_input": action_input,
                                     "loop_num": loop_num,
                                 },
@@ -1295,19 +1442,17 @@ class ReActAgent(Agent):
                                 **kwargs,
                             )
 
-                            # Check tool cache first
                             tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                             tool_result = self._tool_cache.get(tool_cache_entry, None)
                             if not tool_result:
                                 tool_result = self._run_tool(tool, action_input, config, **kwargs)
-                                self._tool_cache[tool_cache_entry] = tool_result
+
                             else:
                                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
 
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
 
-                    # Add observation to prompt
                     observation = f"\nObservation: {tool_result}\n"
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
@@ -1344,18 +1489,17 @@ class ReActAgent(Agent):
                             source=source_name,
                             step="tool",
                             config=config,
-                            by_tokens=False,
                             **kwargs,
                         )
 
-                    self._intermediate_steps[loop_num]["model_observation"].update(
-                        AgentIntermediateStepModelObservation(
-                            tool_using=action,
-                            tool_input=action_input,
-                            tool_output=tool_result,
-                            updated=llm_generated_output,
-                        ).model_dump()
+                    step_observation = AgentIntermediateStepModelObservation(
+                        tool_using=action,
+                        tool_input=action_input,
+                        tool_output=tool_result,
+                        updated=llm_generated_output,
                     )
+
+                    self._intermediate_steps[loop_num]["model_observation"].update(step_observation.model_dump())
                 else:
                     self.stream_reasoning(
                         {
@@ -1368,12 +1512,13 @@ class ReActAgent(Agent):
                         **kwargs,
                     )
             except ActionParsingException as e:
+                error_context = llm_generated_output if llm_generated_output else "No response generated"
                 self._prompt.messages.append(
-                    Message(role=MessageRole.ASSISTANT, content="Response is:" + llm_generated_output, static=True)
+                    Message(role=MessageRole.ASSISTANT, content=f"Previous response:\n{error_context}", static=True)
                 )
                 self._prompt.messages.append(
                     Message(
-                        role=MessageRole.ASSISTANT,
+                        role=MessageRole.USER,
                         content=f"Correction Instruction: The previous response could not be parsed due to "
                         f"the following error: '{type(e).__name__}: {e}'. "
                         f"Please regenerate the response strictly following the "
@@ -1493,6 +1638,9 @@ class ReActAgent(Agent):
                     else:
                         type_str = getattr(field.annotation, "__name__", str(field.annotation))
 
+                    if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
+                        type_str = "tuple[str, ...]"
+
                     description = field.description or "No description"
                     params.append(f"{name} ({type_str}): {description}")
             if params:
@@ -1554,25 +1702,36 @@ class ReActAgent(Agent):
             description += f" Defaults to: {field.default}." if field.default and not field.is_required() else ""
             params = self.filter_format_type(field.annotation)
 
-            properties[name] = {"type": [], "description": description}
+            properties[name] = {"description": description}
+            types = []
 
             for param in params:
                 if param is type(None):
-                    properties[name]["type"].append("null")
+                    types.append("null")
 
                 elif param_type := TYPE_MAPPING.get(param):
-                    properties[name]["type"].append(param_type)
+                    types.append(param_type)
 
                 elif issubclass(param, Enum):
                     element_type = TYPE_MAPPING.get(
                         self.filter_format_type(type(list(param.__members__.values())[0].value))[0]
                     )
-                    properties[name]["type"].append(element_type)
+                    types.append(element_type)
                     properties[name]["enum"] = [field.value for field in param.__members__.values()]
 
                 elif getattr(param, "__origin__", None) is list:
-                    properties[name]["type"].append("array")
+                    types.append("array")
                     properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
+
+                elif getattr(param, "__origin__", None) is dict:
+                    types.append("object")
+
+            if len(types) == 1:
+                properties[name]["type"] = types[0]
+            elif len(types) > 1:
+                properties[name]["type"] = types
+            else:
+                properties[name]["type"] = "string"
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
@@ -1651,6 +1810,10 @@ class ReActAgent(Agent):
             instructions_default = REACT_BLOCK_INSTRUCTIONS_SINGLE
             instructions_xml = REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
 
+        if self.direct_tool_output_enabled:
+            instructions_default += "\n" + DEFAULT_DIRECT_OUTPUT_CAPABILITIES
+            instructions_xml += "\n" + XML_DIRECT_OUTPUT_CAPABILITIES
+
         prompt_blocks = {
             "tools": "" if not self.tools else REACT_BLOCK_TOOLS,
             "instructions": REACT_BLOCK_INSTRUCTIONS_NO_TOOLS if not self.tools else instructions_default,
@@ -1700,10 +1863,22 @@ class ReActAgent(Agent):
                     all_results.append({"tool_name": tool_name, "success": False, "result": error_message})
                     continue
 
-                tool_result = self._run_tool(tool, tool_input, config, **kwargs)
+                result_raw = self._run_tool(tool, tool_input, config, **kwargs)
+                if isinstance(result_raw, dict) and "text" in result_raw:
+                    tool_result = result_raw["text"]
+                    tool_files = result_raw.get("files", {})
+                else:
+                    tool_result = result_raw
+                    tool_files = {}
 
                 all_results.append(
-                    {"tool_name": tool_name, "success": True, "tool_input": tool_input, "result": tool_result}
+                    {
+                        "tool_name": tool_name,
+                        "success": True,
+                        "tool_input": tool_input,
+                        "result": tool_result,
+                        "files": tool_files,
+                    }
                 )
 
                 if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
@@ -1712,7 +1887,6 @@ class ReActAgent(Agent):
                         source=tool.name,
                         step="tool",
                         config=config,
-                        by_tokens=False,
                         **kwargs,
                     )
 
@@ -1729,12 +1903,19 @@ class ReActAgent(Agent):
                 )
 
         observation_parts = []
+        all_files = {}
+
         for result in all_results:
             tool_name = result["tool_name"]
             result_content = result["result"]
             success_status = "SUCCESS" if result["success"] else "ERROR"
             observation_parts.append(f"--- {tool_name} has resulted in {success_status} ---\n{result_content}")
 
+            if result.get("files"):
+                all_files.update(result["files"])
+
         combined_observation = "\n\n".join(observation_parts)
 
+        if all_files:
+            return {"content": combined_observation, "files": all_files}
         return combined_observation

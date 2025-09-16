@@ -29,6 +29,7 @@ def mock_requests(mocker, mock_scale_response):
     mock_response = mocker.Mock()
     mock_response.json.return_value = mock_scale_response
     mock_response.raise_for_status.return_value = None
+    mock_response.status_code = 200
 
     mock_requests = mocker.patch("requests.request", return_value=mock_response)
     return mock_requests

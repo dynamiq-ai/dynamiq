@@ -107,7 +107,6 @@ class ReflectionAgent(Agent):
                         step="reasoning",
                         source=self.name,
                         config=config,
-                        by_tokens=False,
                         **kwargs,
                     )
 

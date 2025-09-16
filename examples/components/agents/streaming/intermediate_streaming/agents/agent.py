@@ -14,11 +14,61 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from examples.llm_setup import setup_llm
 
 AGENT_ROLE = "A helpful Assistant with access to web tools."
-INPUT_TASK = "Research on Google. Do at least 3 iteratiohns"
 
 
-def streamlit_callback(message):
-    st.markdown(f"**Step**: {message}")
+def init_stream_ui(reset: bool = False):
+    """Initialize or reset dynamic step boxes for streaming UI."""
+    if reset or "step_placeholders" not in st.session_state:
+        st.session_state.step_placeholders = {}
+        st.session_state.step_contents = {}
+        st.session_state.step_order = []
+        st.session_state.current_loop_nums = {}
+
+
+def streamlit_callback(step: str, content):
+    if not content:
+        return
+
+    if step not in ["reasoning", "answer"]:
+        return
+
+    step_key = (step or "").lower().strip() or "unknown"
+    display_name = step_key.capitalize()
+
+    # Initialize loop tracking if not exists
+    if "current_loop_nums" not in st.session_state:
+        st.session_state.current_loop_nums = {}
+
+    # Handle the reasoning step
+    if step == "reasoning" and isinstance(content, dict):
+        thought = content.get("thought", "")
+        loop_num = content.get("loop_num", 0)
+
+        current_loop = st.session_state.current_loop_nums.get(step_key, -1)
+        if current_loop != loop_num and current_loop != -1:
+            # Add separator when loop changes
+            if step_key in st.session_state.step_contents:
+                st.session_state.step_contents[step_key] += "\n\n"
+
+        st.session_state.current_loop_nums[step_key] = loop_num
+        content_to_display = thought
+    else:
+        # Handle the answer step
+        content_to_display = str(content) if not isinstance(content, str) else content
+
+    # Create a new box for a step on first occurrence
+    if step_key not in st.session_state.step_placeholders:
+        box = st.container(border=True)
+        with box:
+            st.markdown(f"### {display_name}")
+            placeholder = st.empty()
+        st.session_state.step_placeholders[step_key] = placeholder
+        st.session_state.step_contents[step_key] = ""
+        st.session_state.step_order.append(step_key)
+
+    # Append the incoming content and update the box
+    st.session_state.step_contents[step_key] += content_to_display
+    st.session_state.step_placeholders[step_key].markdown(st.session_state.step_contents[step_key])
 
 
 def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler) -> str:
@@ -39,8 +89,8 @@ def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler)
         llm=llm,
         tools=[tool_search],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.STRUCTURED_OUTPUT,
-        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL, by_tokens=False),
+        inference_mode=InferenceMode.XML,
+        streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
     )
 
     flow = Workflow(
@@ -53,14 +103,21 @@ def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler)
 
 async def _send_stream_events_by_ws(send_handler):
     async for message in send_handler:
-        if "choices" in message.data:
-            step = message.data["choices"][-1]["delta"]["step"]
-            if step == "reasoning":
-                content = message.data["choices"][-1]["delta"]["content"]["thought"]
-                streamlit_callback(content)
+        data = message.data
+        if not isinstance(data, dict):
+            continue
+        choices = data.get("choices") or []
+        if not choices:
+            continue
+        delta = choices[-1].get("delta", {})
+        step = delta.get("step", "")
+        content = delta.get("content", "")
+        if step and content:
+            streamlit_callback(step, content)
 
 
 async def run_agent_async(request: str) -> str:
+    init_stream_ui(reset=True)
     send_handler = AsyncStreamingIteratorCallbackHandler()
     current_loop = asyncio.get_running_loop()
     task = current_loop.create_task(_send_stream_events_by_ws(send_handler))
@@ -73,4 +130,4 @@ async def run_agent_async(request: str) -> str:
 
 
 if __name__ == "__main__":
-    print(asyncio.run(run_agent_async("Write report about Google")))
+    print(asyncio.run(run_agent_async("Write a report about Google.")))
