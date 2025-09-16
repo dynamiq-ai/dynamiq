@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, Callable, ClassVar
 
 from jinja2 import Template
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
@@ -207,6 +207,101 @@ class StreamChunkChoiceDelta(BaseModel):
         if not isinstance(v, str):
             raise ValueError(f"source must be a string, got {type(v).__name__}: {v}")
         return v
+
+    @model_serializer
+    def serialize_content(self):
+        """Serialize content dict, converting any BytesIO objects to base64 strings while preserving key structure."""
+
+        if self.content is None:
+            return None
+
+        if not isinstance(self.content, dict):
+            return self.content
+
+        try:
+            # Create a copy to avoid modifying the original
+            serialized_content = {}
+
+            for key, value in self.content.items():
+
+                if isinstance(value, io.BytesIO):
+                    # Get the current position to restore it later
+                    current_pos = value.tell()
+                    # Reset to beginning
+                    value.seek(0)
+                    # Get content
+                    content_bytes = value.read()
+                    # Restore position
+                    value.seek(current_pos)
+
+                    # Convert to base64
+                    import base64
+
+                    encoded = base64.b64encode(content_bytes).decode("utf-8")
+
+                    # Create a dict with base64 content and metadata under the same key
+                    file_info = {
+                        "content": encoded,
+                        "name": getattr(value, "name", f"file_{key}"),
+                        "content_type": getattr(value, "content_type", "unknown"),
+                        "description": getattr(value, "description", ""),
+                        "original_size": len(content_bytes),
+                    }
+                    # Keep the same key structure but replace BytesIO with file info
+                    serialized_content[key] = file_info
+
+                elif isinstance(value, list):
+                    # Handle lists that might contain BytesIO objects
+                    serialized_list = []
+                    for i, item in enumerate(value):
+                        if isinstance(item, io.BytesIO):
+                            # Get the current position to restore it later
+                            current_pos = item.tell()
+                            # Reset to beginning
+                            item.seek(0)
+                            # Get content
+                            content_bytes = item.read()
+                            # Restore position
+                            item.seek(current_pos)
+
+                            # Convert to base64
+                            import base64
+
+                            encoded = base64.b64encode(content_bytes).decode("utf-8")
+
+                            # Create a dict with base64 content and metadata
+                            file_info = {
+                                "content": encoded,
+                                "name": getattr(item, "name", f"file_{key}_{i}"),
+                                "content_type": getattr(item, "content_type", "unknown"),
+                                "description": getattr(item, "description", ""),
+                                "original_size": len(content_bytes),
+                            }
+                            # Keep the same list structure but replace BytesIO with file info
+                            serialized_list.append(file_info)
+                            print(f"DEBUG: Serialized BytesIO in list[{i}] as file: {file_info['name']}")
+                        else:
+                            serialized_list.append(item)
+                    serialized_content[key] = serialized_list
+                else:
+                    # Keep non-BytesIO values as-is
+                    serialized_content[key] = value
+
+            # Create the final structure with content aggregated under 'content' key
+            result = {
+                "content": serialized_content,  # All original content aggregated here
+                "source": self.source,
+                "step": self.step,
+            }
+
+            return result
+
+        except Exception as e:
+            import traceback
+
+            logger.error(f"Error serializing content: {e}")
+            logger.error(traceback.format_exc())
+            return self.content
 
 
 class StreamChunkChoice(BaseModel):
@@ -891,7 +986,7 @@ class Agent(Node):
 
         self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
 
-        return tool_result_content_processed
+        return tool_result_content_processed, tool_result.output.get("files", [])
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
         """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
