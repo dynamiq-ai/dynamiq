@@ -1852,7 +1852,6 @@ class ReActAgent(Agent):
         if not tools_data:
             return ""
 
-        # Helper to run a single tool
         def _run_single_tool(tool_name: str, tool_input: dict) -> dict[str, Any]:
             tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
             if not tool:
@@ -1880,7 +1879,6 @@ class ReActAgent(Agent):
                 "files": tool_files,
             }
 
-        # Stream helper to avoid repetition
         def _stream_result(res: dict[str, Any]):
             if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                 try:
@@ -1898,10 +1896,8 @@ class ReActAgent(Agent):
                 except Exception as stream_err:
                     logger.error(f"Streaming error for tool {res.get('tool_name')}: {stream_err}")
 
-        # Use at most one worker per tool to avoid oversubscription in nested parallel contexts
         max_workers = max(1, len(tools_data))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Attach original order index to preserve deterministic aggregation later
             future_map = {}
             for idx, td in enumerate(tools_data):
                 tool_name = td.get("name")
@@ -1937,7 +1933,6 @@ class ReActAgent(Agent):
                         "result": error_message,
                         "files": {},
                     }
-                # Tag with original order and collect
                 res["order"] = idx
                 all_results.append(res)
                 _stream_result(res)
@@ -1945,7 +1940,6 @@ class ReActAgent(Agent):
         observation_parts = []
         all_files = {}
 
-        # Preserve the original LLM-specified tool order in the combined observation
         for result in sorted(all_results, key=lambda r: r.get("order", 0)):
             tool_name = result["tool_name"]
             result_content = result["result"]
