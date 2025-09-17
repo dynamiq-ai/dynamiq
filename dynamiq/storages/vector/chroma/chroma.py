@@ -63,8 +63,12 @@ class ChromaVectorStore(BaseVectorStore, DryRunMixin):
             self.client = connection.connect()
         self.index_name = index_name
         if create_if_not_exist:
-            self._collection = self.client.get_or_create_collection(name=index_name)
-            self._track_collection(index_name)
+            collection_exists = self.client.get_collection(name=index_name)
+            if not collection_exists:
+                self._collection = self.client.create_collection(name=index_name)
+                self._track_collection(index_name)
+            else:
+                self._collection = self.client.get_collection(name=index_name)
         else:
             self._collection = self.client.get_collection(name=index_name)
 

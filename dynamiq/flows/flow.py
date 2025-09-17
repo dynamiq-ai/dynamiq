@@ -13,10 +13,8 @@ from dynamiq.executors.base import BaseExecutor
 from dynamiq.executors.pool import ThreadExecutor
 from dynamiq.flows.base import BaseFlow
 from dynamiq.nodes.node import Node, NodeReadyToRun
-from dynamiq.nodes.writers.base import Writer
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
-from dynamiq.storages.vector.base import BaseVectorStore
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.logger import logger
 
@@ -48,7 +46,6 @@ class Flow(BaseFlow):
         super().__init__(**kwargs)
         self._node_by_id = {node.id: node for node in self.nodes}
         self._ts = None
-        self._dry_run_nodes = []
 
         self._init_components()
         self.reset_run_state()
@@ -70,7 +67,6 @@ class Flow(BaseFlow):
         """
         data = super().to_dict(include_secure_params=include_secure_params, **kwargs)
         data["nodes"] = [node.to_dict(include_secure_params=include_secure_params, **kwargs) for node in self.nodes]
-        data["dry_run_nodes"] = [node.id for node in self._dry_run_nodes]
         return data
 
     @field_validator("nodes")
@@ -197,7 +193,6 @@ class Flow(BaseFlow):
             for node in self.nodes
         }
         self._ts = self.init_node_topological_sorter(nodes=self.nodes)
-        self._dry_run_nodes = []
 
     def _cleanup_dry_run(self, config: RunnableConfig = None):
         """
@@ -206,25 +201,36 @@ class Flow(BaseFlow):
         Args:
             config (RunnableConfig, optional): Configuration for the run.
         """
-        if not config or not config.dry_run:
+        if not config or not getattr(config.dry_run, "enabled", False):
             return
 
         logger.info("Starting dry run cleanup...")
-        for node in self._dry_run_nodes:
-            if isinstance(node, BaseVectorStore):
-                try:
-                    node.dry_run_cleanup(config.dry_run)
-                    logger.debug(f"Cleaned up dry run resources for node {node.id}")
-                except Exception as e:
-                    logger.error(f"Failed to clean up dry run resources for node {node.id}: {str(e)}")
-            elif isinstance(node, Writer):
-                try:
-                    node.vector_store.dry_run_cleanup(config.dry_run)
-                    logger.debug(f"Cleaned up dry run resources for node {node.id}")
-                except Exception as e:
-                    logger.error(f"Failed to clean up dry run resources for node {node.id}: {str(e)}")
+        for node in self.nodes:
+            try:
+                node.dry_run_cleanup(config.dry_run)
+                logger.debug(f"Cleaned up dry run resources for node {node.id}")
+            except Exception as e:
+                logger.error(f"Failed to clean up dry run resources for node {node.id}: {str(e)}")
 
-        self._dry_run_nodes = []
+    async def _cleanup_dry_run_async(self, config: RunnableConfig = None):
+        """Async variant of dry-run cleanup. Runs synchronous cleanup functions in a thread."""
+        if not config or not getattr(config.dry_run, "enabled", False):
+            return
+
+        logger.info("Starting async dry run cleanup...")
+        nodes_with_cleanup = [node for node in self.nodes if hasattr(node, "dry_run_cleanup")]
+        tasks = [asyncio.to_thread(getattr(node, "dry_run_cleanup"), config.dry_run) for node in nodes_with_cleanup]
+
+        if not tasks:
+            return
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for node, res in zip(nodes_with_cleanup, results):
+            if isinstance(res, Exception):
+                logger.error(f"Failed to clean up dry run resources for node {node.id}: {res}")
+            else:
+                logger.debug(f"Cleaned up dry run resources for node {node.id}")
 
     def run_sync(self, input_data: Any, config: RunnableConfig = None, **kwargs) -> RunnableResult:
         """
@@ -265,14 +271,6 @@ class Flow(BaseFlow):
                     )
                     self._results.update(results)
                     self._ts.done(*results.keys())
-
-                    for node in ready_nodes:
-                        if (
-                            isinstance(node.node, BaseVectorStore)
-                            or isinstance(node.node, Writer)
-                            and node.node not in self._dry_run_nodes
-                        ):
-                            self._dry_run_nodes.append(node.node)
 
                 run_executor.shutdown()
 
@@ -342,13 +340,6 @@ class Flow(BaseFlow):
                         self._results.update(results)
                         self._ts.done(*results.keys())
 
-                        for node in nodes_to_run:
-                            if (
-                                isinstance(node.node, BaseVectorStore)
-                                or isinstance(node.node, Writer)
-                                and node.node not in self._dry_run_nodes
-                            ):
-                                self._dry_run_nodes.append(node.node)
                     else:
                         # If no nodes are ready yet but the sorter is still active,
                         # yield control to allow other async operations to progress
@@ -367,7 +358,10 @@ class Flow(BaseFlow):
                 error=RunnableResultError.from_exception(e),
             )
         finally:
-            self._cleanup_dry_run(config)
+            try:
+                await self._cleanup_dry_run_async(config)
+            except Exception as e:
+                logger.error(f"Async dry-run cleanup failed: {e}")
 
     def get_dependant_nodes(
         self, nodes_types_to_skip: set[str] | None = None

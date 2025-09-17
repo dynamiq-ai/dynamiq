@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from dynamiq import Workflow
 from dynamiq.connections import Weaviate
 from dynamiq.flows import Flow
+from dynamiq.nodes.operators import Map
 from dynamiq.nodes.writers.weaviate import WeaviateDocumentWriter
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector.dry_run import DryRunConfig
@@ -20,24 +21,29 @@ def weaviate_dry_run():
     ]
 
     # Create runnable config with dry run
-    dry_run_config = DryRunConfig(delete_collection=True, delete_documents=True)
+    dry_run_config = DryRunConfig(enabled=True, delete_collection=False, delete_documents=True)
     config = RunnableConfig(dry_run=dry_run_config)
 
     # Add a writer node
     writer_node = WeaviateDocumentWriter(
         connection=Weaviate(),
-        index_name="test_dry_run",
+        index_name="Test_dry_run",
         create_if_not_exist=True,
     )
 
-    # Create a workflow
-    workflow = Workflow(flow=Flow(nodes=[writer_node]))
+    # Add a map node
+    map_node = Map(
+        node=writer_node,
+    )
+
+    # Create a workflow with the map node
+    workflow = Workflow(flow=Flow(nodes=[map_node]))
+
+    inputs = {"input": [{"documents": [documents[0]]}, {"documents": [documents[1]]}, {"documents": [documents[2]]}]}
 
     # Run workflow with dry run config
     result = workflow.run(
-        input_data={
-            "documents": documents,
-        },
+        input_data=inputs,
         config=config,
     )
 

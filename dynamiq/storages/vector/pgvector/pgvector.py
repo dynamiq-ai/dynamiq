@@ -161,13 +161,16 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         if self.create_if_not_exist:
             with self._get_connection() as conn:
+
+                if not self._check_if_table_exists(conn) and not self._check_if_schema_exists(conn):
+                    self._track_collection(f"{self.schema_name}.{self.table_name}")
+
                 self._create_schema(conn)
                 self._create_tables(conn)
                 if self.index_method in [PGVectorIndexMethod.IVFFLAT, PGVectorIndexMethod.HNSW]:
                     self.index_name = index_name or f"{self.index_method}_index"
                     self._create_index(conn)
                 self._create_keyword_index(conn)
-                self._track_collection(f"{self.schema_name}.{self.table_name}")
         else:
             if not self._check_if_schema_exists(self._conn):
                 msg = f"Schema '{self.schema_name}' does not exist"
@@ -502,8 +505,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         """
         try:
             with self._get_connection() as conn:
-                if self.create_if_not_exist:
-                    self._drop_tables(conn)
+                self._drop_tables(conn)
                 if self.schema_name and self.schema_name != DEFAULT_SCHEMA_NAME:
                     self._drop_schema(conn)
         except Exception as e:

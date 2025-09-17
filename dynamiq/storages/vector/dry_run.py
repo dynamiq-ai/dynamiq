@@ -1,21 +1,22 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.utils.logger import logger
 
 
 class DryRunConfig(BaseModel):
-    """Configuration for dry run operations.
-
-    This class defines all parameters needed to configure dry run behavior
-    across different vector store implementations.
+    """Configuration for dry run.
 
     Attributes:
-        delete_documents: If True, the ingested documents will be deleted after the dry run.
-        delete_collection: If True, the created collection will be deleted after the dry run.
+        enabled (bool): Whether dry run is enabled. Defaults to False.
+        delete_documents: Whether to delete the ingested documents after the dry run. Defaults to True.
+        delete_collection: Whether to delete the created collection after the dry run. Defaults to False.
     """
 
+    enabled: bool = False
     delete_documents: bool = Field(default=True, description="Delete the ingested documents")
     delete_collection: bool = Field(default=False, description="Delete the created collection")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class DryRunMixin:
@@ -35,6 +36,23 @@ class DryRunMixin:
         self._dry_run_config = dry_run_config or DryRunConfig()
         self._tracked_documents: list[str] = []
         self._tracked_collection: str | None = None
+
+    def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
+        """Delete documents by their IDs.
+
+        Args:
+            document_ids: List of document IDs to delete.
+            delete_all: Whether to delete all documents.
+        """
+        raise NotImplementedError("Subclass must implement delete_documents method")
+
+    def delete_collection(self, collection_name: str) -> None:
+        """Delete a collection by its name.
+
+        Args:
+            collection_name: Name of the collection to delete.
+        """
+        raise NotImplementedError("Subclass must implement delete_collection method")
 
     def _track_documents(self, document_ids: list[str]) -> None:
         """Track multiple documents for potential cleanup.

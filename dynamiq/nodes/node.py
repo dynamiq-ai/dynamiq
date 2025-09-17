@@ -29,6 +29,7 @@ from dynamiq.nodes.types import Behavior, ChoiceCondition, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
 from dynamiq.storages.vector.base import BaseVectorStoreParams
+from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
 from dynamiq.types.feedback import (
     ApprovalConfig,
     ApprovalInputData,
@@ -195,7 +196,7 @@ class NodeOutputReferences:
         return NodeOutputReference(node=self.node, output_key=key)
 
 
-class Node(BaseModel, Runnable, ABC):
+class Node(BaseModel, Runnable, DryRunMixin, ABC):
     """
     Abstract base class for all nodes in the workflow.
 
@@ -1355,6 +1356,17 @@ class Node(BaseModel, Runnable, ABC):
             else:
                 result[key] = value
         return result
+
+    def dry_run_cleanup(self, dry_run_config: DryRunConfig | None = None) -> None:
+        """Clean up resources created during dry run.
+        This method provides a default implementation that nodes can override
+        to perform specific cleanup operations. By default, it does nothing
+        but provides the interface for node-level cleanup.
+
+        Args:
+            dry_run_config: Configuration for dry run behavior.
+        """
+        pass
 
 
 class ConnectionNode(Node, ABC):

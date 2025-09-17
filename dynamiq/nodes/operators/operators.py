@@ -10,6 +10,7 @@ from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.storages.vector.dry_run import DryRunConfig
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
@@ -205,6 +206,10 @@ class Map(Node):
             return {k: self.regenerate_ids(v) for k, v in obj.items()}
         else:
             return obj
+
+    def dry_run_cleanup(self, dry_run_config: DryRunConfig | None = None) -> None:
+        """Clean up resources created during dry run."""
+        self.node.dry_run_cleanup(dry_run_config)
 
     def execute_workflow(self, index, data, config, merged_kwargs):
         """Execute a single workflow and handle errors."""
