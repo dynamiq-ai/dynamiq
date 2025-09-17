@@ -3,7 +3,7 @@ import re
 import textwrap
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, ClassVar
+from typing import Any, Callable, ClassVar, Union
 
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
@@ -310,8 +310,8 @@ class AgentIntermediateStep(BaseModel):
 
 class ToolParams(BaseModel):
     global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
-    by_name_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_name")
-    by_id_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_id")
+    by_name_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_name")
+    by_id_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_id")
 
 
 class AgentInputSchema(BaseModel):
@@ -918,25 +918,56 @@ class Agent(Node):
                 self._apply_parameters(merged_input, global_params, "global", debug_info)
 
             # 2. Apply parameters by tool name (medium priority)
-            name_params = tool_params.by_name_params.get(tool.name, {}) or tool_params.by_name_params.get(
-                self.sanitize_tool_name(tool.name), {}
+            name_params_any = tool_params.by_name_params.get(tool.name) or tool_params.by_name_params.get(
+                self.sanitize_tool_name(tool.name)
             )
-            if name_params:
-                self._apply_parameters(merged_input, name_params, f"name:{tool.name}", debug_info)
+            if name_params_any:
+                if isinstance(name_params_any, ToolParams):
+                    if self.verbose:
+                        debug_info.append(
+                            f"  - From name:{tool.name}: encountered nested ToolParams (ignored for non-agent tool)"
+                        )
+                elif isinstance(name_params_any, dict):
+                    self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
 
             # 3. Apply parameters by tool ID (highest priority)
-            id_params = tool_params.by_id_params.get(tool.id, {})
-            if id_params:
-                self._apply_parameters(merged_input, id_params, f"id:{tool.id}", debug_info)
+            id_params_any = tool_params.by_id_params.get(tool.id)
+            if id_params_any:
+                if isinstance(id_params_any, ToolParams):
+                    if self.verbose:
+                        debug_info.append(
+                            f"  - From id:{tool.id}: encountered nested ToolParams (ignored for non-agent tool)"
+                        )
+                elif isinstance(id_params_any, dict):
+                    self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
 
             if self.verbose and debug_info:
                 logger.debug("\n".join(debug_info))
+
+        child_kwargs = kwargs | {"recoverable_error": True}
+        is_child_agent = isinstance(tool, Agent)
+
+        if is_child_agent and tool_params:
+            nested_any = (
+                tool_params.by_id_params.get(getattr(tool, "id", ""))
+                or tool_params.by_name_params.get(getattr(tool, "name", ""))
+                or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(tool, "name", "")))
+            )
+            if nested_any:
+                if isinstance(nested_any, ToolParams):
+                    nested_tp = nested_any
+                elif isinstance(nested_any, dict):
+                    nested_tp = ToolParams.model_validate(nested_any)
+                else:
+                    nested_tp = None
+                if nested_tp:
+                    child_kwargs = child_kwargs | {"tool_params": nested_tp}
 
         tool_result = tool.run(
             input_data=merged_input,
             config=config,
             run_depends=self._run_depends,
-            **(kwargs | {"recoverable_error": True}),
+            **child_kwargs,
         )
         self._run_depends = [NodeDependency(node=tool).to_dict()]
         if tool_result.status != RunnableStatus.SUCCESS:
