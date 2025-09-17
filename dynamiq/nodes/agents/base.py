@@ -26,7 +26,7 @@ from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.storages.file.base import FileStore, FileStoreConfig
+from dynamiq.storages.file.base import FileInfo, FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
@@ -212,80 +212,58 @@ class StreamChunkChoiceDelta(BaseModel):
     def serialize_content(self):
         """Serialize content dict, converting any BytesIO objects to base64 strings while preserving key structure."""
 
-        if self.content is None:
-            return None
+        if self.content is None or not isinstance(self.content, dict):
+            return {"content": self.content, "source": self.source, "step": self.step}
 
-        if not isinstance(self.content, dict):
-            return self.content
+        serialized_content = {}
 
-        try:
-            # Create a copy to avoid modifying the original
-            serialized_content = {}
+        for key, value in self.content.items():
 
-            for key, value in self.content.items():
+            if isinstance(value, io.BytesIO):
+                current_pos = value.tell()
+                value.seek(0)
+                content_bytes = value.read()
+                value.seek(current_pos)
 
-                if isinstance(value, io.BytesIO):
-                    # Get the current position to restore it later
-                    current_pos = value.tell()
-                    # Reset to beginning
-                    value.seek(0)
-                    # Get content
-                    content_bytes = value.read()
-                    # Restore position
-                    value.seek(current_pos)
+                import base64
 
-                    # Convert to base64
-                    import base64
+                encoded = base64.b64encode(content_bytes).decode("utf-8")
 
-                    encoded = base64.b64encode(content_bytes).decode("utf-8")
+                file_info = {
+                    "content": encoded,
+                    "name": getattr(value, "name", f"file_{key}"),
+                    "content_type": getattr(value, "content_type", "unknown"),
+                    "description": getattr(value, "description", ""),
+                    "original_size": len(content_bytes),
+                }
+                serialized_content[key] = file_info
 
-                    # Create a dict with base64 content and metadata under the same key
-                    file_info = {
-                        "content": encoded,
-                        "name": getattr(value, "name", f"file_{key}"),
-                        "content_type": getattr(value, "content_type", "unknown"),
-                        "description": getattr(value, "description", ""),
-                        "original_size": len(content_bytes),
-                    }
-                    # Keep the same key structure but replace BytesIO with file info
-                    serialized_content[key] = file_info
+            elif isinstance(value, list):
+                serialized_list = []
+                for i, item in enumerate(value):
+                    if isinstance(item, io.BytesIO):
+                        current_pos = item.tell()
+                        item.seek(0)
+                        content_bytes = item.read()
+                        item.seek(current_pos)
 
-                elif isinstance(value, list):
-                    # Handle lists that might contain BytesIO objects
-                    serialized_list = []
-                    for i, item in enumerate(value):
-                        if isinstance(item, io.BytesIO):
-                            # Get the current position to restore it later
-                            current_pos = item.tell()
-                            # Reset to beginning
-                            item.seek(0)
-                            # Get content
-                            content_bytes = item.read()
-                            # Restore position
-                            item.seek(current_pos)
+                        import base64
 
-                            # Convert to base64
-                            import base64
+                        encoded = base64.b64encode(content_bytes).decode("utf-8")
 
-                            encoded = base64.b64encode(content_bytes).decode("utf-8")
-
-                            # Create a dict with base64 content and metadata
-                            file_info = {
-                                "content": encoded,
-                                "name": getattr(item, "name", f"file_{key}_{i}"),
-                                "content_type": getattr(item, "content_type", "unknown"),
-                                "description": getattr(item, "description", ""),
-                                "original_size": len(content_bytes),
-                            }
-                            # Keep the same list structure but replace BytesIO with file info
-                            serialized_list.append(file_info)
-                            print(f"DEBUG: Serialized BytesIO in list[{i}] as file: {file_info['name']}")
-                        else:
-                            serialized_list.append(item)
-                    serialized_content[key] = serialized_list
-                else:
-                    # Keep non-BytesIO values as-is
-                    serialized_content[key] = value
+                        file_info = FileInfo(
+                            content=encoded,
+                            name=getattr(item, "name", f"file_{key}_{i}"),
+                            content_type=getattr(item, "content_type", "unknown"),
+                            metadata={"description": getattr(item, "description", "")},
+                            size=len(content_bytes),
+                        )
+                        serialized_list.append(file_info.model_dump())
+                    else:
+                        serialized_list.append(item)
+                serialized_content[key] = serialized_list
+            else:
+                serialized_content[key] = value
 
             # Create the final structure with content aggregated under 'content' key
             result = {
@@ -295,13 +273,6 @@ class StreamChunkChoiceDelta(BaseModel):
             }
 
             return result
-
-        except Exception as e:
-            import traceback
-
-            logger.error(f"Error serializing content: {e}")
-            logger.error(traceback.format_exc())
-            return self.content
 
 
 class StreamChunkChoice(BaseModel):
@@ -986,7 +957,7 @@ class Agent(Node):
 
         self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
 
-        return tool_result_content_processed, tool_result.output.get("files", [])
+        return tool_result_content_processed
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
         """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
