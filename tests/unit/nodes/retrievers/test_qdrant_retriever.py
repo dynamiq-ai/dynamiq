@@ -10,11 +10,13 @@ from dynamiq.nodes.retrievers.base import RetrieverInputSchema
 from dynamiq.nodes.retrievers.qdrant import QdrantDocumentRetriever
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import QdrantVectorStore
+from dynamiq.storages.vector.qdrant import QdrantSimilarityMetric
 
 
 @pytest.fixture
 def mock_qdrant_vector_store():
     mock_store = MagicMock(spec=QdrantVectorStore)
+    mock_store.metric = QdrantSimilarityMetric.COSINE
     return mock_store
 
 

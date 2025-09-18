@@ -16,6 +16,7 @@ from dynamiq.storages.vector import MilvusVectorStore
 def mock_milvus_vector_store():
     mock_store = MagicMock(spec=MilvusVectorStore)
     mock_store.client = MagicMock()
+    mock_store.metric_type = "ip"
     return mock_store
 
 

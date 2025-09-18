@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 from dynamiq.components.retrievers.qdrant import QdrantDocumentRetriever
-from dynamiq.storages.vector.qdrant import QdrantVectorStore
+from dynamiq.storages.vector.qdrant import QdrantSimilarityMetric, QdrantVectorStore
 from dynamiq.types import Document
 
 
@@ -10,6 +10,7 @@ class TestQdrantDocumentRetriever:
     def test_run_method(self, mock_documents):
         mock_vector_store = MagicMock(spec=QdrantVectorStore)
         mock_vector_store._query_by_embedding.return_value = mock_documents
+        mock_vector_store.metric = QdrantSimilarityMetric.COSINE
 
         retriever = QdrantDocumentRetriever(vector_store=mock_vector_store, filters={"field": "value"}, top_k=5)
 
@@ -34,6 +35,7 @@ class TestQdrantDocumentRetriever:
     def test_run_method_with_defaults(self, mock_documents, mock_filters):
         mock_vector_store = MagicMock(spec=QdrantVectorStore)
         mock_vector_store._query_by_embedding.return_value = mock_documents
+        mock_vector_store.metric = QdrantSimilarityMetric.COSINE
 
         retriever = QdrantDocumentRetriever(vector_store=mock_vector_store, filters=mock_filters, top_k=5)
 
@@ -56,6 +58,7 @@ class TestQdrantDocumentRetriever:
 
         mock_vector_store = MagicMock(spec=QdrantVectorStore)
         mock_vector_store._query_by_embedding.return_value = [high_score_doc, low_score_doc]
+        mock_vector_store.metric = QdrantSimilarityMetric.COSINE
 
         retriever = QdrantDocumentRetriever(
             vector_store=mock_vector_store,
