@@ -75,6 +75,7 @@ def test_execute(milvus_document_retriever):
         content_key=None,
         embedding_key=None,
         query=None,
+        similarity_threshold=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -104,6 +105,30 @@ def test_execute_with_default_filters_and_top_k(milvus_document_retriever):
         content_key=None,
         embedding_key=None,
         query=None,
+        similarity_threshold=None,
+    )
+
+    assert result == {"documents": mock_output["documents"]}
+
+
+def test_execute_with_similarity_threshold_from_input(milvus_document_retriever):
+    input_data = RetrieverInputSchema(embedding=[0.1, 0.2, 0.3], similarity_threshold=0.42)
+    config = RunnableConfig(callbacks=[])
+
+    mock_output = {"documents": [{"id": "1", "content": "Document 1"}]}
+    milvus_document_retriever.document_retriever = MagicMock(spec=MilvusDocumentRetrieverComponent)
+    milvus_document_retriever.document_retriever.run.return_value = mock_output
+
+    result = milvus_document_retriever.execute(input_data, config)
+
+    milvus_document_retriever.document_retriever.run.assert_called_once_with(
+        input_data.embedding,
+        filters=milvus_document_retriever.filters,
+        top_k=milvus_document_retriever.top_k,
+        content_key=None,
+        embedding_key=None,
+        query=None,
+        similarity_threshold=0.42,
     )
 
     assert result == {"documents": mock_output["documents"]}

@@ -62,7 +62,11 @@ def test_execute(qdrant_document_retriever):
     result = qdrant_document_retriever.execute(input_data, config)
 
     qdrant_document_retriever.document_retriever.run.assert_called_once_with(
-        input_data.embedding, filters=input_data.filters, top_k=input_data.top_k, content_key=None
+        input_data.embedding,
+        filters=input_data.filters,
+        top_k=input_data.top_k,
+        content_key=None,
+        similarity_threshold=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -90,6 +94,28 @@ def test_execute_with_default_filters_and_top_k(qdrant_document_retriever):
         filters=qdrant_document_retriever.filters,
         top_k=qdrant_document_retriever.top_k,
         content_key=None,
+        similarity_threshold=None,
+    )
+
+    assert result == {"documents": mock_output["documents"]}
+
+
+def test_execute_with_similarity_threshold_from_input(qdrant_document_retriever):
+    input_data = RetrieverInputSchema(embedding=[0.1, 0.2, 0.3], similarity_threshold=0.7)
+    config = RunnableConfig(callbacks=[])
+
+    mock_output = {"documents": [{"id": "1", "content": "Document 1"}]}
+    qdrant_document_retriever.document_retriever = MagicMock(spec=QdrantDocumentRetrieverComponent)
+    qdrant_document_retriever.document_retriever.run.return_value = mock_output
+
+    result = qdrant_document_retriever.execute(input_data, config)
+
+    qdrant_document_retriever.document_retriever.run.assert_called_once_with(
+        input_data.embedding,
+        filters=qdrant_document_retriever.filters,
+        top_k=qdrant_document_retriever.top_k,
+        content_key=None,
+        similarity_threshold=0.7,
     )
 
     assert result == {"documents": mock_output["documents"]}
