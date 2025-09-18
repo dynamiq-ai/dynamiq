@@ -1836,6 +1836,52 @@ class ReActAgent(Agent):
 
         self._prompt_blocks.update(prompt_blocks)
 
+    def _run_single_tool(
+        self, tool_name: str, tool_input: dict[str, Any], config: RunnableConfig, **kwargs
+    ) -> dict[str, Any]:
+        tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
+        if not tool:
+            return {
+                "tool_name": tool_name,
+                "success": False,
+                "tool_input": tool_input,
+                "result": f"Unknown tool: {tool_name}. Please use only available tools.",
+                "files": {},
+            }
+
+        result_raw = self._run_tool(tool, tool_input, config, **kwargs)
+        if isinstance(result_raw, dict) and "text" in result_raw:
+            tool_result = result_raw["text"]
+            tool_files = result_raw.get("files", {})
+        else:
+            tool_result = result_raw
+            tool_files = {}
+
+        return {
+            "tool_name": tool.name,
+            "success": True,
+            "tool_input": tool_input,
+            "result": tool_result,
+            "files": tool_files,
+        }
+
+    def _stream_tool_result(self, result: dict[str, Any], config: RunnableConfig, **kwargs) -> None:
+        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            try:
+                self.stream_content(
+                    content={
+                        "name": result.get("tool_name"),
+                        "input": result.get("tool_input"),
+                        "result": result.get("result"),
+                    },
+                    source=str(result.get("tool_name")),
+                    step="tool",
+                    config=config,
+                    **kwargs,
+                )
+            except Exception as stream_err:
+                logger.error(f"Streaming error for tool {result.get('tool_name')}: {stream_err}")
+
     def _execute_tools(self, tools_data: list[dict[str, Any]], config: RunnableConfig, **kwargs) -> str:
         """
         Execute one or more tools and gather their results.
@@ -1853,90 +1899,67 @@ class ReActAgent(Agent):
         if not tools_data:
             return ""
 
-        def _run_single_tool(tool_name: str, tool_input: dict) -> dict[str, Any]:
-            tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
-            if not tool:
-                return {
-                    "tool_name": tool_name,
-                    "success": False,
-                    "tool_input": tool_input,
-                    "result": f"Unknown tool: {tool_name}. Please use only available tools.",
-                    "files": {},
-                }
+        prepared_tools: list[dict[str, Any]] = []
 
-            result_raw = self._run_tool(tool, tool_input, config, **kwargs)
-            if isinstance(result_raw, dict) and "text" in result_raw:
-                tool_result = result_raw["text"]
-                tool_files = result_raw.get("files", {})
-            else:
-                tool_result = result_raw
-                tool_files = {}
-
-            return {
-                "tool_name": tool.name,
-                "success": True,
-                "tool_input": tool_input,
-                "result": tool_result,
-                "files": tool_files,
-            }
-
-        def _stream_result(res: dict[str, Any]):
-            if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                try:
-                    self.stream_content(
-                        content={
-                            "name": res.get("tool_name"),
-                            "input": res.get("tool_input"),
-                            "result": res.get("result"),
-                        },
-                        source=str(res.get("tool_name")),
-                        step="tool",
-                        config=config,
-                        **kwargs,
-                    )
-                except Exception as stream_err:
-                    logger.error(f"Streaming error for tool {res.get('tool_name')}: {stream_err}")
-
-        max_workers = max(1, len(tools_data))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {}
-            for idx, td in enumerate(tools_data):
-                tool_name = td.get("name")
-                tool_input = td.get("input")
-                if tool_name is None or tool_input is None:
-                    error_message = "Invalid tool payload: missing 'name' or 'input'"
-                    logger.error(error_message)
-                    all_results.append(
-                        {
-                            "order": idx,
-                            "tool_name": tool_name or UNKNOWN_TOOL_NAME,
-                            "success": False,
-                            "tool_input": tool_input,
-                            "result": error_message,
-                            "files": {},
-                        }
-                    )
-                    continue
-                future = executor.submit(_run_single_tool, tool_name, tool_input)
-                future_map[future] = idx
-
-            for future in as_completed(future_map.keys()):
-                idx = future_map[future]
-                try:
-                    res = future.result()
-                except Exception as e:
-                    error_message = f"Error executing tool {tools_data[idx].get('name')}: {str(e)}"
-                    logger.error(error_message)
-                    res = {
-                        "tool_name": tools_data[idx].get("name"),
+        for idx, td in enumerate(tools_data):
+            tool_name = td.get("name")
+            tool_input = td.get("input")
+            if tool_name is None or tool_input is None:
+                error_message = "Invalid tool payload: missing 'name' or 'input'"
+                logger.error(error_message)
+                all_results.append(
+                    {
+                        "order": idx,
+                        "tool_name": tool_name or UNKNOWN_TOOL_NAME,
                         "success": False,
-                        "tool_input": tools_data[idx].get("input"),
+                        "tool_input": tool_input,
                         "result": error_message,
                         "files": {},
                     }
-                res["order"] = idx
+                )
+                continue
+            prepared_tools.append({"order": idx, "name": tool_name, "input": tool_input})
+
+        if prepared_tools:
+            if len(prepared_tools) == 1:
+                tool_payload = prepared_tools[0]
+                res = self._run_single_tool(tool_payload["name"], tool_payload["input"], config, **kwargs)
+                res["order"] = tool_payload["order"]
                 all_results.append(res)
-                _stream_result(res)
+                self._stream_tool_result(res, config, **kwargs)
+            else:
+                max_workers = len(prepared_tools)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_map = {}
+                    for tool_payload in prepared_tools:
+                        future = executor.submit(
+                            self._run_single_tool,
+                            tool_payload["name"],
+                            tool_payload["input"],
+                            config,
+                            **kwargs,
+                        )
+                        future_map[future] = tool_payload
+
+                    for future in as_completed(future_map.keys()):
+                        tool_payload = future_map[future]
+                        tool_name = tool_payload["name"]
+                        tool_input = tool_payload["input"]
+                        try:
+                            res = future.result()
+                        except Exception as e:
+                            error_message = f"Error executing tool {tool_name}: {str(e)}"
+                            logger.error(error_message)
+                            res = {
+                                "tool_name": tool_name,
+                                "success": False,
+                                "tool_input": tool_input,
+                                "result": error_message,
+                                "files": {},
+                            }
+                        res["order"] = tool_payload["order"]
+                        all_results.append(res)
+                        self._stream_tool_result(res, config, **kwargs)
 
         observation_parts = []
         all_files = {}
