@@ -4,10 +4,11 @@ from pydantic.types import PositiveInt
 from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker
 
 from dynamiq.connections import Milvus
+from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
-from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
 from dynamiq.storages.vector.milvus.filter import Filter
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:

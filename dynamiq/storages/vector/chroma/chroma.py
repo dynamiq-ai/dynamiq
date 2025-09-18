@@ -2,9 +2,10 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Optional
 
 from dynamiq.connections import Chroma
+from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore
-from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:

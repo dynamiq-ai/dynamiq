@@ -9,11 +9,12 @@ from weaviate.exceptions import ObjectAlreadyExistsException, UnexpectedStatusCo
 from weaviate.util import generate_uuid5
 
 from dynamiq.connections import Weaviate
+from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
-from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException, VectorStoreException
 from dynamiq.storages.vector.policies import DuplicatePolicy
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
 
 from .filters import Filter, convert_filters

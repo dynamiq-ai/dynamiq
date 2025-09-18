@@ -12,11 +12,12 @@ from psycopg.sql import Literal as SQLLiteral
 from psycopg.types.json import Jsonb
 
 from dynamiq.connections import PostgreSQL
+from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
-from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
 
 

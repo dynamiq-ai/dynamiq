@@ -1,22 +1,5 @@
-from pydantic import BaseModel, ConfigDict, Field
-
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
-
-
-class DryRunConfig(BaseModel):
-    """Configuration for dry run.
-
-    Attributes:
-        enabled (bool): Whether dry run is enabled. Defaults to False.
-        delete_documents: Whether to delete the ingested documents after the dry run. Defaults to True.
-        delete_collection: Whether to delete the created collection after the dry run. Defaults to False.
-    """
-
-    enabled: bool = False
-    delete_documents: bool = Field(default=True, description="Delete the ingested documents")
-    delete_collection: bool = Field(default=False, description="Delete the created collection")
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class DryRunMixin:
@@ -44,7 +27,7 @@ class DryRunMixin:
             document_ids: List of document IDs to delete.
             delete_all: Whether to delete all documents.
         """
-        raise NotImplementedError("Subclass must implement delete_documents method")
+        pass
 
     def delete_collection(self, collection_name: str) -> None:
         """Delete a collection by its name.
@@ -52,7 +35,7 @@ class DryRunMixin:
         Args:
             collection_name: Name of the collection to delete.
         """
-        raise NotImplementedError("Subclass must implement delete_collection method")
+        pass
 
     def _track_documents(self, document_ids: list[str]) -> None:
         """Track multiple documents for potential cleanup.
@@ -82,7 +65,7 @@ class DryRunMixin:
         if dry_run_config.delete_documents and self._tracked_documents:
             try:
                 self.delete_documents(list(self._tracked_documents))
-                logger.info(f"Cleaned up {len(self._tracked_documents)} tracked documents")
+                logger.debug(f"Cleaned up {len(self._tracked_documents)} tracked documents")
                 self._tracked_documents = []
             except Exception as e:
                 logger.error(f"Failed to clean up tracked documents: {e}")
@@ -90,7 +73,7 @@ class DryRunMixin:
         if dry_run_config.delete_collection and self._tracked_collection:
             try:
                 self.delete_collection(self._tracked_collection)
-                logger.info(f"Cleaned up collection: {self._tracked_collection}")
+                logger.debug(f"Cleaned up collection: {self._tracked_collection}")
                 self._tracked_collection = None
             except Exception as e:
                 logger.error(f"Failed to clean up collection {self._tracked_collection}: {e}")

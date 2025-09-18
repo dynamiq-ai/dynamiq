@@ -6,8 +6,8 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.operators import Map
 from dynamiq.nodes.writers.weaviate import WeaviateDocumentWriter
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.vector.dry_run import DryRunConfig
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 
 
 def weaviate_dry_run():

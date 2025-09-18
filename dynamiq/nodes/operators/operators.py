@@ -10,7 +10,7 @@ from dynamiq.nodes import Behavior, Node, NodeGroup
 from dynamiq.nodes.node import Transformer, ensure_config
 from dynamiq.nodes.types import ChoiceCondition, ConditionOperator
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.storages.vector.dry_run import DryRunConfig
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 

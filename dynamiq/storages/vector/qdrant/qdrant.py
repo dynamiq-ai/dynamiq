@@ -10,8 +10,8 @@ from qdrant_client.http import models as rest
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from dynamiq.connections import Qdrant as QdrantConnection
+from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseWriterVectorStoreParams
-from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException as DuplicateDocumentError
 from dynamiq.storages.vector.exceptions import VectorStoreException as DocumentStoreError
 from dynamiq.storages.vector.policies import DuplicatePolicy
@@ -24,6 +24,7 @@ from dynamiq.storages.vector.qdrant.converters import (
 )
 from dynamiq.storages.vector.qdrant.filters import convert_filters_to_qdrant
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 
 if TYPE_CHECKING:
     from qdrant_client import QdrantClient

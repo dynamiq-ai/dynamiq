@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.cache.config import CacheConfig
 from dynamiq.callbacks import BaseCallbackHandler
-from dynamiq.storages.vector.dry_run import DryRunConfig
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils import format_value, generate_uuid, is_called_from_async_context
 

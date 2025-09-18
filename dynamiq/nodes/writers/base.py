@@ -4,8 +4,8 @@ from typing import ClassVar, Literal
 from pydantic import BaseModel, Field
 
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode
-from dynamiq.storages.vector.dry_run import DryRunConfig
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 
 
 class WriterInputSchema(BaseModel):

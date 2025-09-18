@@ -18,6 +18,7 @@ from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager
+from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.exceptions import (
     NodeConditionFailedException,
     NodeConditionSkippedException,
@@ -29,7 +30,7 @@ from dynamiq.nodes.types import Behavior, ChoiceCondition, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
 from dynamiq.storages.vector.base import BaseVectorStoreParams
-from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.feedback import (
     ApprovalConfig,
     ApprovalInputData,

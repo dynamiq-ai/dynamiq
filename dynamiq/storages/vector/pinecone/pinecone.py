@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING, Any, Optional
 from pydantic import Field, field_validator
 
 from dynamiq.connections import Pinecone
+from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
-from dynamiq.storages.vector.dry_run import DryRunConfig, DryRunMixin
 from dynamiq.storages.vector.pinecone.filters import _normalize_filters
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.env import get_env_var
 from dynamiq.utils.logger import logger
 
