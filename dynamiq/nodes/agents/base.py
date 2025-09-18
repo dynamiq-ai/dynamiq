@@ -1,3 +1,4 @@
+import base64
 import io
 import re
 import textwrap
@@ -208,71 +209,72 @@ class StreamChunkChoiceDelta(BaseModel):
             raise ValueError(f"source must be a string, got {type(v).__name__}: {v}")
         return v
 
+    def _convert_bytesio_to_file_info(self, bytesio_obj: io.BytesIO, key: str, index: int = None) -> FileInfo:
+        """Convert a BytesIO object to a FileInfo object with base64 encoded content."""
+        content_bytes = bytesio_obj.getvalue()
+
+        encoded = base64.b64encode(content_bytes).decode("utf-8")
+
+        name = getattr(bytesio_obj, "name", f"file_{key}" if index is None else f"file_{key}_{index}")
+        content_type = getattr(bytesio_obj, "content_type", "unknown")
+        description = getattr(bytesio_obj, "description", "")
+
+        # Create a path based on the name
+        path = f"/{name}" if not name.startswith("/") else name
+
+        return FileInfo(
+            content=encoded,
+            path=path,
+            name=name,
+            content_type=content_type,
+            metadata={"description": description},
+            size=len(content_bytes),
+        )
+
+    def _recursive_serialize(self, obj, key_path: str = "", index: int = None):
+        """Recursively serialize an object, converting any BytesIO objects to FileInfo objects."""
+        if isinstance(obj, io.BytesIO):
+            # Convert BytesIO to FileInfo
+            return self._convert_bytesio_to_file_info(obj, key_path, index).model_dump()
+
+        elif isinstance(obj, dict):
+            # Recursively process dictionary values
+            result = {}
+            for k, v in obj.items():
+                new_key_path = f"{key_path}.{k}" if key_path else k
+                result[k] = self._recursive_serialize(v, new_key_path)
+            return result
+
+        elif isinstance(obj, list):
+            # Recursively process list items
+            result = []
+
+            print(f"obj {obj}")
+            for i, item in enumerate(obj):
+                print(f"i: {i}")
+                new_key_path = f"{key_path}[{i}]" if key_path else f"item_{i}"
+                result.append(self._recursive_serialize(item, new_key_path, i))
+            return result
+
+        else:
+            # Return primitive types as-is
+            return obj
+
     @model_serializer
     def serialize_content(self):
         """Serialize content dict, converting any BytesIO objects to base64 strings while preserving key structure."""
-
         if self.content is None or not isinstance(self.content, dict):
             return {"content": self.content, "source": self.source, "step": self.step}
 
-        serialized_content = {}
+        serialized_content = self._recursive_serialize(self.content)
 
-        for key, value in self.content.items():
+        result = {
+            "content": serialized_content,  # All original content aggregated here
+            "source": self.source,
+            "step": self.step,
+        }
 
-            if isinstance(value, io.BytesIO):
-                current_pos = value.tell()
-                value.seek(0)
-                content_bytes = value.read()
-                value.seek(current_pos)
-
-                import base64
-
-                encoded = base64.b64encode(content_bytes).decode("utf-8")
-
-                file_info = {
-                    "content": encoded,
-                    "name": getattr(value, "name", f"file_{key}"),
-                    "content_type": getattr(value, "content_type", "unknown"),
-                    "description": getattr(value, "description", ""),
-                    "original_size": len(content_bytes),
-                }
-                serialized_content[key] = file_info
-
-            elif isinstance(value, list):
-                serialized_list = []
-                for i, item in enumerate(value):
-                    if isinstance(item, io.BytesIO):
-                        current_pos = item.tell()
-                        item.seek(0)
-                        content_bytes = item.read()
-                        item.seek(current_pos)
-
-                        import base64
-
-                        encoded = base64.b64encode(content_bytes).decode("utf-8")
-
-                        file_info = FileInfo(
-                            content=encoded,
-                            name=getattr(item, "name", f"file_{key}_{i}"),
-                            content_type=getattr(item, "content_type", "unknown"),
-                            metadata={"description": getattr(item, "description", "")},
-                            size=len(content_bytes),
-                        )
-                        serialized_list.append(file_info.model_dump())
-                    else:
-                        serialized_list.append(item)
-                serialized_content[key] = serialized_list
-            else:
-                serialized_content[key] = value
-
-            # Create the final structure with content aggregated under 'content' key
-            result = {
-                "content": serialized_content,  # All original content aggregated here
-                "source": self.source,
-                "step": self.step,
-            }
-
-            return result
+        return result
 
 
 class StreamChunkChoice(BaseModel):
@@ -821,6 +823,9 @@ class Agent(Node):
             choices=[StreamChunkChoice(delta=StreamChunkChoiceDelta(content=content, source=source, step=step))]
         )
 
+        print(str(response_for_stream.model_dump())[:500])
+        print(f"{response_for_stream.model_dump()['files']}" if "files" in response_for_stream.model_dump() else "asd")
+
         self.run_on_node_execute_stream(
             callbacks=config.callbacks,
             chunk=response_for_stream.model_dump(),
@@ -957,7 +962,7 @@ class Agent(Node):
 
         self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
 
-        return tool_result_content_processed
+        return tool_result_content_processed, tool_result.output.get("files", [])
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
         """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
