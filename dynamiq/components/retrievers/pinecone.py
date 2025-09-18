@@ -1,5 +1,6 @@
 from typing import Any
 
+from dynamiq.components.retrievers.utils import filter_documents_by_threshold
 from dynamiq.storages.vector import PineconeVectorStore
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
@@ -16,6 +17,7 @@ class PineconeDocumentRetriever:
         vector_store: PineconeVectorStore,
         filters: dict[str, Any] | None = None,
         top_k: int = 10,
+        similarity_threshold: float | None = None,
     ):
         """
         Initializes a component for retrieving documents from a Pinecone vector store with optional filtering.
@@ -38,6 +40,11 @@ class PineconeDocumentRetriever:
         self.vector_store = vector_store
         self.filters = filters or {}
         self.top_k = top_k
+        self.similarity_threshold = similarity_threshold
+
+    def _higher_is_better(self) -> bool:
+        metric = (self.vector_store.metric or "").lower()
+        return metric not in {"euclidean", "l2", "l2_distance"}
 
     def run(
         self,
@@ -46,6 +53,7 @@ class PineconeDocumentRetriever:
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
         content_key: str | None = None,
+        similarity_threshold: float | None = None,
     ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the PineconeDocumentStore that are similar to the provided query embedding.
@@ -73,5 +81,8 @@ class PineconeDocumentRetriever:
             content_key=content_key,
         )
         logger.debug(f"Retrieved {len(docs)} documents from Pinecone Vector Store.")
+
+        threshold = similarity_threshold if similarity_threshold is not None else self.similarity_threshold
+        docs = filter_documents_by_threshold(docs, threshold, higher_is_better=self._higher_is_better())
 
         return {"documents": docs}

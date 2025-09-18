@@ -1,6 +1,8 @@
 from typing import Any
 
+from dynamiq.components.retrievers.utils import filter_documents_by_threshold
 from dynamiq.storages.vector import PGVectorStore
+from dynamiq.storages.vector.pgvector.pgvector import PGVectorVectorFunction
 from dynamiq.utils.logger import logger
 
 
@@ -15,6 +17,7 @@ class PGVectorDocumentRetriever:
         vector_store: PGVectorStore,
         filters: dict[str, Any] | None = None,
         top_k: int = 10,
+        similarity_threshold: float | None = None,
     ):
         """
         Initializes a component for retrieving documents from a PGVector vector store with optional filtering.
@@ -37,6 +40,14 @@ class PGVectorDocumentRetriever:
         self.vector_store = vector_store
         self.filters = filters or {}
         self.top_k = top_k
+        self.similarity_threshold = similarity_threshold
+
+    def _higher_is_better(self) -> bool:
+        distance_metrics = {
+            PGVectorVectorFunction.L1_DISTANCE,
+            PGVectorVectorFunction.L2_DISTANCE,
+        }
+        return self.vector_store.vector_function not in distance_metrics
 
     def run(
         self,
@@ -48,6 +59,7 @@ class PGVectorDocumentRetriever:
         embedding_key: str | None = None,
         query: str | None = None,
         alpha: float | None = 0.5,
+        similarity_threshold: float | None = None,
     ):
         """
         Retrieves documents from the PGVectorStore that are similar to the provided query embedding.
@@ -95,6 +107,9 @@ class PGVectorDocumentRetriever:
                 content_key=content_key,
                 embedding_key=embedding_key,
             )
+
+        threshold = similarity_threshold if similarity_threshold is not None else self.similarity_threshold
+        docs = filter_documents_by_threshold(docs, threshold, higher_is_better=self._higher_is_better())
 
         logger.debug(f"Retrieved {len(docs)} documents from pgvector Vector Store.")
 
