@@ -1345,6 +1345,7 @@ class ReActAgent(Agent):
 
                 if action and self.tools:
                     tool_result = None
+                    tool_files = []
                     tool = None
 
                     if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled:
@@ -1416,7 +1417,7 @@ class ReActAgent(Agent):
                                     **kwargs,
                                 )
 
-                                tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                                tool_result, tool_files = self._run_tool(tool, action_input, config, **kwargs)
 
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
@@ -1446,7 +1447,7 @@ class ReActAgent(Agent):
                             tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                             tool_result = self._tool_cache.get(tool_cache_entry, None)
                             if not tool_result:
-                                tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                                tool_result, tool_files = self._run_tool(tool, action_input, config, **kwargs)
 
                             else:
                                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
@@ -1486,6 +1487,7 @@ class ReActAgent(Agent):
                                 "name": tool_name,
                                 "input": action_input,
                                 "result": tool_result,
+                                "files": tool_files,
                             },
                             source=source_name,
                             step="tool",
@@ -1839,7 +1841,7 @@ class ReActAgent(Agent):
 
         self._prompt_blocks.update(prompt_blocks)
 
-    def _execute_tools(self, tools_data: list[dict], config: RunnableConfig, **kwargs) -> str:
+    def _execute_tools(self, tools_data: list[dict], config: RunnableConfig, **kwargs) -> str | dict:
         """
         Execute one or more tools and gather their results.
 
@@ -1864,13 +1866,11 @@ class ReActAgent(Agent):
                     all_results.append({"tool_name": tool_name, "success": False, "result": error_message})
                     continue
 
-                result_raw = self._run_tool(tool, tool_input, config, **kwargs)
+                result_raw, tool_files = self._run_tool(tool, tool_input, config, **kwargs)
                 if isinstance(result_raw, dict) and "text" in result_raw:
                     tool_result = result_raw["text"]
-                    tool_files = result_raw.get("files", {})
                 else:
                     tool_result = result_raw
-                    tool_files = {}
 
                 all_results.append(
                     {
@@ -1884,7 +1884,7 @@ class ReActAgent(Agent):
 
                 if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                     self.stream_content(
-                        content={"name": tool.name, "input": tool_input, "result": tool_result},
+                        content={"name": tool.name, "input": tool_input, "result": tool_result, "files": tool_files},
                         source=tool.name,
                         step="tool",
                         config=config,

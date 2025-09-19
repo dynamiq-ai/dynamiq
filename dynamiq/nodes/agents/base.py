@@ -1,3 +1,4 @@
+import base64
 import io
 import re
 import textwrap
@@ -6,7 +7,7 @@ from enum import Enum
 from typing import Any, Callable, ClassVar, Union
 
 from jinja2 import Template
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
@@ -26,7 +27,7 @@ from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.storages.file.base import FileStore, FileStoreConfig
+from dynamiq.storages.file.base import FileInfo, FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
@@ -207,6 +208,67 @@ class StreamChunkChoiceDelta(BaseModel):
         if not isinstance(v, str):
             raise ValueError(f"source must be a string, got {type(v).__name__}: {v}")
         return v
+
+    def _convert_bytesio_to_file_info(self, bytesio_obj: io.BytesIO, key: str, index: int = None) -> FileInfo:
+        """Convert a BytesIO object to a FileInfo object with base64 encoded content."""
+        content_bytes = bytesio_obj.getvalue()
+
+        encoded = base64.b64encode(content_bytes).decode("utf-8")
+
+        name = getattr(bytesio_obj, "name", f"file_{key}" if index is None else f"file_{key}_{index}")
+        content_type = getattr(bytesio_obj, "content_type", "unknown")
+        description = getattr(bytesio_obj, "description", "")
+
+        # Create a path based on the name
+        path = f"/{name}" if not name.startswith("/") else name
+
+        return FileInfo(
+            content=encoded,
+            path=path,
+            name=name,
+            content_type=content_type,
+            metadata={"description": description},
+            size=len(content_bytes),
+        )
+
+    def _recursive_serialize(self, obj, key_path: str = "", index: int = None):
+        """Recursively serialize an object, converting any BytesIO objects to FileInfo objects."""
+        if isinstance(obj, io.BytesIO):
+            return self._convert_bytesio_to_file_info(obj, key_path, index).model_dump()
+
+        elif isinstance(obj, dict):
+            result = {}
+            for k, v in obj.items():
+                new_key_path = f"{key_path}.{k}" if key_path else k
+                result[k] = self._recursive_serialize(v, new_key_path)
+            return result
+
+        elif isinstance(obj, list):
+            result = []
+
+            for i, item in enumerate(obj):
+                new_key_path = f"{key_path}[{i}]" if key_path else f"item_{i}"
+                result.append(self._recursive_serialize(item, new_key_path, i))
+            return result
+
+        else:
+            return obj
+
+    @model_serializer
+    def serialize_content(self):
+        """Serialize content dict, converting any BytesIO objects to base64 strings while preserving key structure."""
+        if self.content is None or not isinstance(self.content, dict):
+            return {"content": self.content, "source": self.source, "step": self.step}
+
+        serialized_content = self._recursive_serialize(self.content)
+
+        result = {
+            "content": serialized_content,
+            "source": self.source,
+            "step": self.step,
+        }
+
+        return result
 
 
 class StreamChunkChoice(BaseModel):
@@ -922,7 +984,7 @@ class Agent(Node):
 
         self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
 
-        return tool_result_content_processed
+        return tool_result_content_processed, tool_result.output.get("files", [])
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
         """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
