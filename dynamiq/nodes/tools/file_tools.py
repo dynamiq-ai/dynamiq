@@ -124,23 +124,18 @@ class FileReadTool(Node):
         """
         total_size = len(content)
 
-        # Calculate chunk positions
         first_chunk = content[:chunk_size]
 
-        # Middle chunk - get chunk from the middle of the file
         middle_start = total_size // 2 - chunk_size // 2
         middle_chunk = content[middle_start : middle_start + chunk_size]
 
-        # Last chunk
         last_chunk = content[-chunk_size:] if total_size > chunk_size else content
 
-        # Create separator with file info
         separator = f"\n\n--- CHUNKED FILE: {file_path} ({total_size:,} bytes total) ---\n".encode()
         first_sep = f"\n--- FIRST {len():,} BYTES ---\n".encode("utf-8")
         middle_sep = f"\n--- MIDDLE {len():,} BYTES (from position {middle_start:,}) ---\n".encode("utf-8")
         last_sep = f"\n--- LAST {len():,} BYTES ---\n".encode("utf-8")
 
-        # Concatenate all chunks with separators
         chunked_bytes = (
             separator
             + first_sep

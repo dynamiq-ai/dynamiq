@@ -249,9 +249,7 @@ class StreamChunkChoiceDelta(BaseModel):
             # Recursively process list items
             result = []
 
-            print(f"obj {obj}")
             for i, item in enumerate(obj):
-                print(f"i: {i}")
                 new_key_path = f"{key_path}[{i}]" if key_path else f"item_{i}"
                 result.append(self._recursive_serialize(item, new_key_path, i))
             return result
@@ -822,9 +820,6 @@ class Agent(Node):
         response_for_stream = StreamChunk(
             choices=[StreamChunkChoice(delta=StreamChunkChoiceDelta(content=content, source=source, step=step))]
         )
-
-        print(str(response_for_stream.model_dump())[:500])
-        print(f"{response_for_stream.model_dump()['files']}" if "files" in response_for_stream.model_dump() else "asd")
 
         self.run_on_node_execute_stream(
             callbacks=config.callbacks,

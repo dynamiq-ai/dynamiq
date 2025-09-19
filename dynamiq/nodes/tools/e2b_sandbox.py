@@ -590,9 +590,9 @@ class E2BInterpreterTool(ConnectionNode):
         for file_path in file_paths:
             try:
 
-                image_bytes = sandbox.files.read(file_path, "bytes")
+                file_bytes = sandbox.files.read(file_path, "bytes")
 
-                base64_content = base64.b64encode(image_bytes).decode("utf-8")
+                base64_content = base64.b64encode(file_bytes).decode("utf-8")
 
                 downloaded_files[file_path] = base64_content
 
