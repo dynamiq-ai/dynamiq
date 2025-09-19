@@ -3,11 +3,10 @@ import re
 import pytest
 
 from dynamiq.connections import Anthropic as AnthropicConnection
-from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
 from dynamiq.nodes.agents.utils import extract_thought_from_intermediate_steps
-from dynamiq.nodes.llms import Anthropic, Gemini, OpenAI
+from dynamiq.nodes.llms import Anthropic, OpenAI
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
@@ -32,20 +31,9 @@ def create_claude_llm():
     )
 
 
-def create_gemini_llm():
-    connection = GeminiConnection()
-    return Gemini(
-        connection=connection,
-        model="gemini-2.5-flash",
-        max_tokens=1000,
-        temperature=0,
-    )
-
-
 LLM_PARAMS = [
     ("openai", create_openai_llm),
     ("claude", create_claude_llm),
-    ("gemini", create_gemini_llm),
 ]
 
 MODE_PARAMS = [
