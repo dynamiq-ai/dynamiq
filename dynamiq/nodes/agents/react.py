@@ -86,7 +86,6 @@ Answer: [Your direct response]
 
 IMPORTANT RULES:
 - ALWAYS start with "Thought:" even for simple responses
-- Begin thoughts with confidence assessment when using tools
 - Explain why this specific tool is the right choice
 - Ensure Action Input is valid JSON without markdown formatting
 - Use proper JSON syntax with double quotes for keys and string values
@@ -139,7 +138,6 @@ For questions that don't require tools:
 
 CRITICAL XML FORMAT RULES:
 - ALWAYS include <thought> tags with detailed reasoning
-- Begin thoughts with confidence assessment when using tools
 - Explain why this specific tool is the right choice
 - For tool use, include action and action_input tags
 - For direct answers, only include thought and answer tags
