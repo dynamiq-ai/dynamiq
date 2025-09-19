@@ -13,6 +13,7 @@ class TestMilvusDocumentRetriever:
         ]
         mock_vector_store = MagicMock(spec=MilvusVectorStore)
         mock_vector_store._embedding_retrieval.return_value = mock_documents
+        mock_vector_store.metric_type = "ip"
 
         retriever = MilvusDocumentRetriever(vector_store=mock_vector_store, filters={"field": "value"}, top_k=5)
 
@@ -47,6 +48,7 @@ class TestMilvusDocumentRetriever:
 
         mock_vector_store = MagicMock(spec=MilvusVectorStore)
         mock_vector_store._embedding_retrieval.return_value = mock_documents
+        mock_vector_store.metric_type = "ip"
 
         retriever = MilvusDocumentRetriever(vector_store=mock_vector_store, filters=mock_filters, top_k=5)
 
@@ -75,6 +77,7 @@ class TestMilvusDocumentRetriever:
 
         mock_vector_store = MagicMock(spec=MilvusVectorStore)
         mock_vector_store._hybrid_retrieval.return_value = mock_documents
+        mock_vector_store.metric_type = "ip"
 
         retriever = MilvusDocumentRetriever(vector_store=mock_vector_store, top_k=5)
 

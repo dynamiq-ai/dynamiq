@@ -1,5 +1,6 @@
 from typing import Any
 
+from dynamiq.components.retrievers.utils import filter_documents_by_threshold
 from dynamiq.storages.vector import MilvusVectorStore
 from dynamiq.types import Document
 
@@ -15,6 +16,7 @@ class MilvusDocumentRetriever:
         vector_store: MilvusVectorStore,
         filters: dict[str, Any] | None = None,
         top_k: int = 10,
+        similarity_threshold: float | None = None,
     ):
         """
         Initializes a component for retrieving documents from a Milvus vector store with optional filtering.
@@ -33,6 +35,11 @@ class MilvusDocumentRetriever:
         self.vector_store = vector_store
         self.filters = filters or {}
         self.top_k = top_k
+        self.similarity_threshold = similarity_threshold
+
+    def _higher_is_better(self) -> bool:
+        metric = (self.vector_store.metric_type or "").upper()
+        return metric not in {"L2", "EUCLIDEAN"}
 
     def run(
         self,
@@ -43,6 +50,7 @@ class MilvusDocumentRetriever:
         filters: dict[str, Any] | None = None,
         content_key: str | None = None,
         embedding_key: str | None = None,
+        similarity_threshold: float | None = None,
     ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the MilvusVectorStore that are similar to the provided query embedding.
@@ -84,5 +92,8 @@ class MilvusDocumentRetriever:
                 embedding_key=embedding_key,
                 return_embeddings=not exclude_document_embeddings,
             )
+
+        threshold = similarity_threshold if similarity_threshold is not None else self.similarity_threshold
+        docs = filter_documents_by_threshold(docs, threshold, higher_is_better=self._higher_is_better())
 
         return {"documents": docs}

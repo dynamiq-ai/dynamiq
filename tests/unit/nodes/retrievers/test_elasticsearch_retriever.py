@@ -10,12 +10,14 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.retrievers.elasticsearch import ElasticsearchDocumentRetriever, ElasticsearchRetrieverInputSchema
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import ElasticsearchVectorStore
+from dynamiq.storages.vector.elasticsearch.elasticsearch import ElasticsearchSimilarityMetric
 
 
 @pytest.fixture
 def mock_elasticsearch_store():
     mock_store = MagicMock(spec=ElasticsearchVectorStore)
     mock_store.client = MagicMock()
+    mock_store.similarity = ElasticsearchSimilarityMetric.COSINE
     return mock_store
 
 
@@ -38,6 +40,7 @@ def elasticsearch_document_retriever(mock_elasticsearch_store):
 def test_initialization_with_defaults(mock_connect_to_vector_store):
     mock_elasticsearch_store = MagicMock(spec=ElasticsearchVectorStore)
     mock_connect_to_vector_store.return_value = mock_elasticsearch_store
+    mock_elasticsearch_store.similarity = ElasticsearchSimilarityMetric.COSINE
 
     retriever = ElasticsearchDocumentRetriever()
 
@@ -89,6 +92,7 @@ def test_execute_basic_search(elasticsearch_document_retriever):
         scale_scores=input_data.scale_scores,
         content_key="content",
         embedding_key="embedding",
+        similarity_threshold=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -121,6 +125,7 @@ def test_execute_with_default_filters_and_top_k(elasticsearch_document_retriever
         scale_scores=input_data.scale_scores,
         content_key="content",
         embedding_key="embedding",
+        similarity_threshold=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
