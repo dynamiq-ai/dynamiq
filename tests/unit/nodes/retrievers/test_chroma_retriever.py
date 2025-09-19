@@ -64,7 +64,10 @@ def test_execute(chroma_document_retriever):
     result = chroma_document_retriever.execute(input_data, config)
 
     chroma_document_retriever.document_retriever.run.assert_called_once_with(
-        input_data.embedding, filters=input_data.filters, top_k=input_data.top_k
+        input_data.embedding,
+        filters=input_data.filters,
+        top_k=input_data.top_k,
+        similarity_threshold=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -88,7 +91,10 @@ def test_execute_with_default_filters_and_top_k(chroma_document_retriever):
     result = chroma_document_retriever.execute(input_data, config)
 
     chroma_document_retriever.document_retriever.run.assert_called_once_with(
-        input_data.embedding, filters=chroma_document_retriever.filters, top_k=chroma_document_retriever.top_k
+        input_data.embedding,
+        filters=chroma_document_retriever.filters,
+        top_k=chroma_document_retriever.top_k,
+        similarity_threshold=None,
     )
 
     assert result == {"documents": mock_output["documents"]}

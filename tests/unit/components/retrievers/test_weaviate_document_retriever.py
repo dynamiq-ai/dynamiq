@@ -23,6 +23,8 @@ class TestWeaviateDocumentRetriever:
             filters={"new_field": "new_value"},
             top_k=2,
             exclude_document_embeddings=True,
+            distance=None,
+            certainty=None,
             content_key=None,
         )
 
@@ -68,6 +70,8 @@ class TestWeaviateDocumentRetriever:
             filters=mock_filters,
             top_k=5,
             exclude_document_embeddings=True,
+            distance=None,
+            certainty=None,
             content_key=None,
         )
 

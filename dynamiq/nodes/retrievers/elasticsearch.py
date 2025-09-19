@@ -35,6 +35,10 @@ class ElasticsearchRetrieverInputSchema(BaseModel):
     scale_scores: bool = Field(default=False, description="Whether to scale scores to 0-1 range")
     content_key: str = Field(default="content", description="Key to use for content in response")
     embedding_key: str = Field(default="embedding", description="Key to use for embedding in response")
+    similarity_threshold: float | None = Field(
+        default=None,
+        description="Minimal similarity or maximal distance score accepted for retrieved documents.",
+    )
 
 
 class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
@@ -99,7 +103,10 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
         super().init_components(connection_manager)
         if self.document_retriever is None:
             self.document_retriever = ElasticsearchDocumentRetrieverComponent(
-                vector_store=self.vector_store, filters=self.filters, top_k=self.top_k
+                vector_store=self.vector_store,
+                filters=self.filters,
+                top_k=self.top_k,
+                similarity_threshold=self.similarity_threshold,
             )
 
     def execute(
@@ -130,6 +137,11 @@ class ElasticsearchDocumentRetriever(Retriever, ElasticsearchVectorStoreParams):
             scale_scores=input_data.scale_scores,
             content_key=input_data.content_key,
             embedding_key=input_data.embedding_key,
+            similarity_threshold=(
+                input_data.similarity_threshold
+                if input_data.similarity_threshold is not None
+                else self.similarity_threshold
+            ),
         )
 
         return {

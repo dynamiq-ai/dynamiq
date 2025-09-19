@@ -4,6 +4,7 @@ import pytest
 
 from dynamiq.components.retrievers.elasticsearch import ElasticsearchDocumentRetriever
 from dynamiq.storages.vector import ElasticsearchVectorStore
+from dynamiq.storages.vector.elasticsearch.elasticsearch import ElasticsearchSimilarityMetric
 from dynamiq.types import Document
 
 
@@ -11,6 +12,7 @@ from dynamiq.types import Document
 def mock_vector_store():
     store = MagicMock(spec=ElasticsearchVectorStore)
     store._embedding_retrieval.return_value = [Document(id="1", content="test content", metadata={}, score=0.9)]
+    store.similarity = ElasticsearchSimilarityMetric.COSINE
     return store
 
 
