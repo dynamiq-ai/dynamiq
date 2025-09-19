@@ -13,24 +13,26 @@ from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
 AGENT_ROLE = (
-    "You are a versatile AI assistant:\n"
-    "  1. Plan your approach in a clear reasoning step.\n"
-    "  2. Search  for any documentation or data you need.\n"
-    "  3. Code: write a snippet that solves the user's request, use code interpreter\n"
+    "You are a versatile AI assistant focused on efficient multi-tool execution:\n"
+    "  1. Plan: map the task into parallelizable subtasks before doing anything else.\n"
+    "  2. Search: queue every information-gathering query that helps the plan so the tools run simultaneously.\n"
+    "  3. Code: while searches execute, prepare the code that will consume their outputs.\n"
     "  4. Execute & Validate:\n"
-    "     - Run your code in the sandbox.\n"
-    "     - Inspect stdout/stderr and the data structures returned.\n"
-    "     - If there are errors or unexpected results, fix them.\n"
-    "     - Optionally add simple assertions or checks to prove correctness.\n"
-    "     - Repeat until the code runs cleanly and meets the spec.\n"
-    "  5. Report: Return a concise Markdown‐formatted answer or code block,\n"
+    "     - Run your code in the sandbox as soon as the required search results arrive.\n"
+    "     - Inspect stdout/stderr and returned data structures.\n"
+    "     - If there are errors or missing data, trigger the necessary tools again in parallel.\n"
+    "     - Add quick assertions or sanity checks when practical.\n"
+    "  5. Report: Return a concise Markdown-formatted answer or code block,\n"
     "     including any tables or plots if relevant.\n\n"
-    "Always think in terms of tool use: plan → search → code → test → refine → answer."
+    "Always think in terms of tool use: plan -> queue parallel tool calls -> synthesize -> answer."
 )
 
 EXAMPLE_QUERY = (
-    "Find the best AI conferences in Europe for 2025. "
-    "You should use parallel tool calls to search from different angles."
+    "Locate the official OpenWeatherMap documentation covering authentication, available daily forecast "
+    "endpoints, and the schema for 7-day forecast responses. At the same time, craft Python code "
+    "(using requests and pandas) that fetches the 7-day forecast for Warsaw, Poland, loads it into a DataFrame, "
+    "and prints a table of date versus average temperature. Explain in the final answer how parallel tool calls "
+    "helped you deliver the result quickly."
 )
 
 
@@ -66,7 +68,7 @@ def setup_multi_tool_agent() -> ReActAgent:
     return agent
 
 
-def run_workflow(agent: ReActAgent = setup_multi_tool_agent(), input_prompt: str = EXAMPLE_QUERY) -> tuple[str, dict]:
+def run_workflow(agent: ReActAgent | None = None, input_prompt: str = EXAMPLE_QUERY) -> tuple[str, dict]:
     """
     Execute a workflow using the multi-tool ReAct agent to process a query.
 
@@ -80,6 +82,7 @@ def run_workflow(agent: ReActAgent = setup_multi_tool_agent(), input_prompt: str
     Raises:
         Exception: Captures and prints any errors during workflow execution.
     """
+    agent = agent or setup_multi_tool_agent()
     tracing = TracingCallbackHandler()
     wf = Workflow(flow=Flow(nodes=[agent]))
 

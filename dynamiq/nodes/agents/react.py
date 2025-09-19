@@ -1,6 +1,7 @@
 import json
 import re
 import types
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from typing import Any, Callable, Union, get_args, get_origin
 
@@ -19,11 +20,7 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-from dynamiq.nodes.agents.utils import (
-    SummarizationConfig,
-    ToolCacheEntry,
-    XMLParser,
-)
+from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.types import Behavior, InferenceMode
@@ -1343,11 +1340,12 @@ class ReActAgent(Agent):
 
                 if action and self.tools:
                     tool_result = None
-                    tool_files = []
+                    tool_files: Any = []
                     tool = None
 
                     if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled:
-                        tool_result = self._execute_tools(tools_data, config, **kwargs)
+                        execution_output = self._execute_tools(tools_data, config, **kwargs)
+                        tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
 
                     elif self.inference_mode == InferenceMode.DEFAULT and self.parallel_tool_calls_enabled:
                         if action == "multiple_tools":
@@ -1377,7 +1375,8 @@ class ReActAgent(Agent):
                                 **kwargs,
                             )
 
-                            tool_result = self._execute_tools(tools_data, config, **kwargs)
+                            execution_output = self._execute_tools(tools_data, config, **kwargs)
+                            tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
 
                             action_input_json = json.dumps(action_input)
 
@@ -1839,7 +1838,104 @@ class ReActAgent(Agent):
 
         self._prompt_blocks.update(prompt_blocks)
 
-    def _execute_tools(self, tools_data: list[dict], config: RunnableConfig, **kwargs) -> str | dict:
+    @staticmethod
+    def _build_unique_file_key(files_map: dict[str, Any], base: str) -> str:
+        key = base or "file"
+        if key not in files_map:
+            return key
+        suffix = 1
+        while f"{key}_{suffix}" in files_map:
+            suffix += 1
+        return f"{key}_{suffix}"
+
+    def _merge_tool_files(self, aggregated: dict[str, Any], tool_name: str, files: Any) -> None:
+        if not files:
+            return
+
+        sanitized_name = self.sanitize_tool_name(tool_name) or "tool"
+
+        if isinstance(files, dict):
+            for key, value in files.items():
+                base_key = key or sanitized_name
+                unique_key = self._build_unique_file_key(aggregated, base_key)
+                aggregated[unique_key] = value
+        elif isinstance(files, (list, tuple)):
+            for idx, file_obj in enumerate(files):
+                base_key = getattr(file_obj, "name", None) or f"{sanitized_name}_{idx}"
+                unique_key = self._build_unique_file_key(aggregated, base_key)
+                aggregated[unique_key] = file_obj
+        else:
+            unique_key = self._build_unique_file_key(aggregated, sanitized_name)
+            aggregated[unique_key] = files
+
+    @staticmethod
+    def _separate_tool_result_and_files(execution_result: Any) -> tuple[Any, dict[str, Any]]:
+        if isinstance(execution_result, dict):
+            content = execution_result.get("content", "")
+            files = execution_result.get("files", {})
+            if isinstance(files, dict):
+                return content, files
+            if isinstance(files, (list, tuple)):
+                return content, {str(index): file for index, file in enumerate(files)}
+            if files:
+                return content, {"result": files}
+            return content, {}
+        return execution_result, {}
+
+    def _run_single_tool(
+        self, tool_name: str, tool_input: dict[str, Any], config: RunnableConfig, **kwargs
+    ) -> dict[str, Any]:
+        tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
+        if not tool:
+            return {
+                "tool_name": tool_name,
+                "success": False,
+                "tool_input": tool_input,
+                "result": f"Unknown tool: {tool_name}. Please use only available tools.",
+                "files": {},
+            }
+
+        try:
+            tool_result, tool_files = self._run_tool(tool, tool_input, config, **kwargs)
+            return {
+                "tool_name": tool.name,
+                "success": True,
+                "tool_input": tool_input,
+                "result": tool_result,
+                "files": tool_files,
+            }
+        except RecoverableAgentException as e:
+            error_message = f"{type(e).__name__}: {e}"
+            logger.error(error_message)
+            return {
+                "tool_name": tool.name,
+                "success": False,
+                "tool_input": tool_input,
+                "result": error_message,
+                "files": {},
+            }
+
+    def _stream_tool_result(self, result: dict[str, Any], config: RunnableConfig, **kwargs) -> None:
+        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            try:
+                self.stream_content(
+                    content={
+                        "name": result.get("tool_name"),
+                        "input": result.get("tool_input"),
+                        "result": result.get("result"),
+                        "files": result.get("files"),
+                    },
+                    source=str(result.get("tool_name")),
+                    step="tool",
+                    config=config,
+                    **kwargs,
+                )
+            except Exception as stream_err:
+                logger.error(f"Streaming error for tool {result.get('tool_name')}: {stream_err}")
+
+    def _execute_tools(
+        self, tools_data: list[dict[str, Any]], config: RunnableConfig, **kwargs
+    ) -> str | dict[str, Any]:
         """
         Execute one or more tools and gather their results.
 
@@ -1849,72 +1945,88 @@ class ReActAgent(Agent):
             **kwargs: Additional arguments for tool execution
 
         Returns:
-            str: Combined observation string with all tool results
+            str | dict[str, Any]: Combined observation string with all tool results and optional files
         """
-        all_results = []
+        all_results: list[dict[str, Any]] = []
 
-        for tool_data in tools_data:
-            try:
-                tool_name = tool_data["name"]
-                tool_input = tool_data["input"]
+        if not tools_data:
+            return ""
 
-                tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
-                if not tool:
-                    error_message = f"Unknown tool: {tool_name}. Please use only available tools."
-                    all_results.append({"tool_name": tool_name, "success": False, "result": error_message})
-                    continue
+        prepared_tools: list[dict[str, Any]] = []
 
-                result_raw, tool_files = self._run_tool(tool, tool_input, config, **kwargs)
-                if isinstance(result_raw, dict) and "text" in result_raw:
-                    tool_result = result_raw["text"]
-                else:
-                    tool_result = result_raw
-
-                all_results.append(
-                    {
-                        "tool_name": tool_name,
-                        "success": True,
-                        "tool_input": tool_input,
-                        "result": tool_result,
-                        "files": tool_files,
-                    }
-                )
-
-                if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                    self.stream_content(
-                        content={"name": tool.name, "input": tool_input, "result": tool_result, "files": tool_files},
-                        source=tool.name,
-                        step="tool",
-                        config=config,
-                        **kwargs,
-                    )
-
-            except Exception as e:
-                error_message = f"Error executing tool {tool_data['name']}: {str(e)}"
+        for idx, td in enumerate(tools_data):
+            tool_name = td.get("name")
+            tool_input = td.get("input")
+            if tool_name is None or tool_input is None:
+                error_message = "Invalid tool payload: missing 'name' or 'input'"
                 logger.error(error_message)
                 all_results.append(
                     {
-                        "tool_name": tool_data["name"],
+                        "order": idx,
+                        "tool_name": tool_name or UNKNOWN_TOOL_NAME,
                         "success": False,
                         "tool_input": tool_input,
                         "result": error_message,
+                        "files": {},
                     }
                 )
+                continue
+            prepared_tools.append({"order": idx, "name": tool_name, "input": tool_input})
 
-        observation_parts = []
-        all_files = {}
+        if prepared_tools:
+            if len(prepared_tools) == 1:
+                tool_payload = prepared_tools[0]
+                res = self._run_single_tool(tool_payload["name"], tool_payload["input"], config, **kwargs)
+                res["order"] = tool_payload["order"]
+                all_results.append(res)
+                self._stream_tool_result(res, config, **kwargs)
+            else:
+                max_workers = len(prepared_tools)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_map = {}
+                    for tool_payload in prepared_tools:
+                        future = executor.submit(
+                            self._run_single_tool,
+                            tool_payload["name"],
+                            tool_payload["input"],
+                            config,
+                            **kwargs,
+                        )
+                        future_map[future] = tool_payload
 
-        for result in all_results:
-            tool_name = result["tool_name"]
-            result_content = result["result"]
-            success_status = "SUCCESS" if result["success"] else "ERROR"
+                    for future in as_completed(future_map.keys()):
+                        tool_payload = future_map[future]
+                        tool_name = tool_payload["name"]
+                        tool_input = tool_payload["input"]
+                        try:
+                            res = future.result()
+                        except Exception as e:
+                            error_message = f"Error executing tool {tool_name}: {str(e)}"
+                            logger.error(error_message)
+                            res = {
+                                "tool_name": tool_name,
+                                "success": False,
+                                "tool_input": tool_input,
+                                "result": error_message,
+                                "files": {},
+                            }
+                        res["order"] = tool_payload["order"]
+                        all_results.append(res)
+                        self._stream_tool_result(res, config, **kwargs)
+
+        observation_parts: list[str] = []
+        aggregated_files: dict[str, Any] = {}
+
+        for result in sorted(all_results, key=lambda r: r.get("order", 0)):
+            tool_name = result.get("tool_name", UNKNOWN_TOOL_NAME)
+            result_content = result.get("result", "")
+            success_status = "SUCCESS" if result.get("success") else "ERROR"
             observation_parts.append(f"--- {tool_name} has resulted in {success_status} ---\n{result_content}")
 
-            if result.get("files"):
-                all_files.update(result["files"])
+            self._merge_tool_files(aggregated_files, tool_name, result.get("files"))
 
         combined_observation = "\n\n".join(observation_parts)
 
-        if all_files:
-            return {"content": combined_observation, "files": all_files}
+        if aggregated_files:
+            return {"content": combined_observation, "files": aggregated_files}
         return combined_observation

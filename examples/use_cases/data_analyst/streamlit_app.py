@@ -1,13 +1,10 @@
 import io
 import os
-import streamlit as st
-from agent import analyze_csv_file, save_analysis_files, run_agent_with_streaming_sync
 
-st.set_page_config(
-    page_title="Data Analyst Chat Agent",
-    page_icon="💬",
-    layout="wide"
-)
+import streamlit as st
+from agent import analyze_csv_file, run_agent_with_streaming_sync, save_analysis_files
+
+st.set_page_config(page_title="Data Analyst Chat Agent", page_icon="💬", layout="wide")
 
 # Initialize session state
 if "messages" not in st.session_state:
@@ -56,7 +53,7 @@ with st.sidebar:
         "Choose a CSV or text file",
         type=["csv", "txt"],
         help="Upload a CSV or text file for analysis",
-        key="file_uploader"
+        key="file_uploader",
     )
 
     if uploaded_file is not None:
@@ -80,7 +77,7 @@ with st.sidebar:
     streaming_enabled = st.checkbox(
         "🔄 Enable Streaming",
         value=st.session_state.streaming_enabled,
-        help="Show real-time agent reasoning and responses"
+        help="Show real-time agent reasoning and responses",
     )
     st.session_state.streaming_enabled = streaming_enabled
 
@@ -93,7 +90,7 @@ with st.sidebar:
         "Compare different groups/categories",
         "Generate summary statistics",
         "Create a correlation matrix",
-        "Show me the distribution of key variables"
+        "Show me the distribution of key variables",
     ]
 
     for prompt in example_prompts:
@@ -128,7 +125,7 @@ if st.session_state.uploaded_file is not None:
                                 data=file_data,
                                 file_name=file_name,
                                 mime="application/octet-stream",
-                                key=f"download_{file_name}_{len(st.session_state.messages)}"
+                                key=f"download_{file_name}_{len(st.session_state.messages)}",
                             )
                         except Exception as e:
                             st.error(f"Error preparing file {getattr(file_bytesio, 'name', 'unknown')}: {e}")
@@ -139,6 +136,7 @@ if st.session_state.uploaded_file is not None:
                         try:
                             if isinstance(file_content, str) and file_content.startswith("data:"):
                                 import base64
+
                                 header, base64_content = file_content.split(",", 1)
                                 file_data = base64.b64decode(base64_content)
                                 mime_type = header.split(";")[0].replace("data:", "")
@@ -163,10 +161,10 @@ if st.session_state.uploaded_file is not None:
                                     ".txt": "text/plain",
                                     ".json": "application/json",
                                 }
-                                mime_type = mime_map.get(file_ext, 'application/octet-stream')
+                                mime_type = mime_map.get(file_ext, "application/octet-stream")
 
                             # For images, try to display them inline
-                            if mime_type.startswith('image/'):
+                            if mime_type.startswith("image/"):
                                 try:
                                     st.image(file_data, caption=os.path.basename(file_path), use_column_width=True)
                                 except Exception as img_error:
@@ -178,7 +176,7 @@ if st.session_state.uploaded_file is not None:
                                 data=file_data,
                                 file_name=os.path.basename(file_path),
                                 mime=mime_type,
-                                key=f"download_{file_path}_{len(st.session_state.messages)}"
+                                key=f"download_{file_path}_{len(st.session_state.messages)}",
                             )
                         except Exception as e:
                             st.error(f"Error preparing file {file_path}: {e}")
@@ -208,6 +206,7 @@ if st.session_state.uploaded_file is not None:
                 except Exception as e:
                     st.error(f"Streaming failed: {e}")
                     import traceback
+
                     st.error(f"Full error: {traceback.format_exc()}")
                     st.warning("🔄 Falling back to non-streaming mode...")
                     # Fallback to non-streaming
@@ -254,7 +253,7 @@ if st.session_state.uploaded_file is not None:
                                 data=file_data,
                                 file_name=file_name,
                                 mime="application/octet-stream",
-                                key=f"download_{file_name}_{len(st.session_state.messages)}"
+                                key=f"download_{file_name}_{len(st.session_state.messages)}",
                             )
                         except Exception as e:
                             st.error(f"Error preparing file {getattr(file_bytesio, 'name', 'unknown')}: {e}")
@@ -265,6 +264,7 @@ if st.session_state.uploaded_file is not None:
                         try:
                             if isinstance(file_content, str) and file_content.startswith("data:"):
                                 import base64
+
                                 header, base64_content = file_content.split(",", 1)
                                 file_data = base64.b64decode(base64_content)
                                 mime_type = header.split(";")[0].replace("data:", "")
@@ -289,10 +289,10 @@ if st.session_state.uploaded_file is not None:
                                     ".txt": "text/plain",
                                     ".json": "application/json",
                                 }
-                                mime_type = mime_map.get(file_ext, 'application/octet-stream')
+                                mime_type = mime_map.get(file_ext, "application/octet-stream")
 
                             # For images, try to display them inline
-                            if mime_type.startswith('image/'):
+                            if mime_type.startswith("image/"):
                                 try:
                                     st.image(file_data, caption=os.path.basename(file_path), use_column_width=True)
                                 except Exception as img_error:
@@ -304,7 +304,7 @@ if st.session_state.uploaded_file is not None:
                                 data=file_data,
                                 file_name=os.path.basename(file_path),
                                 mime=mime_type,
-                                key=f"download_{file_path}_{len(st.session_state.messages)}"
+                                key=f"download_{file_path}_{len(st.session_state.messages)}",
                             )
                         except Exception as e:
                             st.error(f"Error preparing file {file_path}: {e}")
@@ -319,11 +319,7 @@ if st.session_state.uploaded_file is not None:
         if isinstance(generated_files, dict):
             # Convert dict to list format
             for file_name, file_content in generated_files.items():
-                file_info = {
-                    "name": file_name,
-                    "content": file_content,
-                    "type": "unknown"
-                }
+                file_info = {"name": file_name, "content": file_content, "type": "unknown"}
                 st.session_state.generated_files.append(file_info)
         elif isinstance(generated_files, list):
             # Add list of files to generated_files
@@ -333,7 +329,7 @@ if st.session_state.uploaded_file is not None:
                         file_bytesio, "name", f"generated_file_{len(st.session_state.generated_files)}.bin"
                     ),
                     "content": file_bytesio.read(),
-                    "type": "unknown"
+                    "type": "unknown",
                 }
                 file_bytesio.seek(0)  # Reset position
                 st.session_state.generated_files.append(file_info)
