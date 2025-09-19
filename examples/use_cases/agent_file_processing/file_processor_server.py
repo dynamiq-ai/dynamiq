@@ -8,10 +8,10 @@ To run this FastAPI server, use the following command:
 python file_processor_server.py
 """
 
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import JSONResponse
 
-from fastapi import FastAPI, File, JSONResponse, UploadFile
-
-from examples.use_cases.agent_file_processing.agent_deep_scraping import PORT
+from examples.use_cases.agent_file_processing.agent_file_api import PORT
 
 app = FastAPI(title="File Processor API", version="1.0.0")
 

@@ -589,33 +589,12 @@ class E2BInterpreterTool(ConnectionNode):
         downloaded_files = {}
         for file_path in file_paths:
             try:
-                file_content = sandbox.files.read(file_path)
-                if isinstance(file_content, str):
-                    file_content = file_content.encode("utf-8")
-                elif isinstance(file_content, bytes):
-                    pass
-                else:
-                    file_content = str(file_content).encode("utf-8")
 
-                mime_type = detect_mime_type(file_content, file_path)
+                file_bytes = sandbox.files.read(file_path, "bytes")
 
-                base64_content = base64.b64encode(file_content).decode("utf-8")
+                base64_content = base64.b64encode(file_bytes).decode("utf-8")
 
-                # Format as data URI for supported types
-                if should_use_data_uri(mime_type):
-                    final_content = f"data:{mime_type};base64,{base64_content}"
-                    logger.info(
-                        f"Tool {self.name} - {self.id}: Downloaded file {file_path} "
-                        f"({len(file_content)} bytes) as data URI with MIME type {mime_type}"
-                    )
-                else:
-                    final_content = base64_content
-                    logger.info(
-                        f"Tool {self.name} - {self.id}: Downloaded file {file_path} "
-                        f"({len(file_content)} bytes) as base64 with MIME type {mime_type}"
-                    )
-
-                downloaded_files[file_path] = final_content
+                downloaded_files[file_path] = base64_content
 
             except Exception as e:
                 logger.warning(f"Tool {self.name} - {self.id}: Failed to download {file_path}: {e}")
@@ -821,30 +800,38 @@ class E2BInterpreterTool(ConnectionNode):
                     if file_content.startswith("Error:"):
                         result_text += f"- {file_path}: {file_content}\n"
                     else:
-                        # Decode content to bytes
-                        if file_content.startswith("data:"):
-                            mime_part = file_content.split(";")[0].replace("data:", "")
-                            base64_part = file_content.split(",", 1)[1]
-                            content_bytes = base64.b64decode(base64_part)
-                            file_name = file_path.split("/")[-1]
-                            file_size = len(content_bytes)
-                            result_text += f"- **{file_name}** ({file_size:,} bytes, {mime_part})\n"
-                        else:
-                            content_bytes = base64.b64decode(file_content)
-                            file_name = file_path.split("/")[-1]
-                            file_size = len(content_bytes)
-                            result_text += f"- **{file_name}** ({file_size:,} bytes)\n"
+                        try:
+                            # Decode content to bytes
+                            if file_content.startswith("data:"):
+                                # Handle data URI format
+                                mime_part = file_content.split(";")[0].replace("data:", "")
+                                base64_part = file_content.split(",", 1)[1]
+                                content_bytes = base64.b64decode(base64_part)
+                                content_type = mime_part
+                            else:
+                                # Handle plain base64 content
+                                content_bytes = base64.b64decode(file_content)
+                                content_type = detect_mime_type(content_bytes, file_path)
 
-                        # Create BytesIO object with metadata
-                        file_bytesio = io.BytesIO(content_bytes)
-                        file_bytesio.name = file_name
-                        file_bytesio.description = f"Generated file from E2B sandbox: {file_path}"
-                        file_bytesio.content_type = (
-                            mime_part
-                            if file_content.startswith("data:")
-                            else detect_mime_type(content_bytes, file_path)
-                        )
-                        files_bytesio.append(file_bytesio)
+                            file_name = file_path.split("/")[-1]
+                            file_size = len(content_bytes)
+                            result_text += f"- **{file_name}** ({file_size:,} bytes, {content_type})\n"
+
+                            # Create BytesIO object with metadata
+                            file_bytesio = io.BytesIO(content_bytes)
+                            file_bytesio.name = file_name
+                            file_bytesio.description = f"Generated file from E2B sandbox: {file_path}"
+                            file_bytesio.content_type = content_type
+
+                            # Ensure the BytesIO object is positioned at the beginning for reading
+                            file_bytesio.seek(0)
+
+                            files_bytesio.append(file_bytesio)
+
+                        except (base64.binascii.Error, ValueError, Exception) as e:
+                            error_msg = f"Failed to decode file {file_path}: {str(e)}"
+                            result_text += f"- {file_path}: {error_msg}\n"
+                            logger.warning(f"Tool {self.name} - {self.id}: {error_msg}")
 
                 result_text += "\n"
 
