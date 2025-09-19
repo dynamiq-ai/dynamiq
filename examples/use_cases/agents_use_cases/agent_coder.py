@@ -7,6 +7,8 @@ from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.storages.file import FileStoreConfig
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 
 AGENT_ROLE = """
@@ -75,6 +77,8 @@ def create_agent():
         budget_tokens=4000,
     )
 
+    file_store_config = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
+
     agent_software = ReActAgent(
         name="Agent",
         llm=llm,
@@ -82,6 +86,7 @@ def create_agent():
         role=AGENT_ROLE,
         max_loops=10,
         inference_mode=InferenceMode.XML,
+        file_store=file_store_config,
     )
 
     return agent_software
