@@ -389,7 +389,7 @@ class Agent(Node):
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
     file_store: FileStoreConfig = Field(
-        default_factory=lambda: FileStoreConfig(enabled=True, backend=InMemoryFileStore()),
+        default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
 
@@ -653,6 +653,11 @@ class Agent(Node):
 
         files = input_data.files
         if files:
+            if not self.file_store_backend:
+                self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
+                self.tools.append(FileReadTool(file_store=self.file_store.backend))
+                self.tools.append(FileListTool(file_store=self.file_store.backend))
+                self._init_prompt_blocks()
             self._ensure_named_files(files)
 
         if input_data.tool_params:
