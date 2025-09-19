@@ -132,9 +132,9 @@ class FileReadTool(Node):
         last_chunk = content[-chunk_size:] if total_size > chunk_size else content
 
         separator = f"\n\n--- CHUNKED FILE: {file_path} ({total_size:,} bytes total) ---\n".encode()
-        first_sep = f"\n--- FIRST {len():,} BYTES ---\n".encode("utf-8")
-        middle_sep = f"\n--- MIDDLE {len():,} BYTES (from position {middle_start:,}) ---\n".encode("utf-8")
-        last_sep = f"\n--- LAST {len():,} BYTES ---\n".encode("utf-8")
+        first_sep = f"\n--- FIRST {len():,} BYTES ---\n".encode()
+        middle_sep = f"\n--- MIDDLE {len():,} BYTES (from position {middle_start:,}) ---\n".encode()
+        last_sep = f"\n--- LAST {len():,} BYTES ---\n".encode()
 
         chunked_bytes = (
             separator
