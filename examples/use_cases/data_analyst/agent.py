@@ -90,14 +90,17 @@ def _show_loading_spinner():
             st.markdown("🤖 **Agent is analyzing your data...**")
             st.markdown("*This may take a few moments*")
 
-    st.markdown("""
+    st.markdown(
+        """
     <style>
     @keyframes spin {
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
     }
     </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 def _hide_loading_spinner():
@@ -134,6 +137,7 @@ def _convert_base64_to_bytesio(base64_string, file_name="file", content_type="un
 def _is_valid_base64(s):
     """Check if a string is valid base64."""
     import base64
+
     try:
         if isinstance(s, str):
             decoded = base64.b64decode(s, validate=True)
@@ -159,13 +163,14 @@ def _process_tool_files_with_conversion(tool_files):
                 file_type = getattr(bytesio_obj, "content_type", "unknown")
 
                 import base64
-                base64_content = base64.b64encode(file_content).decode('utf-8')
+
+                base64_content = base64.b64encode(file_content).decode("utf-8")
 
                 file_info = {
                     "name": file_name,
                     "content": base64_content,
                     "type": file_type,
-                    "original_size": len(file_content)
+                    "original_size": len(file_content),
                 }
 
                 processed_files.append(file_info)
@@ -288,6 +293,7 @@ def streamlit_callback(step: str, content):
                 if isinstance(tool_input, str):
                     try:
                         import json
+
                         tool_input_dict = json.loads(tool_input)
                         python_code = tool_input_dict.get("python", "")
                     except (json.JSONDecodeError, AttributeError):
@@ -361,9 +367,9 @@ def _display_all_files_at_end():
         st.markdown(f"### {i+1}. {file_info.get('name', f'file_{i}')}")
 
         # Display file info
-        file_type = file_info.get('type', 'unknown')
-        original_size = file_info.get('original_size', 0)
-        description = file_info.get('description', '')
+        file_type = file_info.get("type", "unknown")
+        original_size = file_info.get("original_size", 0)
+        description = file_info.get("description", "")
 
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -406,7 +412,7 @@ def _process_file_references_in_text(text):
     import re
 
     # Pattern to match file references like [filename.ext] or [filename]
-    file_pattern = r'\[([^\]]+\.(?:csv|png|jpg|jpeg|gif|bmp|json|txt|pdf|html|xml|yaml|yml))\](?!\])'
+    file_pattern = r"\[([^\]]+\.(?:csv|png|jpg|jpeg|gif|bmp|json|txt|pdf|html|xml|yaml|yml))\](?!\])"
 
     def replace_file_reference(match):
         file_name = match.group(1)
@@ -422,10 +428,10 @@ def _process_file_references_in_text(text):
             exact_match = stored_name == file_name
             endswith_match = stored_name.endswith(file_name)
             contains_match = file_name in stored_name
-            path_match_forward = stored_name.split('/')[-1] == file_name
-            path_match_backward = stored_name.split('\\')[-1] == file_name
+            path_match_forward = stored_name.split("/")[-1] == file_name
+            path_match_backward = stored_name.split("\\")[-1] == file_name
 
-            if (exact_match or endswith_match or contains_match or path_match_forward or path_match_backward):
+            if exact_match or endswith_match or contains_match or path_match_forward or path_match_backward:
                 file_info = f
                 break
 
@@ -525,7 +531,7 @@ def _display_answer_with_inline_files(content):
     """Display answer content with inline file displays."""
     import re
 
-    parts = re.split(r'```file_display_([^`]+)```', content)
+    parts = re.split(r"```file_display_([^`]+)```", content)
 
     for i, part in enumerate(parts):
         if i % 2 == 0:
@@ -568,7 +574,7 @@ def _display_single_file_inline(file_info, i=0):
                 data=file_content if isinstance(file_content, bytes) else file_content.encode(),
                 file_name=file_name,
                 mime="application/octet-stream",
-                key=f"download_{unique_key}"
+                key=f"download_{unique_key}",
             )
     except Exception as e:
         st.error(f"Error displaying file {file_name}: {e}")
@@ -577,7 +583,7 @@ def _display_single_file_inline(file_info, i=0):
             data=file_content if isinstance(file_content, bytes) else file_content.encode(),
             file_name=file_name,
             mime="application/octet-stream",
-            key=f"download_fallback_{unique_key}"
+            key=f"download_fallback_{unique_key}",
         )
 
 
@@ -596,14 +602,14 @@ def _display_csv_file_inline(content, file_name, unique_key=None):
             content = content_bytes.decode("utf-8")
 
         elif isinstance(content, bytes):
-            content = content.decode('utf-8')
+            content = content.decode("utf-8")
 
         df = pd.read_csv(io.StringIO(content))
 
         st.dataframe(df, use_container_width=True)
 
         csv_data = df.to_csv(index=False)
-        csv_base64 = base64.b64encode(csv_data.encode('utf-8')).decode('utf-8')
+        csv_base64 = base64.b64encode(csv_data.encode("utf-8")).decode("utf-8")
         data_uri = f"data:text/csv;base64,{csv_base64}"
 
         unique_key = unique_key or f"{file_name}_{int(time.time() * 1000)}"
@@ -625,21 +631,22 @@ def _display_image_file_inline(content, file_name, unique_key=None):
                 data_uri = content
             else:
                 data_uri = f"data:image/png;base64,{content}"
-        elif hasattr(content, 'getvalue'):
+        elif hasattr(content, "getvalue"):
             import io
+
             content_bytes = content.getvalue()
-            base64_str = base64.b64encode(content_bytes).decode('utf-8')
+            base64_str = base64.b64encode(content_bytes).decode("utf-8")
             data_uri = f"data:image/png;base64,{base64_str}"
         elif isinstance(content, io.BytesIO):
             content_bytes = content.getvalue()
-            base64_str = base64.b64encode(content_bytes).decode('utf-8')
+            base64_str = base64.b64encode(content_bytes).decode("utf-8")
             data_uri = f"data:image/png;base64,{base64_str}"
         elif isinstance(content, bytes):
-            base64_str = base64.b64encode(content).decode('utf-8')
+            base64_str = base64.b64encode(content).decode("utf-8")
             data_uri = f"data:image/png;base64,{base64_str}"
         else:
             content_str = str(content)
-            base64_str = base64.b64encode(content_str.encode('utf-8')).decode('utf-8')
+            base64_str = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
             data_uri = f"data:image/png;base64,{base64_str}"
 
         st.markdown(f"![{file_name}]({data_uri})", unsafe_allow_html=True)
@@ -654,7 +661,7 @@ def _display_json_file_inline(content, file_name, unique_key=None):
         import json
 
         if isinstance(content, bytes):
-            content = content.decode('utf-8')
+            content = content.decode("utf-8")
 
         json_data = json.loads(content)
         st.json(json_data)
@@ -669,7 +676,7 @@ def _display_text_file_inline(content, file_name, unique_key=None):
     try:
 
         if isinstance(content, bytes):
-            content = content.decode('utf-8')
+            content = content.decode("utf-8")
 
         st.code(content[:2000] + "..." if len(content) > 2000 else content)
 
@@ -834,8 +841,7 @@ def run_agent_with_streaming(
         )
 
         result = flow.run(
-            input_data={"input": analysis_prompt, "files": [file_obj]},
-            config=RunnableConfig(callbacks=[send_handler])
+            input_data={"input": analysis_prompt, "files": [file_obj]}, config=RunnableConfig(callbacks=[send_handler])
         )
 
         content = result.output[agent.id]["output"].get("content", "")
@@ -1078,6 +1084,7 @@ def save_analysis_files(files: dict | list, output_dir: str = "./analysis_output
                 # Handle base64 encoded content
                 if isinstance(file_content, str) and file_content.startswith("data:"):
                     import base64
+
                     header, base64_content = file_content.split(",", 1)
                     file_data = base64.b64decode(base64_content)
                 else:
