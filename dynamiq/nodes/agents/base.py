@@ -234,11 +234,9 @@ class StreamChunkChoiceDelta(BaseModel):
     def _recursive_serialize(self, obj, key_path: str = "", index: int = None):
         """Recursively serialize an object, converting any BytesIO objects to FileInfo objects."""
         if isinstance(obj, io.BytesIO):
-            # Convert BytesIO to FileInfo
             return self._convert_bytesio_to_file_info(obj, key_path, index).model_dump()
 
         elif isinstance(obj, dict):
-            # Recursively process dictionary values
             result = {}
             for k, v in obj.items():
                 new_key_path = f"{key_path}.{k}" if key_path else k
@@ -246,7 +244,6 @@ class StreamChunkChoiceDelta(BaseModel):
             return result
 
         elif isinstance(obj, list):
-            # Recursively process list items
             result = []
 
             for i, item in enumerate(obj):
@@ -255,7 +252,6 @@ class StreamChunkChoiceDelta(BaseModel):
             return result
 
         else:
-            # Return primitive types as-is
             return obj
 
     @model_serializer
@@ -267,7 +263,7 @@ class StreamChunkChoiceDelta(BaseModel):
         serialized_content = self._recursive_serialize(self.content)
 
         result = {
-            "content": serialized_content,  # All original content aggregated here
+            "content": serialized_content,
             "source": self.source,
             "step": self.step,
         }
