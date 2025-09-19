@@ -4,9 +4,11 @@ from pydantic.types import PositiveInt
 from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker
 
 from dynamiq.connections import Milvus
+from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.milvus.filter import Filter
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -21,13 +23,8 @@ class MilvusWriterVectorStoreParams(MilvusVectorStoreParams, BaseWriterVectorSto
     dimension: PositiveInt = 1536
 
 
-class MilvusVectorStore(BaseVectorStore):
-    """
-    Vector store using Milvus.
-
-    This class can be used with Zilliz Cloud Services or self-hosted instances.
-
-    """
+class MilvusVectorStore(BaseVectorStore, DryRunMixin):
+    """Vector store using Milvus."""
 
     def __init__(
         self,
@@ -40,7 +37,25 @@ class MilvusVectorStore(BaseVectorStore):
         create_if_not_exist: bool = False,
         content_key: str = "content",
         embedding_key: str = "embedding",
+        dry_run_config: DryRunConfig | None = None,
     ):
+        """
+        Initialize a MilvusVectorStore instance.
+
+        Args:
+            connection (Milvus | None): A Milvus connection object. Defaults to None.
+            client (Optional[MilvusClient]): A Milvus client. Defaults to None.
+            index_name (str): The name of the index to use. Defaults to "default".
+            metric_type (str): The metric type to use for the index. Defaults to "COSINE".
+            index_type (str): The index type to use for the index. Defaults to "AUTOINDEX".
+            dimension (int): The dimension of the vectors. Defaults to 1536.
+            create_if_not_exist (bool): Whether to create the collection if it does not exist. Defaults to False.
+            content_key (str): The field used to store content in the storage. Defaults to "content".
+            embedding_key (str): The field used to store vector in the storage. Defaults to "embedding".
+            dry_run_config (Optional[DryRunConfig]): Configuration for dry run mode. Defaults to None.
+        """
+        super().__init__(dry_run_config=dry_run_config)
+
         self.client = client
         if self.client is None:
             connection = connection or Milvus()
@@ -81,6 +96,7 @@ class MilvusVectorStore(BaseVectorStore):
                 self.client.create_collection(
                     collection_name=self.index_name, schema=self.schema, index_params=self.index_params
                 )
+                self._track_collection(self.index_name)
             else:
                 raise ValueError(
                     f"Collection {self.index_name} does not exist. Set 'create_if_not_exist' to True to create it."
@@ -136,6 +152,8 @@ class MilvusVectorStore(BaseVectorStore):
 
             data_to_upsert.append(document_data)
 
+        self._track_documents([doc.id for doc in documents])
+
         response = self.client.upsert(
             collection_name=self.index_name,
             data=data_to_upsert,
@@ -181,6 +199,21 @@ class MilvusVectorStore(BaseVectorStore):
         delete_result = self.client.delete(collection_name=self.index_name, filter=filter_expression)
 
         logger.info(f"Deleted {len(delete_result)} entities from collection {self.index_name} based on filters.")
+
+    def delete_collection(self, collection_name: str | None = None):
+        """
+        Delete a Milvus collection.
+
+        Args:
+            collection_name (str | None): Name of the collection to delete.
+        """
+        try:
+            collection_to_delete = collection_name or self.index_name
+            self.client.drop_collection(collection_name=collection_to_delete)
+            logger.info(f"Deleted collection '{collection_to_delete}'.")
+        except Exception as e:
+            logger.error(f"Failed to delete collection '{collection_to_delete}': {e}")
+            raise
 
     def list_documents(
         self, limit: int = 1000, content_key: str | None = None, embedding_key: str | None = None
