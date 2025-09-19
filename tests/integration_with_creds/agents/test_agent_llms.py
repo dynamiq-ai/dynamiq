@@ -171,7 +171,7 @@ def run_and_assert_agent(agent: ReActAgent, agent_input, expected_answer, run_co
         thought_found = thought is not None or "<thought>" in str(intermediate_steps)
         assert thought_found, "Expected <thought> tags to be present in XML mode"
 
-
+@pytest.mark.skip(reason="Model access limited by current API key")
 @pytest.mark.integration
 @pytest.mark.parametrize("model", OPENAI_MODELS)
 @pytest.mark.parametrize("inference_mode", INFERENCE_MODES)
@@ -188,7 +188,7 @@ def test_react_agent_openai_models(model, inference_mode, emoji_agent_role, agen
     )
     run_and_assert_agent(agent, agent_input, expected_answer, run_config)
 
-
+@pytest.mark.skip(reason="Model access limited by current API key")
 @pytest.mark.integration
 @pytest.mark.parametrize("model", ANTHROPIC_MODELS)
 @pytest.mark.parametrize("inference_mode", INFERENCE_MODES)
