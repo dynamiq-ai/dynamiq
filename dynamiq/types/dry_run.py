@@ -12,4 +12,4 @@ class DryRunConfig(BaseModel):
 
     enabled: bool = False
     delete_documents: bool = Field(default=True, description="Delete the ingested documents")
-    delete_collection: bool = Field(default=False, description="Delete the created collection")
+    delete_collection: bool = Field(default=True, description="Delete the created collection")
