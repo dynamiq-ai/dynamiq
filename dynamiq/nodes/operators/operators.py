@@ -156,6 +156,8 @@ class Choice(Node):
                 return bool(re.search(str(cond.value), str(value))) == (not cond.is_not)
             except re.error as e:
                 raise ValueError(f"Invalid regular expression '{cond.value}': {e}")
+        elif cond.operator == ConditionOperator.STRING_ENDS_WITH:
+            return (str(value).endswith(str(cond.value))) == (not cond.is_not)
         else:
             raise ValueError(f"Operator {cond.operator} not supported.")
 
