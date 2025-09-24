@@ -1,3 +1,4 @@
+import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar, Literal
@@ -146,6 +147,15 @@ class Choice(Node):
             return (value < cond.value) == (not cond.is_not)
         elif cond.operator == ConditionOperator.STRING_LESS_THAN_OR_EQUALS:
             return (value <= cond.value) == (not cond.is_not)
+        elif cond.operator == ConditionOperator.STRING_STARTS_WITH:
+            return (str(value).startswith(str(cond.value))) == (not cond.is_not)
+        elif cond.operator == ConditionOperator.STRING_CONTAINS:
+            return (str(cond.value) in str(value)) == (not cond.is_not)
+        elif cond.operator == ConditionOperator.STRING_REGEXP:
+            try:
+                return bool(re.search(str(cond.value), str(value))) == (not cond.is_not)
+            except re.error as e:
+                raise ValueError(f"Invalid regular expression '{cond.value}': {e}")
         else:
             raise ValueError(f"Operator {cond.operator} not supported.")
 

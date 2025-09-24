@@ -75,6 +75,75 @@ def choice_option_default():
 
 
 @pytest.fixture()
+def choice_condition_email_starts_with():
+    return operators.ChoiceCondition(
+        operator=operators.ConditionOperator.STRING_STARTS_WITH,
+        variable="$.email",
+        value="user",
+        operands=[],
+    )
+
+
+@pytest.fixture()
+def choice_condition_message_contains():
+    return operators.ChoiceCondition(
+        operator=operators.ConditionOperator.STRING_CONTAINS,
+        variable="$.message",
+        value="test",
+        operands=[],
+    )
+
+
+@pytest.fixture()
+def choice_condition_filename_regexp():
+    return operators.ChoiceCondition(
+        operator=operators.ConditionOperator.STRING_REGEXP,
+        variable="$.filename",
+        value=r"\.pdf$",
+        operands=[],
+    )
+
+
+@pytest.fixture()
+def choice_condition_email_starts_with_negated():
+    return operators.ChoiceCondition(
+        operator=operators.ConditionOperator.STRING_STARTS_WITH,
+        variable="$.email",
+        value="admin",
+        is_not=True,
+        operands=[],
+    )
+
+
+@pytest.fixture()
+def choice_option_email_starts_with(choice_condition_email_starts_with):
+    return operators.ChoiceOption(
+        condition=choice_condition_email_starts_with,
+    )
+
+
+@pytest.fixture()
+def choice_option_message_contains(choice_condition_message_contains):
+    return operators.ChoiceOption(
+        condition=choice_condition_message_contains,
+    )
+
+
+@pytest.fixture()
+def choice_option_filename_regexp(choice_condition_filename_regexp):
+    return operators.ChoiceOption(
+        condition=choice_condition_filename_regexp,
+    )
+
+
+@pytest.fixture()
+def choice_option_email_starts_with_negated(choice_condition_email_starts_with_negated):
+    return operators.ChoiceOption(
+        condition=choice_condition_email_starts_with_negated,
+    )
+
+
+@pytest.fixture()
 def choice_node(
     choice_option_a_and_b_str_eq, choice_option_a_bool_eq, choice_option_default
 ):
@@ -356,3 +425,229 @@ def test_workflow_with_choice_operator_with_errors_and_retries(
     mock_tracing_client.trace.assert_called_once_with(
         [run for run in tracing.runs.values()]
     )
+
+
+@pytest.mark.parametrize(
+    ("input_data", "choice_options_results"),
+    [
+        (
+            {"email": "user@example.com", "message": "Hello test", "filename": "document.pdf"},
+            [
+                RunnableResult(status=RunnableStatus.SUCCESS, output=True),
+                RunnableResult(status=RunnableStatus.SKIP, output=None),
+                RunnableResult(status=RunnableStatus.SKIP, output=None),
+            ],
+        ),
+        (
+            {"email": "admin@example.com", "message": "Hello test", "filename": "document.pdf"},
+            [
+                RunnableResult(status=RunnableStatus.FAILURE, output=False),
+                RunnableResult(status=RunnableStatus.SUCCESS, output=True),
+                RunnableResult(status=RunnableStatus.SKIP, output=None),
+            ],
+        ),
+        (
+            {"email": "admin@example.com", "message": "Hello world", "filename": "document.pdf"},
+            [
+                RunnableResult(status=RunnableStatus.FAILURE, output=False),
+                RunnableResult(status=RunnableStatus.FAILURE, output=False),
+                RunnableResult(status=RunnableStatus.SUCCESS, output=True),
+            ],
+        ),
+        (
+            {"email": "admin@example.com", "message": "Hello world", "filename": "document.txt"},
+            [
+                RunnableResult(status=RunnableStatus.FAILURE, output=False),
+                RunnableResult(status=RunnableStatus.FAILURE, output=False),
+                RunnableResult(status=RunnableStatus.FAILURE, output=False),
+            ],
+        ),
+    ],
+)
+def test_workflow_with_string_operators(
+    choice_option_email_starts_with,
+    choice_option_message_contains,
+    choice_option_filename_regexp,
+    input_data,
+    choice_options_results,
+    mock_tracing_client,
+):
+    """Test workflow with string operators: STRING_STARTS_WITH, STRING_CONTAINS, STRING_REGEXP."""
+    tracing = TracingCallbackHandler(client=mock_tracing_client())
+
+    choice_node = operators.Choice(
+        name="StringChoice",
+        options=[
+            choice_option_email_starts_with,
+            choice_option_message_contains,
+            choice_option_filename_regexp,
+        ],
+        error_handling=ErrorHandling(max_retries=3, backoff_rate=0.2),
+    )
+
+    wf_string_operators = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[choice_node]),
+    )
+
+    response = wf_string_operators.run(
+        input_data=input_data,
+        config=RunnableConfig(callbacks=[tracing]),
+    )
+
+    # Build expected results
+    email_starts_with_result = choice_options_results[0]
+    email_starts_with_result.input = input_data
+    expected_result_email_starts_with = {
+        choice_option_email_starts_with.id: email_starts_with_result.to_dict(),
+    }
+
+    message_contains_result = choice_options_results[1]
+    message_contains_result.input = input_data
+    expected_result_message_contains = {
+        choice_option_message_contains.id: message_contains_result.to_dict(),
+    }
+
+    filename_regexp_result = choice_options_results[2]
+    filename_regexp_result.input = input_data
+    expected_result_filename_regexp = {
+        choice_option_filename_regexp.id: filename_regexp_result.to_dict(),
+    }
+
+    expected_output_choice_node = (
+        expected_result_email_starts_with | expected_result_message_contains | expected_result_filename_regexp
+    )
+    expected_result_choice_node = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input=input_data,
+        output=expected_output_choice_node,
+    ).to_dict()
+    expected_output = {choice_node.id: expected_result_choice_node}
+
+    assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
+
+
+@pytest.mark.parametrize(
+    ("input_data", "expected_result"),
+    [
+        (
+            {"email": "user@example.com"},
+            RunnableResult(status=RunnableStatus.SUCCESS, output=True),
+        ),
+        (
+            {"email": "admin@example.com"},
+            RunnableResult(status=RunnableStatus.FAILURE, output=False),
+        ),
+    ],
+)
+def test_workflow_with_string_operator_negative(
+    choice_option_email_starts_with_negated,
+    input_data,
+    expected_result,
+    mock_tracing_client,
+):
+    """Test workflow with string operator (is_not=True)."""
+    tracing = TracingCallbackHandler(client=mock_tracing_client())
+
+    choice_node = operators.Choice(
+        name="NegationChoice",
+        options=[choice_option_email_starts_with_negated],
+        error_handling=ErrorHandling(max_retries=3, backoff_rate=0.2),
+    )
+
+    wf_negation = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[choice_node]),
+    )
+
+    response = wf_negation.run(
+        input_data=input_data,
+        config=RunnableConfig(callbacks=[tracing]),
+    )
+
+    # Build expected results
+    expected_result.input = input_data
+    expected_output_choice_node = {
+        choice_option_email_starts_with_negated.id: expected_result.to_dict(),
+    }
+    expected_result_choice_node = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input=input_data,
+        output=expected_output_choice_node,
+    ).to_dict()
+    expected_output = {choice_node.id: expected_result_choice_node}
+
+    assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
+
+
+@pytest.mark.parametrize(
+    ("input_data", "choice_options_results"),
+    [
+        (
+            {"message": "Hello TEST message"},
+            [
+                RunnableResult(status=RunnableStatus.FAILURE, output=False),
+            ],
+        ),
+        (
+            {"status_code": "200"},
+            [
+                RunnableResult(status=RunnableStatus.SUCCESS, output=True),
+            ],
+        ),
+    ],
+)
+def test_workflow_with_string_operator_edge_cases(
+    input_data,
+    choice_options_results,
+    mock_tracing_client,
+):
+    """Test edge cases for string operators."""
+    tracing = TracingCallbackHandler(client=mock_tracing_client())
+
+    if "message" in input_data:
+        condition = operators.ChoiceCondition(
+            operator=operators.ConditionOperator.STRING_CONTAINS,
+            variable="$.message",
+            value="test",
+            operands=[],
+        )
+    else:
+        condition = operators.ChoiceCondition(
+            operator=operators.ConditionOperator.STRING_STARTS_WITH,
+            variable="$.status_code",
+            value="2",
+            operands=[],
+        )
+
+    choice_option = operators.ChoiceOption(condition=condition)
+
+    choice_node = operators.Choice(
+        name="EdgeCaseChoice",
+        options=[choice_option],
+        error_handling=ErrorHandling(max_retries=3, backoff_rate=0.2),
+    )
+
+    wf_edge_case = Workflow(
+        id=str(uuid.uuid4()),
+        flow=Flow(nodes=[choice_node]),
+    )
+
+    response = wf_edge_case.run(
+        input_data=input_data,
+        config=RunnableConfig(callbacks=[tracing]),
+    )
+
+    expected_result = choice_options_results[0]
+    expected_result.input = input_data
+    expected_output_choice_node = {
+        choice_option.id: expected_result.to_dict(),
+    }
+    expected_result_choice_node = RunnableResult(
+        status=RunnableStatus.SUCCESS,
+        input=input_data,
+        output=expected_output_choice_node,
+    ).to_dict()
+    expected_output = {choice_node.id: expected_result_choice_node}
+
+    assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
