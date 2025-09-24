@@ -1,12 +1,13 @@
+import base64
 import io
 import re
 import textwrap
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, ClassVar
+from typing import Any, Callable, ClassVar, Union
 
 from jinja2 import Template
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
@@ -26,7 +27,7 @@ from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.storages.file.base import FileStore, FileStoreConfig
+from dynamiq.storages.file.base import FileInfo, FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
@@ -208,6 +209,67 @@ class StreamChunkChoiceDelta(BaseModel):
             raise ValueError(f"source must be a string, got {type(v).__name__}: {v}")
         return v
 
+    def _convert_bytesio_to_file_info(self, bytesio_obj: io.BytesIO, key: str, index: int = None) -> FileInfo:
+        """Convert a BytesIO object to a FileInfo object with base64 encoded content."""
+        content_bytes = bytesio_obj.getvalue()
+
+        encoded = base64.b64encode(content_bytes).decode("utf-8")
+
+        name = getattr(bytesio_obj, "name", f"file_{key}" if index is None else f"file_{key}_{index}")
+        content_type = getattr(bytesio_obj, "content_type", "unknown")
+        description = getattr(bytesio_obj, "description", "")
+
+        # Create a path based on the name
+        path = f"/{name}" if not name.startswith("/") else name
+
+        return FileInfo(
+            content=encoded,
+            path=path,
+            name=name,
+            content_type=content_type,
+            metadata={"description": description},
+            size=len(content_bytes),
+        )
+
+    def _recursive_serialize(self, obj, key_path: str = "", index: int = None):
+        """Recursively serialize an object, converting any BytesIO objects to FileInfo objects."""
+        if isinstance(obj, io.BytesIO):
+            return self._convert_bytesio_to_file_info(obj, key_path, index).model_dump()
+
+        elif isinstance(obj, dict):
+            result = {}
+            for k, v in obj.items():
+                new_key_path = f"{key_path}.{k}" if key_path else k
+                result[k] = self._recursive_serialize(v, new_key_path)
+            return result
+
+        elif isinstance(obj, list):
+            result = []
+
+            for i, item in enumerate(obj):
+                new_key_path = f"{key_path}[{i}]" if key_path else f"item_{i}"
+                result.append(self._recursive_serialize(item, new_key_path, i))
+            return result
+
+        else:
+            return obj
+
+    @model_serializer
+    def serialize_content(self):
+        """Serialize content dict, converting any BytesIO objects to base64 strings while preserving key structure."""
+        if self.content is None or not isinstance(self.content, dict):
+            return {"content": self.content, "source": self.source, "step": self.step}
+
+        serialized_content = self._recursive_serialize(self.content)
+
+        result = {
+            "content": serialized_content,
+            "source": self.source,
+            "step": self.step,
+        }
+
+        return result
+
 
 class StreamChunkChoice(BaseModel):
     """Stream chunk choice model."""
@@ -244,8 +306,8 @@ class AgentIntermediateStep(BaseModel):
 
 class ToolParams(BaseModel):
     global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
-    by_name_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_name")
-    by_id_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_id")
+    by_name_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_name")
+    by_id_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_id")
 
 
 class AgentInputSchema(BaseModel):
@@ -327,7 +389,7 @@ class Agent(Node):
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
     file_store: FileStoreConfig = Field(
-        default_factory=lambda: FileStoreConfig(enabled=True, backend=InMemoryFileStore()),
+        default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
 
@@ -591,6 +653,11 @@ class Agent(Node):
 
         files = input_data.files
         if files:
+            if not self.file_store_backend:
+                self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
+                self.tools.append(FileReadTool(file_store=self.file_store.backend))
+                self.tools.append(FileListTool(file_store=self.file_store.backend))
+                self._init_prompt_blocks()
             self._ensure_named_files(files)
 
         if input_data.tool_params:
@@ -852,25 +919,56 @@ class Agent(Node):
                 self._apply_parameters(merged_input, global_params, "global", debug_info)
 
             # 2. Apply parameters by tool name (medium priority)
-            name_params = tool_params.by_name_params.get(tool.name, {}) or tool_params.by_name_params.get(
-                self.sanitize_tool_name(tool.name), {}
+            name_params_any = tool_params.by_name_params.get(tool.name) or tool_params.by_name_params.get(
+                self.sanitize_tool_name(tool.name)
             )
-            if name_params:
-                self._apply_parameters(merged_input, name_params, f"name:{tool.name}", debug_info)
+            if name_params_any:
+                if isinstance(name_params_any, ToolParams):
+                    if self.verbose:
+                        debug_info.append(
+                            f"  - From name:{tool.name}: encountered nested ToolParams (ignored for non-agent tool)"
+                        )
+                elif isinstance(name_params_any, dict):
+                    self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
 
             # 3. Apply parameters by tool ID (highest priority)
-            id_params = tool_params.by_id_params.get(tool.id, {})
-            if id_params:
-                self._apply_parameters(merged_input, id_params, f"id:{tool.id}", debug_info)
+            id_params_any = tool_params.by_id_params.get(tool.id)
+            if id_params_any:
+                if isinstance(id_params_any, ToolParams):
+                    if self.verbose:
+                        debug_info.append(
+                            f"  - From id:{tool.id}: encountered nested ToolParams (ignored for non-agent tool)"
+                        )
+                elif isinstance(id_params_any, dict):
+                    self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
 
             if self.verbose and debug_info:
                 logger.debug("\n".join(debug_info))
+
+        child_kwargs = kwargs | {"recoverable_error": True}
+        is_child_agent = isinstance(tool, Agent)
+
+        if is_child_agent and tool_params:
+            nested_any = (
+                tool_params.by_id_params.get(getattr(tool, "id", ""))
+                or tool_params.by_name_params.get(getattr(tool, "name", ""))
+                or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(tool, "name", "")))
+            )
+            if nested_any:
+                if isinstance(nested_any, ToolParams):
+                    nested_tp = nested_any
+                elif isinstance(nested_any, dict):
+                    nested_tp = ToolParams.model_validate(nested_any)
+                else:
+                    nested_tp = None
+                if nested_tp:
+                    child_kwargs = child_kwargs | {"tool_params": nested_tp}
 
         tool_result = tool.run(
             input_data=merged_input,
             config=config,
             run_depends=self._run_depends,
-            **(kwargs | {"recoverable_error": True}),
+            **child_kwargs,
         )
         self._run_depends = [NodeDependency(node=tool).to_dict()]
         if tool_result.status != RunnableStatus.SUCCESS:
@@ -891,7 +989,7 @@ class Agent(Node):
 
         self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
 
-        return tool_result_content_processed
+        return tool_result_content_processed, tool_result.output.get("files", [])
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
         """Ensure all uploaded files have name and description attributes and store them in file_store if available."""

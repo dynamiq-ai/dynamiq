@@ -10,6 +10,7 @@ from qdrant_client.http import models as rest
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from dynamiq.connections import Qdrant as QdrantConnection
+from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreDuplicateDocumentException as DuplicateDocumentError
 from dynamiq.storages.vector.exceptions import VectorStoreException as DocumentStoreError
@@ -23,6 +24,7 @@ from dynamiq.storages.vector.qdrant.converters import (
 )
 from dynamiq.storages.vector.qdrant.filters import convert_filters_to_qdrant
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 
 if TYPE_CHECKING:
     from qdrant_client import QdrantClient
@@ -72,7 +74,7 @@ class QdrantWriterVectorStoreParams(BaseWriterVectorStoreParams):
     metric: QdrantSimilarityMetric = QdrantSimilarityMetric.COSINE
 
 
-class QdrantVectorStore(BaseVectorStore):
+class QdrantVectorStore(BaseVectorStore, DryRunMixin):
     """QdrantVectorStore a Document Store for Qdrant.
 
     Usage example:
@@ -139,6 +141,7 @@ class QdrantVectorStore(BaseVectorStore):
         scroll_size: int = 10_000,
         payload_fields_to_index: list[dict] | None = None,
         content_key: str = "content",
+        dry_run_config: DryRunConfig | None = None,
     ):
         """Initializes the QdrantDocumentStore.
 
@@ -188,7 +191,9 @@ class QdrantVectorStore(BaseVectorStore):
             scroll_size: The scroll size for reading documents.
             payload_fields_to_index: List of payload fields to index.
             content_key (Optional[str]): The field used to store content in the storage.
+            dry_run_config (Optional[DryRunConfig]): Configuration for dry run mode. Defaults to None.
         """
+        super().__init__(dry_run_config=dry_run_config)
 
         self._client = client
         if self._client is None:
@@ -378,6 +383,8 @@ class QdrantVectorStore(BaseVectorStore):
                 wait=self.wait_result_from_api,
             )
 
+        self._track_documents([doc.id for doc in documents])
+
         return len(document_objects)
 
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
@@ -417,6 +424,21 @@ class QdrantVectorStore(BaseVectorStore):
             self.delete_documents(document_ids=document_ids)
         else:
             raise ValueError("No filters provided to delete documents.")
+
+    def delete_collection(self, collection_name: str | None = None):
+        """
+        Delete a Qdrant collection.
+
+        Args:
+            collection_name (str | None): Name of the collection to delete.
+        """
+        try:
+            collection_to_delete = collection_name or self.index_name
+            self.client.delete_collection(collection_name=collection_to_delete)
+            logger.info(f"Deleted collection '{collection_to_delete}'.")
+        except Exception as e:
+            logger.error(f"Failed to delete collection '{collection_to_delete}': {e}")
+            raise
 
     def get_documents_generator(
         self,
@@ -797,6 +819,7 @@ class QdrantVectorStore(BaseVectorStore):
                 use_sparse_embeddings=use_sparse_embeddings,
                 sparse_idf=sparse_idf,
             )
+            self._track_collection(collection_name)
             if payload_fields_to_index:
                 self._create_payload_index(collection_name, payload_fields_to_index)
             return

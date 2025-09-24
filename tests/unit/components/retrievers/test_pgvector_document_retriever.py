@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 from dynamiq.components.retrievers.pgvector import PGVectorDocumentRetriever
 from dynamiq.storages.vector import PGVectorStore
+from dynamiq.storages.vector.pgvector.pgvector import PGVectorVectorFunction
 
 
 class TestPGVectorDocumentRetriever:
@@ -9,6 +10,7 @@ class TestPGVectorDocumentRetriever:
     def test_run_method(self, mock_documents):
         mock_vector_store = MagicMock(spec=PGVectorStore)
         mock_vector_store._embedding_retrieval.return_value = mock_documents
+        mock_vector_store.vector_function = PGVectorVectorFunction.COSINE_SIMILARITY
 
         retriever = PGVectorDocumentRetriever(vector_store=mock_vector_store, filters={"field": "value"}, top_k=5)
 
@@ -33,6 +35,7 @@ class TestPGVectorDocumentRetriever:
     def test_run_method_hybrid(self, mock_documents):
         mock_vector_store = MagicMock(spec=PGVectorStore)
         mock_vector_store._hybrid_retrieval.return_value = mock_documents
+        mock_vector_store.vector_function = PGVectorVectorFunction.COSINE_SIMILARITY
 
         retriever = PGVectorDocumentRetriever(vector_store=mock_vector_store, filters={"field": "value"}, top_k=5)
 
@@ -61,6 +64,7 @@ class TestPGVectorDocumentRetriever:
     def test_run_method_with_defaults(self, mock_documents, mock_filters):
         mock_vector_store = MagicMock(spec=PGVectorStore)
         mock_vector_store._embedding_retrieval.return_value = mock_documents
+        mock_vector_store.vector_function = PGVectorVectorFunction.COSINE_SIMILARITY
 
         retriever = PGVectorDocumentRetriever(vector_store=mock_vector_store, filters=mock_filters, top_k=5)
 

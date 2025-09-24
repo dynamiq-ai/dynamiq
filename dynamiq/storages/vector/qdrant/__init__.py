@@ -1,1 +1,1 @@
-from .qdrant import QdrantVectorStore
+from .qdrant import QdrantSimilarityMetric, QdrantVectorStore

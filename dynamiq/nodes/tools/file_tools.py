@@ -32,28 +32,36 @@ class FileReadTool(Node):
     A tool for reading files from storage.
 
     This tool can be passed to ReAct agents to read files
-    from the configured storage backend.
+    from the configured storage backend. For large files, it automatically
+    returns chunked content showing first, middle, and last parts.
 
     Attributes:
         group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
         name (str): The name of the tool.
         description (str): A brief description of the tool.
-        storage_type (str): Type of storage to use ("in_memory" or "file_system").
+        file_store (FileStore): File storage to read from.
+        max_size (int): Maximum size in bytes before chunking (default: 10000).
+        chunk_size (int): Size of each chunk in bytes (default: 1000).
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "FileReadTool"
     description: str = """
         Reads files from storage based on the provided file path.
-        Usage Examples:
-            - Read text file: {"file_path": "config.txt"}
-            - Read JSON file: {"file_path": "data.json"}
+        For large files (configurable threshold), returns first, middle, and last chunks as bytes with separators.
 
-        Usage:
-            - Save intermediate results.
+        Usage Examples:
+            - Read small file: {"file_path": "config.txt"}
+            - Read large file: {"file_path": "large_data.json"}
+            - Read huge file: {"file_path": "huge_file.csv"}
+
+        Parameters:
+            - file_path: Path of the file to read
     """
 
     file_store: FileStore = Field(..., description="File storage to read from.")
+    max_size: int = Field(default=10000, description="Maximum size in bytes before chunking (default: 10000)")
+    chunk_size: int = Field(default=1000, description="Size of each chunk in bytes (default: 1000)")
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileReadInputSchema]] = FileReadInputSchema
 
@@ -65,6 +73,7 @@ class FileReadTool(Node):
     ) -> dict[str, Any]:
         """
         Executes the file read operation and returns the file content.
+        For large files, returns first, middle, and last chunks instead of full content.
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
@@ -79,9 +88,19 @@ class FileReadTool(Node):
                 )
 
             content = self.file_store.retrieve(input_data.file_path)
+            content_size = len(content)
 
-            logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(content)[:200]}...")
-            return {"content": content}
+            # If file is small enough, return full content
+            if content_size <= self.max_size:
+                logger.info(f"Tool {self.name} - {self.id}: returning full content ({content_size} bytes)")
+                return {"content": content}
+
+            # For large files, return chunked content
+            logger.info(f"Tool {self.name} - {self.id}: file is large ({content_size} bytes), returning chunks")
+
+            chunked_content = self._create_chunked_content(content, self.chunk_size, input_data.file_path)
+
+            return {"content": chunked_content}
 
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to read file. Error: {str(e)}")
@@ -90,6 +109,45 @@ class FileReadTool(Node):
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
+
+    def _create_chunked_content(self, content: bytes, chunk_size: int, file_path: str) -> bytes:
+        """
+        Create chunked content showing first, middle, and last parts of a large file.
+
+        Args:
+            content: The file content as bytes
+            chunk_size: Size of each chunk in bytes
+            file_path: Path of the file being read
+
+        Returns:
+            Concatenated bytes containing first, middle, and last chunks
+        """
+        total_size = len(content)
+
+        first_chunk = content[:chunk_size]
+
+        middle_start = total_size // 2 - chunk_size // 2
+        middle_chunk = content[middle_start : middle_start + chunk_size]
+
+        last_chunk = content[-chunk_size:] if total_size > chunk_size else content
+
+        separator = f"\n\n--- CHUNKED FILE: {file_path} ({total_size:,} bytes total) ---\n".encode()
+        first_sep = f"\n--- FIRST {len(first_chunk):,} BYTES ---\n".encode()
+        middle_sep = f"\n--- MIDDLE {len(middle_chunk):,} BYTES (from position {middle_start:,}) ---\n".encode()
+        last_sep = f"\n--- LAST {len(last_chunk):,} BYTES ---\n".encode()
+
+        chunked_bytes = (
+            separator
+            + first_sep
+            + first_chunk
+            + middle_sep
+            + middle_chunk
+            + last_sep
+            + last_chunk
+            + b"\n\n--- END OF CHUNKED FILE ---\n"
+        )
+
+        return chunked_bytes
 
 
 class FileWriteTool(Node):
