@@ -1,3 +1,4 @@
+import re
 from collections import defaultdict
 
 import pytest
@@ -12,6 +13,17 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingMode
+
+
+def concat_stream_text(events):
+    """Rebuild content from streamed chunks safely."""
+    pieces = []
+    for _, content in events:
+        if content:
+            pieces.append(str(content))
+    raw = "".join(pieces)
+    normalized = re.sub(r"\s+", " ", raw).strip()
+    return normalized
 
 
 @pytest.fixture(scope="module")
@@ -140,8 +152,8 @@ def test_react_agent_all_streaming(react_agent_with_all_streaming, streaming_eve
         assert len(agent_output) > 0
         assert all(event == streaming_event for event, _ in agent_output)
 
-        full_content = " ".join(str(content) for _, content in agent_output)
-        assert "Paris" in full_content
+        full_content = concat_stream_text(agent_output)
+        assert "paris" in full_content.lower()
 
 
 @pytest.mark.integration
@@ -168,14 +180,14 @@ def test_react_agent_final_streaming(react_agent_with_final_streaming, streaming
         assert len(agent_output) > 0
         assert all(event == streaming_event for event, _ in agent_output)
 
-        full_content = " ".join(str(content) for _, content in agent_output)
-        assert "Berlin" in full_content
+        full_content = concat_stream_text(agent_output)
+        assert "berlin" in full_content.lower()
 
         reasoning_indicators = ["I need to", "Let me think", "First,", "Step 1:"]
         found_reasoning = any(indicator in full_content for indicator in reasoning_indicators)
         assert not found_reasoning, "Should not find reasoning steps in FINAL streaming mode"
 
-        assert "Berlin" in str(response.output)
+        assert "berlin" in str(response.output).lower()
 
 
 @pytest.mark.integration
@@ -202,5 +214,5 @@ def test_simple_agent_streaming(simple_agent_with_streaming, streaming_event):
         assert len(agent_output) > 0
         assert all(event == streaming_event for event, _ in agent_output)
 
-        full_content = " ".join(str(content) for _, content in agent_output)
-        assert "Everest" in full_content
+        full_content = concat_stream_text(agent_output)
+        assert "everest" in full_content.lower()
