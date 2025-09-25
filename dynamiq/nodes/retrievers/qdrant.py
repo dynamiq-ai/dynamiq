@@ -66,7 +66,10 @@ class QdrantDocumentRetriever(Retriever):
         super().init_components(connection_manager)
         if self.document_retriever is None:
             self.document_retriever = QdrantDocumentRetrieverComponent(
-                vector_store=self.vector_store, filters=self.filters, top_k=self.top_k
+                vector_store=self.vector_store,
+                filters=self.filters,
+                top_k=self.top_k,
+                similarity_threshold=self.similarity_threshold,
             )
 
     def execute(self, input_data: RetrieverInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
@@ -90,8 +93,19 @@ class QdrantDocumentRetriever(Retriever):
         content_key = input_data.content_key
         filters = input_data.filters or self.filters
         top_k = input_data.top_k or self.top_k
+        similarity_threshold = (
+            input_data.similarity_threshold
+            if input_data.similarity_threshold is not None
+            else self.similarity_threshold
+        )
 
-        output = self.document_retriever.run(query_embedding, filters=filters, top_k=top_k, content_key=content_key)
+        output = self.document_retriever.run(
+            query_embedding,
+            filters=filters,
+            top_k=top_k,
+            content_key=content_key,
+            similarity_threshold=similarity_threshold,
+        )
 
         return {
             "documents": output["documents"],

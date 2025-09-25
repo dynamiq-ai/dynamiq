@@ -1,12 +1,13 @@
+import base64
 import io
 import re
 import textwrap
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, ClassVar
+from typing import Any, Callable, ClassVar, Union
 
 from jinja2 import Template
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
@@ -14,15 +15,20 @@ from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
+    FileMappedInput,
     ToolCacheEntry,
     create_message_from_input,
     process_tool_output_for_agent,
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
+from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.storages.file.base import FileInfo, FileStore, FileStoreConfig
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
 
@@ -169,11 +175,6 @@ You are AI powered assistant.
 {{tools}}
 {%- endif %}
 
-{%- if files %}
-# USER UPLOADS
-Files provided by user: {{files}}
-{%- endif %}
-
 {%- if output_format %}
 # RESPONSE FORMAT
 {{output_format}}
@@ -207,6 +208,67 @@ class StreamChunkChoiceDelta(BaseModel):
         if not isinstance(v, str):
             raise ValueError(f"source must be a string, got {type(v).__name__}: {v}")
         return v
+
+    def _convert_bytesio_to_file_info(self, bytesio_obj: io.BytesIO, key: str, index: int = None) -> FileInfo:
+        """Convert a BytesIO object to a FileInfo object with base64 encoded content."""
+        content_bytes = bytesio_obj.getvalue()
+
+        encoded = base64.b64encode(content_bytes).decode("utf-8")
+
+        name = getattr(bytesio_obj, "name", f"file_{key}" if index is None else f"file_{key}_{index}")
+        content_type = getattr(bytesio_obj, "content_type", "unknown")
+        description = getattr(bytesio_obj, "description", "")
+
+        # Create a path based on the name
+        path = f"/{name}" if not name.startswith("/") else name
+
+        return FileInfo(
+            content=encoded,
+            path=path,
+            name=name,
+            content_type=content_type,
+            metadata={"description": description},
+            size=len(content_bytes),
+        )
+
+    def _recursive_serialize(self, obj, key_path: str = "", index: int = None):
+        """Recursively serialize an object, converting any BytesIO objects to FileInfo objects."""
+        if isinstance(obj, io.BytesIO):
+            return self._convert_bytesio_to_file_info(obj, key_path, index).model_dump()
+
+        elif isinstance(obj, dict):
+            result = {}
+            for k, v in obj.items():
+                new_key_path = f"{key_path}.{k}" if key_path else k
+                result[k] = self._recursive_serialize(v, new_key_path)
+            return result
+
+        elif isinstance(obj, list):
+            result = []
+
+            for i, item in enumerate(obj):
+                new_key_path = f"{key_path}[{i}]" if key_path else f"item_{i}"
+                result.append(self._recursive_serialize(item, new_key_path, i))
+            return result
+
+        else:
+            return obj
+
+    @model_serializer
+    def serialize_content(self):
+        """Serialize content dict, converting any BytesIO objects to base64 strings while preserving key structure."""
+        if self.content is None or not isinstance(self.content, dict):
+            return {"content": self.content, "source": self.source, "step": self.step}
+
+        serialized_content = self._recursive_serialize(self.content)
+
+        result = {
+            "content": serialized_content,
+            "source": self.source,
+            "step": self.step,
+        }
+
+        return result
 
 
 class StreamChunkChoice(BaseModel):
@@ -244,8 +306,8 @@ class AgentIntermediateStep(BaseModel):
 
 class ToolParams(BaseModel):
     global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
-    by_name_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_name")
-    by_id_params: dict[str, dict[str, Any]] = Field(default_factory=dict, alias="by_id")
+    by_name_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_name")
+    by_id_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_id")
 
 
 class AgentInputSchema(BaseModel):
@@ -326,6 +388,10 @@ class Agent(Node):
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
     verbose: bool = Field(False, description="Whether to print verbose logs.")
+    file_store: FileStoreConfig = Field(
+        default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
+        description="Configuration for file storage used by the agent.",
+    )
 
     input_message: Message | VisionMessage | None = None
     role: str | None = ""
@@ -394,7 +460,15 @@ class Agent(Node):
                 self._mcp_server_tool_ids.extend([subtool.id for subtool in subtools])
             else:
                 expanded_tools.append(tool)
+
         self.tools = expanded_tools
+
+        if self.file_store_backend:
+            if self.file_store.agent_file_write_enabled:
+                self.tools.append(FileWriteTool(file_store=self.file_store_backend))
+
+            self.tools.append(FileReadTool(file_store=self.file_store_backend))
+            self.tools.append(FileListTool(file_store=self.file_store_backend))
 
         self._init_prompt_blocks()
 
@@ -422,6 +496,7 @@ class Agent(Node):
             "memory": True,
             "files": True,
             "images": True,
+            "file_store": True,
         }
 
     def to_dict(self, **kwargs) -> dict:
@@ -467,13 +542,11 @@ class Agent(Node):
         self._prompt_blocks = {
             "date": "{{ date }}",
             "tools": "{{ tool_description }}",
-            "files": "{{ file_description }}",
             "instructions": "",
             "context": "{{ context }}",
         }
         self._prompt_variables = {
             "tool_description": self.tool_description,
-            "file_description": self.file_description,
             "date": datetime.now().strftime("%d %B %Y"),
         }
 
@@ -580,8 +653,12 @@ class Agent(Node):
 
         files = input_data.files
         if files:
-            self.files = files
-            self._prompt_variables["file_description"] = self.file_description
+            if not self.file_store_backend:
+                self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
+                self.tools.append(FileReadTool(file_store=self.file_store.backend))
+                self.tools.append(FileListTool(file_store=self.file_store.backend))
+                self._init_prompt_blocks()
+            self._ensure_named_files(files)
 
         if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
@@ -599,6 +676,14 @@ class Agent(Node):
             "content": result,
             "intermediate_steps": self._intermediate_steps,
         }
+
+        if self.file_store_backend and not self.file_store_backend.is_empty():
+            execution_result["files"] = self.file_store_backend.list_files_bytes()
+            logger.info(
+                f"Agent {self.name} - {self.id}: returning {len(execution_result['files'])}"
+                " accumulated file(s) in FileStore"
+            )
+
         logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
         return execution_result
@@ -701,7 +786,6 @@ class Agent(Node):
         source: str,
         step: str,
         config: RunnableConfig | None = None,
-        by_tokens: bool | None = None,
         **kwargs,
     ) -> str | dict:
         """
@@ -711,8 +795,6 @@ class Agent(Node):
             content (str | dict): Data that will be streamed.
             source (str): Source of the content.
             step (str): Description of the step.
-            by_tokens (Optional[bool]): Determines whether to stream content by tokens or not.
-                If None it is determined based on StreamingConfig. Defaults to None.
             config (Optional[RunnableConfig]): Configuration for the runnable.
             **kwargs: Additional keyword arguments.
 
@@ -725,30 +807,7 @@ class Agent(Node):
                 f"This likely indicates incorrect parameter passing from the calling code."
             )
 
-        if (by_tokens is None and self.streaming.by_tokens) or by_tokens:
-            return self.stream_by_tokens(content=content, source=source, step=step, config=config, **kwargs)
         return self.stream_response(content=content, source=source, step=step, config=config, **kwargs)
-
-    def stream_by_tokens(self, content: str, source: str, step: str, config: RunnableConfig | None = None, **kwargs):
-        """Streams the input content to the callbacks."""
-        if isinstance(content, dict):
-            return self.stream_response(content, source, step, config, **kwargs)
-        tokens = content.split(" ")
-        final_response = []
-        for token in tokens:
-            final_response.append(token)
-            token_with_prefix = " " + token
-            token_for_stream = StreamChunk(
-                choices=[
-                    StreamChunkChoice(delta=StreamChunkChoiceDelta(content=token_with_prefix, source=source, step=step))
-                ]
-            )
-            self.run_on_node_execute_stream(
-                callbacks=config.callbacks,
-                chunk=token_for_stream.model_dump(),
-                **kwargs,
-            )
-        return " ".join(final_response)
 
     def stream_response(
         self, content: str | dict, source: str, step: str, config: RunnableConfig | None = None, **kwargs
@@ -829,15 +888,24 @@ class Agent(Node):
 
     def _run_tool(self, tool: Node, tool_input: dict, config, **kwargs) -> Any:
         """Runs a specific tool with the given input."""
-        if self.files:
-            if tool.is_files_allowed is True:
-                tool_input["files"] = self.files
-
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
+
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
+
+        if self.file_store_backend and tool.is_files_allowed:
+            for field_name, field in tool.input_schema.model_fields.items():
+                if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
+                    if field_name in merged_input:
+                        merged_input[field_name] = FileMappedInput(
+                            input=merged_input[field_name], files=self.file_store_backend.list_files_bytes()
+                        )
+                    else:
+                        merged_input[field_name] = self.file_store_backend.list_files_bytes()
+            if isinstance(tool, Python):
+                merged_input["files"] = self.file_store_backend.list_files_bytes()
 
         if tool_params:
             debug_info = []
@@ -851,25 +919,56 @@ class Agent(Node):
                 self._apply_parameters(merged_input, global_params, "global", debug_info)
 
             # 2. Apply parameters by tool name (medium priority)
-            name_params = tool_params.by_name_params.get(tool.name, {}) or tool_params.by_name_params.get(
-                self.sanitize_tool_name(tool.name), {}
+            name_params_any = tool_params.by_name_params.get(tool.name) or tool_params.by_name_params.get(
+                self.sanitize_tool_name(tool.name)
             )
-            if name_params:
-                self._apply_parameters(merged_input, name_params, f"name:{tool.name}", debug_info)
+            if name_params_any:
+                if isinstance(name_params_any, ToolParams):
+                    if self.verbose:
+                        debug_info.append(
+                            f"  - From name:{tool.name}: encountered nested ToolParams (ignored for non-agent tool)"
+                        )
+                elif isinstance(name_params_any, dict):
+                    self._apply_parameters(merged_input, name_params_any, f"name:{tool.name}", debug_info)
 
             # 3. Apply parameters by tool ID (highest priority)
-            id_params = tool_params.by_id_params.get(tool.id, {})
-            if id_params:
-                self._apply_parameters(merged_input, id_params, f"id:{tool.id}", debug_info)
+            id_params_any = tool_params.by_id_params.get(tool.id)
+            if id_params_any:
+                if isinstance(id_params_any, ToolParams):
+                    if self.verbose:
+                        debug_info.append(
+                            f"  - From id:{tool.id}: encountered nested ToolParams (ignored for non-agent tool)"
+                        )
+                elif isinstance(id_params_any, dict):
+                    self._apply_parameters(merged_input, id_params_any, f"id:{tool.id}", debug_info)
 
             if self.verbose and debug_info:
                 logger.debug("\n".join(debug_info))
+
+        child_kwargs = kwargs | {"recoverable_error": True}
+        is_child_agent = isinstance(tool, Agent)
+
+        if is_child_agent and tool_params:
+            nested_any = (
+                tool_params.by_id_params.get(getattr(tool, "id", ""))
+                or tool_params.by_name_params.get(getattr(tool, "name", ""))
+                or tool_params.by_name_params.get(self.sanitize_tool_name(getattr(tool, "name", "")))
+            )
+            if nested_any:
+                if isinstance(nested_any, ToolParams):
+                    nested_tp = nested_any
+                elif isinstance(nested_any, dict):
+                    nested_tp = ToolParams.model_validate(nested_any)
+                else:
+                    nested_tp = None
+                if nested_tp:
+                    child_kwargs = child_kwargs | {"tool_params": nested_tp}
 
         tool_result = tool.run(
             input_data=merged_input,
             config=config,
             run_depends=self._run_depends,
-            **(kwargs | {"recoverable_error": True}),
+            **child_kwargs,
         )
         self._run_depends = [NodeDependency(node=tool).to_dict()]
         if tool_result.status != RunnableStatus.SUCCESS:
@@ -878,16 +977,121 @@ class Agent(Node):
                 raise ToolExecutionException({error_message})
             else:
                 raise ValueError({error_message})
-        tool_result_content = tool_result.output.get("content")
+        tool_result_output_content = tool_result.output.get("content")
+
+        self._handle_tool_generated_files(tool, tool_result)
+
         tool_result_content_processed = process_tool_output_for_agent(
-            content=tool_result_content,
+            content=tool_result_output_content,
             max_tokens=self.tool_output_max_length,
             truncate=self.tool_output_truncate_enabled,
         )
 
         self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
 
-        return tool_result_content_processed
+        return tool_result_content_processed, tool_result.output.get("files", [])
+
+    def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
+        """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
+        named = []
+        for i, f in enumerate(files):
+            if isinstance(f, bytes):
+                bio = io.BytesIO(f)
+                bio.name = f"file_{i}.bin"
+                bio.description = "User-provided file"
+
+                if self.file_store_backend:
+                    try:
+                        self.file_store_backend.store(
+                            file_path=bio.name,
+                            content=f,
+                            content_type="application/octet-stream",
+                            metadata={"description": bio.description, "source": "user_upload"},
+                            overwrite=True,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to store file {bio.name} in file_store: {e}")
+
+                named.append(bio)
+            elif isinstance(f, io.BytesIO):
+                if not hasattr(f, "name"):
+                    f.name = f"file_{i}"
+                if not hasattr(f, "description"):
+                    f.description = "User-provided file"
+
+                if self.file_store_backend:
+                    try:
+                        content = f.read()
+                        f.seek(0)
+
+                        self.file_store_backend.store(
+                            file_path=f.name,
+                            content=content,
+                            content_type="application/octet-stream",
+                            metadata={"description": f.description, "source": "user_upload"},
+                            overwrite=True,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to store file {f.name} in file_store: {e}")
+
+                named.append(f)
+            else:
+                named.append(f)
+        return named
+
+    def _handle_tool_generated_files(self, tool: Node, tool_result: RunnableResult) -> None:
+        """
+        Handle files generated by tools and store them in the file store.
+
+        Args:
+            tool: The tool that generated the files
+            tool_result: The result from the tool execution
+        """
+        if not self.file_store_backend:
+            return
+
+        if isinstance(tool_result.output, dict) and "files" in tool_result.output:
+            tool_files = tool_result.output.get("files", [])
+            if tool_files:
+                stored_files = []
+                for file in tool_files:
+                    if isinstance(file, io.BytesIO):
+                        file_name = getattr(file, "name", f"file_{id(file)}.bin")
+                        file_description = getattr(file, "description", "Tool-generated file")
+                        content_type = getattr(file, "content_type", "application/octet-stream")
+
+                        content = file.read()
+                        file.seek(0)
+
+                        self.file_store_backend.store(
+                            file_path=file_name,
+                            content=content,
+                            content_type=content_type,
+                            metadata={"description": file_description, "source": "tool_generated"},
+                            overwrite=True,
+                        )
+                        stored_files.append(file_name)
+                    elif isinstance(file, bytes):
+                        file_name = f"file_{id(file)}.bin"
+                        file_description = f"Tool-{tool.name}-generated file"
+                        content_type = "application/octet-stream"
+                        self.file_store_backend.store(
+                            file_path=file_name,
+                            content=file,
+                            content_type=content_type,
+                            metadata={"description": file_description, "source": "tool_generated"},
+                            overwrite=True,
+                        )
+                        stored_files.append(file_name)
+                    else:
+                        logger.warning(f"Unsupported file type from tool '{tool.name}': {type(file)}")
+
+                logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
+
+    @property
+    def file_store_backend(self) -> FileStore | None:
+        """Get the file store backend from the configuration if enabled."""
+        return self.file_store.backend if self.file_store.enabled else None
 
     @property
     def tool_description(self) -> str:
@@ -902,18 +1106,6 @@ class Agent(Node):
             if self.tools
             else ""
         )
-
-    @property
-    def file_description(self) -> str:
-        """Returns a description of the files available to the agent."""
-        if self.files:
-            file_description = "You can work with the following files:\n"
-            for file in self.files:
-                name = getattr(file, "name", "Unnamed file")
-                description = getattr(file, "description", "No description")
-                file_description += f"<file>: {name} - {description} <\\file>\n"
-            return file_description
-        return ""
 
     @property
     def tool_names(self) -> str:
@@ -1068,16 +1260,13 @@ class AgentManager(Agent):
     def _final(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'final' action."""
         prompt = Template(self._prompt_blocks.get("final")).render(**(self._prompt_variables | kwargs))
-        llm_result = self._run_llm(
-            [Message(role=MessageRole.USER, content=prompt)], config, by_tokens=False, **kwargs
-        ).output["content"]
+        llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled:
             return self.stream_content(
                 content=llm_result,
                 step="manager_final_output",
                 source=self.name,
                 config=config,
-                by_tokens=False,
                 **kwargs,
             )
         return llm_result

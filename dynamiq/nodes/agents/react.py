@@ -1,6 +1,7 @@
 import json
 import re
 import types
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from typing import Any, Callable, Union, get_args, get_origin
 
@@ -23,11 +24,9 @@ from dynamiq.nodes.agents.exceptions import (
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
-from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file.base import FileStore
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
@@ -70,6 +69,7 @@ ADVANCED FEATURES:
 
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
+
 Thought: [Your detailed reasoning about what to do next]
 Action: [Tool name from ONLY [{{ tools_name }}]]
 Action Input: [JSON input for the tool]
@@ -87,7 +87,6 @@ Answer: [Your direct response]
 
 IMPORTANT RULES:
 - ALWAYS start with "Thought:" even for simple responses
-- Begin thoughts with confidence assessment when using tools
 - Explain why this specific tool is the right choice
 - Ensure Action Input is valid JSON without markdown formatting
 - Use proper JSON syntax with double quotes for keys and string values
@@ -95,9 +94,14 @@ IMPORTANT RULES:
 - JSON must be properly formatted with correct commas and brackets
 - Only use tools from the provided list
 - If you can answer directly, use only Thought followed by Answer
-"""  # noqa: E501
+- Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
+FILE HANDLING:
+- Tools may generate or process files (images, CSVs, PDFs, etc.)
+- Files are automatically collected and will be returned with your final answer
+- Mention created files in your final answer so users know what was generated"""  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
+
 <output>
     <thought>
         [Your detailed reasoning about what to do next]
@@ -135,7 +139,6 @@ For questions that don't require tools:
 
 CRITICAL XML FORMAT RULES:
 - ALWAYS include <thought> tags with detailed reasoning
-- Begin thoughts with confidence assessment when using tools
 - Explain why this specific tool is the right choice
 - For tool use, include action and action_input tags
 - For direct answers, only include thought and answer tags
@@ -144,16 +147,22 @@ CRITICAL XML FORMAT RULES:
 - Use double quotes for JSON strings
 - Escape special characters in JSON (\\n for newlines, \\" for quotes)
 - Properly close all XML tags
-- For all tags other than <answer>, text content should ideally be XML-escaped.
+- For all tags other than <answer>, text content should ideally be XML-escaped
 - Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
 - Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
-- You can get "Observation (shortened)" this indicates that output from this tool is shortened.
+- You may receive "Observation (shortened)" indicating that tool output was truncated
+- Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {"input": "your subtask"}. Keep only inputs inside <action_input>.
 
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags
 - Use double quotes for all strings
 - Escape newlines as \\n, quotes as \\"
 - NO multi-line JSON formatting
+
+FILE HANDLING:
+- Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
+- Generated files are automatically collected and returned with your final answer
+- File operations are handled transparently - focus on the task, not file management
 """  # noqa: E501
 
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
@@ -351,6 +360,12 @@ Answer: [Your direct response]
 - Proper JSON syntax with commas and brackets
 - List each Action and Action Input separately
 - Only use tools from the provided list
+
+**FILE HANDLING:**
+- Tools may generate multiple files during execution
+- All generated files are automatically collected and returned
+- When using multiple tools, files from all tools are aggregated
+- Reference all created files in your final Answer
 """  # noqa: E501
 )
 
@@ -372,6 +387,7 @@ For Tool Usage (Single or Multiple):
         <!-- Add more tool elements as needed based on your strategy -->
         <tool>
             <name>[Tool name]</name>
+            <input>[JSON input for the tool - single line, properly escaped]</input>
             <input>[JSON input for the tool - single line, properly escaped]</input>
         </tool>
     </tool_calls>
@@ -415,6 +431,11 @@ JSON FORMATTING REQUIREMENTS:
 - Use double quotes for all strings
 - Escape newlines as \\n, quotes as \\"
 - NO multi-line JSON formatting
+
+FILE HANDLING WITH MULTIPLE TOOLS:
+- Each tool may generate files independently
+- Files from all tools are automatically aggregated
+- Generated files are returned with the final answer
 """  # noqa: E501
 )
 
@@ -454,10 +475,11 @@ IMPORTANT RULES:
 - Do not mention tools or actions since you don't have access to any
 """
 
-REACT_BLOCK_OUTPUT_FORMAT = (
-    "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
-)
-
+REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
+- Avoid phrases like 'based on the information gathered or provided.'
+- Clearly mention any files that were generated during the process.
+- Provide file names and brief descriptions of their contents.
+"""
 
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
@@ -481,8 +503,7 @@ Your response should be clear, concise, and professional.
 </answer>
 """  # noqa: E501
 
-REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """If you have sufficient information to provide final answer, provide your final answer in one of these two formats:
-Always structure your responses in this JSON format:
+REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
 {thought: [Your reasoning about the next step],
 action: [The tool you choose to use, if any from ONLY [{{ tools_name }}]],
@@ -507,7 +528,12 @@ IMPORTANT RULES:
 - In action_input field, provide properly formatted JSON with double quotes
 - Avoid using extra backslashes
 - Do not use markdown code blocks around your JSON
-- Never keep action_input empty.
+- Never leave action_input empty
+- Ensure proper JSON syntax with quoted keys and values
+
+FILE HANDLING:
+- Tools may generate files that are automatically collected
+- Generated files will be included in the final response
 - Never return empty response.
 """  # noqa: E501
 
@@ -515,15 +541,23 @@ REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
 You need to use the right functions based on what the user asks.
 
 Use the function `provide_final_answer` when you can give a clear answer to the user's first question,
- and no extra steps, tools, or work are needed.
+and no extra steps, tools, or work are needed.
 Call this function if the user's input is simple and doesn't require additional help or tools.
 
 If the user's request requires the use of specific tools, such as [{{ tools_name }}],
  you must first call the appropriate function to invoke those tools.
 Only after utilizing the necessary tools and gathering the required information should
- you call `provide_final_answer` to deliver the final response.
+you call `provide_final_answer` to deliver the final response.
 
-Make sure to check each request carefully to see if you can answer it right away or if you need to use tools to help.
+FUNCTION CALLING GUIDELINES:
+- Analyze the request carefully to determine if tools are needed
+- Call functions with properly formatted arguments
+- Handle tool responses appropriately before providing final answer
+- Chain multiple tool calls when necessary for complex tasks
+
+FILE HANDLING:
+- Tools may generate files that will be included in the final response
+- Files created by tools are automatically collected and returned
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
@@ -561,9 +595,9 @@ IMPORTANT RULES:
 """
 
 
-REACT_BLOCK_OUTPUT_FORMAT = (
-    "In your final answer, avoid phrases like 'based on the information gathered or provided.' "
-)
+REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
+- Avoid phrases like 'based on the information gathered or provided.'
+"""
 
 
 REACT_MAX_LOOPS_PROMPT = """
@@ -647,6 +681,7 @@ TYPE_MAPPING = {
     float: "float",
     bool: "boolean",
     str: "string",
+    dict: "object",
 }
 
 UNKNOWN_TOOL_NAME = "unknown_tool"
@@ -675,17 +710,9 @@ class Agent(BaseAgent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
-    file_store: FileStore | None = Field(default=None, description="Filesystem storage to use for agent.")
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if self.file_store:
-            self.tools.append(FileReadTool(file_store=self.file_store))
-            self.tools.append(FileWriteTool(file_store=self.file_store))
-            self.tools.append(FileListTool(file_store=self.file_store))
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -868,13 +895,11 @@ class Agent(BaseAgent):
             action = tool_output_match.group(1)
             action_input = tool_output_match.group(2)
 
-            # Parse the action_input if it's a JSON string and normalize it
             try:
                 parsed_action_input = json.loads(action_input)
             except json.JSONDecodeError as e:
                 raise RecoverableAgentException(f"Invalid JSON in Action Input for {action}: {str(e)}")
 
-            # Direct dictionary lookup using ToolCacheEntry as key
             cache_entry = ToolCacheEntry(action=action, action_input=parsed_action_input)
             tool_output = self._tool_cache.get(cache_entry)
 
@@ -882,7 +907,6 @@ class Agent(BaseAgent):
                 logger.info(f"Found tool output for action='{action}' action_input='{action_input}'")
                 return str(tool_output)
             else:
-                # If not found, log available tools for debugging
                 available_tools = [(entry.action, entry.action_input) for entry in self._tool_cache.keys()]
                 logger.warning(
                     f"Tool output not found for action='{action}' input='{action_input}'. "
@@ -908,7 +932,6 @@ class Agent(BaseAgent):
                 source=self.name,
                 step="reasoning",
                 config=config,
-                by_tokens=False,
                 **kwargs,
             )
 
@@ -1071,7 +1094,6 @@ class Agent(BaseAgent):
 
         for loop_num in range(1, self.max_loops + 1):
             try:
-                # Create a streaming callback
                 streaming_callback = None
                 original_streaming_enabled = self.llm.streaming.enabled
 
@@ -1083,11 +1105,9 @@ class Agent(BaseAgent):
                         **kwargs,
                     )
 
-                    # Temporarily enable streaming on LLM
                     if not original_streaming_enabled:
                         self.llm.streaming.enabled = True
 
-                    # Create a config for the LLM that uses proper streaming callback
                     llm_config = config.model_copy(deep=False)
                     llm_config.callbacks = [
                         callback
@@ -1105,7 +1125,6 @@ class Agent(BaseAgent):
                         **kwargs,
                     )
                 finally:
-                    # Restore original streaming state
                     if not original_streaming_enabled:
                         try:
                             self.llm.streaming.enabled = original_streaming_enabled
@@ -1115,7 +1134,6 @@ class Agent(BaseAgent):
                 action, action_input = None, None
                 llm_generated_output = ""
 
-                # Use content from callback if available
                 if streaming_callback and streaming_callback.accumulated_content:
                     llm_generated_output = streaming_callback.accumulated_content
                 else:
@@ -1210,7 +1228,6 @@ class Agent(BaseAgent):
                         try:
                             if isinstance(action_input, str):
                                 action_input = json.loads(action_input)
-                            # If it's already a dict/object, use it as-is
                         except json.JSONDecodeError as e:
                             raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
 
@@ -1324,10 +1341,12 @@ class Agent(BaseAgent):
 
                 if action and self.tools:
                     tool_result = None
+                    tool_files: Any = []
                     tool = None
 
                     if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled:
-                        tool_result = self._execute_tools(tools_data, config, **kwargs)
+                        execution_output = self._execute_tools(tools_data, config, **kwargs)
+                        tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
 
                     elif self.inference_mode == InferenceMode.DEFAULT and self.parallel_tool_calls_enabled:
                         if action == "multiple_tools":
@@ -1357,17 +1376,20 @@ class Agent(BaseAgent):
                                 **kwargs,
                             )
 
-                            tool_result = self._execute_tools(tools_data, config, **kwargs)
+                            execution_output = self._execute_tools(tools_data, config, **kwargs)
+                            tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
 
                             action_input_json = json.dumps(action_input)
 
+                            step_observation = AgentIntermediateStepModelObservation(
+                                tool_using="multiple_tools",
+                                tool_input=str(action_input_json),
+                                tool_output=str(tool_result),
+                                updated=llm_generated_output,
+                            )
+
                             self._intermediate_steps[loop_num]["model_observation"].update(
-                                AgentIntermediateStepModelObservation(
-                                    tool_using="multiple_tools",
-                                    tool_input=str(action_input_json),
-                                    tool_output=str(tool_result),
-                                    updated=llm_generated_output,
-                                ).model_dump()
+                                step_observation.model_dump()
                             )
                         else:
                             try:
@@ -1393,7 +1415,7 @@ class Agent(BaseAgent):
                                     **kwargs,
                                 )
 
-                                tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                                tool_result, tool_files = self._run_tool(tool, action_input, config, **kwargs)
 
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
@@ -1423,7 +1445,7 @@ class Agent(BaseAgent):
                             tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                             tool_result = self._tool_cache.get(tool_cache_entry, None)
                             if not tool_result:
-                                tool_result = self._run_tool(tool, action_input, config, **kwargs)
+                                tool_result, tool_files = self._run_tool(tool, action_input, config, **kwargs)
 
                             else:
                                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
@@ -1463,22 +1485,22 @@ class Agent(BaseAgent):
                                 "name": tool_name,
                                 "input": action_input,
                                 "result": tool_result,
+                                "files": tool_files,
                             },
                             source=source_name,
                             step="tool",
                             config=config,
-                            by_tokens=False,
                             **kwargs,
                         )
 
-                    self._intermediate_steps[loop_num]["model_observation"].update(
-                        AgentIntermediateStepModelObservation(
-                            tool_using=action,
-                            tool_input=action_input,
-                            tool_output=tool_result,
-                            updated=llm_generated_output,
-                        ).model_dump()
+                    step_observation = AgentIntermediateStepModelObservation(
+                        tool_using=action,
+                        tool_input=action_input,
+                        tool_output=tool_result,
+                        updated=llm_generated_output,
                     )
+
+                    self._intermediate_steps[loop_num]["model_observation"].update(step_observation.model_dump())
                 else:
                     self.stream_reasoning(
                         {
@@ -1617,6 +1639,9 @@ class Agent(BaseAgent):
                     else:
                         type_str = getattr(field.annotation, "__name__", str(field.annotation))
 
+                    if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
+                        type_str = "tuple[str, ...]"
+
                     description = field.description or "No description"
                     params.append(f"{name} ({type_str}): {description}")
             if params:
@@ -1678,25 +1703,36 @@ class Agent(BaseAgent):
             description += f" Defaults to: {field.default}." if field.default and not field.is_required() else ""
             params = self.filter_format_type(field.annotation)
 
-            properties[name] = {"type": [], "description": description}
+            properties[name] = {"description": description}
+            types = []
 
             for param in params:
                 if param is type(None):
-                    properties[name]["type"].append("null")
+                    types.append("null")
 
                 elif param_type := TYPE_MAPPING.get(param):
-                    properties[name]["type"].append(param_type)
+                    types.append(param_type)
 
                 elif issubclass(param, Enum):
                     element_type = TYPE_MAPPING.get(
                         self.filter_format_type(type(list(param.__members__.values())[0].value))[0]
                     )
-                    properties[name]["type"].append(element_type)
+                    types.append(element_type)
                     properties[name]["enum"] = [field.value for field in param.__members__.values()]
 
                 elif getattr(param, "__origin__", None) is list:
-                    properties[name]["type"].append("array")
+                    types.append("array")
                     properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
+
+                elif getattr(param, "__origin__", None) is dict:
+                    types.append("object")
+
+            if len(types) == 1:
+                properties[name]["type"] = types[0]
+            elif len(types) > 1:
+                properties[name]["type"] = types
+            else:
+                properties[name]["type"] = "string"
 
     def generate_function_calling_schemas(self):
         """Generate schemas for function calling."""
@@ -1803,7 +1839,104 @@ class Agent(BaseAgent):
 
         self._prompt_blocks.update(prompt_blocks)
 
-    def _execute_tools(self, tools_data: list[dict], config: RunnableConfig, **kwargs) -> str:
+    @staticmethod
+    def _build_unique_file_key(files_map: dict[str, Any], base: str) -> str:
+        key = base or "file"
+        if key not in files_map:
+            return key
+        suffix = 1
+        while f"{key}_{suffix}" in files_map:
+            suffix += 1
+        return f"{key}_{suffix}"
+
+    def _merge_tool_files(self, aggregated: dict[str, Any], tool_name: str, files: Any) -> None:
+        if not files:
+            return
+
+        sanitized_name = self.sanitize_tool_name(tool_name) or "tool"
+
+        if isinstance(files, dict):
+            for key, value in files.items():
+                base_key = key or sanitized_name
+                unique_key = self._build_unique_file_key(aggregated, base_key)
+                aggregated[unique_key] = value
+        elif isinstance(files, (list, tuple)):
+            for idx, file_obj in enumerate(files):
+                base_key = getattr(file_obj, "name", None) or f"{sanitized_name}_{idx}"
+                unique_key = self._build_unique_file_key(aggregated, base_key)
+                aggregated[unique_key] = file_obj
+        else:
+            unique_key = self._build_unique_file_key(aggregated, sanitized_name)
+            aggregated[unique_key] = files
+
+    @staticmethod
+    def _separate_tool_result_and_files(execution_result: Any) -> tuple[Any, dict[str, Any]]:
+        if isinstance(execution_result, dict):
+            content = execution_result.get("content", "")
+            files = execution_result.get("files", {})
+            if isinstance(files, dict):
+                return content, files
+            if isinstance(files, (list, tuple)):
+                return content, {str(index): file for index, file in enumerate(files)}
+            if files:
+                return content, {"result": files}
+            return content, {}
+        return execution_result, {}
+
+    def _run_single_tool(
+        self, tool_name: str, tool_input: dict[str, Any], config: RunnableConfig, **kwargs
+    ) -> dict[str, Any]:
+        tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
+        if not tool:
+            return {
+                "tool_name": tool_name,
+                "success": False,
+                "tool_input": tool_input,
+                "result": f"Unknown tool: {tool_name}. Please use only available tools.",
+                "files": {},
+            }
+
+        try:
+            tool_result, tool_files = self._run_tool(tool, tool_input, config, **kwargs)
+            return {
+                "tool_name": tool.name,
+                "success": True,
+                "tool_input": tool_input,
+                "result": tool_result,
+                "files": tool_files,
+            }
+        except RecoverableAgentException as e:
+            error_message = f"{type(e).__name__}: {e}"
+            logger.error(error_message)
+            return {
+                "tool_name": tool.name,
+                "success": False,
+                "tool_input": tool_input,
+                "result": error_message,
+                "files": {},
+            }
+
+    def _stream_tool_result(self, result: dict[str, Any], config: RunnableConfig, **kwargs) -> None:
+        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            try:
+                self.stream_content(
+                    content={
+                        "name": result.get("tool_name"),
+                        "input": result.get("tool_input"),
+                        "result": result.get("result"),
+                        "files": result.get("files"),
+                    },
+                    source=str(result.get("tool_name")),
+                    step="tool",
+                    config=config,
+                    **kwargs,
+                )
+            except Exception as stream_err:
+                logger.error(f"Streaming error for tool {result.get('tool_name')}: {stream_err}")
+
+    def _execute_tools(
+        self, tools_data: list[dict[str, Any]], config: RunnableConfig, **kwargs
+    ) -> str | dict[str, Any]:
         """
         Execute one or more tools and gather their results.
 
@@ -1813,56 +1946,88 @@ class Agent(BaseAgent):
             **kwargs: Additional arguments for tool execution
 
         Returns:
-            str: Combined observation string with all tool results
+            str | dict[str, Any]: Combined observation string with all tool results and optional files
         """
-        all_results = []
+        all_results: list[dict[str, Any]] = []
 
-        for tool_data in tools_data:
-            try:
-                tool_name = tool_data["name"]
-                tool_input = tool_data["input"]
+        if not tools_data:
+            return ""
 
-                tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
-                if not tool:
-                    error_message = f"Unknown tool: {tool_name}. Please use only available tools."
-                    all_results.append({"tool_name": tool_name, "success": False, "result": error_message})
-                    continue
+        prepared_tools: list[dict[str, Any]] = []
 
-                tool_result = self._run_tool(tool, tool_input, config, **kwargs)
-
-                all_results.append(
-                    {"tool_name": tool_name, "success": True, "tool_input": tool_input, "result": tool_result}
-                )
-
-                if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                    self.stream_content(
-                        content={"name": tool.name, "input": tool_input, "result": tool_result},
-                        source=tool.name,
-                        step="tool",
-                        config=config,
-                        by_tokens=False,
-                        **kwargs,
-                    )
-
-            except Exception as e:
-                error_message = f"Error executing tool {tool_data['name']}: {str(e)}"
+        for idx, td in enumerate(tools_data):
+            tool_name = td.get("name")
+            tool_input = td.get("input")
+            if tool_name is None or tool_input is None:
+                error_message = "Invalid tool payload: missing 'name' or 'input'"
                 logger.error(error_message)
                 all_results.append(
                     {
-                        "tool_name": tool_data["name"],
+                        "order": idx,
+                        "tool_name": tool_name or UNKNOWN_TOOL_NAME,
                         "success": False,
                         "tool_input": tool_input,
                         "result": error_message,
+                        "files": {},
                     }
                 )
+                continue
+            prepared_tools.append({"order": idx, "name": tool_name, "input": tool_input})
 
-        observation_parts = []
-        for result in all_results:
-            tool_name = result["tool_name"]
-            result_content = result["result"]
-            success_status = "SUCCESS" if result["success"] else "ERROR"
+        if prepared_tools:
+            if len(prepared_tools) == 1:
+                tool_payload = prepared_tools[0]
+                res = self._run_single_tool(tool_payload["name"], tool_payload["input"], config, **kwargs)
+                res["order"] = tool_payload["order"]
+                all_results.append(res)
+                self._stream_tool_result(res, config, **kwargs)
+            else:
+                max_workers = len(prepared_tools)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_map = {}
+                    for tool_payload in prepared_tools:
+                        future = executor.submit(
+                            self._run_single_tool,
+                            tool_payload["name"],
+                            tool_payload["input"],
+                            config,
+                            **kwargs,
+                        )
+                        future_map[future] = tool_payload
+
+                    for future in as_completed(future_map.keys()):
+                        tool_payload = future_map[future]
+                        tool_name = tool_payload["name"]
+                        tool_input = tool_payload["input"]
+                        try:
+                            res = future.result()
+                        except Exception as e:
+                            error_message = f"Error executing tool {tool_name}: {str(e)}"
+                            logger.error(error_message)
+                            res = {
+                                "tool_name": tool_name,
+                                "success": False,
+                                "tool_input": tool_input,
+                                "result": error_message,
+                                "files": {},
+                            }
+                        res["order"] = tool_payload["order"]
+                        all_results.append(res)
+                        self._stream_tool_result(res, config, **kwargs)
+
+        observation_parts: list[str] = []
+        aggregated_files: dict[str, Any] = {}
+
+        for result in sorted(all_results, key=lambda r: r.get("order", 0)):
+            tool_name = result.get("tool_name", UNKNOWN_TOOL_NAME)
+            result_content = result.get("result", "")
+            success_status = "SUCCESS" if result.get("success") else "ERROR"
             observation_parts.append(f"--- {tool_name} has resulted in {success_status} ---\n{result_content}")
+
+            self._merge_tool_files(aggregated_files, tool_name, result.get("files"))
 
         combined_observation = "\n\n".join(observation_parts)
 
+        if aggregated_files:
+            return {"content": combined_observation, "files": aggregated_files}
         return combined_observation

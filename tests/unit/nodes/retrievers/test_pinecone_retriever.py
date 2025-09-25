@@ -18,6 +18,7 @@ from dynamiq.storages.vector import PineconeVectorStore
 def mock_pinecone_vector_store():
     mock_store = MagicMock(spec=PineconeVectorStore)
     mock_store.client = MagicMock()  # Add the client attribute to the mock
+    mock_store.metric = "cosine"
     return mock_store
 
 
@@ -67,7 +68,11 @@ def test_execute(pinecone_document_retriever):
     result = pinecone_document_retriever.execute(input_data, config)
 
     pinecone_document_retriever.document_retriever.run.assert_called_once_with(
-        input_data.embedding, filters=input_data.filters, top_k=input_data.top_k, content_key=None
+        input_data.embedding,
+        filters=input_data.filters,
+        top_k=input_data.top_k,
+        content_key=None,
+        similarity_threshold=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -95,6 +100,7 @@ def test_execute_with_default_filters_and_top_k(pinecone_document_retriever):
         filters=pinecone_document_retriever.filters,
         top_k=pinecone_document_retriever.top_k,
         content_key=None,
+        similarity_threshold=None,
     )
 
     assert result == {"documents": mock_output["documents"]}

@@ -42,7 +42,7 @@ def test_file_write_tool(file_store):
     """Test FileWriteTool functionality including initialization, successful writes, and error handling."""
     # Test initialization
     tool = FileWriteTool(file_store=file_store)
-    assert tool.name == "File Write Tool"
+    assert tool.name == "FileWriteTool"
     assert tool.group == "tools"
     assert tool.file_store == file_store
 
@@ -74,7 +74,7 @@ def test_file_list_tool(file_store):
     """Test FileListTool functionality including initialization, listing files, and empty directory."""
     # Test initialization
     tool = FileListTool(file_store=file_store)
-    assert tool.name == "File List Tool"
+    assert tool.name == "FileListTool"
     assert tool.group == "tools"
     assert tool.file_store == file_store
 

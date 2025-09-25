@@ -1,6 +1,8 @@
 from typing import Any
 
+from dynamiq.components.retrievers.utils import filter_documents_by_threshold
 from dynamiq.storages.vector import ElasticsearchVectorStore
+from dynamiq.storages.vector.elasticsearch.elasticsearch import ElasticsearchSimilarityMetric
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -14,6 +16,7 @@ class ElasticsearchDocumentRetriever:
         vector_store: ElasticsearchVectorStore,
         filters: dict[str, Any] | None = None,
         top_k: int = 10,
+        similarity_threshold: float | None = None,
     ):
         """
         Initialize ElasticsearchDocumentRetriever.
@@ -32,6 +35,10 @@ class ElasticsearchDocumentRetriever:
         self.vector_store = vector_store
         self.filters = filters or {}
         self.top_k = top_k
+        self.similarity_threshold = similarity_threshold
+
+    def _higher_is_better(self) -> bool:
+        return self.vector_store.similarity != ElasticsearchSimilarityMetric.L2
 
     def run(
         self,
@@ -42,6 +49,7 @@ class ElasticsearchDocumentRetriever:
         content_key: str | None = None,
         embedding_key: str | None = None,
         scale_scores: bool = False,
+        similarity_threshold: float | None = None,
     ) -> dict[str, list[Document]]:
         """
         Retrieve documents from ElasticsearchVectorStore.
@@ -73,6 +81,9 @@ class ElasticsearchDocumentRetriever:
             content_key=content_key,
             embedding_key=embedding_key,
         )
+
+        threshold = similarity_threshold if similarity_threshold is not None else self.similarity_threshold
+        docs = filter_documents_by_threshold(docs, threshold, higher_is_better=self._higher_is_better())
 
         logger.debug(f"Retrieved {len(docs)} documents from Elasticsearch Vector Store")
         return {"documents": docs}

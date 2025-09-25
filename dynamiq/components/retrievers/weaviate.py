@@ -1,5 +1,6 @@
 from typing import Any
 
+from dynamiq.components.retrievers.utils import filter_documents_by_threshold
 from dynamiq.storages.vector.weaviate import WeaviateVectorStore
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
@@ -16,6 +17,7 @@ class WeaviateDocumentRetriever:
         vector_store: WeaviateVectorStore,
         filters: dict[str, Any] | None = None,
         top_k: int = 10,
+        similarity_threshold: float | None = None,
     ):
         """
         Initializes a component for retrieving documents from a Weaviate vector store with optional filtering.
@@ -35,6 +37,7 @@ class WeaviateDocumentRetriever:
         self.vector_store = vector_store
         self.filters = filters or {}
         self.top_k = top_k
+        self.similarity_threshold = similarity_threshold
 
     def run(
         self,
@@ -45,6 +48,7 @@ class WeaviateDocumentRetriever:
         content_key: str | None = None,
         query: str | None = None,
         alpha: float | None = 0.5,
+        similarity_threshold: float | None = None,
     ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the WeaviateDocumentStore that are similar to the provided query embedding.
@@ -69,6 +73,8 @@ class WeaviateDocumentRetriever:
         top_k = top_k or self.top_k
         filters = filters or self.filters
 
+        threshold = similarity_threshold if similarity_threshold is not None else self.similarity_threshold
+
         if query:
             docs = self.vector_store._hybrid_retrieval(
                 query_embedding=query_embedding,
@@ -79,15 +85,30 @@ class WeaviateDocumentRetriever:
                 content_key=content_key,
                 alpha=alpha,
             )
+            docs = filter_documents_by_threshold(docs, threshold, higher_is_better=True)
 
         else:
+            distance = None
+            certainty = None
+            higher_is_better = True
+            if threshold is not None:
+                if threshold <= 1:
+                    certainty = threshold
+                    higher_is_better = True
+                else:
+                    distance = threshold
+                    higher_is_better = False
+
             docs = self.vector_store._embedding_retrieval(
                 query_embedding=query_embedding,
                 filters=filters,
                 top_k=top_k,
                 exclude_document_embeddings=exclude_document_embeddings,
+                distance=distance,
+                certainty=certainty,
                 content_key=content_key,
             )
+            docs = filter_documents_by_threshold(docs, threshold, higher_is_better=higher_is_better)
 
         logger.debug(f"Retrieved {len(docs)} documents from Weaviate Vector Store.")
 

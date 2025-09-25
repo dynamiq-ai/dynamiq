@@ -102,6 +102,7 @@ def test_retrieve_workflow(
         filters=mock_filters,
         top_k=input_data["top_k"],
         return_embedding=False,
+        score_threshold=None,
         content_key=None,
     )
 

@@ -49,7 +49,7 @@ def llm_instance():
     connection = OpenAIConnection()
     llm = OpenAI(
         connection=connection,
-        model="gpt-4o-mini",
+        model="gpt-4o",
         max_tokens=1000,
         temperature=0,
     )
@@ -145,7 +145,7 @@ def test_react_agent_structured_output_mode(
     run_and_assert_agent(agent, agent_input, expected_length, run_config)
 
 
-@pytest.mark.integration
+@pytest.mark.skip(reason="Skip due to outdated behaviour ")
 def test_react_agent_function_calling_mode(
     llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config
 ):

@@ -53,7 +53,6 @@ def react_agent_with_all_streaming(openai_llm, agent_role, streaming_event):
             enabled=True,
             event=streaming_event,
             mode=StreamingMode.ALL,
-            by_tokens=True,
         ),
     )
     return agent
@@ -73,7 +72,6 @@ def react_agent_with_final_streaming(openai_llm, agent_role, streaming_event):
             enabled=True,
             event=streaming_event,
             mode=StreamingMode.FINAL,
-            by_tokens=True,
         ),
     )
     return agent
@@ -90,7 +88,6 @@ def simple_agent_with_streaming(openai_llm, agent_role, streaming_event):
             enabled=True,
             event=streaming_event,
             mode=StreamingMode.FINAL,
-            by_tokens=False,
         ),
     )
     return agent

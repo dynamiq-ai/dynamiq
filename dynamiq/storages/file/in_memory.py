@@ -3,10 +3,15 @@
 import mimetypes
 import os
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from .base import FileExistsError, FileInfo, FileNotFoundError, FileStore, StorageError
+from pydantic import ConfigDict
+
+from dynamiq.utils.logger import logger
+
+from .base import FileInfo, FileNotFoundError, FileStore, StorageError
 
 
 class InMemoryFileStore(FileStore):
@@ -17,9 +22,37 @@ class InMemoryFileStore(FileStore):
 
     """
 
-    def __init__(self):
-        """Initialize the in-memory storage."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def __init__(self, **kwargs):
+        """Initialize the in-memory storage.
+
+        Args:
+            **kwargs: Additional keyword arguments (ignored)
+        """
+        super().__init__(**kwargs)
         self._files: dict[str, dict[str, Any]] = {}
+
+    def list_files_bytes(self) -> list[BytesIO]:
+        """List files in storage and return the content as bytes in BytesIO objects.
+
+        Returns:
+            List of BytesIO objects
+        """
+        files = []
+
+        for file_path in self._files.keys():
+            file = BytesIO(self._files[file_path]["content"])
+            file.name = file_path
+            file.description = self._files[file_path]["metadata"].get("description", "")
+            file.content_type = self._files[file_path]["content_type"]
+            files.append(file)
+
+        return files
+
+    def is_empty(self) -> bool:
+        """Check if the file store is empty."""
+        return len(self._files) == 0
 
     def store(
         self,
@@ -33,7 +66,8 @@ class InMemoryFileStore(FileStore):
         file_path = str(file_path)
 
         if file_path in self._files and not overwrite:
-            raise FileExistsError(f"File '{file_path}' already exists", operation="store", path=file_path)
+            logger.info(f"File '{file_path}' already exists. Skipping...")
+            return self._create_file_info(file_path, self._files[file_path])
 
         # Convert content to bytes
         if isinstance(content, str):
@@ -119,4 +153,18 @@ class InMemoryFileStore(FileStore):
             content_type=file_data["content_type"],
             created_at=file_data["created_at"],
             metadata=file_data.get("metadata", {}),
+            content=file_data["content"],
         )
+
+    def to_dict(self, **kwargs) -> dict[str, Any]:
+        """Convert the InMemoryFileStore instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the file store that is JSON serializable.
+        """
+
+        return {
+            "type": "dynamiq.storages.file.InMemoryFileStore",
+            "file_count": len(self._files),
+            "is_empty": self.is_empty(),
+        }

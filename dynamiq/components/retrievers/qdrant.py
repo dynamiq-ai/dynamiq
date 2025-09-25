@@ -1,6 +1,7 @@
 from typing import Any
 
-from dynamiq.storages.vector.qdrant import QdrantVectorStore
+from dynamiq.components.retrievers.utils import filter_documents_by_threshold
+from dynamiq.storages.vector.qdrant import QdrantSimilarityMetric, QdrantVectorStore
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -16,6 +17,7 @@ class QdrantDocumentRetriever:
         vector_store: QdrantVectorStore,
         filters: dict[str, Any] | None = None,
         top_k: int = 10,
+        similarity_threshold: float | None = None,
     ):
         """
         Initializes a component for retrieving documents from a Qdrant vector store with optional filtering.
@@ -35,6 +37,10 @@ class QdrantDocumentRetriever:
         self.vector_store = vector_store
         self.filters = filters or {}
         self.top_k = top_k
+        self.similarity_threshold = similarity_threshold
+
+    def _higher_is_better(self) -> bool:
+        return self.vector_store.metric != QdrantSimilarityMetric.L2
 
     def run(
         self,
@@ -43,6 +49,7 @@ class QdrantDocumentRetriever:
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
         content_key: str | None = None,
+        similarity_threshold: float | None = None,
     ) -> dict[str, list[Document]]:
         """
         Retrieves documents from the QdrantDocumentStore that are similar to the provided query embedding.
@@ -62,13 +69,18 @@ class QdrantDocumentRetriever:
         top_k = top_k or self.top_k
         filters = filters or self.filters
 
+        threshold = similarity_threshold if similarity_threshold is not None else self.similarity_threshold
+
         docs = self.vector_store._query_by_embedding(
             query_embedding=query_embedding,
             filters=filters,
             top_k=top_k,
             return_embedding=not exclude_document_embeddings,
+            score_threshold=threshold,
             content_key=content_key,
         )
         logger.debug(f"Retrieved {len(docs)} documents from Qdrant Vector Store.")
+
+        docs = filter_documents_by_threshold(docs, threshold, higher_is_better=self._higher_is_better())
 
         return {"documents": docs}

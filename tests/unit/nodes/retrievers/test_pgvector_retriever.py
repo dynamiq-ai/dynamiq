@@ -9,12 +9,14 @@ from dynamiq.nodes.retrievers.base import RetrieverInputSchema
 from dynamiq.nodes.retrievers.pgvector import PGVectorDocumentRetriever
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PGVectorStore
+from dynamiq.storages.vector.pgvector.pgvector import PGVectorVectorFunction
 
 
 @pytest.fixture
 def mock_pg_vector_store():
     mock_store = MagicMock(spec=PGVectorStore)
     mock_store.client = MagicMock()
+    mock_store.vector_function = PGVectorVectorFunction.COSINE_SIMILARITY
     return mock_store
 
 
@@ -34,6 +36,7 @@ def pgvector_document_retriever(mock_pg_vector_store):
 def test_initialization_with_defaults(mock_connect_to_vector_store):
     mock_pg_vector_store = MagicMock(spec=PGVectorStore)
     mock_connect_to_vector_store.return_value = mock_pg_vector_store
+    mock_pg_vector_store.vector_function = PGVectorVectorFunction.COSINE_SIMILARITY
 
     retriever = PGVectorDocumentRetriever()
 
@@ -81,6 +84,7 @@ def test_execute(pgvector_document_retriever):
         embedding_key=None,
         query=None,
         alpha=0.5,
+        similarity_threshold=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -104,6 +108,7 @@ def test_execute_hybrid(pgvector_document_retriever):
         embedding_key=None,
         query=input_data.query,
         alpha=0.5,
+        similarity_threshold=None,
     )
 
     assert result == {"documents": mock_output["documents"]}
@@ -134,6 +139,7 @@ def test_execute_with_default_filters_and_top_k(pgvector_document_retriever):
         embedding_key=None,
         query=None,
         alpha=0.5,
+        similarity_threshold=None,
     )
 
     assert result == {"documents": mock_output["documents"]}

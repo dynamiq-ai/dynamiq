@@ -76,7 +76,10 @@ class PGVectorDocumentRetriever(Retriever, PGVectorStoreRetrieverParams):
         super().init_components(connection_manager)
         if self.document_retriever is None:
             self.document_retriever = PGVectorDocumentRetrieverComponent(
-                vector_store=self.vector_store, filters=self.filters, top_k=self.top_k
+                vector_store=self.vector_store,
+                filters=self.filters,
+                top_k=self.top_k,
+                similarity_threshold=self.similarity_threshold,
             )
 
     def execute(self, input_data: RetrieverInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
@@ -102,6 +105,11 @@ class PGVectorDocumentRetriever(Retriever, PGVectorStoreRetrieverParams):
         embedding_key = input_data.embedding_key
         filters = input_data.filters or self.filters
         top_k = input_data.top_k or self.top_k
+        similarity_threshold = (
+            input_data.similarity_threshold
+            if input_data.similarity_threshold is not None
+            else self.similarity_threshold
+        )
 
         alpha = input_data.alpha or self.alpha
         query = input_data.query
@@ -114,6 +122,7 @@ class PGVectorDocumentRetriever(Retriever, PGVectorStoreRetrieverParams):
             embedding_key=embedding_key,
             query=query,
             alpha=alpha,
+            similarity_threshold=similarity_threshold,
         )
 
         return {

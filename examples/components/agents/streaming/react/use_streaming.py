@@ -37,7 +37,6 @@ def run_workflow_with_streaming():
             enabled=True,
             event="research_stream",  # Custom event channel name
             mode=StreamingMode.FINAL,
-            by_tokens=True,  # Stream complete chunks rather than token-by-token
         ),
         max_loops=5,
         inference_mode=InferenceMode.DEFAULT,

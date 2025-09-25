@@ -14,6 +14,17 @@ class ReasoningEffort(str, enum.Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    MINIMAL = "minimal"
+
+
+class Verbosity(str, enum.Enum):
+    """
+    The verbosity level for the OpenAI LLM.
+    """
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 
 class OpenAI(BaseLLM):
@@ -26,6 +37,7 @@ class OpenAI(BaseLLM):
     """
     connection: OpenAIConnection | None = None
     reasoning_effort: ReasoningEffort | None = ReasoningEffort.MEDIUM
+    verbosity: Verbosity | None = Verbosity.MEDIUM
     O_SERIES_MODEL_PREFIXES: ClassVar[tuple[str, ...]] = ("o1", "o3", "o4")
     MODEL_PREFIX = "openai/"
 
@@ -66,6 +78,8 @@ class OpenAI(BaseLLM):
             new_params.pop("max_tokens", None)
             new_params.pop("temperature", None)
         elif model_lower.startswith("gpt-5"):
+            new_params["verbosity"] = self.verbosity
+            new_params["reasoning_effort"] = self.reasoning_effort
             new_params["max_completion_tokens"] = self.max_tokens
             new_params.pop("stop", None)
             new_params.pop("max_tokens", None)

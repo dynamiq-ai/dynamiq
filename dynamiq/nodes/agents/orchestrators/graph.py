@@ -254,7 +254,6 @@ class GraphOrchestrator(Orchestrator):
                     step="manager_planning",
                     source=self.name,
                     config=config,
-                    by_tokens=False,
                     **kwargs,
                 )
 

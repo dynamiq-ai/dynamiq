@@ -9,6 +9,7 @@ class TestPineconeDocumentRetriever:
     def test_run_method(self, mock_documents):
         mock_vector_store = MagicMock(spec=PineconeVectorStore)
         mock_vector_store._embedding_retrieval.return_value = mock_documents
+        mock_vector_store.metric = "cosine"
 
         retriever = PineconeDocumentRetriever(vector_store=mock_vector_store, filters={"field": "value"}, top_k=5)
 
@@ -32,6 +33,7 @@ class TestPineconeDocumentRetriever:
     def test_run_method_with_defaults(self, mock_documents, mock_filters):
         mock_vector_store = MagicMock(spec=PineconeVectorStore)
         mock_vector_store._embedding_retrieval.return_value = mock_documents
+        mock_vector_store.metric = "cosine"
 
         retriever = PineconeDocumentRetriever(vector_store=mock_vector_store, filters=mock_filters, top_k=5)
 

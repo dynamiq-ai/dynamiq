@@ -2,8 +2,10 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Optional
 
 from dynamiq.connections import Chroma
+from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -23,7 +25,7 @@ CHROMA_OPERATOR_MAPPING = {
 }
 
 
-class ChromaVectorStore(BaseVectorStore):
+class ChromaVectorStore(BaseVectorStore, DryRunMixin):
     """
     Vector store using Chroma.
 
@@ -42,6 +44,7 @@ class ChromaVectorStore(BaseVectorStore):
         client: Optional["ClientAPI"] = None,
         index_name: str = "default",
         create_if_not_exist: bool = False,
+        dry_run_config: DryRunConfig | None = None,
     ):
         """
         Initialize the ChromaVectorStore.
@@ -50,14 +53,23 @@ class ChromaVectorStore(BaseVectorStore):
             connection (Chroma | None): A Chroma connection object. Defaults to None.
             client (Optional[ClientAPI]): A Chroma client API instance. Defaults to None.
             index_name (str): The name of the index or collection. Defaults to "default".
+            create_if_not_exist (bool): Whether to create the collection if it doesn't exist. Defaults to False.
+            dry_run_config (DryRunConfig | None): Configuration for dry run mode. Defaults to None.
         """
+        super().__init__(dry_run_config=dry_run_config)
+
         self.client = client
         if self.client is None:
             connection = connection or Chroma()
             self.client = connection.connect()
         self.index_name = index_name
         if create_if_not_exist:
-            self._collection = self.client.get_or_create_collection(name=index_name)
+            collection_exists = self.client.get_collection(name=index_name)
+            if not collection_exists:
+                self._collection = self.client.create_collection(name=index_name)
+                self._track_collection(index_name)
+            else:
+                self._collection = self.client.get_collection(name=index_name)
         else:
             self._collection = self.client.get_collection(name=index_name)
 
@@ -102,6 +114,7 @@ class ChromaVectorStore(BaseVectorStore):
                 data["embeddings"] = [doc.embedding]
 
             self._collection.add(**data)
+            self._track_documents([doc.id])
 
         return len(documents)
 
@@ -140,6 +153,21 @@ class ChromaVectorStore(BaseVectorStore):
         else:
             ids, where, where_document = self._normalize_filters(filters)
             self._collection.delete(ids=ids, where=where, where_document=where_document)
+
+    def delete_collection(self, collection_name: str | None = None):
+        """
+        Delete a Chroma collection.
+
+        Args:
+            collection_name (str | None): Name of the collection to delete.
+        """
+        try:
+            collection_to_delete = collection_name or self.index_name
+            self.client.delete_collection(name=collection_to_delete)
+            logger.info(f"Deleted collection '{collection_to_delete}'.")
+        except Exception as e:
+            logger.error(f"Failed to delete collection '{collection_to_delete}': {e}")
+            raise
 
     def search_embeddings(
         self,

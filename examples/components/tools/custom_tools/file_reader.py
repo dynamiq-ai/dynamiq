@@ -25,8 +25,7 @@ class FileReaderSchema(BaseModel):
     """Schema for FileReaderTool input parameters."""
 
     files: list[Any] | None = Field(
-        default=None,
-        description="List of byte streams to process.",
+        default=None, description="List of byte streams to process.", json_schema_extra={"map_from_storage": True}
     )
 
 

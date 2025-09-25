@@ -85,7 +85,7 @@ def run(input_data):
         inference_mode=InferenceMode.DEFAULT,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
-        streaming=StreamingConfig(enabled=True, event="react_map_stream", mode=StreamingMode.ALL, by_tokens=True),
+        streaming=StreamingConfig(enabled=True, event="react_map_stream", mode=StreamingMode.ALL),
         max_loops=20,
         behaviour_on_max_loops=Behavior.RETURN,
     )
@@ -160,9 +160,7 @@ def run(input_data):
         inference_mode=InferenceMode.DEFAULT,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
-        streaming=StreamingConfig(
-            enabled=True, event="react_map_stream_final", mode=StreamingMode.FINAL, by_tokens=True
-        ),
+        streaming=StreamingConfig(enabled=True, event="react_map_stream_final", mode=StreamingMode.FINAL),
         max_loops=20,
         behaviour_on_max_loops=Behavior.RETURN,
     )
