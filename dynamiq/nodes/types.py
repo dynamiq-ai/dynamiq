@@ -70,6 +70,10 @@ class ConditionOperator(str, Enum):
     STRING_LESS_THAN_PATH = "string-less-than-path"
     STRING_LESS_THAN_OR_EQUALS = "string-less-than-or-equals"
     STRING_LESS_THAN_OR_EQUALS_PATH = "string-less-than-or-equals-path"
+    STRING_STARTS_WITH = "string-starts-with"
+    STRING_ENDS_WITH = "string-ends-with"
+    STRING_CONTAINS = "string-contains"
+    STRING_REGEXP = "string-regexp"
 
 
 class ChoiceCondition(BaseModel):

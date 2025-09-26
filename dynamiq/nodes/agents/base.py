@@ -376,7 +376,7 @@ class Agent(Node):
 
     llm: BaseLLM = Field(..., description="LLM used by the agent.")
     group: NodeGroup = NodeGroup.AGENTS
-    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=3600))
     tools: list[Node] = []
     files: list[io.BytesIO | bytes] | None = None
     images: list[str | bytes | io.BytesIO] = None
