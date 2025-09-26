@@ -5,6 +5,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
 from dynamiq.nodes.tools import FileReadTool, FileWriteTool
 from dynamiq.runnables import RunnableConfig
+from dynamiq.storages.file.base import FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
@@ -31,15 +32,13 @@ def setup_agent() -> ReActAgent:
 
     llm = setup_llm(model_provider="claude", model_name="claude-3-5-sonnet-20241022", temperature=0.2)
 
-    file_store = InMemoryFileStore()
-    read_tool = FileReadTool(file_store=file_store)
-    write_tool = FileWriteTool(file_store=file_store)
+    file_store_config = FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True)
 
     agent = ReActAgent(
         name="AgentFileInteractionWithMemory",
         id="AgentFileInteractionWithMemory",
         llm=llm,
-        tools=[read_tool, write_tool],
+        file_store=file_store_config,
         role=AGENT_ROLE,
         inference_mode=InferenceMode.DEFAULT,
         max_loops=5,

@@ -3,7 +3,8 @@ import pytest
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.storages.file.in_memory import InMemoryFileStore
-
+from dynamiq.llms.base import BaseLLM
+from unittest.mock import MagicMock
 
 @pytest.fixture
 def file_store():
@@ -16,11 +17,15 @@ def sample_file_path():
     """Sample file path for testing."""
     return "test/file.txt"
 
+@pytest.fixture
+def llm_model():
+    connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="api-key")
+    return OpenAI(name="OpenAI", model="gpt-4o-mini", connection=connection)
 
 def test_file_read_tool(file_store, sample_file_path):
     """Test FileReadTool functionality including initialization, successful read, and error handling."""
     # Test initialization
-    tool = FileReadTool(file_store=file_store)
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
     assert tool.name == "FileReadTool"
     assert tool.group == "tools"
     assert tool.file_store == file_store
