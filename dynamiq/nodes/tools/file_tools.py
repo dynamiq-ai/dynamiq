@@ -105,6 +105,29 @@ class FileReadTool(Node):
 
         return False
 
+    def _process_with_llm(self, content: bytes, instructions: str, config: RunnableConfig, **kwargs) -> dict[str, Any]:
+        """Process file content with LLM using vision capabilities."""
+        return {
+            "content": self.llm.run(
+                input_data={},
+                prompt=Prompt(
+                    messages=[
+                        VisionMessage(
+                            role="user",
+                            content=[
+                                VisionMessageTextContent(text=instructions),
+                                VisionMessageImageContent(
+                                    image_url=VisionMessageImageURL(url=bytes_to_data_url(content))
+                                ),
+                            ],
+                        )
+                    ]
+                ),
+                config=config,
+                **(kwargs | {"parent_run_id": kwargs.get("run_id")}),
+            ).output["content"]
+        }
+
     def execute(
         self,
         input_data: FileReadInputSchema,
@@ -138,48 +161,10 @@ class FileReadTool(Node):
                 # Check if we should use LLM processing based on file type and LLM capabilities
                 if is_image and self.llm.is_vision_supported:
                     logger.info(f"Tool {self.name} - {self.id}: processing image with LLM (vision supported)")
-                    return {
-                        "content": self.llm.run(
-                            input_data={},
-                            prompt=Prompt(
-                                messages=[
-                                    VisionMessage(
-                                        role="user",
-                                        content=[
-                                            VisionMessageTextContent(text=input_data.instructions),
-                                            VisionMessageImageContent(
-                                                image_url=VisionMessageImageURL(url=bytes_to_data_url(content))
-                                            ),
-                                        ],
-                                    )
-                                ]
-                            ),
-                            config=config,
-                            **(kwargs | {"parent_run_id": kwargs.get("run_id")}),
-                        ).output["content"]
-                    }
+                    return self._process_with_llm(content, input_data.instructions, config, **kwargs)
                 elif is_pdf and self.llm.is_pdf_input_supported:
                     logger.info(f"Tool {self.name} - {self.id}: processing PDF with LLM (PDF input supported)")
-                    return {
-                        "content": self.llm.run(
-                            input_data={},
-                            prompt=Prompt(
-                                messages=[
-                                    VisionMessage(
-                                        role="user",
-                                        content=[
-                                            VisionMessageTextContent(text=input_data.instructions),
-                                            VisionMessageImageContent(
-                                                image_url=VisionMessageImageURL(url=bytes_to_data_url(content))
-                                            ),
-                                        ],
-                                    )
-                                ]
-                            ),
-                            config=config,
-                            **(kwargs | {"parent_run_id": kwargs.get("run_id")}),
-                        ).output["content"]
-                    }
+                    return self._process_with_llm(content, input_data.instructions, config, **kwargs)
                 elif is_image and not self.llm.is_vision_supported:
                     error_msg = (
                         f"Cannot process image file '{input_data.file_path}' with current LLM. "
