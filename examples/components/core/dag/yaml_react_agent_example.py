@@ -17,7 +17,7 @@ from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
 
 # Input data for the workflow
-INPUT_DATA = "What is the content of provided image. Call FileReadTool two times."
+INPUT_DATA = "What is the content of provided image. Call FileReadTool two times with different instructions."
 IMAGE_FILE = ""
 
 

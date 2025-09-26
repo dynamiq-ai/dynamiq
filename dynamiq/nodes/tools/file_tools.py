@@ -7,7 +7,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.agents.utils import bytes_to_data_url
 from dynamiq.nodes.llms.base import BaseLLM
-from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.node import ensure_config
 from dynamiq.prompts.prompts import (
     Prompt,
     VisionMessage,
@@ -96,29 +96,33 @@ class FileReadTool(Node):
 
     def _process_with_llm(self, content: bytes, instructions: str, config: RunnableConfig, **kwargs) -> dict[str, Any]:
         """Process file content with LLM using vision capabilities."""
-        return {
-            "content": self.llm.run(
-                input_data={},
-                prompt=Prompt(
-                    messages=[
-                        VisionMessage(
-                            role="user",
-                            content=[
-                                VisionMessageTextContent(text=instructions),
-                                VisionMessageImageContent(
-                                    image_url=VisionMessageImageURL(url=bytes_to_data_url(content))
-                                ),
-                            ],
-                        )
-                    ]
-                ),
-                config=config,
-                **(
-                    kwargs
-                    | {"parent_run_id": kwargs.get("run_id"), "run_depends": [NodeDependency(node=self).to_dict()]}
-                ),
-            ).output["content"]
-        }
+        from dynamiq.runnables import RunnableStatus
+
+        llm_result = self.llm.run(
+            input_data={},
+            prompt=Prompt(
+                messages=[
+                    VisionMessage(
+                        role="user",
+                        content=[
+                            VisionMessageTextContent(text=instructions),
+                            VisionMessageImageContent(image_url=VisionMessageImageURL(url=bytes_to_data_url(content))),
+                        ],
+                    )
+                ]
+            ),
+            config=config,
+            **(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []}),
+        )
+
+        if llm_result.status != RunnableStatus.SUCCESS:
+            error_message = f"LLM processing failed with status '{llm_result.status}'"
+            if llm_result.error:
+                error_message += f": {llm_result.error.message}"
+            logger.warning(f"Tool {self.name} - {self.id}: {error_message}")
+            return {"content": error_message}
+
+        return {"content": llm_result.output["content"]}
 
     @property
     def to_dict_exclude_params(self):
