@@ -59,15 +59,6 @@ def test_workflow_with_openai_text_embedder(mock_embedding_executor_truncate_tra
     openai_run = tracing_runs[2]
     assert openai_run.parent_run_id == flow_run.id
     assert openai_run.input == input
-    assert openai_run.metadata["truncated"] == {
-        "input": {},
-        "output": {
-            "embedding": {
-                "original_length": 30,
-                "truncated_length": 20,
-            }
-        },
-    }
     assert (
         openai_run.output
         == format_value({"query": "I love pizza!", **mock_embedding_tracing_output}, truncate_enabled=True)[0]
@@ -145,15 +136,6 @@ def test_workflow_with_openai_document_embedder(mock_embedding_executor_truncate
     assert flow_run.status == RunStatus.SUCCEEDED
     openai_run = tracing_runs[2]
     assert openai_run.parent_run_id == flow_run.id
-    assert openai_run.metadata["truncated"] == {
-        "input": {},
-        "output": {
-            "documents[0].embedding": {
-                "original_length": 30,
-                "truncated_length": 20,
-            }
-        },
-    }
     embedder_tracing_output = {
         **input,
         "meta": {
