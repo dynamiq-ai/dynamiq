@@ -94,17 +94,6 @@ class FileReadTool(Node):
 
         return False
 
-    def _is_pdf(self, file_path: str, content: bytes) -> bool:
-        """Check if the file is a PDF."""
-        mime_type, _ = mimetypes.guess_type(file_path)
-        if mime_type and mime_type == "application/pdf":
-            return True
-
-        if content.startswith(b"%PDF"):
-            return True
-
-        return False
-
     def _process_with_llm(self, content: bytes, instructions: str, config: RunnableConfig, **kwargs) -> dict[str, Any]:
         """Process file content with LLM using vision capabilities."""
         return {
@@ -179,7 +168,6 @@ class FileReadTool(Node):
             # Only use LLM processing for images/PDFs with instructions and if LLM supports the specific type
             if input_data.instructions:
                 is_image = self._is_image(input_data.file_path, content)
-                is_pdf = self._is_pdf(input_data.file_path, content)
 
                 # Check if we should use LLM processing based on file type and LLM capabilities
                 if is_image and self.llm.is_vision_supported:
@@ -189,13 +177,6 @@ class FileReadTool(Node):
                     error_msg = (
                         f"Cannot process image file '{input_data.file_path}' with current LLM. "
                         f"The model '{self.llm.model}' does not support vision/image processing."
-                    )
-                    logger.warning(f"Tool {self.name} - {self.id}: {error_msg}")
-                    return {"content": error_msg}
-                elif is_pdf and not self.llm.is_pdf_input_supported:
-                    error_msg = (
-                        f"Cannot process PDF file '{input_data.file_path}' with current LLM. "
-                        f"The model '{self.llm.model}' does not support PDF input processing."
                     )
                     logger.warning(f"Tool {self.name} - {self.id}: {error_msg}")
                     return {"content": error_msg}
