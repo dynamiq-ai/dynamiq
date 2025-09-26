@@ -39,6 +39,7 @@ ALLOWED_MODULES = [
     "uuid",
     "pandas",
     "numpy",
+    "openpyxl"
 ]
 
 

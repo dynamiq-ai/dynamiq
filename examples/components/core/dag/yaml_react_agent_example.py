@@ -8,7 +8,7 @@ This example demonstrates:
 
 import json
 import os
-
+import io
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections.managers import get_connection_manager
@@ -17,7 +17,8 @@ from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
 
 # Input data for the workflow
-INPUT_DATA = "Create a sample file. Use the Python tool to verify it was stored correctly."
+INPUT_DATA = "What is the content of provided image. Call FileReadTool two times with different instructions."
+IMAGE_FILE = ""
 
 
 def run_yaml_react_agent_example():
@@ -32,6 +33,12 @@ def run_yaml_react_agent_example():
     # Path to the YAML configuration
     dag_yaml_file_path = os.path.join(os.path.dirname(__file__), "react_agent_file_storage.yaml")
 
+    with open(IMAGE_FILE, "rb") as f:
+        image_data = f.read()
+
+    image_file = io.BytesIO(image_data)
+    image_file.name = "image.png"
+
     try:
         tracing = TracingCallbackHandler()
         with get_connection_manager() as cm:
@@ -39,7 +46,7 @@ def run_yaml_react_agent_example():
             wf = Workflow.from_yaml_file(file_path=dag_yaml_file_path, connection_manager=cm, init_components=True)
 
             wf.run(
-                input_data={"input": INPUT_DATA},
+                input_data={"input": INPUT_DATA, "files": [image_file]},
                 config=RunnableConfig(callbacks=[tracing]),
             )
         # Check if traces dumped without errors

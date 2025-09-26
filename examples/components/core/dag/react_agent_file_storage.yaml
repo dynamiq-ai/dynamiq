@@ -9,7 +9,7 @@ nodes:
       id: react-agent-llm
       type: dynamiq.nodes.llms.OpenAI
       connection: openai-conn
-      model: gpt-3.5-turbo
+      model: gpt-4o
     tools:
       - id: python-file-tool
         type: dynamiq.nodes.tools.python.Python
