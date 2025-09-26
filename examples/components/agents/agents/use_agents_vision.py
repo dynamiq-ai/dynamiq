@@ -4,10 +4,9 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
-from examples.llm_setup import 
+from examples.llm_setup import setup_llm
 IMAGE_FILE = ""
 
 
