@@ -3,8 +3,6 @@ import pytest
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.storages.file.in_memory import InMemoryFileStore
-from dynamiq.llms.base import BaseLLM
-from unittest.mock import MagicMock
 
 @pytest.fixture
 def file_store():

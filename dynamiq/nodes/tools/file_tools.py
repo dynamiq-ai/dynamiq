@@ -162,9 +162,6 @@ class FileReadTool(Node):
                 if is_image and self.llm.is_vision_supported:
                     logger.info(f"Tool {self.name} - {self.id}: processing image with LLM (vision supported)")
                     return self._process_with_llm(content, input_data.instructions, config, **kwargs)
-                elif is_pdf and self.llm.is_pdf_input_supported:
-                    logger.info(f"Tool {self.name} - {self.id}: processing PDF with LLM (PDF input supported)")
-                    return self._process_with_llm(content, input_data.instructions, config, **kwargs)
                 elif is_image and not self.llm.is_vision_supported:
                     error_msg = (
                         f"Cannot process image file '{input_data.file_path}' with current LLM. "
