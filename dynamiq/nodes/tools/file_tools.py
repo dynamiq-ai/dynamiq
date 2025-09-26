@@ -7,7 +7,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.agents.utils import bytes_to_data_url
 from dynamiq.nodes.llms.base import BaseLLM
-from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts.prompts import (
     Prompt,
     VisionMessage,
@@ -124,9 +124,32 @@ class FileReadTool(Node):
                     ]
                 ),
                 config=config,
-                **(kwargs | {"parent_run_id": kwargs.get("run_id")}),
+                **(
+                    kwargs
+                    | {"parent_run_id": kwargs.get("run_id"), "run_depends": [NodeDependency(node=self).to_dict()]}
+                ),
             ).output["content"]
         }
+
+    @property
+    def to_dict_exclude_params(self):
+        """
+        Property to define which parameters should be excluded when converting the class instance to a dictionary.
+
+        Returns:
+            dict: A dictionary defining the parameters to exclude.
+        """
+        return super().to_dict_exclude_params | {"llm": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the instance.
+        """
+        data = super().to_dict(**kwargs)
+        data["llm"] = self.llm.to_dict(**kwargs)
+        return data
 
     def execute(
         self,

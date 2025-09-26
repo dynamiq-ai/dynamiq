@@ -27,10 +27,10 @@ def llm_model():
     return OpenAI(name="OpenAI", model="gpt-4o-mini", connection=connection)
 
 
-def test_file_read_tool(file_store, sample_file_path):
+def test_file_read_tool(file_store, sample_file_path, llm_model):
     """Test FileReadTool functionality including initialization, successful read, and error handling."""
     # Test initialization
-    tool = FileReadTool(file_store=file_store, llm=llm_model())
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
     assert tool.name == "FileReadTool"
     assert tool.group == "tools"
     assert tool.file_store == file_store
@@ -121,11 +121,11 @@ def test_file_list_tool(file_store):
     assert "File: " not in result.output["content"]
 
 
-def test_file_tools_integration(file_store):
+def test_file_tools_integration(file_store, llm_model):
     """Test file tools working together."""
     # Test tools working together
     write_tool = FileWriteTool(file_store=file_store)
-    read_tool = FileReadTool(file_store=file_store, llm=llm_model())
+    read_tool = FileReadTool(file_store=file_store, llm=llm_model)
 
     # Write file
     write_input = {"file_path": "test/integration.txt", "content": "Integration test content"}
@@ -142,7 +142,7 @@ def test_file_tools_integration(file_store):
     storage2 = InMemoryFileStore()
     storage2.store("test.txt", "Content from storage 2")
 
-    read_tool2 = FileReadTool(file_store=storage2, llm=llm_model())
+    read_tool2 = FileReadTool(file_store=storage2, llm=llm_model)
     input_data = {"file_path": "test.txt"}
 
     result2 = read_tool2.run(input_data)

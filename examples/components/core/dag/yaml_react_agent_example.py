@@ -17,7 +17,7 @@ from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
 
 # Input data for the workflow
-INPUT_DATA = "What is the content of provided image."
+INPUT_DATA = "What is the content of provided image. Call FileReadTool two times."
 IMAGE_FILE = ""
 
 
@@ -37,7 +37,7 @@ def run_yaml_react_agent_example():
         image_data = f.read()
 
     image_file = io.BytesIO(image_data)
-    image_file.name = "image.jpg"
+    image_file.name = "image.png"
 
     try:
         tracing = TracingCallbackHandler()
