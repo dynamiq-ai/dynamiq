@@ -17,7 +17,6 @@ from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     FileMappedInput,
     ToolCacheEntry,
-    create_message_from_input,
     process_tool_output_for_agent,
 )
 from dynamiq.nodes.llms import BaseLLM
@@ -467,7 +466,7 @@ class Agent(Node):
             if self.file_store.agent_file_write_enabled:
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
 
-            self.tools.append(FileReadTool(file_store=self.file_store_backend))
+            self.tools.append(FileReadTool(file_store=self.file_store_backend, llm=self.llm))
             self.tools.append(FileListTool(file_store=self.file_store_backend))
 
         self._init_prompt_blocks()
@@ -614,7 +613,7 @@ class Agent(Node):
 
         custom_metadata = self._prepare_metadata(dict(input_data))
 
-        input_message = input_message or self.input_message or create_message_from_input(dict(input_data))
+        input_message = input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
         input_message = input_message.format_message(**dict(input_data))
 
         use_memory = self.memory and (dict(input_data).get("user_id") or dict(input_data).get("session_id"))
@@ -655,7 +654,7 @@ class Agent(Node):
         if files:
             if not self.file_store_backend:
                 self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
-                self.tools.append(FileReadTool(file_store=self.file_store.backend))
+                self.tools.append(FileReadTool(file_store=self.file_store.backend, llm=self.llm))
                 self.tools.append(FileListTool(file_store=self.file_store.backend))
                 self._init_prompt_blocks()
             self._ensure_named_files(files)
