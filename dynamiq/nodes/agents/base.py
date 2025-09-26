@@ -395,6 +395,7 @@ class Agent(Node):
 
     input_message: Message | VisionMessage | None = None
     role: str | None = ""
+    description: str | None = Field(default=None, description="Short human-readable description of the agent.")
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
@@ -403,7 +404,7 @@ class Agent(Node):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
-    _json_schema_fields: ClassVar[list[str]] = ["role"]
+    _json_schema_fields: ClassVar[list[str]] = ["role", "description"]
 
     @classmethod
     def _generate_json_schema(
