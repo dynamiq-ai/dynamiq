@@ -20,6 +20,7 @@ from dynamiq.utils.logger import logger
 INPUT_DATA = "What is the content of provided image."
 IMAGE_FILE = ""
 
+
 def run_yaml_react_agent_example():
     """
     Run the ReActAgent example using YAML configuration with Workflow.from_yaml_file().

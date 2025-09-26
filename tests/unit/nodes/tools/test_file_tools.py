@@ -1,8 +1,13 @@
+import uuid
+
 import pytest
 
+from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.storages.file.in_memory import InMemoryFileStore
+
 
 @pytest.fixture
 def file_store():
@@ -15,10 +20,12 @@ def sample_file_path():
     """Sample file path for testing."""
     return "test/file.txt"
 
+
 @pytest.fixture
 def llm_model():
-    connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="api-key")
+    connection = OpenAIConnection(id=str(uuid.uuid4()), api_key="api-key")
     return OpenAI(name="OpenAI", model="gpt-4o-mini", connection=connection)
+
 
 def test_file_read_tool(file_store, sample_file_path):
     """Test FileReadTool functionality including initialization, successful read, and error handling."""
@@ -118,7 +125,7 @@ def test_file_tools_integration(file_store):
     """Test file tools working together."""
     # Test tools working together
     write_tool = FileWriteTool(file_store=file_store)
-    read_tool = FileReadTool(file_store=file_store)
+    read_tool = FileReadTool(file_store=file_store, llm=llm_model)
 
     # Write file
     write_input = {"file_path": "test/integration.txt", "content": "Integration test content"}
@@ -135,7 +142,7 @@ def test_file_tools_integration(file_store):
     storage2 = InMemoryFileStore()
     storage2.store("test.txt", "Content from storage 2")
 
-    read_tool2 = FileReadTool(file_store=storage2)
+    read_tool2 = FileReadTool(file_store=storage2, llm=llm_model)
     input_data = {"file_path": "test.txt"}
 
     result2 = read_tool2.run(input_data)
