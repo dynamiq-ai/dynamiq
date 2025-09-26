@@ -1,10 +1,20 @@
+import mimetypes
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
+from dynamiq.nodes.agents.utils import bytes_to_data_url
+from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.nodes.node import ensure_config
+from dynamiq.prompts.prompts import (
+    Prompt,
+    VisionMessage,
+    VisionMessageImageContent,
+    VisionMessageImageURL,
+    VisionMessageTextContent,
+)
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.logger import logger
@@ -14,6 +24,10 @@ class FileReadInputSchema(BaseModel):
     """Schema for file read input parameters."""
 
     file_path: str = Field(default="", description="Path of the file to read")
+    instructions: str | None = Field(
+        default=None,
+        description="Instructions for the file read. If not provided, the file will be read in its entirety.",
+    )
 
 
 class FileWriteInputSchema(BaseModel):
@@ -49,21 +63,86 @@ class FileReadTool(Node):
     description: str = """
         Reads files from storage based on the provided file path.
         For large files (configurable threshold), returns first, middle, and last chunks as bytes with separators.
+        For images and PDFs with instructions, uses LLM processing if the model supports vision/PDF input.
 
         Usage Examples:
             - Read small file: {"file_path": "config.txt"}
             - Read large file: {"file_path": "large_data.json"}
             - Read huge file: {"file_path": "huge_file.csv"}
+            - Read image: {"file_path": "image.png", "instructions": "Describe the image in detail"}
+            - Read PDF: {"file_path": "report.pdf", "instructions": "Summarize the report"}
 
         Parameters:
             - file_path: Path of the file to read
+            - instructions: Optional instructions for LLM processing of images/PDFs
     """
-
+    llm: BaseLLM = Field(..., description="LLM that will be used to process files.")
     file_store: FileStore = Field(..., description="File storage to read from.")
     max_size: int = Field(default=10000, description="Maximum size in bytes before chunking (default: 10000)")
     chunk_size: int = Field(default=1000, description="Size of each chunk in bytes (default: 1000)")
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileReadInputSchema]] = FileReadInputSchema
+
+    def _is_image(self, file_path: str, content: bytes) -> bool:
+        """Check if the file is an image."""
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if mime_type and mime_type.startswith("image/"):
+            return True
+
+        if content.startswith(b"\x89PNG") or content.startswith(b"\xFF\xD8\xFF") or content.startswith(b"GIF8"):
+            return True
+
+        return False
+
+    def _process_with_llm(self, content: bytes, instructions: str, config: RunnableConfig, **kwargs) -> dict[str, Any]:
+        """Process file content with LLM using vision capabilities."""
+        from dynamiq.runnables import RunnableStatus
+
+        llm_result = self.llm.run(
+            input_data={},
+            prompt=Prompt(
+                messages=[
+                    VisionMessage(
+                        role="user",
+                        content=[
+                            VisionMessageTextContent(text=instructions),
+                            VisionMessageImageContent(image_url=VisionMessageImageURL(url=bytes_to_data_url(content))),
+                        ],
+                    )
+                ]
+            ),
+            config=config,
+            **(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []}),
+        )
+
+        if llm_result.status != RunnableStatus.SUCCESS:
+            error_message = f"LLM processing failed with status '{llm_result.status}'"
+            if llm_result.error:
+                error_message += f": {llm_result.error.message}"
+            logger.warning(f"Tool {self.name} - {self.id}: {error_message}")
+            return {"content": error_message}
+
+        return {"content": llm_result.output["content"]}
+
+    @property
+    def to_dict_exclude_params(self):
+        """
+        Property to define which parameters should be excluded when converting the class instance to a dictionary.
+
+        Returns:
+            dict: A dictionary defining the parameters to exclude.
+        """
+        return super().to_dict_exclude_params | {"llm": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the instance.
+        """
+        data = super().to_dict(**kwargs)
+        data["llm"] = self.llm.to_dict(**kwargs)
+        return data
 
     def execute(
         self,
@@ -89,6 +168,22 @@ class FileReadTool(Node):
 
             content = self.file_store.retrieve(input_data.file_path)
             content_size = len(content)
+
+            # Only use LLM processing for images/PDFs with instructions and if LLM supports the specific type
+            if input_data.instructions:
+                is_image = self._is_image(input_data.file_path, content)
+
+                # Check if we should use LLM processing based on file type and LLM capabilities
+                if is_image and self.llm.is_vision_supported:
+                    logger.info(f"Tool {self.name} - {self.id}: processing image with LLM (vision supported)")
+                    return self._process_with_llm(content, input_data.instructions, config, **kwargs)
+                elif is_image and not self.llm.is_vision_supported:
+                    error_msg = (
+                        f"Cannot process image file '{input_data.file_path}' with current LLM. "
+                        f"The model '{self.llm.model}' does not support vision/image processing."
+                    )
+                    logger.warning(f"Tool {self.name} - {self.id}: {error_msg}")
+                    return {"content": error_msg}
 
             # If file is small enough, return full content
             if content_size <= self.max_size:

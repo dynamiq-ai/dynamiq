@@ -3,7 +3,8 @@ import json
 import warnings
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
-from litellm import get_max_tokens
+from litellm import get_max_tokens, supports_vision
+from litellm.utils import supports_pdf_input
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.connections import BaseConnection, HttpApiKey
@@ -183,6 +184,16 @@ class BaseLLM(ConnectionNode):
             int: Number of tokens.
         """
         return get_max_tokens(self.model)
+
+    @property
+    def is_vision_supported(self) -> bool:
+        """Check if the LLM supports vision/image processing."""
+        return supports_vision(self.model)
+
+    @property
+    def is_pdf_input_supported(self) -> bool:
+        """Check if the LLM supports PDF input."""
+        return supports_pdf_input(self.model)
 
     def get_messages(
         self,
