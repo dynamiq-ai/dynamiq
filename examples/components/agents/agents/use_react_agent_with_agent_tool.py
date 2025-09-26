@@ -40,7 +40,7 @@ def run(params: dict):
 
     child = ReActAgent(
         name="Coder Agent",
-        description='Uses Sum Calculator tool; provide only {"n": int}',
+        description='Call with {"input": "<calculation request>"}',
         role=CHILD_ROLE,
         llm=llm,
         tools=[python_tool],
