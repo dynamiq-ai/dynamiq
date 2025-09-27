@@ -6,10 +6,10 @@ import pytest
 from pydantic import Field, create_model
 
 from dynamiq import connections
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.tools import FileListTool, FileReadTool
 from dynamiq.nodes.tools.mcp import MCPServer, MCPSse, MCPTool
-from dynamiq.nodes.tools import FileReadTool, FileListTool
 
 
 def assert_tool_matches(tool, expected, connection):
@@ -185,7 +185,7 @@ def test_agent_integration_with_mcp_tools(sse_server_connection, mock_mcp_tools,
     mcp_server._mcp_tools = {"add": mock_mcp_tools["add"], "multiply": mock_mcp_tools["multiply"]}
     mcp_tool = mock_mcp_tools["subtract"]
 
-    agent = ReActAgent(llm=llm_model, tools=[mcp_server, mcp_tool])
+    agent = Agent(llm=llm_model, tools=[mcp_server, mcp_tool])
 
     agent_tools = [tool for tool in agent.tools if not isinstance(tool, (FileReadTool, FileListTool))]
     expected_tools = [

@@ -1,9 +1,9 @@
 """
-YAML-based ReActAgent example with file storage and Python tool.
+YAML-based agent example with file storage and Python tool.
 
 This example demonstrates:
 1. Loading a YAML configuration file using Workflow.from_yaml_file()
-2. Running a ReActAgent with file storage and Python tool
+2. Running an agent with file storage and Python tool
 """
 
 import json
@@ -23,12 +23,12 @@ IMAGE_FILE = ""
 
 def run_yaml_react_agent_example():
     """
-    Run the ReActAgent example using YAML configuration with Workflow.from_yaml_file().
+    Run the agent example using YAML configuration with Workflow.from_yaml_file().
 
     Returns:
         tuple: (workflow, traces) for use in graph drawing
     """
-    logger.info("Starting YAML-based ReActAgent file storage example...")
+    logger.info("Starting YAML-based agent file storage example...")
 
     # Path to the YAML configuration
     dag_yaml_file_path = os.path.join(os.path.dirname(__file__), "react_agent_file_storage.yaml")
@@ -62,7 +62,7 @@ def run_yaml_react_agent_example():
         return wf, tracing.runs
 
     except Exception as e:
-        logger.error(f"Error running YAML-based ReActAgent: {e}")
+        logger.error(f"Error running YAML-based agent: {e}")
         raise
 
 
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     # from dynamiq.storages.file.in_memory import InMemoryFileStore
     # print(InMemoryFileStore().to_dict())
 
-    print("=== YAML-based ReActAgent with File Storage and Python Tool ===")
+    print("=== YAML-based Agent with File Storage and Python Tool ===")
     print("This example loads configuration from YAML using Workflow.from_yaml_file()")
     print()
 

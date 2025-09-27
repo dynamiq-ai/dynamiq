@@ -1,7 +1,7 @@
 from dynamiq import Workflow
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -11,8 +11,8 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 def run_workflow_with_streaming():
     """
     Execute a workflow with two different agents and different streaming configurations:
-    1. A ReActAgent that streams all content (reasoning, tool usage, and answers)
-    2. A SimpleAgent that only streams the final answer
+    1. A Agent that streams all content (reasoning, tool usage, and answers)
+    2. A Agent that only streams the final answer
 
     Shows how to use:
     - Different streaming event channels
@@ -26,8 +26,8 @@ def run_workflow_with_streaming():
         temperature=0.7,
     )
 
-    # Set up ReActAgent with full streaming (reasoning, tools, answers)
-    react_agent = ReActAgent(
+    # Set up Agent with full streaming (reasoning, tools, answers)
+    react_agent = Agent(
         name="Research Assistant",
         id="research_agent",
         llm=llm,

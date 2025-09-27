@@ -6,7 +6,7 @@ from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import HttpApiKey
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.in_memory import InMemory
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from examples.llm_setup import setup_llm
@@ -33,7 +33,7 @@ Some of the key responsibilities of the Dynamiq Assistant include:
 AGENT_ROLE = PERSONALITY + ROLE
 
 
-def setup_agent() -> ReActAgent:
+def setup_agent() -> Agent:
     """
     Initializes an AI agent with a specified role and streaming configuration.
     """
@@ -56,7 +56,7 @@ def setup_agent() -> ReActAgent:
     memory = Memory(backend=InMemory())
     streaming_config = StreamingConfig(enabled=True, mode=StreamingMode.FINAL)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="Dynamiq Assistant",
         llm=llm,
         tools=[db_tool, mailgun_tool],
@@ -67,7 +67,7 @@ def setup_agent() -> ReActAgent:
     return agent
 
 
-def generate_agent_response(agent: ReActAgent, user_input: str):
+def generate_agent_response(agent: Agent, user_input: str):
     """
     Processes the user input using the agent. Supports both streaming and non-streaming responses.
     """

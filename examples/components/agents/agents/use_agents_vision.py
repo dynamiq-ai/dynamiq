@@ -3,18 +3,17 @@ import io
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from examples.llm_setup import setup_llm
-
 IMAGE_FILE = ""
 
 
 def run_files_with_images_workflow():
     """Example workflow that automatically detects images in the files field"""
-    llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=1)
-    agent = ReActAgent(
+    llm = setup_llm(model_provider="gpt", model_name="gpt-4.5-preview-2025-02-27", temperature=1)
+    agent = Agent(
         name="FilesImageAgent",
         id="files_image_agent",
         inference_mode=InferenceMode.XML,

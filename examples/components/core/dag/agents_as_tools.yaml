@@ -4,7 +4,7 @@ connections:
 
 nodes:
   child-agent:
-    type: dynamiq.nodes.agents.ReActAgent
+    type: dynamiq.nodes.agents.Agent
     name: Coder Agent
     description: Writes and runs small Python snippets to compute results.
     role: |
@@ -31,7 +31,7 @@ nodes:
     max_loops: 3
 
   parent-agent:
-    type: dynamiq.nodes.agents.ReActAgent
+    type: dynamiq.nodes.agents.Agent
     name: Manager Agent
     description: Delegates subtasks to a coding agent when computation is required.
     role: |
@@ -47,7 +47,7 @@ nodes:
       max_tokens: 2000
     tools:
       - id: child-agent
-        type: dynamiq.nodes.agents.ReActAgent
+        type: dynamiq.nodes.agents.Agent
         name: Coder Agent
         description: Writes and runs small Python snippets to compute results.
         role: |

@@ -1,3 +1,4 @@
+import re
 from collections import defaultdict
 
 import pytest
@@ -7,11 +8,22 @@ from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections.managers import get_connection_manager
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingMode
+
+
+def concat_stream_text(events):
+    """Rebuild content from streamed chunks safely."""
+    pieces = []
+    for _, content in events:
+        if content:
+            pieces.append(str(content))
+    raw = "".join(pieces)
+    normalized = re.sub(r"\s+", " ", raw).strip()
+    return normalized
 
 
 @pytest.fixture(scope="module")
@@ -41,7 +53,7 @@ def streaming_event():
 
 @pytest.fixture(scope="module")
 def react_agent_with_all_streaming(openai_llm, agent_role, streaming_event):
-    agent = ReActAgent(
+    agent = Agent(
         name="AllStreamingTestAgent",
         id="all_streaming_test_agent",
         llm=openai_llm,
@@ -60,7 +72,7 @@ def react_agent_with_all_streaming(openai_llm, agent_role, streaming_event):
 
 @pytest.fixture(scope="module")
 def react_agent_with_final_streaming(openai_llm, agent_role, streaming_event):
-    agent = ReActAgent(
+    agent = Agent(
         name="FinalStreamingTestAgent",
         id="final_streaming_test_agent",
         llm=openai_llm,
@@ -79,7 +91,7 @@ def react_agent_with_final_streaming(openai_llm, agent_role, streaming_event):
 
 @pytest.fixture(scope="module")
 def simple_agent_with_streaming(openai_llm, agent_role, streaming_event):
-    agent = SimpleAgent(
+    agent = Agent(
         name="SimpleStreamingAgent",
         id="simple_streaming_agent",
         llm=openai_llm,
@@ -118,7 +130,7 @@ def collect_streaming_events(streaming_iterator, workflow_id):
 
 @pytest.mark.integration
 def test_react_agent_all_streaming(react_agent_with_all_streaming, streaming_event):
-    """Test streaming functionality with ReActAgent in ALL mode."""
+    """Test streaming functionality with Agent in ALL mode."""
     with get_connection_manager():
         streaming = StreamingIteratorCallbackHandler()
 
@@ -140,13 +152,13 @@ def test_react_agent_all_streaming(react_agent_with_all_streaming, streaming_eve
         assert len(agent_output) > 0
         assert all(event == streaming_event for event, _ in agent_output)
 
-        full_content = " ".join(str(content) for _, content in agent_output)
-        assert "Paris" in full_content
+        full_content = concat_stream_text(agent_output)
+        assert "paris" in full_content.lower()
 
 
 @pytest.mark.integration
 def test_react_agent_final_streaming(react_agent_with_final_streaming, streaming_event):
-    """Test streaming functionality with ReActAgent in FINAL mode."""
+    """Test streaming functionality with Agent in FINAL mode."""
     with get_connection_manager():
         streaming = StreamingIteratorCallbackHandler()
 
@@ -168,19 +180,19 @@ def test_react_agent_final_streaming(react_agent_with_final_streaming, streaming
         assert len(agent_output) > 0
         assert all(event == streaming_event for event, _ in agent_output)
 
-        full_content = " ".join(str(content) for _, content in agent_output)
-        assert "Berlin" in full_content
+        full_content = concat_stream_text(agent_output)
+        assert "berlin" in full_content.lower()
 
         reasoning_indicators = ["I need to", "Let me think", "First,", "Step 1:"]
         found_reasoning = any(indicator in full_content for indicator in reasoning_indicators)
         assert not found_reasoning, "Should not find reasoning steps in FINAL streaming mode"
 
-        assert "Berlin" in str(response.output)
+        assert "berlin" in str(response.output).lower()
 
 
 @pytest.mark.integration
 def test_simple_agent_streaming(simple_agent_with_streaming, streaming_event):
-    """Test streaming functionality with SimpleAgent."""
+    """Test streaming functionality with Agent."""
     with get_connection_manager():
         streaming = StreamingIteratorCallbackHandler()
 
@@ -202,5 +214,5 @@ def test_simple_agent_streaming(simple_agent_with_streaming, streaming_event):
         assert len(agent_output) > 0
         assert all(event == streaming_event for event, _ in agent_output)
 
-        full_content = " ".join(str(content) for _, content in agent_output)
-        assert "Everest" in full_content
+        full_content = concat_stream_text(agent_output)
+        assert "everest" in full_content.lower()

@@ -27,7 +27,7 @@ nodes:
               model: gpt-3.5-turbo
           tasks:
           - id: agent-researcher
-            type: dynamiq.nodes.agents.ReActAgent
+            type: dynamiq.nodes.agents.Agent
             role: Research on relevant information
             llm:
               id: agent-researcher-llm
@@ -36,7 +36,7 @@ nodes:
               model: gpt-3.5-turbo
 
           - id: agent-researcher2
-            type: dynamiq.nodes.agents.ReActAgent
+            type: dynamiq.nodes.agents.Agent
             role: Research on relevant information
             llm:
               id: agent-researcher-llm
@@ -58,7 +58,7 @@ nodes:
               model: gpt-3.5-turbo
           tasks:
           - id: agent-researcher
-            type: dynamiq.nodes.agents.ReActAgent
+            type: dynamiq.nodes.agents.Agent
             role: Form results in short report
             llm:
               id: agent-researcher-llm

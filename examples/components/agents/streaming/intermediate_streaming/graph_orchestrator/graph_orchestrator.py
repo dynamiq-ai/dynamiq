@@ -5,10 +5,10 @@ import streamlit as st
 
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.connections import OpenAI as OpenAIConnection
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive import ActionCommand
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
@@ -38,7 +38,7 @@ def run_orchestrator(request: str, send_handler: AsyncStreamingIteratorCallbackH
         temperature=0.1,
     )
 
-    email_writer = ReActAgent(
+    email_writer = Agent(
         name="email-writer-agent",
         llm=llm,
         role="Write personalized emails taking into account feedback.",

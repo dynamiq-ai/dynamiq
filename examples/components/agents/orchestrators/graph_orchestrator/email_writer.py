@@ -2,9 +2,9 @@ from typing import Any
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes import InputTransformer
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
-from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.llms import OpenAI
 
 llm = OpenAI(
@@ -13,7 +13,7 @@ llm = OpenAI(
     temperature=0.1,
 )
 
-email_writer = SimpleAgent(
+email_writer = Agent(
     name="email-writer-agent",
     llm=llm,
     role="Write personalized emails taking into account feedback.",

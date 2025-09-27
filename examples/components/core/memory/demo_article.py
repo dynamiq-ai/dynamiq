@@ -2,7 +2,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import Qdrant as QdrantConnection
 from dynamiq.memory.backends.qdrant import Qdrant
 from dynamiq.memory.memory import Memory
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.prompts import MessageRole
 from examples.llm_setup import setup_llm
@@ -31,7 +31,7 @@ def setup_agent():
         metadata={"user_id": USER_ID},
     )
 
-    agent = SimpleAgent(
+    agent = Agent(
         name="Agent",
         llm=llm,
         role=AGENT_ROLE,

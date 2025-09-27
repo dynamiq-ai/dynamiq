@@ -5,7 +5,7 @@ from composio_tool import ComposioTool
 
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.in_memory import InMemory
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from examples.llm_setup import setup_llm
 
 # Create tool instance
@@ -16,7 +16,7 @@ tool_3 = ComposioTool(action=Action.LINEAR_CREATE_LINEAR_ISSUE, api_key=os.geten
 llm = setup_llm()
 memory = Memory(backend=InMemory())
 
-agent = ReActAgent(
+agent = Agent(
     name="AI Agent",
     llm=llm,
     tools=[tool_1, tool_2, tool_3],

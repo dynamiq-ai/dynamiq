@@ -11,7 +11,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks.base import BaseCallbackHandler, get_parent_run_id, get_run_id
 from dynamiq.flows import Flow
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.agents import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import format_value
 from examples.llm_setup import setup_llm
@@ -287,7 +287,7 @@ class LangfuseCallbackHandler(LangfuseBaseCallbackHandler, BaseCallbackHandler):
 
 if __name__ == "__main__":
     llm = setup_llm()
-    agent = SimpleAgent(
+    agent = Agent(
         name="Agent",
         llm=llm,
         role="Agent, goal is to provide information based on the user input",

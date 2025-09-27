@@ -23,7 +23,7 @@ nodes:
     inference_mode: DEFAULT
     behaviour_on_max_loops: raise
     format_schema: []
-    type: dynamiq.nodes.agents.ReActAgent
+    type: dynamiq.nodes.agents.Agent
     depends: []
     input_mapping: {}
     llm:

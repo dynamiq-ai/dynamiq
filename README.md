@@ -100,7 +100,7 @@ An agent that has the access to E2B Code Interpreter and is capable of solving c
 ```python
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.connections import OpenAI as OpenAIConnection, E2B as E2BConnection
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 
 # Initialize the E2B tool
@@ -117,8 +117,8 @@ llm = OpenAI(
     max_tokens=1000,
 )
 
-# Create the ReAct agent
-agent = ReActAgent(
+# Create the agent
+agent = Agent(
     name="react-agent",
     llm=llm, # Language model instance
     tools=[e2b_tool],  # List of tools that the agent can use
@@ -148,7 +148,7 @@ if __name__ == "__main__":
 from dynamiq import Workflow
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.agents.reflection import ReflectionAgent
+from dynamiq.nodes.agents import Agent
 
 # Setup your LLM
 llm = OpenAI(
@@ -158,7 +158,7 @@ llm = OpenAI(
 )
 
 # Define the first agent: a question answering agent
-first_agent = ReflectionAgent(
+first_agent = Agent(
     name="Expert Agent",
     llm=llm,
     role="Professional writer with the goal of producing well-written and informative responses.",
@@ -167,7 +167,7 @@ first_agent = ReflectionAgent(
 )
 
 # Define the second agent: a poetic writer
-second_agent = ReflectionAgent(
+second_agent = Agent(
     name="Poetic Rewriter Agent",
     llm=llm,
     role="Professional writer with the goal of rewriting user input as a poem without changing its meaning.",
@@ -205,7 +205,7 @@ print('--- Agent 2: Output ---\n', result.output[second_agent.id].get("output").
 from dynamiq import Workflow
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.agents.reflection import ReflectionAgent
+from dynamiq.nodes.agents import Agent
 
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 
@@ -216,7 +216,7 @@ llm = OpenAI(
     temperature=0.1,
 )
 
-first_agent = ReflectionAgent(
+first_agent = Agent(
     name="Expert Agent",
     llm=llm,
     role="Professional writer with the goal of producing well-written and informative responses.",  # Role of the agent
@@ -224,7 +224,7 @@ first_agent = ReflectionAgent(
     max_loops=5
 )
 
-second_agent = ReflectionAgent(
+second_agent = Agent(
     name="Poetic Rewriter Agent",
     llm=llm,
     role="Professional writer with the goal of rewriting user input as a poem without changing its meaning.",  # Role of the agent
@@ -267,8 +267,7 @@ from dynamiq.connections import (OpenAI as OpenAIConnection,
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.agents.reflection import ReflectionAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 
@@ -288,7 +287,7 @@ llm = OpenAI(
 )
 
 # Define agents
-coding_agent = ReActAgent(
+coding_agent = Agent(
     name="coding-agent",
     llm=llm,
     tools=[python_tool],
@@ -298,7 +297,7 @@ coding_agent = ReActAgent(
     max_loops=15,
 )
 
-planner_agent = ReflectionAgent(
+planner_agent = Agent(
     name="planner-agent",
     llm=llm,
     role=("Expert agent with planning skills."
@@ -306,7 +305,7 @@ planner_agent = ReflectionAgent(
           "and provide a detailed action plan."),
 )
 
-search_agent = ReActAgent(
+search_agent = Agent(
     name="search-agent",
     llm=llm,
     tools=[search_tool],
@@ -495,7 +494,7 @@ A simple chatbot that uses the `Memory` module to store and retrieve conversatio
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.in_memory import InMemory
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 
 AGENT_ROLE = "helpful assistant, goal is to provide useful information and answer questions"
@@ -507,7 +506,7 @@ llm = OpenAI(
 
 memory = Memory(backend=InMemory())
 
-agent = SimpleAgent(
+agent = Agent(
     name="Agent",
     llm=llm,
     role=AGENT_ROLE,
@@ -544,7 +543,7 @@ from typing import Any
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 
 llm = OpenAI(
@@ -553,7 +552,7 @@ llm = OpenAI(
     temperature=0.1,
 )
 
-email_writer = SimpleAgent(
+email_writer = Agent(
     name="email-writer-agent",
     llm=llm,
     role="Write personalized emails taking into account feedback.",

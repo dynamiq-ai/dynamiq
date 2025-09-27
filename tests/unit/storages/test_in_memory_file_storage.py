@@ -43,7 +43,7 @@ def test_store_file_exists_error(storage, sample_text_content):
     storage.store(file_path, sample_text_content)
 
     storage.store(file_path, "new content")
-    assert storage.retrieve(file_path) == sample_text_content.encode('utf-8')
+    assert storage.retrieve(file_path) == sample_text_content.encode("utf-8")
 
 
 def test_store_text_content_full(storage, sample_text_content, sample_file_path):
