@@ -56,7 +56,7 @@ class FileMappedInput(BaseModel):
 
     @field_serializer("files")
     def serialize_files(self, files: list[io.BytesIO]) -> list[str]:
-        return [convert_bytesio_to_file_info(file, f"file_{i}", i) for i, file in enumerate(files)]
+        return [getattr(file, "name", f"file_{i}") for i, file in enumerate(files)]
 
 
 class XMLParser:
