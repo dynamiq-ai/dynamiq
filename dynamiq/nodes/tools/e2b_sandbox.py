@@ -354,8 +354,10 @@ class E2BInterpreterTool(ConnectionNode):
     def to_dict(self, **kwargs) -> dict[str, Any]:
         """
         Convert instance to dictionary format.
+
         Args:
             **kwargs: Additional keyword arguments.
+
         Returns:
             dict[str, Any]: Dictionary representation of the instance.
         """
