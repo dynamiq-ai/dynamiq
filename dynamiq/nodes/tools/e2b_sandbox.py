@@ -351,6 +351,19 @@ class E2BInterpreterTool(ConnectionNode):
         """
         return super().to_dict_exclude_params | {"files": True}
 
+    def to_dict(self, **kwargs) -> dict[str, Any]:
+        """
+        Convert instance to dictionary format.
+        Args:
+            **kwargs: Additional keyword arguments.
+        Returns:
+            dict[str, Any]: Dictionary representation of the instance.
+        """
+        data = super().to_dict(**kwargs)
+        if self.files:
+            data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
+        return data
+
     def _initialize_persistent_sandbox(self):
         """Initialize the persistent sandbox, install packages, and upload initial files."""
         logger.debug(f"Tool {self.name} - {self.id}: " f"Initializing Persistent Sandbox with timeout {self.timeout}s")
