@@ -6,7 +6,7 @@ from typing import Any, Sequence
 
 import filetype
 from lxml import etree as LET  # nosec: B410
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
 
 from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
 from dynamiq.prompts import (
@@ -17,10 +17,34 @@ from dynamiq.prompts import (
     VisionMessageImageURL,
     VisionMessageTextContent,
 )
+from dynamiq.storages.file.base import FileInfo
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import CHARS_PER_TOKEN
 
 TOOL_MAX_TOKENS = 64000
+
+
+def convert_bytesio_to_file_info(bytesio_obj: io.BytesIO, key: str, index: int = None) -> FileInfo:
+    """Convert a BytesIO object to a FileInfo object with base64 encoded content."""
+    content_bytes = bytesio_obj.getvalue()
+
+    encoded = base64.b64encode(content_bytes).decode("utf-8")
+
+    name = getattr(bytesio_obj, "name", f"file_{key}" if index is None else f"file_{key}_{index}")
+    content_type = getattr(bytesio_obj, "content_type", "unknown")
+    description = getattr(bytesio_obj, "description", "")
+
+    # Create a path based on the name
+    path = f"/{name}" if not name.startswith("/") else name
+
+    return FileInfo(
+        content=encoded,
+        path=path,
+        name=name,
+        content_type=content_type,
+        metadata={"description": description},
+        size=len(content_bytes),
+    )
 
 
 class FileMappedInput(BaseModel):
@@ -29,6 +53,10 @@ class FileMappedInput(BaseModel):
     input: Any
     files: list[io.BytesIO]  # List of BytesIO objects or FileInfo objects
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @field_serializer("files")
+    def serialize_files(self, files: list[io.BytesIO]) -> list[str]:
+        return [convert_bytesio_to_file_info(file, f"file_{i}", i) for i, file in enumerate(files)]
 
 
 class XMLParser:
