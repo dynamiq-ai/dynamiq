@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_execution_run_id, get_parent_run_id, get_run_id
 from dynamiq.clients import BaseTracingClient, DynamiqTracingClient
-from dynamiq.utils import JsonWorkflowEncoder, format_value, generate_uuid
+from dynamiq.utils import INCLUDE_NONE_KEYS, JsonWorkflowEncoder, format_value, generate_uuid
 
 UTC = timezone.utc
 
@@ -149,9 +149,17 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
 
     @staticmethod
     def _prune_nulls(value: Any) -> Any:
-        """Recursively remove keys with None values from dicts and None items from lists."""
+        """Recursively remove keys with None values from dicts and None items from lists.
+
+        Note: Preserve None for keys named 'input' and 'output' so these fields
+        are explicitly present even when their values are None.
+        """
         if isinstance(value, dict):
-            return {k: TracingCallbackHandler._prune_nulls(v) for k, v in value.items() if v is not None}
+            return {
+                k: (TracingCallbackHandler._prune_nulls(v) if v is not None else None)
+                for k, v in value.items()
+                if v is not None or k in INCLUDE_NONE_KEYS
+            }
         if isinstance(value, list):
             return [TracingCallbackHandler._prune_nulls(v) for v in value if v is not None]
         return value

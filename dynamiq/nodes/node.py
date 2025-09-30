@@ -39,7 +39,7 @@ from dynamiq.types.feedback import (
     FeedbackMethod,
 )
 from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEventMessage
-from dynamiq.utils import format_value, generate_uuid, merge
+from dynamiq.utils import INCLUDE_NONE_KEYS, format_value, generate_uuid, merge
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
@@ -684,7 +684,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         data["input_mapping"] = format_value(self.input_mapping)[0]
 
         if for_tracing:
-            data = {k: v for k, v in data.items() if v is not None}
+            data = {k: v for k, v in data.items() if v is not None or k in INCLUDE_NONE_KEYS}
         return data
 
     def send_streaming_approval_message(

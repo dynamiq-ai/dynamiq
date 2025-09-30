@@ -4,7 +4,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.runnables import Runnable, RunnableConfig
-from dynamiq.utils import generate_uuid
+from dynamiq.utils import INCLUDE_NONE_KEYS, generate_uuid
 
 
 class BaseFlow(BaseModel, Runnable, ABC):
@@ -52,7 +52,7 @@ class BaseFlow(BaseModel, Runnable, ABC):
             **kwargs,
         )
         if for_tracing:
-            data = {k: v for k, v in data.items() if v is not None}
+            data = {k: v for k, v in data.items() if v is not None or k in INCLUDE_NONE_KEYS}
 
         return data
 

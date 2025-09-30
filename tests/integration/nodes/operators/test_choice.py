@@ -304,13 +304,15 @@ def test_workflow_with_choice_operator(
         "parent_run_id": ANY,
         "status": RunStatus.SUCCEEDED,
         "input": input_data,
-        "output": TracingCallbackHandler._prune_nulls(expected_output_choice_node),
+        "output": expected_output_choice_node,
         "metadata": ANY,
         "executions": [
             {
                 "id": ANY,
                 "start_time": ANY,
                 "end_time": ANY,
+                "input": None,
+                "output": None,
                 "status": RunStatus.SUCCEEDED,
                 "metadata": ANY,
             }
@@ -422,6 +424,8 @@ def test_workflow_with_choice_operator_with_errors_and_retries(
                     "message": str(error),
                     "traceback": ANY,
                 },
+                "input": None,
+                "output": None,
                 "metadata": ANY,
             },
             {
@@ -433,6 +437,8 @@ def test_workflow_with_choice_operator_with_errors_and_retries(
                     "message": str(error),
                     "traceback": ANY,
                 },
+                "input": None,
+                "output": None,
                 "metadata": ANY,
             },
             {
@@ -440,6 +446,8 @@ def test_workflow_with_choice_operator_with_errors_and_retries(
                 "start_time": ANY,
                 "end_time": ANY,
                 "status": RunStatus.SUCCEEDED,
+                "input": None,
+                "output": None,
                 "metadata": ANY,
             },
         ],

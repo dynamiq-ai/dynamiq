@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, computed_field
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import BaseFlow, Flow
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.utils import format_duration, generate_uuid, merge
+from dynamiq.utils import INCLUDE_NONE_KEYS, format_duration, generate_uuid, merge
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -121,7 +121,7 @@ class Workflow(BaseModel, Runnable):
         )
         data["flow"] = self.flow.to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
         if for_tracing:
-            data = {k: v for k, v in data.items() if v is not None}
+            data = {k: v for k, v in data.items() if v is not None or k in INCLUDE_NONE_KEYS}
 
         return data
 
