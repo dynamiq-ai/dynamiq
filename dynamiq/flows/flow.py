@@ -65,8 +65,13 @@ class Flow(BaseFlow):
         Returns:
             dict: A dictionary representation of the instance.
         """
+        for_tracing = kwargs.get("for_tracing", False)
         data = super().to_dict(include_secure_params=include_secure_params, **kwargs)
-        data["nodes"] = [node.to_dict(include_secure_params=include_secure_params, **kwargs) for node in self.nodes]
+        node_kwargs = {k: v for k, v in kwargs.items() if k != "for_tracing"}
+        data["nodes"] = [
+            node.to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **node_kwargs)
+            for node in self.nodes
+        ]
         return data
 
     @field_validator("nodes")

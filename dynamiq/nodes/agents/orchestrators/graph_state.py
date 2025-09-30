@@ -185,7 +185,7 @@ class GraphState(Node):
                     **kwargs,
                 )
 
-                run_depends = [NodeDependency(node=self.manager).to_dict()]
+                run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
                 if manager_result.status != RunnableStatus.SUCCESS:
                     result = manager_result.to_dict()

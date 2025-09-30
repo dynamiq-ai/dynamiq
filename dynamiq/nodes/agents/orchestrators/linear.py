@@ -141,7 +141,7 @@ class LinearOrchestrator(Orchestrator):
                 run_depends=self._run_depends,
                 **kwargs,
             )
-            self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+            self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
             if manager_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.manager.name}' failed: {manager_result.error.message}"
@@ -245,7 +245,7 @@ class LinearOrchestrator(Orchestrator):
                     run_depends=self._run_depends,
                     **kwargs,
                 )
-                self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+                self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
                 if manager_result.status == RunnableStatus.SUCCESS:
                     assigned_agent_index = self._extract_agent_index(manager_result.output.get("content", {}))
@@ -272,7 +272,7 @@ class LinearOrchestrator(Orchestrator):
                             run_depends=self._run_depends,
                             **kwargs,
                         )
-                        self._run_depends = [NodeDependency(node=assigned_agent).to_dict()]
+                        self._run_depends = [NodeDependency(node=assigned_agent).to_dict(for_tracing=True)]
                         if result.status != RunnableStatus.SUCCESS:
                             raise ValueError(
                                 f"Failed to execute task {task.id}.{task.name} "

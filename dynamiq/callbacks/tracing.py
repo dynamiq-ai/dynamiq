@@ -56,12 +56,12 @@ class ExecutionRun:
     metadata: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        """Convert ExecutionRun to dictionary.
+        """Convert ExecutionRun to dictionary with None fields pruned.
 
         Returns:
-            dict: Dictionary representation of ExecutionRun.
+            dict: Dictionary representation of ExecutionRun without null fields.
         """
-        return asdict(self)
+        return TracingCallbackHandler._prune_nulls(asdict(self))
 
 
 @dataclass
@@ -104,12 +104,12 @@ class Run:
     tags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        """Convert Run to dictionary.
+        """Convert Run to dictionary with None fields pruned recursively.
 
         Returns:
-            dict: Dictionary representation of Run.
+            dict: Dictionary representation of Run without null fields.
         """
-        return asdict(self)
+        return TracingCallbackHandler._prune_nulls(asdict(self))
 
     def to_json(self) -> str:
         """Convert Run to JSON string.
@@ -146,6 +146,15 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @staticmethod
+    def _prune_nulls(value: Any) -> Any:
+        """Recursively remove keys with None values from dicts and None items from lists."""
+        if isinstance(value, dict):
+            return {k: TracingCallbackHandler._prune_nulls(v) for k, v in value.items() if v is not None}
+        if isinstance(value, list):
+            return [TracingCallbackHandler._prune_nulls(v) for v in value if v is not None]
+        return value
 
     @cached_property
     def host(self) -> dict:
@@ -195,8 +204,6 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             parent_run_id=parent_run_id,
             metadata={
                 "node": serialized,
-                "run_depends": kwargs.get("run_depends", []),
-                "host": self.host,
                 **self.metadata,
             },
             tags=self.tags,
@@ -224,10 +231,8 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             source_id=self.source_id,
             session_id=self.session_id,
             start_time=datetime.now(UTC),
-            input=format_value(input_data, truncate_enabled=True)[0],
             metadata={
                 "workflow": {"id": serialized.get("id"), "version": serialized.get("version")},
-                "host": self.host,
                 **self.metadata,
             },
             tags=self.tags,
@@ -245,7 +250,6 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-        run.output = format_value(output_data, truncate_enabled=True)[0]
         run.status = RunStatus.SUCCEEDED
 
         self.flush()
@@ -290,8 +294,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             session_id=self.session_id,
             start_time=datetime.now(UTC),
             parent_run_id=parent_run_id,
-            input=format_value(input_data, truncate_enabled=True)[0],
-            metadata={"flow": {"id": serialized.get("id")}, "host": self.host, **self.metadata},
+            metadata={"flow": {"id": serialized.get("id")}, **self.metadata},
             tags=self.tags,
         )
 
@@ -307,7 +310,6 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-        run.output = format_value(output_data, truncate_enabled=True)[0]
         run.status = RunStatus.SUCCEEDED
         # If parent_run_id is None, the run is the highest in the execution tree
         if run.parent_run_id is None:
@@ -427,7 +429,6 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         execution = ExecutionRun(
             id=execution_run_id,
             start_time=datetime.now(UTC),
-            input=format_value(input_data, truncate_enabled=True)[0],
             metadata={},
         )
         run.executions.append(execution)
@@ -445,7 +446,6 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run = ensure_run(get_run_id(kwargs), self.runs)
         execution = ensure_execution_run(get_execution_run_id(kwargs), run.executions)
         execution.end_time = datetime.now(UTC)
-        execution.output = format_value(output_data, truncate_enabled=True)[0]
         execution.status = RunStatus.SUCCEEDED
 
     def on_node_execute_error(

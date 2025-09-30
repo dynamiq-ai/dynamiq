@@ -113,12 +113,16 @@ class Workflow(BaseModel, Runnable):
             dict: A dictionary representation of the instance.
         """
         exclude = kwargs.pop("exclude", self.to_dict_exclude_params)
+        for_tracing: bool = kwargs.pop("for_tracing", False)
         data = self.model_dump(
             exclude=exclude,
             serialize_as_any=kwargs.pop("serialize_as_any", True),
             **kwargs,
         )
-        data["flow"] = self.flow.to_dict(include_secure_params=include_secure_params, **kwargs)
+        data["flow"] = self.flow.to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
+        if for_tracing:
+            data = {k: v for k, v in data.items() if v is not None}
+
         return data
 
     def to_yaml_file_data(self) -> "WorkflowYamlData":
@@ -227,7 +231,7 @@ class Workflow(BaseModel, Runnable):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_workflow_start(self.model_dump(), input_data, **kwargs)
+                callback.on_workflow_start(self.to_dict(for_tracing=True), input_data, **kwargs)
 
     def run_on_workflow_end(
         self, output: Any, config: RunnableConfig = None, **kwargs: Any
@@ -241,7 +245,7 @@ class Workflow(BaseModel, Runnable):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_workflow_end(self.model_dump(), output, **kwargs)
+                callback.on_workflow_end(self.to_dict(for_tracing=True), output, **kwargs)
 
     def run_on_workflow_error(
         self, error: BaseException, config: RunnableConfig = None, **kwargs: Any
@@ -255,4 +259,4 @@ class Workflow(BaseModel, Runnable):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_workflow_error(self.model_dump(), error, **kwargs)
+                callback.on_workflow_error(self.to_dict(for_tracing=True), error, **kwargs)

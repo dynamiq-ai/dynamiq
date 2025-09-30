@@ -45,11 +45,15 @@ class BaseFlow(BaseModel, Runnable, ABC):
             dict: A dictionary representation of the instance.
         """
         exclude = kwargs.pop("exclude", self.to_dict_exclude_params)
+        for_tracing: bool = kwargs.pop("for_tracing", False)
         data = self.model_dump(
             exclude=exclude,
             serialize_as_any=kwargs.pop("serialize_as_any", True),
             **kwargs,
         )
+        if for_tracing:
+            data = {k: v for k, v in data.items() if v is not None}
+
         return data
 
     def run_on_flow_start(
@@ -65,7 +69,7 @@ class BaseFlow(BaseModel, Runnable, ABC):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_flow_start(self.model_dump(), input_data, **kwargs)
+                callback.on_flow_start(self.to_dict(for_tracing=True), input_data, **kwargs)
 
     def run_on_flow_end(
         self, output_data: Any, config: RunnableConfig = None, **kwargs: Any
@@ -80,7 +84,7 @@ class BaseFlow(BaseModel, Runnable, ABC):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_flow_end(self.model_dump(), output_data, **kwargs)
+                callback.on_flow_end(self.to_dict(for_tracing=True), output_data, **kwargs)
 
     def run_on_flow_error(
         self, error: BaseException, config: RunnableConfig = None, **kwargs: Any
@@ -95,4 +99,4 @@ class BaseFlow(BaseModel, Runnable, ABC):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_flow_error(self.model_dump(), error, **kwargs)
+                callback.on_flow_error(self.to_dict(for_tracing=True), error, **kwargs)

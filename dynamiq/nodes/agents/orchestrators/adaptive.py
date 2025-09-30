@@ -140,7 +140,7 @@ class AdaptiveOrchestrator(Orchestrator):
             run_depends=self._run_depends,
             **kwargs,
         )
-        self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+        self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
         if manager_result.status != RunnableStatus.SUCCESS:
             error_message = f"Agent '{self.manager.name}' failed: {manager_result.error.message}"
@@ -161,7 +161,7 @@ class AdaptiveOrchestrator(Orchestrator):
                 run_depends=self._run_depends,
                 **kwargs,
             )
-            self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+            self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
             if reflect_result.status != RunnableStatus.SUCCESS:
                 error_message = f"Agent '{self.manager.name}' failed on reflection: {reflect_result.error.message}"
@@ -237,7 +237,7 @@ class AdaptiveOrchestrator(Orchestrator):
                 run_depends=self._run_depends,
                 **kwargs,
             )
-            self._run_depends = [NodeDependency(node=agent).to_dict()]
+            self._run_depends = [NodeDependency(node=agent).to_dict(for_tracing=True)]
             if result.status != RunnableStatus.SUCCESS:
                 error_message = f"Agent '{agent.name}' failed: {result.error.message}"
                 raise OrchestratorError(f"Failed to execute Agent {agent.name}, due to error: {error_message}")
@@ -260,7 +260,7 @@ class AdaptiveOrchestrator(Orchestrator):
                 run_depends=self._run_depends,
                 **kwargs,
             )
-            self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+            self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
             if result.status != RunnableStatus.SUCCESS:
                 content = result.error.message
                 logger.error(
