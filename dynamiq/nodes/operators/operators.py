@@ -40,13 +40,13 @@ class Choice(Node):
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {"options": True}
 
-    def to_dict(self, **kwargs) -> dict:
+    def to_dict(self, include_secure_params: bool = True, for_tracing=False, **kwargs) -> dict:
         """Converts the instance to a dictionary.
 
         Returns:
             dict: A dictionary representation of the instance.
         """
-        data = super().to_dict(**kwargs)
+        data = super().to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
         data["options"] = [option.model_dump(**kwargs) for option in self.options]
         return data
 
@@ -192,7 +192,7 @@ class Map(Node):
         Returns:
             dict: A dictionary representation of the instance.
         """
-        data = super().to_dict(**kwargs)
+        data = super().to_dict(for_tracing=kwargs.pop("for_tracing", False), **kwargs)
         data["node"] = self.node.to_dict(**kwargs)
         return data
 

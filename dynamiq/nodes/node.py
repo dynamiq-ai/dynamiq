@@ -855,7 +855,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                 transformed_input = input_data | {
                     k: result.to_tracing_depend_dict() for k, result in depends_result.items()
                 }
-                skip_data = {"failed_dependency": e.failed_depend.to_dict()}
+                skip_data = {"failed_dependency": e.failed_depend.to_dict(for_tracing=True)}
                 self.run_on_node_skip(
                     callbacks=config.callbacks,
                     skip_data=skip_data,

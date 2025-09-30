@@ -59,17 +59,15 @@ class Flow(BaseFlow):
     def to_dict_exclude_params(self):
         return {"nodes": True, "connection_manager": True}
 
-    def to_dict(self, include_secure_params: bool = True, **kwargs) -> dict:
+    def to_dict(self, include_secure_params: bool = True, for_tracing=False, **kwargs) -> dict:
         """Converts the instance to a dictionary.
 
         Returns:
             dict: A dictionary representation of the instance.
         """
-        for_tracing = kwargs.get("for_tracing", False)
         data = super().to_dict(include_secure_params=include_secure_params, **kwargs)
-        node_kwargs = {k: v for k, v in kwargs.items() if k != "for_tracing"}
         data["nodes"] = [
-            node.to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **node_kwargs)
+            node.to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
             for node in self.nodes
         ]
         return data

@@ -192,12 +192,12 @@ def test_exa_with_invalid_input_schema(mock_requests, mock_exa_response):
     assert len(tracing_runs) == 3
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf.id
-    assert wf_run.output
+    assert wf_run.output is None
     assert wf_run.status == RunStatus.SUCCEEDED
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf.flow.id
     assert flow_run.parent_run_id == wf_run.id
-    assert flow_run.output
+    assert flow_run.output is None
     assert flow_run.status == RunStatus.SUCCEEDED
     exa_tool_run = tracing_runs[2]
     assert exa_tool_run.metadata["node"]["id"] == exa_tool.id
