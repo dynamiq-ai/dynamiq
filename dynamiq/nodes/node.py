@@ -44,7 +44,7 @@ from dynamiq.utils.duration import format_duration
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
 from dynamiq.utils.logger import logger
-from dynamiq.utils.utils import clear_annotation, remove_null_transformer, truncate_config
+from dynamiq.utils.utils import clear_annotation
 
 
 def ensure_config(config: RunnableConfig = None) -> RunnableConfig:
@@ -92,6 +92,11 @@ class Transformer(BaseModel):
     path: str | None = None
     selector: dict[str, str] | None = None
 
+    def to_dict(self, for_tracing: bool = False, **kwargs) -> dict | None:
+        if for_tracing and self.path is None and self.selector is None:
+            return None
+        return self.model_dump(**kwargs)
+
 
 class InputTransformer(Transformer):
     """Input transformer for nodes."""
@@ -111,6 +116,11 @@ class CachingConfig(BaseModel):
         enabled (bool): Whether caching is enabled for the node.
     """
     enabled: bool = False
+
+    def to_dict(self, for_tracing: bool = False, **kwargs) -> dict:
+        if for_tracing and self.enabled is False:
+            return {"enabled": False}
+        return self.model_dump(**kwargs)
 
 
 class NodeReadyToRun(BaseModel):
@@ -621,6 +631,11 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             "vector_store": True,
             "depends": True,
             "input_mapping": True,
+            "input_transformer": True,
+            "output_transformer": True,
+            "caching": True,
+            "streaming": True,
+            "approval": True,
         }
 
     @property
@@ -655,15 +670,17 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             **kwargs,
         )
 
-        if for_tracing:
-            remove_null_transformer("input_transformer", data)
-            remove_null_transformer("output_transformer", data)
-            [truncate_config(key, data) for key in ["streaming", "approval", "caching"]]
+        it = self.input_transformer.to_dict(for_tracing=for_tracing, **kwargs)
+        if it is not None:
+            data["input_transformer"] = it
+        ot = self.output_transformer.to_dict(for_tracing=for_tracing, **kwargs)
+        if ot is not None:
+            data["output_transformer"] = ot
+        data["caching"] = self.caching.to_dict(for_tracing=for_tracing, **kwargs)
+        data["streaming"] = self.streaming.to_dict(for_tracing=for_tracing, **kwargs)
+        data["approval"] = self.approval.to_dict(for_tracing=for_tracing, **kwargs)
 
-        if for_tracing:
-            data["depends"] = [depend.to_dict(for_tracing=True) for depend in self.depends]
-        else:
-            data["depends"] = [depend.to_dict(**kwargs) for depend in self.depends]
+        data["depends"] = [depend.to_dict(for_tracing=for_tracing, **kwargs) for depend in self.depends]
         data["input_mapping"] = format_value(self.input_mapping)[0]
 
         if for_tracing:
