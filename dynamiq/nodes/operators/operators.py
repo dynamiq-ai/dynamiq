@@ -192,7 +192,7 @@ class Map(Node):
         Returns:
             dict: A dictionary representation of the instance.
         """
-        data = super().to_dict(for_tracing=kwargs.pop("for_tracing", False), **kwargs)
+        data = super().to_dict(**kwargs)
         data["node"] = self.node.to_dict(**kwargs)
         return data
 
