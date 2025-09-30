@@ -640,8 +640,6 @@ class E2BInterpreterTool(ConnectionNode):
         """
         try:
             collected_files = {}
-            extensions = ["csv", "xlsx", "xls", "txt", "json", "png", "jpg", "jpeg", "gif", "pdf", "html", "md"]
-            patterns = " -o ".join([f"-name '*.{ext}'" for ext in extensions])
 
             search_dirs = ["/home/user/output"]
 
@@ -659,7 +657,7 @@ class E2BInterpreterTool(ConnectionNode):
                 max_depth = "3"  # Allow deeper search in /home/user/output directory
                 cmd = (
                     f"cd {shlex.quote(search_dir)} && find . -maxdepth {max_depth} "
-                    f"-type f \\( {patterns} \\) -printf '%P\\n' 2>/dev/null | head -20"
+                    f"-type f -printf '%P\\n' 2>/dev/null | head -20"
                 )
                 res = sandbox.commands.run(cmd)
 
