@@ -204,6 +204,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             parent_run_id=parent_run_id,
             metadata={
                 "node": serialized,
+                "run_depends": kwargs.get("run_depends", []),
                 **self.metadata,
             },
             tags=self.tags,
