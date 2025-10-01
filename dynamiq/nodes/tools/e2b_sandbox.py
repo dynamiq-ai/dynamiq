@@ -191,50 +191,34 @@ def generate_file_description(file: bytes | io.BytesIO, length: int = 20) -> str
     return f"File starting with: {file_content.hex()}"
 
 
-class FileData(BaseModel):
-    """Model for file data with metadata."""
-    data: bytes
-    name: str
-    description: str
-
-
-def handle_file_upload(files: list[bytes | io.BytesIO | FileData | FileInfo]) -> list[FileData]:
+def handle_file_upload(files: list[bytes | io.BytesIO | FileInfo]) -> list[io.BytesIO]:
     """
-    Handles file uploading with additional metadata.
+    Handles file uploading and converts all inputs to BytesIO objects.
 
     Args:
         files: List of file objects to upload.
 
     Returns:
-        list[FileData]: List of processed file data objects.
+        list[io.BytesIO]: List of BytesIO objects with file data.
 
     Raises:
         ValueError: If invalid file data type is provided.
     """
     files_data = []
     for file in files:
-        if isinstance(file, FileData):
+        if isinstance(file, io.BytesIO):
             files_data.append(file)
-        elif isinstance(file, bytes | io.BytesIO):
+        elif isinstance(file, bytes):
             file_name = getattr(file, "name", generate_fallback_filename(file))
-            description = getattr(file, "description", generate_file_description(file))
-            files_data.append(
-                FileData(
-                    data=file.getvalue() if isinstance(file, io.BytesIO) else file,
-                    name=file_name,
-                    description=description,
-                )
-            )
+            bytes_io = io.BytesIO(file)
+            bytes_io.name = file_name
+            files_data.append(bytes_io)
         elif isinstance(file, FileInfo):
-            files_data.append(
-                FileData(
-                    data=file.content,
-                    name=file.name,
-                    description=file.metadata.get("description", ""),
-                )
-            )
+            bytes_io = io.BytesIO(file.content)
+            bytes_io.name = file.name
+            files_data.append(bytes_io)
         else:
-            raise ValueError(f"Error: Invalid file data type: {type(file)}. " f"Expected bytes or BytesIO or FileData.")
+            raise ValueError(f"Error: Invalid file data type: {type(file)}. " f"Expected bytes or BytesIO or FileInfo.")
 
     return files_data
 
@@ -252,13 +236,13 @@ class SandboxCreationErrorHandling(BaseModel):
 class E2BInterpreterInputSchema(BaseModel):
     """Input schema for E2B interpreter tool."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     packages: str = Field(default="", description="Comma-separated pip packages to install.")
     shell_command: str = Field(default="", description="Shell command to execute.")
     python: str = Field(default="", description="Python code to execute.")
     download_files: list[str] = Field(default_factory=list, description="Exact file paths to fetch as base64.")
-    files: list[FileData] | None = Field(
+    files: list[io.BytesIO] | None = Field(
         default=None,
         description="Files to upload to the sandbox.",
         json_schema_extra={"is_accessible_to_agent": False, "map_from_storage": True},
@@ -274,12 +258,6 @@ class E2BInterpreterInputSchema(BaseModel):
         json_schema_extra={"is_accessible_to_agent": False},
     )
     cwd: str = Field(default="/home/user/output", description="Working directory for shell commands.")
-    artifact_mode: Literal["diff", "none"] = Field(
-        default="diff", description="How to collect artifacts: 'diff' (new/changed files in cwd) or 'none'."
-    )
-    artifact_max_bytes: int = Field(
-        default=5_000_000, description="Maximum total bytes to download via artifacts. Use 0 to disable size limit."
-    )
     timeout: int | None = Field(default=None, description="Override sandbox timeout for this execution (seconds)")
 
     @model_validator(mode="after")
@@ -291,7 +269,7 @@ class E2BInterpreterInputSchema(BaseModel):
 
     @field_validator("files", mode="before")
     @classmethod
-    def files_validator(cls, files: list[FileData | bytes | io.BytesIO | FileInfo], **kwargs):
+    def files_validator(cls, files: list[bytes | io.BytesIO | FileInfo], **kwargs):
         """Validate and process files."""
         if files in (None, [], ()):
             return None
@@ -323,7 +301,7 @@ class E2BInterpreterTool(ConnectionNode):
     description: str = DESCRIPTION_E2B
     connection: E2BConnection
     installed_packages: list = []
-    files: list[FileData] | None = None
+    files: list[io.BytesIO] | None = None
     persistent_sandbox: bool = True
     timeout: int = Field(default=600, description="Sandbox timeout in seconds (default: 600 seconds)")
     is_files_allowed: bool = True
@@ -401,7 +379,7 @@ class E2BInterpreterTool(ConnectionNode):
             if process.exit_code != 0:
                 raise ToolExecutionException(f"Error during package installation: {process.stderr}", recoverable=True)
 
-    def _upload_files(self, files: list[FileData], sandbox: Sandbox) -> str:
+    def _upload_files(self, files: list[io.BytesIO], sandbox: Sandbox) -> str:
         """
         Upload multiple files to the sandbox and return details for each file.
 
@@ -415,17 +393,18 @@ class E2BInterpreterTool(ConnectionNode):
         upload_details = []
         for file in files:
             uploaded_path = self._upload_file(file, sandbox)
+            file_name = getattr(file, "name", "unknown_file")
             upload_details.append(
                 {
-                    "original_name": file.name,
-                    "description": file.description,
+                    "original_name": file_name,
+                    "description": getattr(file, "description", ""),
                     "uploaded_path": uploaded_path,
                 }
             )
         self._update_description_with_files(upload_details)
         return "\n".join([f"{file['original_name']} -> {file['uploaded_path']}" for file in upload_details])
 
-    def _upload_file(self, file: FileData, sandbox: Sandbox | None = None) -> str:
+    def _upload_file(self, file: io.BytesIO, sandbox: Sandbox | None = None) -> str:
         """
         Upload a single file to the specified sandbox and return the uploaded path.
 
@@ -442,18 +421,20 @@ class E2BInterpreterTool(ConnectionNode):
         if not sandbox:
             raise ValueError("Sandbox instance is required for file upload.")
 
-        if "/" in file.name:
-            dir_path = "/".join(file.name.split("/")[:-1])
+        file_name = getattr(file, "name", "unknown_file")
+
+        if "/" in file_name:
+            dir_path = "/".join(file_name.split("/")[:-1])
             sandbox.commands.run(f"mkdir -p /home/user/input/{shlex.quote(dir_path)}")
 
-        file_like_object = io.BytesIO(file.data)
-        file_like_object.name = file.name.split("/")[-1]
+        # Reset file position to beginning
+        file.seek(0)
 
         # Upload to /home/user/input directory
         target_path = (
-            f"/home/user/input/{file.name}" if not file.name.startswith("/") else f"/home/user/input{file.name}"
+            f"/home/user/input/{file_name}" if not file_name.startswith("/") else f"/home/user/input{file_name}"
         )
-        uploaded_info = sandbox.files.write(target_path, file_like_object)
+        uploaded_info = sandbox.files.write(target_path, file)
         logger.debug(f"Tool {self.name} - {self.id}: Uploaded file info: {uploaded_info}")
 
         return uploaded_info.path
