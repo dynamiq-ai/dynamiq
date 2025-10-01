@@ -256,12 +256,14 @@ def test_workflow_with_depend_nodes_with_tracing(
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf.id
     assert wf_run.metadata["workflow"]["version"] == wf.version
+    assert wf_run.output == format_value(expected_output)[0]
     assert wf_run.status == RunStatus.SUCCEEDED
     assert wf_run.tags == tags
     assert metadata.items() <= wf_run.metadata.items()
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf.flow.id
     assert flow_run.parent_run_id == wf_run.id
+    assert flow_run.output == format_value(expected_output)[0]
     assert flow_run.status == RunStatus.SUCCEEDED
     assert flow_run.tags == tags
     assert metadata.items() <= flow_run.metadata.items()
@@ -414,12 +416,14 @@ async def test_workflow_with_depend_nodes_with_tracing_async(
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf.id
     assert wf_run.metadata["workflow"]["version"] == wf.version
+    assert wf_run.output == format_value(expected_output)[0]
     assert wf_run.status == RunStatus.SUCCEEDED
     assert wf_run.tags == tags
     assert metadata.items() <= wf_run.metadata.items()
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf.flow.id
     assert flow_run.parent_run_id == wf_run.id
+    assert flow_run.output == format_value(expected_output)[0]
     assert flow_run.status == RunStatus.SUCCEEDED
     assert flow_run.tags == tags
     assert metadata.items() <= flow_run.metadata.items()
@@ -549,11 +553,13 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf.id
     assert wf_run.metadata["workflow"]["version"] == wf.version
+    assert wf_run.output == expected_output
     assert wf_run.status == RunStatus.SUCCEEDED
     assert wf_run.tags == []
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf.flow.id
     assert flow_run.parent_run_id == wf_run.id
+    assert flow_run.output == expected_output
     assert flow_run.status == RunStatus.SUCCEEDED
     assert flow_run.tags == []
     openai_run = tracing_runs[2]
@@ -832,14 +838,14 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf_with_conditional_depend.id
     assert wf_run.metadata["workflow"]["version"] == wf_with_conditional_depend.version
-    assert wf_run.output is None
+    assert wf_run.output == format_value(expected_output)[0]
     assert wf_run.status == RunStatus.SUCCEEDED
     assert wf_run.tags == tags
     assert metadata.items() <= wf_run.metadata.items()
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf_with_conditional_depend.flow.id
     assert flow_run.parent_run_id == wf_run.id
-    assert flow_run.output is None
+    assert flow_run.output == format_value(expected_output)[0]
     assert flow_run.status == RunStatus.SUCCEEDED
     assert flow_run.tags == tags
     assert metadata.items() <= flow_run.metadata.items()

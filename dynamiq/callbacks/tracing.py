@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_execution_run_id, get_parent_run_id, get_run_id
 from dynamiq.clients import BaseTracingClient, DynamiqTracingClient
-from dynamiq.utils import INCLUDE_NONE_KEYS, JsonWorkflowEncoder, format_value, generate_uuid
+from dynamiq.utils import JsonWorkflowEncoder, format_value, generate_uuid
 
 UTC = timezone.utc
 
@@ -61,7 +61,7 @@ class ExecutionRun:
         Returns:
             dict: Dictionary representation of ExecutionRun without null fields.
         """
-        return TracingCallbackHandler._prune_nulls(asdict(self))
+        return asdict(self)
 
 
 @dataclass
@@ -109,7 +109,7 @@ class Run:
         Returns:
             dict: Dictionary representation of Run without null fields.
         """
-        return TracingCallbackHandler._prune_nulls(asdict(self))
+        return asdict(self)
 
     def to_json(self) -> str:
         """Convert Run to JSON string.
@@ -146,23 +146,6 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @staticmethod
-    def _prune_nulls(value: Any) -> Any:
-        """Recursively remove keys with None values from dicts and None items from lists.
-
-        Note: Preserve None for keys named 'input' and 'output' so these fields
-        are explicitly present even when their values are None.
-        """
-        if isinstance(value, dict):
-            return {
-                k: (TracingCallbackHandler._prune_nulls(v) if v is not None else None)
-                for k, v in value.items()
-                if v is not None or k in INCLUDE_NONE_KEYS
-            }
-        if isinstance(value, list):
-            return [TracingCallbackHandler._prune_nulls(v) for v in value if v is not None]
-        return value
 
     @cached_property
     def host(self) -> dict:
@@ -240,6 +223,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             source_id=self.source_id,
             session_id=self.session_id,
             start_time=datetime.now(UTC),
+            input=format_value(input_data, truncate_enabled=True)[0],
             metadata={
                 "workflow": {"id": serialized.get("id"), "version": serialized.get("version")},
                 **self.metadata,
@@ -259,6 +243,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
+        run.output = format_value(output_data, truncate_enabled=True)[0]
         run.status = RunStatus.SUCCEEDED
 
         self.flush()
@@ -303,6 +288,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             session_id=self.session_id,
             start_time=datetime.now(UTC),
             parent_run_id=parent_run_id,
+            input=format_value(input_data, truncate_enabled=True)[0],
             metadata={"flow": {"id": serialized.get("id")}, **self.metadata},
             tags=self.tags,
         )
@@ -319,6 +305,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
+        run.output = format_value(output_data, truncate_enabled=True)[0]
         run.status = RunStatus.SUCCEEDED
         # If parent_run_id is None, the run is the highest in the execution tree
         if run.parent_run_id is None:

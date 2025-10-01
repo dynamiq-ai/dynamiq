@@ -15,7 +15,7 @@ from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, create_model, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
-from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler
+from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.dry_run import DryRunMixin
@@ -39,7 +39,7 @@ from dynamiq.types.feedback import (
     FeedbackMethod,
 )
 from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEventMessage
-from dynamiq.utils import INCLUDE_NONE_KEYS, format_value, generate_uuid, merge
+from dynamiq.utils import format_value, generate_uuid, merge
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.jsonpath import mapper as jsonpath_mapper
@@ -684,7 +684,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         data["input_mapping"] = format_value(self.input_mapping)[0]
 
         if for_tracing:
-            data = {k: v for k, v in data.items() if v is not None or k in INCLUDE_NONE_KEYS}
+            data = {k: v for k, v in data.items() if v is not None or k in ("input", "output")}
         return data
 
     def send_streaming_approval_message(
@@ -1083,7 +1083,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_start(self.to_dict(for_tracing=True), input_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1103,7 +1106,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_end(self.to_dict(for_tracing=True), output_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_end(self.to_dict(**dict_kwargs), output_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1123,7 +1129,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_error(self.to_dict(for_tracing=True), error, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_error(self.to_dict(**dict_kwargs), error, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1145,7 +1154,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_skip(self.to_dict(for_tracing=True), skip_data, input_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_skip(self.to_dict(**dict_kwargs), skip_data, input_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1168,7 +1180,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_execute_start(self.to_dict(for_tracing=True), input_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_execute_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1188,7 +1203,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_execute_end(self.to_dict(for_tracing=True), output_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_execute_end(self.to_dict(**dict_kwargs), output_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1208,7 +1226,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_execute_error(self.to_dict(for_tracing=True), error, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_execute_error(self.to_dict(**dict_kwargs), error, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1226,7 +1247,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_execute_run(self.to_dict(for_tracing=True), **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_execute_run(self.to_dict(**dict_kwargs), **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1246,7 +1270,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_execute_stream(self.to_dict(for_tracing=True), chunk, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_execute_stream(self.to_dict(**dict_kwargs), chunk, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 

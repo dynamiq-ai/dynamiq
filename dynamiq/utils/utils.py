@@ -13,8 +13,6 @@ from pydantic import BaseModel, PydanticUserError, RootModel
 
 TRUNCATE_LIMIT = 20
 
-INCLUDE_NONE_KEYS = frozenset({"input", "output"})
-
 CHARS_PER_TOKEN = 4
 
 
@@ -366,16 +364,3 @@ def orjson_encode(obj: Any) -> Any:
             return str(obj)
     else:
         return encoded_value
-
-
-def truncate_config(key: str, data):
-    cfg = data.get(key)
-    if isinstance(cfg, dict):
-        if cfg.get("enabled") is False:
-            data[key] = {"enabled": False}
-
-
-def remove_null_transformer(key: str, data):
-    t = data.get(key)
-    if isinstance(t, dict) and (t.get("path") is None and t.get("selector") is None):
-        data.pop(key, None)

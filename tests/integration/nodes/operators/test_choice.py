@@ -285,11 +285,11 @@ def test_workflow_with_choice_operator(
     assert len(tracing_runs) == 3
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf_choice_operator.id
-    assert wf_run.output is None
+    assert wf_run.output == expected_output
     assert wf_run.status == RunStatus.SUCCEEDED
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf_choice_operator.flow.id
-    assert flow_run.output is None
+    assert flow_run.output == expected_output
     assert flow_run.status == RunStatus.SUCCEEDED
     choice_trace = tracing_runs[2]
     assert choice_trace.to_dict() == {
@@ -305,6 +305,7 @@ def test_workflow_with_choice_operator(
         "status": RunStatus.SUCCEEDED,
         "input": input_data,
         "output": expected_output_choice_node,
+        "error": None,
         "metadata": ANY,
         "executions": [
             {
@@ -313,6 +314,7 @@ def test_workflow_with_choice_operator(
                 "end_time": ANY,
                 "input": None,
                 "output": None,
+                "error": None,
                 "status": RunStatus.SUCCEEDED,
                 "metadata": ANY,
             }
@@ -414,6 +416,7 @@ def test_workflow_with_choice_operator_with_errors_and_retries(
         "input": input_data,
         "output": expected_output_choice_node,
         "metadata": ANY,
+        "error": None,
         "executions": [
             {
                 "id": ANY,
@@ -448,6 +451,7 @@ def test_workflow_with_choice_operator_with_errors_and_retries(
                 "status": RunStatus.SUCCEEDED,
                 "input": None,
                 "output": None,
+                "error": None,
                 "metadata": ANY,
             },
         ],

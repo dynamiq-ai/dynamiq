@@ -3,8 +3,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.runnables import Runnable, RunnableConfig
-from dynamiq.utils import INCLUDE_NONE_KEYS, generate_uuid
+from dynamiq.utils import generate_uuid
 
 
 class BaseFlow(BaseModel, Runnable, ABC):
@@ -45,14 +46,12 @@ class BaseFlow(BaseModel, Runnable, ABC):
             dict: A dictionary representation of the instance.
         """
         exclude = kwargs.pop("exclude", self.to_dict_exclude_params)
-        for_tracing: bool = kwargs.pop("for_tracing", False)
+        kwargs.pop("for_tracing", False)
         data = self.model_dump(
             exclude=exclude,
             serialize_as_any=kwargs.pop("serialize_as_any", True),
             **kwargs,
         )
-        if for_tracing:
-            data = {k: v for k, v in data.items() if v is not None or k in INCLUDE_NONE_KEYS}
 
         return data
 
@@ -69,7 +68,10 @@ class BaseFlow(BaseModel, Runnable, ABC):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_flow_start(self.to_dict(for_tracing=True), input_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_flow_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
 
     def run_on_flow_end(
         self, output_data: Any, config: RunnableConfig = None, **kwargs: Any
@@ -84,7 +86,10 @@ class BaseFlow(BaseModel, Runnable, ABC):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_flow_end(self.to_dict(for_tracing=True), output_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_flow_end(self.to_dict(**dict_kwargs), output_data, **kwargs)
 
     def run_on_flow_error(
         self, error: BaseException, config: RunnableConfig = None, **kwargs: Any
@@ -99,4 +104,7 @@ class BaseFlow(BaseModel, Runnable, ABC):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_flow_error(self.to_dict(for_tracing=True), error, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_flow_error(self.to_dict(**dict_kwargs), error, **kwargs)
