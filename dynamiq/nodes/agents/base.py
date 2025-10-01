@@ -512,6 +512,9 @@ class Agent(Node):
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         if self.images:
             data["images"] = [{"name": getattr(f, "name", f"image_{i}")} for i, f in enumerate(self.images)]
+
+        data["file_store"] = self.file_store.to_dict()
+
         return data
 
     def init_components(self, connection_manager: ConnectionManager | None = None):

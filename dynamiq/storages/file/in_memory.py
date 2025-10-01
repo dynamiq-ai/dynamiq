@@ -163,8 +163,6 @@ class InMemoryFileStore(FileStore):
             dict: A dictionary representation of the file store that is JSON serializable.
         """
 
-        return {
-            "type": "dynamiq.storages.file.InMemoryFileStore",
-            "file_count": len(self._files),
-            "is_empty": self.is_empty(),
-        }
+        data = self.model_dump(**kwargs)
+        data["type"] = self.type
+        return data

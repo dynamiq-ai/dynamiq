@@ -34,6 +34,11 @@ class Input(Pass):
     )
     _json_schema_fields: ClassVar[list[str]] = ["json_schema"]
 
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary."""
+        data = super().model_dump(**kwargs)
+        return data
+
 
 class Output(Pass):
     """
@@ -62,3 +67,8 @@ class Output(Pass):
     """,
     )
     _json_schema_fields: ClassVar[list[str]] = ["json_schema"]
+
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary."""
+        data = super().model_dump(**kwargs)
+        return data
