@@ -171,7 +171,7 @@ class VectorStoreRetriever(Node):
             text_embedder_output = self.text_embedder.run(
                 input_data={"query": query}, run_depends=self._run_depends, config=config, **kwargs
             )
-            self._run_depends = [NodeDependency(node=self.text_embedder).to_dict()]
+            self._run_depends = [NodeDependency(node=self.text_embedder).to_dict(for_tracing=True)]
             embedding = text_embedder_output.output.get("embedding")
 
             document_retriever_output = self.document_retriever.run(
@@ -187,7 +187,7 @@ class VectorStoreRetriever(Node):
                 config=config,
                 **kwargs,
             )
-            self._run_depends = [NodeDependency(node=self.document_retriever).to_dict()]
+            self._run_depends = [NodeDependency(node=self.document_retriever).to_dict(for_tracing=True)]
             retrieved_documents = document_retriever_output.output.get("documents", [])
             logger.debug(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")
 

@@ -214,7 +214,7 @@ class Orchestrator(Node, ABC):
         manager_result = self.manager.run(
             input_data={"action": "final", **input_data}, config=config, run_depends=self._run_depends, **kwargs
         )
-        self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+        self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
         if manager_result.status != RunnableStatus.SUCCESS:
             error_message = f"Manager '{self.manager.name}' failed: {manager_result.error.message}"

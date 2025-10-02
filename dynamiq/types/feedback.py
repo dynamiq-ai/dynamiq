@@ -60,6 +60,11 @@ class ApprovalConfig(BaseModel):
     event: str = APPROVAL_EVENT
     accept_pattern: str = ""
 
+    def to_dict(self, for_tracing: bool = False, **kwargs) -> dict:
+        if for_tracing and not self.enabled:
+            return {"enabled": False}
+        return self.model_dump(**kwargs)
+
 
 class PlanApprovalConfig(ApprovalConfig):
     msg_template: str = (

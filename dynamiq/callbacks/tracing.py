@@ -196,7 +196,6 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             metadata={
                 "node": serialized,
                 "run_depends": kwargs.get("run_depends", []),
-                "host": self.host,
                 **self.metadata,
             },
             tags=self.tags,
@@ -227,7 +226,6 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             input=format_value(input_data, truncate_enabled=True)[0],
             metadata={
                 "workflow": {"id": serialized.get("id"), "version": serialized.get("version")},
-                "host": self.host,
                 **self.metadata,
             },
             tags=self.tags,
@@ -291,7 +289,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             start_time=datetime.now(UTC),
             parent_run_id=parent_run_id,
             input=format_value(input_data, truncate_enabled=True)[0],
-            metadata={"flow": {"id": serialized.get("id")}, "host": self.host, **self.metadata},
+            metadata={"flow": {"id": serialized.get("id")}, **self.metadata},
             tags=self.tags,
         )
 
@@ -427,7 +425,6 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         execution = ExecutionRun(
             id=execution_run_id,
             start_time=datetime.now(UTC),
-            input=format_value(input_data, truncate_enabled=True)[0],
             metadata={},
         )
         run.executions.append(execution)
@@ -445,7 +442,6 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run = ensure_run(get_run_id(kwargs), self.runs)
         execution = ensure_execution_run(get_execution_run_id(kwargs), run.executions)
         execution.end_time = datetime.now(UTC)
-        execution.output = format_value(output_data, truncate_enabled=True)[0]
         execution.status = RunStatus.SUCCEEDED
 
     def on_node_execute_error(

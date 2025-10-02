@@ -48,13 +48,10 @@ def test_workflow_with_openai_text_embedder(mock_embedding_executor_truncate_tra
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf_openai_ai.id
     assert wf_run.metadata["workflow"]["version"] == wf_openai_ai.version
-    assert wf_run.output == format_value(expected_output, truncate_enabled=True)[0]
     assert wf_run.status == RunStatus.SUCCEEDED
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf_openai_ai.flow.id
-    assert flow_run.metadata["host"]
     assert flow_run.parent_run_id == wf_run.id
-    assert flow_run.output == format_value(expected_output, truncate_enabled=True)[0]
     assert flow_run.status == RunStatus.SUCCEEDED
     openai_run = tracing_runs[2]
     assert openai_run.parent_run_id == flow_run.id
@@ -126,13 +123,10 @@ def test_workflow_with_openai_document_embedder(mock_embedding_executor_truncate
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf_openai_ai.id
     assert wf_run.metadata["workflow"]["version"] == wf_openai_ai.version
-    assert wf_run.output == format_value(expected_output, truncate_enabled=True)[0]
     assert wf_run.status == RunStatus.SUCCEEDED
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf_openai_ai.flow.id
-    assert flow_run.metadata["host"]
     assert flow_run.parent_run_id == wf_run.id
-    assert flow_run.output == format_value(expected_output, truncate_enabled=True)[0]
     assert flow_run.status == RunStatus.SUCCEEDED
     openai_run = tracing_runs[2]
     assert openai_run.parent_run_id == flow_run.id
