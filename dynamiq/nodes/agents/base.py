@@ -1,4 +1,3 @@
-import base64
 import io
 import re
 import textwrap
@@ -17,6 +16,7 @@ from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     FileMappedInput,
     ToolCacheEntry,
+    convert_bytesio_to_file_info,
     process_tool_output_for_agent,
 )
 from dynamiq.nodes.llms import BaseLLM
@@ -26,7 +26,7 @@ from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.storages.file.base import FileInfo, FileStore, FileStoreConfig
+from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 from dynamiq.utils.utils import deep_merge
@@ -208,32 +208,10 @@ class StreamChunkChoiceDelta(BaseModel):
             raise ValueError(f"source must be a string, got {type(v).__name__}: {v}")
         return v
 
-    def _convert_bytesio_to_file_info(self, bytesio_obj: io.BytesIO, key: str, index: int = None) -> FileInfo:
-        """Convert a BytesIO object to a FileInfo object with base64 encoded content."""
-        content_bytes = bytesio_obj.getvalue()
-
-        encoded = base64.b64encode(content_bytes).decode("utf-8")
-
-        name = getattr(bytesio_obj, "name", f"file_{key}" if index is None else f"file_{key}_{index}")
-        content_type = getattr(bytesio_obj, "content_type", "unknown")
-        description = getattr(bytesio_obj, "description", "")
-
-        # Create a path based on the name
-        path = f"/{name}" if not name.startswith("/") else name
-
-        return FileInfo(
-            content=encoded,
-            path=path,
-            name=name,
-            content_type=content_type,
-            metadata={"description": description},
-            size=len(content_bytes),
-        )
-
     def _recursive_serialize(self, obj, key_path: str = "", index: int = None):
         """Recursively serialize an object, converting any BytesIO objects to FileInfo objects."""
         if isinstance(obj, io.BytesIO):
-            return self._convert_bytesio_to_file_info(obj, key_path, index).model_dump()
+            return convert_bytesio_to_file_info(obj, key_path, index).model_dump()
 
         elif isinstance(obj, dict):
             result = {}
