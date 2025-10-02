@@ -19,7 +19,7 @@ INPUT_QUESTION = "How are sin(x) and cos(x) connected in electrodynamics?"
 
 def run_workflow() -> tuple[str, dict]:
     """
-    Set up and run a workflow using a Agent with OpenAI's language model.
+    Set up and run a workflow using an Agent with OpenAI's language model.
 
     The workflow processes the input question "What is the capital of France?"
     using a professional writer agent.
