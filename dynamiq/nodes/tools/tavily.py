@@ -39,8 +39,8 @@ Parameter Guide:
 
 
 Examples:
-- {"query": "React performance 2024", "search_depth": "advanced"}
-- {"query": "GPT-4 news", "topic": "news", "time_range": "week"}
+- {"query": "React performance 2025", "search_depth": "advanced"}
+- {"query": "GPT-5 news", "topic": "news", "time_range": "week"}
 - {"query": "ML tutorials", "include_domains": ["coursera.org"]}"""
 
 
