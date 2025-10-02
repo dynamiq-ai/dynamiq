@@ -3,7 +3,7 @@ import json
 from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.python import Python
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
@@ -38,7 +38,7 @@ def run(params: dict):
         description='Computes the sum of the first n integers; expects input {"n": int}',
     )
 
-    child = ReActAgent(
+    child = Agent(
         name="Coder Agent",
         description='Call with {"input": "<calculation request>"}',
         role=CHILD_ROLE,
@@ -50,7 +50,7 @@ def run(params: dict):
 
 
 def make_parent_agent(llm, child_agent):
-    parent = ReActAgent(
+    parent = Agent(
         name="Manager Agent",
         description="Delegates subtasks to a coding agent when computation is required.",
         role=PARENT_ROLE,

@@ -11,7 +11,7 @@ from dynamiq.utils import format_value
 from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
-    from dynamiq.nodes.agents.react import ReActAgent
+    from dynamiq.nodes.agents import Agent
 
 
 FINAL_ANSWER_FUNCTION_NAME = "provide_final_answer"
@@ -284,8 +284,8 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
             yield item
 
 
-class ReActAgentStreamingParserCallback(BaseCallbackHandler):
-    """ReAct Agent callback that parses LLM streaming output in real time and streams structured chunks.
+class AgentStreamingParserCallback(BaseCallbackHandler):
+    """Agent callback that parses LLM streaming output in real time and streams structured chunks.
 
     This callback attaches to the underlying LLM node (group == 'llms'), incrementally parses the
     provider streaming chunks to detect logical sections like reasoning and final answer based on
@@ -293,7 +293,7 @@ class ReActAgentStreamingParserCallback(BaseCallbackHandler):
     with appropriate `step` labels (reasoning/answer) included.
     """
 
-    def __init__(self, agent: "ReActAgent", config, loop_num: int, **kwargs):
+    def __init__(self, agent: "Agent", config, loop_num: int, **kwargs):
         self.agent = agent
         self.config = config
         self.loop_num = loop_num

@@ -1,16 +1,16 @@
 from dynamiq.connections import Http as HttpConnection
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
 from dynamiq.nodes.types import InferenceMode
 from examples.llm_setup import setup_llm
 
 
-def setup_react_agent_with_apis() -> ReActAgent:
+def setup_react_agent_with_apis() -> Agent:
     """
     Set up and return a ReAct agent with two API tools.
 
     Returns:
-        ReActAgent: Configured ReAct agent.
+        Agent: Configured ReAct agent.
     """
     llm = setup_llm()
 
@@ -46,7 +46,7 @@ def setup_react_agent_with_apis() -> ReActAgent:
         description="Gets a random dog fact (using cat API for demo purposes)",
     )
 
-    agent = ReActAgent(
+    agent = Agent(
         name="AI Agent",
         llm=llm,
         tools=[cat_api, dog_api],

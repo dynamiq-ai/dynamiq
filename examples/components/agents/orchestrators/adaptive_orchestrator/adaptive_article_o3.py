@@ -1,9 +1,8 @@
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.connections import Exa, ZenRows
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.zenrows import ZenRowsTool
@@ -36,7 +35,7 @@ if __name__ == "__main__":
 
     llm = setup_llm(model_provider="gpt", model_name="o3-mini", max_tokens=100000)
 
-    agent_coding = ReActAgent(
+    agent_coding = Agent(
         name="Coding Agent",
         llm=llm,
         tools=[python_tool],
@@ -44,7 +43,7 @@ if __name__ == "__main__":
         inference_mode=InferenceMode.XML,
     )
 
-    agent_web = ReActAgent(
+    agent_web = Agent(
         name="Web Agent",
         llm=llm,
         tools=[zenrows_tool, exa_tool],
@@ -52,7 +51,7 @@ if __name__ == "__main__":
         inference_mode=InferenceMode.XML,
     )
 
-    agent_reflection = SimpleAgent(
+    agent_reflection = Agent(
         name="Reflection Agent (Reviewer, Critic)",
         llm=llm,
         role=(

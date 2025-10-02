@@ -6,7 +6,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import PostgreSQL as PostgreSQLConnection
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.postgresql import PostgreSQL as PostgreSQLMemoryBackend
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI as OpenAI_LLM
 
 PG_HOST = os.getenv("POSTGRESQL_HOST", "localhost")
@@ -34,7 +34,7 @@ def setup_llm():
 
 
 def setup_agent():
-    """Sets up the SimpleAgent with PostgreSQL memory."""
+    """Sets up the Agent with PostgreSQL memory."""
     llm = setup_llm()
 
     try:
@@ -66,7 +66,7 @@ def setup_agent():
     memory = Memory(backend=pg_backend, message_limit=MEMORY_MESSAGE_LIMIT)
 
     AGENT_ROLE = "Helpful assistant that remembers previous conversations using PostgreSQL."
-    agent = SimpleAgent(
+    agent = Agent(
         name="ChatAgentPostgres",
         llm=llm,
         role=AGENT_ROLE,
@@ -76,7 +76,7 @@ def setup_agent():
     return agent
 
 
-def chat_loop(agent: SimpleAgent):
+def chat_loop(agent: Agent):
     """Runs the main chat loop."""
     print("\nWelcome to the AI Chat (PostgreSQL Backend)! (Type 'exit' to end)")
 

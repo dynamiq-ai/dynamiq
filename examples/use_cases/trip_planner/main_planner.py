@@ -3,10 +3,9 @@ from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.base import Agent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators import LinearOrchestrator
 from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
@@ -63,7 +62,7 @@ def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini") -> d
     tool_search = ScaleSerpTool(connection=http_connection_search)
 
     # Create agents
-    agent_selection_city = ReActAgent(
+    agent_selection_city = Agent(
         name="City Selection Expert",
         role=AGENT_SELECTION_CITY_ROLE,
         llm=llm_agent,
@@ -72,7 +71,7 @@ def inference(input_data: dict, model_type="gpt", model_name="gpt-4o-mini") -> d
         behaviour_on_max_loops=Behavior.RETURN,
     )
 
-    agent_city_guide = ReActAgent(
+    agent_city_guide = Agent(
         name="City Guide Expert",
         role=AGENT_CITY_GUIDE_ROLE,
         llm=llm_agent,

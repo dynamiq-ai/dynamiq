@@ -5,9 +5,10 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import E2B, Exa
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.exa_search import ExaTool
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 from dynamiq.utils import JsonWorkflowEncoder
@@ -36,13 +37,13 @@ EXAMPLE_QUERY = (
 )
 
 
-def setup_multi_tool_streaming_agent() -> ReActAgent:
+def setup_multi_tool_streaming_agent() -> Agent:
     """
     Set up and return a ReAct agent with search and code interpreter tools,
     configured with streaming enabled to test parallel tool calls streaming.
 
     Returns:
-        ReActAgent: Configured ReAct agent with multi-tool capabilities and streaming.
+        Agent: Configured ReAct agent with multi-tool capabilities and streaming.
     """
     conn_code = E2B()
     conn_search = Exa()
@@ -52,7 +53,7 @@ def setup_multi_tool_streaming_agent() -> ReActAgent:
 
     llm = setup_llm(model_provider="gpt", model_name="o3-mini", temperature=0.2)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="MultiToolStreamingAgent",
         id="MultiToolStreamingAgent",
         llm=llm,
@@ -71,9 +72,7 @@ def setup_multi_tool_streaming_agent() -> ReActAgent:
     return agent
 
 
-def run_streaming_workflow(
-    agent: ReActAgent = None, input_prompt: str = EXAMPLE_QUERY
-) -> tuple[str, dict, list]:
+def run_streaming_workflow(agent: Agent = None, input_prompt: str = EXAMPLE_QUERY) -> tuple[str, dict, list]:
     """
     Execute a workflow using the multi-tool ReAct agent with streaming enabled
     to test parallel tool calls streaming functionality.

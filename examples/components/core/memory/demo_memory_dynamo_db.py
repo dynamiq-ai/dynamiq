@@ -4,12 +4,12 @@ import uuid
 from dynamiq.connections import AWS
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.dynamo_db import DynamoDB
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from examples.llm_setup import setup_llm
 
 
 def setup_agent():
-    """Sets up the SimpleAgent with DynamoDB memory."""
+    """Sets up the Agent with DynamoDB memory."""
     llm = setup_llm()
 
     try:
@@ -30,7 +30,7 @@ def setup_agent():
     memory = Memory(backend=dynamo_db, message_limit=50)
 
     AGENT_ROLE = "Helpful assistant focusing on the current conversation."
-    agent = SimpleAgent(
+    agent = Agent(
         name="ChatAgent",
         llm=llm,
         role=AGENT_ROLE,
@@ -40,7 +40,7 @@ def setup_agent():
     return agent
 
 
-def chat_loop(agent: SimpleAgent):
+def chat_loop(agent: Agent):
     """Runs the main chat loop."""
     print("\nWelcome to the AI Chat (DynamoDB Backend)! (Type 'exit' to end)")
 

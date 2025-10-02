@@ -19,7 +19,7 @@ This directory contains examples demonstrating how to build interactive Streamli
 ### Agent with Memory and Streaming
 
 - **`example_agent_chat/`**:
-    - **`server.py`**: This example showcases a SimpleAgent with in-memory storage for conversation history. It demonstrates how to maintain context across multiple user interactions and stream the agent's responses.
+    - **`server.py`**: This example showcases a Agent with in-memory storage for conversation history. It demonstrates how to maintain context across multiple user interactions and stream the agent's responses.
     - **`app.py`**: A Streamlit application that connects to the agent server, enabling users to engage in a chat with the agent, which remembers previous interactions thanks to its memory.
 
 ## Usage

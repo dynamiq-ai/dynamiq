@@ -7,7 +7,7 @@ import pytest
 
 from dynamiq import connections
 from dynamiq.callbacks.tracing import TracingCallbackHandler
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.runnables import RunnableConfig
@@ -135,7 +135,7 @@ def test_react_agent_with_structured_python_tool(string_handler_python_tool):
     """Test ReAct agent using Python tool with structured output (content + raw_response)."""
     llm = OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(), temperature=0.1)
 
-    agent = ReActAgent(name="Text Assistant", llm=llm, tools=[string_handler_python_tool], max_loops=5)
+    agent = Agent(name="Text Assistant", llm=llm, tools=[string_handler_python_tool], max_loops=5)
 
     tracing_handler = TracingCallbackHandler()
     config = RunnableConfig(callbacks=[tracing_handler])

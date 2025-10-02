@@ -8,7 +8,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.connections import E2B
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
@@ -698,7 +698,7 @@ def create_agent(streaming_enabled: bool = False):
 
     streaming_config = StreamingConfig(enabled=streaming_enabled, mode=StreamingMode.ALL)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="DataAnalyst",
         id="DataAnalyst",
         llm=llm,

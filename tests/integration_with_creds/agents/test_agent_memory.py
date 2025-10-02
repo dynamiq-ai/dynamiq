@@ -7,9 +7,10 @@ import pytest
 from dynamiq import Workflow, connections, flows
 from dynamiq.memory import Memory
 from dynamiq.memory.backends import DynamoDB, Pinecone, Qdrant
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.utils.logger import logger
@@ -120,7 +121,7 @@ def test_react_agent_with_pinecone_memory(
     run_config,
     monkeypatch,
 ):
-    """Test ReActAgent with Pinecone memory backend."""
+    """Test Agent with Pinecone memory backend."""
     memory_backend = Pinecone(
         index_name="test-memory-pinecone",
         connection=pinecone_connection,
@@ -132,7 +133,7 @@ def test_react_agent_with_pinecone_memory(
 
     memory = Memory(backend=memory_backend)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="PineconeMemoryAgent",
         llm=openai_llm,
         tools=[],
@@ -194,7 +195,7 @@ def test_react_agent_with_qdrant_memory(
     run_config,
     monkeypatch,
 ):
-    """Test ReActAgent with Qdrant memory backend."""
+    """Test Agent with Qdrant memory backend."""
     memory_backend = Qdrant(
         connection=qdrant_connection,
         embedder=openai_embedder,
@@ -203,7 +204,7 @@ def test_react_agent_with_qdrant_memory(
 
     memory = Memory(backend=memory_backend)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="QdrantMemoryAgent",
         llm=openai_llm,
         tools=[],
@@ -287,7 +288,7 @@ def test_react_agent_with_dynamodb_memory(
     memory_test_input,
     run_config,
 ):
-    """Test ReActAgent with DynamoDB memory backend."""
+    """Test Agent with DynamoDB memory backend."""
 
     try:
         memory_backend = DynamoDB(
@@ -301,7 +302,7 @@ def test_react_agent_with_dynamodb_memory(
 
     memory = Memory(backend=memory_backend, message_limit=20)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="DynamoDBMemoryAgent",
         llm=openai_llm,
         tools=[],
