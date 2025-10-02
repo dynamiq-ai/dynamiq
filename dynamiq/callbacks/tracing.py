@@ -56,10 +56,10 @@ class ExecutionRun:
     metadata: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        """Convert ExecutionRun to dictionary with None fields pruned.
+        """Convert ExecutionRun to dictionary.
 
         Returns:
-            dict: Dictionary representation of ExecutionRun without null fields.
+            dict: Dictionary representation of ExecutionRun.
         """
         return asdict(self)
 

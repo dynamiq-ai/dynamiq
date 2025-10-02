@@ -117,6 +117,6 @@ class StreamingConfig(BaseModel):
         return self.enabled and self.input_queue
 
     def to_dict(self, for_tracing: bool = False, **kwargs) -> dict:
-        if for_tracing and self.enabled is False:
+        if for_tracing and not self.enabled:
             return {"enabled": False}
         return self.model_dump(**kwargs)
