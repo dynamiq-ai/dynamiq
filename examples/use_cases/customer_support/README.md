@@ -12,7 +12,7 @@ This directory contains an example of a bank customer support workflow built usi
 ### `main.py`
 
 - Defines the main workflow logic.
-- Creates workflow with instances of `ReActAgent` for handling API and documentation queries.
+- Creates workflow with instances of `Agent` for handling API and documentation queries.
 - Executes the workflow with a sample input.
 
 ## Workflow Logic

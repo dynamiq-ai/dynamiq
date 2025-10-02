@@ -4,9 +4,9 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Anthropic, ScaleSerp
 from dynamiq.flows import Flow
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators import LinearOrchestrator
 from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
@@ -64,19 +64,19 @@ def create_workflow() -> Workflow:
     tool_search = ScaleSerpTool(connection=search_connection)
 
     # Create agents
-    agent_researcher = ReActAgent(
+    agent_researcher = Agent(
         name="researcher-analyst",
         role=AGENT_RESEARCHER_ROLE,
         llm=llm,
         tools=[tool_search],
     )
-    agent_writer = ReActAgent(
+    agent_writer = Agent(
         name="job-description-writer",
         role=AGENT_WRITER_ROLE,
         llm=llm,
         tools=[tool_search, tool_file_read],
     )
-    agent_reviewer = ReActAgent(
+    agent_reviewer = Agent(
         name="job-description-reviewer-and-editor",
         role=AGENT_REVIEWER_ROLE,
         llm=llm,

@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, Query
 
 from dynamiq.connections import Exa
 from dynamiq.connections import TogetherAI as TogetherAIConnection
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.togetherai import TogetherAI
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
@@ -27,7 +27,7 @@ llm = TogetherAI(
     temperature=0,
     max_tokens=4000,
 )
-agent = ReActAgent(
+agent = Agent(
     name="Agent",
     id="Agent",
     llm=llm,

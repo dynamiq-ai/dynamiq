@@ -8,9 +8,9 @@ from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections.managers import get_connection_manager
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Gemini, OpenAI
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
@@ -139,9 +139,9 @@ def _run_and_assert_agent(agent, input_data, expected_keywords, run_config):
 def test_react_agent_inference_modes(
     openai_llm, image_bytes, camera_query, expected_camera_keywords, agent_role, run_config, inference_mode
 ):
-    """Test ReActAgent with all inference modes."""
+    """Test Agent with all inference modes."""
     with get_connection_manager():
-        agent = ReActAgent(
+        agent = Agent(
             name=f"CameraDetection_{inference_mode.value}",
             id=f"camera_detection_{inference_mode.value.lower()}",
             llm=openai_llm,
@@ -159,9 +159,9 @@ def test_react_agent_inference_modes(
 def test_simple_agent_with_text_and_image(
     gemini_llm, image_bytes, camera_query, expected_camera_keywords, agent_role, run_config
 ):
-    """Test SimpleAgent with both a text query and image."""
+    """Test Agent with both a text query and image."""
     with get_connection_manager():
-        agent = SimpleAgent(
+        agent = Agent(
             name="SimpleAgent_TextAndImage",
             id="simple_agent_text_and_image",
             llm=gemini_llm,
@@ -174,9 +174,9 @@ def test_simple_agent_with_text_and_image(
 
 @pytest.mark.integration
 def test_simple_agent_with_image_only(gemini_llm, image_bytes, agent_role, run_config):
-    """Test SimpleAgent with just an image and no specific query."""
+    """Test Agent with just an image and no specific query."""
     with get_connection_manager():
-        agent = SimpleAgent(
+        agent = Agent(
             name="SimpleAgent_ImageOnly",
             id="simple_agent_image_only",
             llm=gemini_llm,

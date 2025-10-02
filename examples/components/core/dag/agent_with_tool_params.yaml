@@ -15,7 +15,7 @@ connections:
 
 nodes:
   animal-facts-agent:
-    type: dynamiq.nodes.agents.react.ReActAgent
+    type: dynamiq.nodes.agents.Agent
     name: Animal Facts Agent
     llm:
       id: agent-llm

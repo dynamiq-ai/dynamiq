@@ -6,7 +6,7 @@ from fastapi import FastAPI, WebSocket
 from dynamiq import Workflow, connections, flows
 from dynamiq.connections import ScaleSerp
 from dynamiq.nodes import llms
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import StreamingConfig
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from examples.components.core.websocket.ws_server_fastapi import WorkflowWSHandler
@@ -33,7 +33,7 @@ OPENAI_NODE = llms.OpenAI(
 
 tool_search = ScaleSerpTool(connection=ScaleSerp())
 
-agent = ReActAgent(
+agent = Agent(
     name="ReAct Agent - Children Teacher",
     id="react",
     llm=OPENAI_NODE,

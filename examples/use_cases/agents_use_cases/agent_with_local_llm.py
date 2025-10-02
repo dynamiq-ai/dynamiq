@@ -1,5 +1,5 @@
 from dynamiq.connections import Exa, Ollama
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Ollama as OllamaLLM
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
@@ -16,7 +16,7 @@ if __name__ == "__main__":
         temperature=0.1,
         max_tokens=1000,
     )
-    agent = ReActAgent(
+    agent = Agent(
         name="Agent",
         id="Agent",
         llm=llm,

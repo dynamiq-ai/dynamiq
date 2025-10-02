@@ -1,7 +1,7 @@
 import io
 
 from dynamiq.connections import E2B, Firecrawl, ScaleSerp
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
@@ -51,14 +51,14 @@ def create_agent():
     Create and configure the agent with necessary tools.
 
     Returns:
-        ReActAgent: A configured Dynamiq ReActAgent ready to run.
+        Agent: A configured Dynamiq Agent ready to run.
     """
     tool_code = E2BInterpreterTool(connection=E2B())
     tool_scrape = FirecrawlTool(connection=Firecrawl())
     tool_search = ScaleSerpTool(connection=ScaleSerp())
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0.001)
 
-    agent_software = ReActAgent(
+    agent_software = Agent(
         name="React Agent",
         llm=llm,
         tools=[tool_code, tool_scrape, tool_search],

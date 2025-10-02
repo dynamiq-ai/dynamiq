@@ -3,7 +3,7 @@ import io
 import os
 
 from dynamiq.connections import E2B
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
@@ -64,7 +64,7 @@ def create_agent():
     Create and configure the agent with E2B tools.
 
     Returns:
-        ReActAgent: A configured Dynamiq ReActAgent ready to run.
+        Agent: A configured Dynamiq agent ready to run.
     """
     tool = E2BInterpreterTool(name="code-executor", connection=E2B())
 
@@ -79,7 +79,7 @@ def create_agent():
 
     file_store_config = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
 
-    agent_software = ReActAgent(
+    agent_software = Agent(
         name="Agent",
         llm=llm,
         tools=[tool],

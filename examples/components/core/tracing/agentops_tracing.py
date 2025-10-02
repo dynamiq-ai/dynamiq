@@ -10,8 +10,7 @@ from dynamiq.callbacks.tracing import RunType
 from dynamiq.connections import Exa
 from dynamiq.flows import Flow
 from dynamiq.nodes import NodeGroup
-from dynamiq.nodes.agents import SimpleAgent
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -101,7 +100,7 @@ def get_react_agent():
     llm = setup_llm()
     connection_exa = Exa()
     tool_search = ExaTool(connection=connection_exa)
-    agent = ReActAgent(
+    agent = Agent(
         name="Agent",
         id="Agent",
         llm=llm,
@@ -113,7 +112,7 @@ def get_react_agent():
 
 def get_simple_agent():
     llm = setup_llm()
-    agent = SimpleAgent(
+    agent = Agent(
         name="Agent",
         llm=llm,
         role="Agent, goal to provide information based on the user input",

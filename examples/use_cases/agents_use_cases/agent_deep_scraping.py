@@ -1,5 +1,5 @@
 from dynamiq.connections import Firecrawl
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.types import InferenceMode
@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
     storage = InMemoryFileStore()
 
-    agent = ReActAgent(
+    agent = Agent(
         name="Agent",
         id="Agent",
         llm=llm,

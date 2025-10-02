@@ -5,9 +5,10 @@ import pytest
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.utils import extract_thought_from_intermediate_steps
 from dynamiq.nodes.llms import Anthropic, Gemini, OpenAI
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 OPENAI_MODELS = [
@@ -121,7 +122,7 @@ def check_for_emoji(text):
     return any(emoji in text for emoji in common_emoji)
 
 
-def run_and_assert_agent(agent: ReActAgent, agent_input, expected_answer, run_config):
+def run_and_assert_agent(agent: Agent, agent_input, expected_answer, run_config):
     """Helper function to run agent and perform common assertions."""
     agent_output = None
     intermediate_steps = None
@@ -179,7 +180,7 @@ def run_and_assert_agent(agent: ReActAgent, agent_input, expected_answer, run_co
 def test_react_agent_openai_models(model, inference_mode, emoji_agent_role, agent_input, expected_answer, run_config):
     """Test OpenAI models with different inference modes."""
     llm_instance = create_openai_llm(model)
-    agent = ReActAgent(
+    agent = Agent(
         name=f"Test Agent {inference_mode.value} (OPENAI-{model})",
         llm=llm_instance,
         tools=[],
@@ -199,7 +200,7 @@ def test_react_agent_anthropic_models(
 ):
     """Test Anthropic models with different inference modes."""
     llm_instance = create_claude_llm(model)
-    agent = ReActAgent(
+    agent = Agent(
         name=f"Test Agent {inference_mode.value} (ANTHROPIC-{model})",
         llm=llm_instance,
         tools=[],
@@ -217,7 +218,7 @@ def test_react_agent_anthropic_models(
 def test_react_agent_google_models(model, inference_mode, emoji_agent_role, agent_input, expected_answer, run_config):
     """Test Google models with different inference modes."""
     llm_instance = create_gemini_llm(model)
-    agent = ReActAgent(
+    agent = Agent(
         name=f"Test Agent {inference_mode.value} (GOOGLE-{model})",
         llm=llm_instance,
         tools=[],

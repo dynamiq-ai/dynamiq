@@ -2,7 +2,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import Qdrant as QdrantConnection
 from dynamiq.memory import Memory
 from dynamiq.memory.backends import Qdrant
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from examples.llm_setup import setup_llm
 
@@ -22,7 +22,7 @@ def setup_agent():
     memory_qdrant = Memory(backend=backend)
 
     AGENT_ROLE = "Helpful assistant with the goal of providing useful information and answering questions."
-    agent = SimpleAgent(
+    agent = Agent(
         name="Agent",
         llm=llm,
         role=AGENT_ROLE,
