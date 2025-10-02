@@ -6,8 +6,8 @@ from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
-from dynamiq.types.document import TextEmbeddingOutput
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import TRUNCATE_EMBEDDINGS_LIMIT
 
 
 class DocumentEmbedderInputSchema(BaseModel):
@@ -50,6 +50,20 @@ class TextEmbedderInputSchema(BaseModel):
     query: str = Field(..., description="Parameter to provide query to find embeddings for.")
 
 
+class TextEmbeddingOutput(dict):
+    """Dict-like output for text embedders with tracing-aware to_dict()."""
+
+    query: str
+    embedding: list[float]
+
+    def to_dict(self, for_tracing: bool = False, truncate_limit: int = TRUNCATE_EMBEDDINGS_LIMIT, **kwargs) -> dict:
+        data = dict(self)
+        if for_tracing and isinstance(data.get("embedding"), list):
+            if len(data["embedding"]) > truncate_limit:
+                data["embedding"] = data["embedding"][:truncate_limit]
+        return data
+
+
 class TextEmbedder(ConnectionNode):
     group: Literal[NodeGroup.EMBEDDERS] = NodeGroup.EMBEDDERS
     text_embedder: BaseEmbedder | None = None
@@ -76,7 +90,7 @@ class TextEmbedder(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         raw_output = self.text_embedder.embed_text(input_data.query)
-        logger.debug(f"BedrockTextEmbedder: {raw_output['meta']}")
+        logger.debug(f"{self.name}: {raw_output['meta']}")
         result = TextEmbeddingOutput(
             embedding=raw_output["embedding"],
             query=input_data.query,

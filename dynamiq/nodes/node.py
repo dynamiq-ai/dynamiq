@@ -640,19 +640,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
     @property
     def to_dict_exclude_secure_params(self):
-        return self.to_dict_exclude_params | {
-            "connection": {
-                "api_key": True,
-                "browserbase_api_key": True,
-                "access_token": True,
-                "access_key_id": True,
-                "model_api_key": True,
-                "password": True,
-                "private_key_id": True,
-                "private_key": True,
-                "secret_access_key": True,
-            }
-        }
+        return self.to_dict_exclude_params | {"connection": True}
 
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
         """Converts the instance to a dictionary.
@@ -681,7 +669,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         data["approval"] = self.approval.to_dict(for_tracing=for_tracing, **kwargs)
 
         data["depends"] = [depend.to_dict(for_tracing=for_tracing, **kwargs) for depend in self.depends]
-        data["input_mapping"] = format_value(self.input_mapping)[0]
+        data["input_mapping"] = format_value(self.input_mapping)
+
+        if hasattr(self, "connection") and getattr(self, "connection"):
+            data["connection"] = self.connection.to_dict(for_tracing=for_tracing, **kwargs)
 
         if for_tracing:
             data = {k: v for k, v in data.items() if v is not None or k in ("input", "output")}

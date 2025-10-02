@@ -11,7 +11,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, PydanticUserError, RootModel
 
-TRUNCATE_LIMIT = 20
+TRUNCATE_EMBEDDINGS_LIMIT = 20
+TRUNCATE_LIST_LIMIT = 50
 
 CHARS_PER_TOKEN = 4
 
@@ -179,6 +180,7 @@ def format_value(
     skip_format_types: set = None,
     force_format_types: set = None,
     for_tracing: bool = False,
+    truncate_limit: int = TRUNCATE_LIST_LIMIT,
     **kwargs,
 ) -> Any:
     """Format a value for serialization.
@@ -187,6 +189,8 @@ def format_value(
         value (Any): The value to format.
         skip_format_types (set, optional): Types to skip formatting.
         force_format_types (set, optional): Types to force formatting.
+        for_tracing (bool, optional): Whether to format value regarding tracing standard.
+        truncate_limit (int): The maximum allowed length for the value; if exceeded, the value will be truncated.
         **kwargs: Additional keyword arguments.
 
     Returns:
@@ -225,6 +229,10 @@ def format_value(
             )
             formatted_dict[k] = formatted_v
         return formatted_dict
+
+    if for_tracing and isinstance(value, list):
+        if len(value) > truncate_limit:
+            value = value[:truncate_limit]
 
     if isinstance(value, (list, tuple, set)):
         formatted_list = []
