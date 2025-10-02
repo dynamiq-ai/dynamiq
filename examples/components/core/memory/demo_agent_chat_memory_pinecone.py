@@ -3,7 +3,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory import Memory
 from dynamiq.memory.backends import Pinecone
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.embedders import OpenAIDocumentEmbedder
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
@@ -32,7 +32,7 @@ def setup_agent():
     memory_pinecone = Memory(backend=backend)
 
     AGENT_ROLE = "Helpful assistant with the goal of providing useful information and answering questions."
-    agent = ReActAgent(
+    agent = Agent(
         name="Agent",
         llm=llm,
         role=AGENT_ROLE,

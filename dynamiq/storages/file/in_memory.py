@@ -155,16 +155,3 @@ class InMemoryFileStore(FileStore):
             metadata=file_data.get("metadata", {}),
             content=file_data["content"],
         )
-
-    def to_dict(self, **kwargs) -> dict[str, Any]:
-        """Convert the InMemoryFileStore instance to a dictionary.
-
-        Returns:
-            dict: A dictionary representation of the file store that is JSON serializable.
-        """
-
-        return {
-            "type": "dynamiq.storages.file.InMemoryFileStore",
-            "file_count": len(self._files),
-            "is_empty": self.is_empty(),
-        }

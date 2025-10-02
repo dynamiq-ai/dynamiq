@@ -1,7 +1,7 @@
 from dynamiq.connections import E2B as E2BConnection
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.types import InferenceMode
 from examples.llm_setup import setup_llm
@@ -42,7 +42,7 @@ if __name__ == "__main__":
     )
     llm = setup_llm()
 
-    agent_coding = ReActAgent(
+    agent_coding = Agent(
         name="Coding Agent",
         llm=llm,
         tools=[python_tool],

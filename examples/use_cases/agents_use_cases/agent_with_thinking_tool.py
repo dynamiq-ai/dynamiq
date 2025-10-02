@@ -1,5 +1,5 @@
 from dynamiq.connections import Exa
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools import ThinkingTool
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
@@ -12,7 +12,7 @@ if __name__ == "__main__":
     connection_exa = Exa()
     tool_search = ExaTool(connection=connection_exa)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="Thinking Agent",
         id="thinking_agent",
         llm=llm,

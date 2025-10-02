@@ -19,10 +19,7 @@ app = FastAPI(title="File Processor API", version="1.0.0")
 @app.get("/")
 async def health_check():
     """Health check endpoint."""
-    return {
-        'status': 'healthy',
-        'message': 'FastAPI File Processor Server is running'
-    }
+    return {"status": "healthy", "message": "FastAPI File Processor Server is running"}
 
 
 @app.post("/upload")
@@ -32,8 +29,9 @@ async def upload_file(file: UploadFile = File(...)):
     return JSONResponse(content={"filename": file.filename, "message": f"File received successfully {contents}"})
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import uvicorn
+
     print("Starting FastAPI File Processor Server...")
     print(f"Server will be available at: http://localhost:{PORT}")
     print(f"API Documentation: http://localhost:{PORT}/docs")

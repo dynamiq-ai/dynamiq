@@ -2,10 +2,11 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import E2B, ScaleSerp
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
+from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from examples.llm_setup import setup_llm
 
@@ -37,12 +38,12 @@ QUERY2 = """Research the latest developments in
             regarding all areas of ML/DL and AI"""
 
 
-def create_enhanced_context_agent() -> ReActAgent:
+def create_enhanced_context_agent() -> Agent:
     """
     Create a ReAct agent with enhanced context management features.
 
     Returns:
-        ReActAgent with context management enabled
+        Agent with context management enabled
     """
     exa_conn = ScaleSerp()
     e2b_conn = E2B()
@@ -59,7 +60,7 @@ def create_enhanced_context_agent() -> ReActAgent:
         context_history_length=10,
     )
 
-    agent = ReActAgent(
+    agent = Agent(
         name="Context Agent",
         llm=llm,
         tools=[search_tool, code_tool],
