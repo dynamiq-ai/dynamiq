@@ -3,7 +3,7 @@ from datetime import date
 from dynamiq import Workflow
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.node import InputTransformer, NodeDependency
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, RequestPayloadType
@@ -162,7 +162,7 @@ def initialize_workflow(endpoint_url, api_key):
 
     api_tools = create_api_tools(endpoint_url, api_key)
 
-    financial_research_agent = ReActAgent(
+    financial_research_agent = Agent(
         id="financial_research_agent",
         name="Financial Research Agent",
         role="Generates detailed financial research based on user queries using APIs.",

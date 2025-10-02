@@ -9,7 +9,7 @@ from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.flows import Flow
 from dynamiq.memory import Memory
 from dynamiq.memory.backends import InMemory
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.operators import Map
 from dynamiq.nodes.types import InferenceMode
@@ -22,14 +22,14 @@ def _openai_llm(model: str = "gpt-4o-mini") -> OpenAI:
     return OpenAI(model=model, connection=connections.OpenAI())
 
 
-def _child_researcher(llm: OpenAI) -> ReActAgent:
+def _child_researcher(llm: OpenAI) -> Agent:
     role = (
         "You are a Researcher sub-agent.\n"
         "- Always expect a single string input under the 'input' key.\n"
         "- Do NOT expect or require other keys like 'query' or 'metadata'.\n"
         "- Provide a concise factual summary based on the provided input.\n"
     )
-    return ReActAgent(
+    return Agent(
         name="Researcher",
         description=(
             "Sub-agent that summarizes research for a given topic. "
@@ -44,14 +44,14 @@ def _child_researcher(llm: OpenAI) -> ReActAgent:
     )
 
 
-def _child_writer(llm: OpenAI) -> ReActAgent:
+def _child_writer(llm: OpenAI) -> Agent:
     role = (
         "You are a Writer sub-agent.\n"
         "- Always expect a single string input under the 'input' key.\n"
         "- Do NOT expect or require other keys like 'query' or 'metadata'.\n"
         "- Based on the 'input' topic, produce a clean, concise brief.\n"
     )
-    return ReActAgent(
+    return Agent(
         name="Writer",
         description=(
             "Sub-agent that drafts a concise brief based on a topic. "
@@ -90,7 +90,7 @@ def test_manager_with_subagents_parallel_calls():
         "- Do not include extraneous keys like 'query' or 'metadata' in tool inputs.\n"
         "- Prefer parallel calls when multiple subtasks are obvious.\n"
     )
-    manager = ReActAgent(
+    manager = Agent(
         name="Manager",
         description=("Manager that delegates to Researcher and Writer. Tools expect {'input': '<topic>'}."),
         role=manager_role,
@@ -159,7 +159,7 @@ def test_agents_as_tools_with_map_parallel_streaming_tracing_memory():
         "- Do not include extraneous keys like 'query' or 'metadata' in tool inputs.\n"
         "- Prefer parallel calls when multiple subtasks are obvious.\n"
     )
-    manager = ReActAgent(
+    manager = Agent(
         name="Manager",
         description=("Manager that delegates to Researcher and Writer. Tools expect {'input': '<topic>'}."),
         role=manager_role,

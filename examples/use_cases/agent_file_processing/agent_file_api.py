@@ -2,7 +2,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -35,7 +35,7 @@ if __name__ == "__main__":
 
     llm = setup_llm(model_provider="claude", model_name="claude-3-7-sonnet-20250219", temperature=0)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="Agent",
         id="Agent",
         llm=llm,

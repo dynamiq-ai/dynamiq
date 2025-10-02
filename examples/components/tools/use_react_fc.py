@@ -1,5 +1,5 @@
 from dynamiq.connections import ScaleSerp
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.function_tool import function_tool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from examples.llm_setup import setup_llm
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     serp_connection = ScaleSerp()
     tool_search = ScaleSerpTool(connection=serp_connection)
 
-    agent = ReActAgent(
+    agent = Agent(
         name="Agent",
         id="agent",
         role=AGENT_ROLE,

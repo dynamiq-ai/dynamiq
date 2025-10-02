@@ -1,8 +1,7 @@
 import agentops
 
 from dynamiq.connections import Exa
-from dynamiq.nodes.agents import SimpleAgent
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.env import get_env_var
@@ -15,7 +14,7 @@ def get_react_agent():
     llm = setup_llm()
     connection_exa = Exa()
     tool_search = ExaTool(connection=connection_exa)
-    agent = ReActAgent(
+    agent = Agent(
         name="Agent",
         id="React Agent",
         llm=llm,
@@ -28,7 +27,7 @@ def get_react_agent():
 @agentops.track_agent(name="Simple Agent")
 def get_simple_agent():
     llm = setup_llm()
-    agent = SimpleAgent(
+    agent = Agent(
         name="Agent",
         id="Simple Agent",
         llm=llm,

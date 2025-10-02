@@ -8,7 +8,7 @@ This directory contains an example demonstrating how to use Dynamiq agents and a
 
 - Defines the workflow logic for creating a job posting.
 - Initializes connections to Anthropic and ScaleSerp.
-- Creates instances of `ReActAgent` for research, writing, and reviewing.
+- Creates instances of `Agent` for research, writing, and reviewing.
 - Creates a `LinearOrchestrator` to manage the workflow of multiple agents.
 - Executes the workflow with a sample input containing company information and hiring needs.
 

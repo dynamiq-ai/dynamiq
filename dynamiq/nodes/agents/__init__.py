@@ -1,4 +1,9 @@
-from .base import Agent, AgentManager
-from .react import ReActAgent
-from .reflection import ReflectionAgent
-from .simple import SimpleAgent
+from dynamiq.nodes.types import InferenceMode
+
+from .agent import Agent
+from .base import Agent as BaseAgent
+from .base import AgentManager
+
+ReActAgent = Agent
+ReflectionAgent = Agent
+SimpleAgent = Agent

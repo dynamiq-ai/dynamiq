@@ -480,13 +480,13 @@ class E2BInterpreterTool(ConnectionNode):
             vars_code = "\n# Tool params variables injected by framework\n"
             for key, value in params.items():
                 if isinstance(value, str):
-                    vars_code += f'{key} = {repr(value)}\n'
+                    vars_code += f"{key} = {repr(value)}\n"
                 elif isinstance(value, (int, float, bool)) or value is None:
-                    vars_code += f'{key} = {value}\n'
+                    vars_code += f"{key} = {value}\n"
                 elif isinstance(value, (list, dict)):
-                    vars_code += f'{key} = {repr(value)}\n'
+                    vars_code += f"{key} = {repr(value)}\n"
                 else:
-                    vars_code += f'{key} = {repr(str(value))}\n'
+                    vars_code += f"{key} = {repr(str(value))}\n"
 
             code = vars_code + "\n" + code
 
@@ -505,11 +505,11 @@ class E2BInterpreterTool(ConnectionNode):
                     )
                 raise ToolExecutionException(f"Error during Python code execution: {execution.error}", recoverable=True)
 
-            if hasattr(execution, 'logs') and execution.logs:
-                if hasattr(execution.logs, 'stdout') and execution.logs.stdout:
+            if hasattr(execution, "logs") and execution.logs:
+                if hasattr(execution.logs, "stdout") and execution.logs.stdout:
                     for log in execution.logs.stdout:
                         output_parts.append(log)
-                if hasattr(execution.logs, 'stderr') and execution.logs.stderr:
+                if hasattr(execution.logs, "stderr") and execution.logs.stderr:
                     for log in execution.logs.stderr:
                         output_parts.append(f"[stderr] {log}")
 
@@ -627,7 +627,7 @@ class E2BInterpreterTool(ConnectionNode):
             for search_dir in search_dirs:
                 check_cmd = f"test -d {shlex.quote(search_dir)} && echo exists"
                 check_res = sandbox.commands.run(check_cmd)
-                if hasattr(check_res, 'wait'):
+                if hasattr(check_res, "wait"):
                     check_out = check_res.wait()
                 else:
                     check_out = check_res
@@ -642,7 +642,7 @@ class E2BInterpreterTool(ConnectionNode):
                 )
                 res = sandbox.commands.run(cmd)
 
-                if hasattr(res, 'wait'):
+                if hasattr(res, "wait"):
                     out = res.wait()
                 else:
                     out = res
@@ -764,9 +764,9 @@ class E2BInterpreterTool(ConnectionNode):
 
             uploaded_files = set()
             if files_uploaded := content.get("files_uploaded"):
-                for line in files_uploaded.split('\n'):
-                    if ' -> ' in line:
-                        uploaded_path = line.split(' -> ')[1].strip()
+                for line in files_uploaded.split("\n"):
+                    if " -> " in line:
+                        uploaded_path = line.split(" -> ")[1].strip()
                         uploaded_files.add(uploaded_path)
 
             new_files = {k: v for k, v in all_files.items() if k not in uploaded_files}
@@ -821,9 +821,9 @@ class E2BInterpreterTool(ConnectionNode):
 
             if files_uploaded := content.get("files_uploaded"):
                 files_list = []
-                for line in files_uploaded.split('\n'):
-                    if ' -> ' in line:
-                        file_name = line.split(' -> ')[0].strip()
+                for line in files_uploaded.split("\n"):
+                    if " -> " in line:
+                        file_name = line.split(" -> ")[0].strip()
                         files_list.append(file_name)
                 if files_list:
                     result_text += f"*Files uploaded: {', '.join(files_list)}*\n"

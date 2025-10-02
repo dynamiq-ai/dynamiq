@@ -11,10 +11,9 @@ from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import ScaleSerp, ZenRows
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.base import Agent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators import LinearOrchestrator
 from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
@@ -49,7 +48,7 @@ def initialize_llm_models(model_type: str, model_name: str) -> tuple[OpenAI | An
 
     Returns:
         Tuple[Union[OpenAI, Anthropic], Union[OpenAI, Anthropic]]: A tuple containing two LLM instances:
-            - The first for the ReActAgent
+            - The first for the Agent
             - The second for general use
 
     Raises:
@@ -112,7 +111,7 @@ def inference(user_prompt: str, model_type="gpt", model_name="gpt-4o-mini") -> d
     tool_scrape_summarizer = ScraperSummarizerTool(connection=zenrows_connection, llm=llm_agent)
 
     # Create agents
-    agent_researcher = ReActAgent(
+    agent_researcher = Agent(
         name="Research Analyst",
         llm=llm_react_agent,
         tools=[tool_search, tool_scrape_summarizer],

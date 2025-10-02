@@ -6,7 +6,7 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
 from dynamiq.nodes import InputTransformer
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.prompts import Message, Prompt
@@ -86,7 +86,7 @@ Explain that you are not able to find the answer and provide some suggestions fo
 llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", max_tokens=500, temperature=0.5)
 
 # Define agents and search tool
-agent_query_rephraser = SimpleAgent(
+agent_query_rephraser = Agent(
     id="agent_query_rephraser",
     name="agent_query_rephraser",
     role=AGENT_QUERY_ROLE,

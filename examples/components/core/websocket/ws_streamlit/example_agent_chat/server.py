@@ -6,7 +6,7 @@ from fastapi import FastAPI, WebSocket
 from dynamiq import Workflow, connections, flows
 from dynamiq.memory import Memory
 from dynamiq.nodes import llms
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.node import StreamingConfig
 from examples.components.core.websocket.ws_server_fastapi import WorkflowWSHandler
 
@@ -32,7 +32,7 @@ OPENAI_NODE = llms.OpenAI(
 
 memory_in_memory = Memory()
 AGENT_ROLE = "helpful assistant, goal is to provide useful information and answer questions"
-agent = SimpleAgent(
+agent = Agent(
     name="Agent",
     llm=OPENAI_NODE,
     role=AGENT_ROLE,

@@ -1,6 +1,6 @@
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.in_memory import InMemory
-from dynamiq.nodes.agents.simple import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from examples.llm_setup import setup_llm
 
 
@@ -8,7 +8,7 @@ def setup_agent():
     llm = setup_llm()
     memory = Memory(backend=InMemory())
     AGENT_ROLE = "Helpful assistant with the goal of providing useful information and answering questions."
-    agent = SimpleAgent(
+    agent = Agent(
         name="Agent",
         llm=llm,
         role=AGENT_ROLE,
