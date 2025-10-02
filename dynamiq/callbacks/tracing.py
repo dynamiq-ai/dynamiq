@@ -104,10 +104,10 @@ class Run:
     tags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        """Convert Run to dictionary with None fields pruned recursively.
+        """Convert Run to dictionary.
 
         Returns:
-            dict: Dictionary representation of Run without null fields.
+            dict: Dictionary representation of Run.
         """
         return asdict(self)
 
