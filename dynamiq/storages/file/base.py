@@ -69,6 +69,8 @@ class FileStore(abc.ABC, BaseModel):
         Returns:
             dict: Dictionary representation of the FileStore instance.
         """
+        for param in ("include_secure_params", "for_tracing"):
+            kwargs.pop(param, None)
         data = self.model_dump(**kwargs)
         data["type"] = self.type
         return data
@@ -184,6 +186,8 @@ class FileStoreConfig(BaseModel):
 
     def to_dict(self, **kwargs) -> dict[str, Any]:
         """Convert the FileStoreConfig instance to a dictionary."""
+        for param in ("include_secure_params", "for_tracing"):
+            kwargs.pop(param, None)
         config_data = self.model_dump(exclude={"backend"}, **kwargs)
         config_data["backend"] = self.backend.to_dict()
         return config_data
