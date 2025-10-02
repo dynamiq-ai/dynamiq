@@ -155,14 +155,3 @@ class InMemoryFileStore(FileStore):
             metadata=file_data.get("metadata", {}),
             content=file_data["content"],
         )
-
-    def to_dict(self, **kwargs) -> dict[str, Any]:
-        """Convert the InMemoryFileStore instance to a dictionary.
-
-        Returns:
-            dict: A dictionary representation of the file store that is JSON serializable.
-        """
-
-        data = self.model_dump(**kwargs)
-        data["type"] = self.type
-        return data

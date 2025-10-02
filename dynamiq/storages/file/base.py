@@ -63,6 +63,16 @@ class FileStore(abc.ABC, BaseModel):
         """Returns the backend type as a string."""
         return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
+    def to_dict(self, **kwargs) -> dict[str, Any]:
+        """Convert the FileStore instance to a dictionary.
+
+        Returns:
+            dict: Dictionary representation of the FileStore instance.
+        """
+        data = self.model_dump(**kwargs)
+        data["type"] = self.type
+        return data
+
     @abc.abstractmethod
     def list_files_bytes(self) -> list[BytesIO]:
         """List files in storage and return the content as bytes in BytesIO objects.
