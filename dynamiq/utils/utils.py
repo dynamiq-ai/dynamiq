@@ -142,7 +142,7 @@ def encode(value: Any) -> Any:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, (BytesIO, bytes, Exception)) or callable(value):
-        return format_value(value)[0]
+        return format_value(value)
     return value
 
 
@@ -178,18 +178,15 @@ def format_value(
     value: Any,
     skip_format_types: set = None,
     force_format_types: set = None,
-    truncate_enabled: bool = False,
-    truncate_limit: int = TRUNCATE_LIMIT,
+    for_tracing: bool = False,
     **kwargs,
-) -> tuple[Any, dict]:
+) -> Any:
     """Format a value for serialization.
 
     Args:
         value (Any): The value to format.
         skip_format_types (set, optional): Types to skip formatting.
         force_format_types (set, optional): Types to force formatting.
-        truncate_enabled (bool, optional): Whether to apply truncation.
-        truncate_limit (int): The maximum allowed length for the value; if exceeded, the value will be truncated.
         **kwargs: Additional keyword arguments.
 
     Returns:
@@ -207,72 +204,50 @@ def format_value(
     if not isinstance(value, tuple(force_format_types)) and isinstance(
         value, tuple(skip_format_types)
     ):
-        return value, truncate_metadata
+        return value
 
     if isinstance(value, BytesIO):
-        return getattr(value, "name", None) or encode_bytes(value.getvalue()), truncate_metadata
+        return getattr(value, "name", None) or encode_bytes(value.getvalue())
     if isinstance(value, bytes):
-        return encode_bytes(value), truncate_metadata
+        return encode_bytes(value)
 
     path = kwargs.get("path", "")
     if isinstance(value, dict):
         formatted_dict = {}
         for k, v in value.items():
             new_path = f"{path}.{k}" if path else k
-            formatted_v, sub_metadata = format_value(
-                v, skip_format_types, force_format_types, truncate_enabled, path=new_path
+            formatted_v = format_value(
+                v,
+                skip_format_types,
+                force_format_types,
+                for_tracing,
+                path=new_path,
             )
             formatted_dict[k] = formatted_v
-            truncate_metadata.update(sub_metadata)
-        return formatted_dict, truncate_metadata
-
-    if truncate_enabled and isinstance(value, list) and all(isinstance(v, float) for v in value):
-        original_length = len(value)
-        if original_length > truncate_limit:
-            truncated_value = value[:truncate_limit]
-            truncate_metadata[path] = {
-                "original_length": original_length,
-                "truncated_length": len(truncated_value),
-            }
-            return truncated_value, truncate_metadata
+        return formatted_dict
 
     if isinstance(value, (list, tuple, set)):
         formatted_list = []
         for i, v in enumerate(value):
             new_path = f"{path}[{i}]"
-            formatted_v, sub_metadata = format_value(
-                v, skip_format_types, force_format_types, truncate_enabled, path=new_path
+            formatted_v = format_value(
+                v,
+                skip_format_types,
+                force_format_types,
+                for_tracing,
+                path=new_path,
             )
             formatted_list.append(formatted_v)
-            truncate_metadata.update(sub_metadata)
 
-        return type(value)(formatted_list), truncate_metadata
+        return type(value)(formatted_list)
 
     if isinstance(value, (RunnableResult, PythonInputSchema)):
-        return (
-            value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types),
-            truncate_metadata,
-        )
+        return value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types)
     if isinstance(value, BaseModel):
-        base_dict = value.to_dict() if hasattr(value, "to_dict") else value.model_dump()
+        dict_kwargs = {"for_tracing": for_tracing} if for_tracing else {}
+        base_dict = value.to_dict(**dict_kwargs) if hasattr(value, "to_dict") else value.model_dump()
 
-        if truncate_enabled:
-            for attr_name, attr_value in base_dict.items():
-                if isinstance(attr_value, list) and all(isinstance(x, float) for x in attr_value):
-                    metadata_key = f"{path}.{attr_name}" if path else attr_name
-
-                    original_length = len(attr_value)
-                    if original_length > truncate_limit:
-                        truncated_value = attr_value[:truncate_limit]
-
-                        truncate_metadata[metadata_key] = {
-                            "original_length": original_length,
-                            "truncated_length": len(truncated_value),
-                        }
-
-                        base_dict[attr_name] = truncated_value
-
-        return base_dict, truncate_metadata
+        return base_dict
     if isinstance(value, Exception):
         recoverable = bool(kwargs.get("recoverable"))
         return {
@@ -281,12 +256,12 @@ def format_value(
             "recoverable": recoverable,
         }, truncate_metadata
     if callable(value):
-        return f"func: {getattr(value, '__name__', str(value))}", truncate_metadata
+        return f"func: {getattr(value, '__name__', str(value))}"
 
     try:
-        return RootModel[type(value)](value).model_dump(), truncate_metadata
+        return RootModel[type(value)](value).model_dump()
     except PydanticUserError:
-        return str(value), truncate_metadata
+        return str(value)
 
 
 def deep_merge(source: dict, destination: dict) -> dict:

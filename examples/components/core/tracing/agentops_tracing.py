@@ -59,7 +59,7 @@ class AgentOpsCallbackHandler(BaseCallbackHandler):
             type=RunType.NODE,
             trace_id=self.trace_id,
             parent_run_id=parent_run_id,
-            input=format_value(input_data)[0],
+            input=format_value(input_data),
             metadata={"node": serialized, "run_depends": kwargs.get("run_depends", [])},
         )
         if node_group == NodeGroup.LLMS:
@@ -80,9 +80,9 @@ class AgentOpsCallbackHandler(BaseCallbackHandler):
         node_group = serialized.get("group")
         event = self.events[str(run_id)]
         event.end_timestamp = get_ISO_time()
-        event.returns = format_value(output_data)[0]
+        event.returns = format_value(output_data)
         if node_group == NodeGroup.LLMS:
-            event.completion = format_value(output_data)[0]
+            event.completion = format_value(output_data)
         self.ao_client.record(event)
 
     def on_workflow_end(self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any):

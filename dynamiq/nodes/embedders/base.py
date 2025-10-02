@@ -6,6 +6,7 @@ from dynamiq.components.embedders.base import BaseEmbedder
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
+from dynamiq.types.document import TextEmbeddingOutput
 from dynamiq.utils.logger import logger
 
 
@@ -74,9 +75,10 @@ class TextEmbedder(ConnectionNode):
         """
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
-        output = self.text_embedder.embed_text(input_data.query)
-        logger.debug(f"BedrockTextEmbedder: {output['meta']}")
-        return {
-            "embedding": output["embedding"],
-            "query": input_data.query,
-        }
+        raw_output = self.text_embedder.embed_text(input_data.query)
+        logger.debug(f"BedrockTextEmbedder: {raw_output['meta']}")
+        result = TextEmbeddingOutput(
+            embedding=raw_output["embedding"],
+            query=input_data.query,
+        )
+        return result

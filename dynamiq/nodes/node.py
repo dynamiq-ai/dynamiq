@@ -1109,6 +1109,9 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                 dict_kwargs = {}
                 if isinstance(callback, TracingCallbackHandler):
                     dict_kwargs["for_tracing"] = True
+                    output_data = (
+                        output_data.to_dict(for_tracing=True) if hasattr(output_data, "to_dict") else output_data
+                    )
                 callback.on_node_end(self.to_dict(**dict_kwargs), output_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
@@ -1206,6 +1209,9 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                 dict_kwargs = {}
                 if isinstance(callback, TracingCallbackHandler):
                     dict_kwargs["for_tracing"] = True
+                    output_data = (
+                        output_data.to_dict(for_tracing=True) if hasattr(output_data, "to_dict") else output_data
+                    )
                 callback.on_node_execute_end(self.to_dict(**dict_kwargs), output_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
