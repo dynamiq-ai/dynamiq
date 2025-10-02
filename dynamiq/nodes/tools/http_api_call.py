@@ -3,7 +3,7 @@ import io
 import json
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dynamiq.connections import Http as HttpConnection
 from dynamiq.connections import HTTPMethod
@@ -52,15 +52,15 @@ class RequestPayloadType(str, enum.Enum):
     JSON = "json"
 
 
-def handle_file_upload(input_data: dict[str, str | bytes] | FileMappedInput) -> dict[str, bytes]:
+def handle_file_upload(input_data: dict[str, str | bytes] | FileMappedInput) -> dict[str, io.BytesIO]:
     """
-    Handles file uploading with additional metadata.
+    Handles file uploading and converts all inputs to BytesIO objects.
 
     Args:
         input_data: Dictionary mapping parameter names to file objects to upload or FileMappedInput object.
 
     Returns:
-        dict[str, bytes]: Dictionary mapping parameter names to file content as bytes.
+        dict[str, io.BytesIO]: Dictionary mapping parameter names to BytesIO objects.
 
     Raises:
         ValueError: If invalid file data type is provided.
@@ -75,15 +75,21 @@ def handle_file_upload(input_data: dict[str, str | bytes] | FileMappedInput) -> 
 
     for param_name, file in files.items():
         if isinstance(file, bytes):
-            files_data[param_name] = file
+            bytes_io = io.BytesIO(file)
+            bytes_io.name = param_name
+            files_data[param_name] = bytes_io
         elif isinstance(file, io.BytesIO):
-            files_data[param_name] = file.getvalue()
+            files_data[param_name] = file
         elif isinstance(file, FileInfo):
-            files_data[param_name] = file.content
+            bytes_io = io.BytesIO(file.content)
+            bytes_io.name = file.name
+            files_data[param_name] = bytes_io
         elif isinstance(file, str):
             if files_map:
                 if file in files_map:
-                    files_data[param_name] = files_map[file].getvalue()
+                    bytes_io = io.BytesIO(files_map[file].getvalue())
+                    bytes_io.name = files_map[file].name
+                    files_data[param_name] = bytes_io
                 else:
                     raise ValueError(f"File {file} not found in files.")
             else:
@@ -103,12 +109,14 @@ class HttpApiCallInputSchema(BaseModel):
     payload_type: RequestPayloadType = Field(default=None, description="Parameter to specify the type of payload data.")
     headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
-    files: dict[str, str | bytes] = Field(
+    files: dict[str, io.BytesIO] = Field(
         default={},
         description="Parameter to provide files to the request. Maps parameter names to file paths for file uploads. "
         "Provide strings for file IDs from files.",
         map_from_storage=True,
     )
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @field_validator("data", "headers", "params", mode="before")
     @classmethod
@@ -187,7 +195,7 @@ class HttpApiCall(ConnectionNode):
 
         data = self.connection.data | self.data | input_data.data
         payload_type = input_data.payload_type or self.payload_type
-        files = input_data.files
+        files = {param: file_io.getvalue() for param, file_io in input_data.files.items()}
 
         extras = {"data": data} if payload_type == RequestPayloadType.RAW else {"json": data}
         url = input_data.url or self.url or self.connection.url
