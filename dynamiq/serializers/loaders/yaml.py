@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from os import PathLike
 from typing import Any
 
@@ -310,6 +311,7 @@ class WorkflowYAMLLoader:
         registry: dict[str, Any],
         connection_manager: ConnectionManager | None = None,
         init_components: bool = False,
+        max_workers: int | None = None,
     ):
         """
         Get node init data with initialized nodes components recursively (llms, agents, etc)
@@ -323,6 +325,7 @@ class WorkflowYAMLLoader:
             registry: Registry of node types.
             connection_manager: Optional connection manager.
             init_components: Flag to initialize components.
+            max_workers: Maximum number of worker threads for node parallel processing.
 
         Returns:
             A dictionary of newly created nodes with dependencies.
@@ -336,6 +339,7 @@ class WorkflowYAMLLoader:
             registry=registry,
             connection_manager=connection_manager,
             init_components=init_components,
+            max_workers=max_workers,
         )
         for param_name, param_data in node_init_data.items():
             # TODO: dummy fix, revisit this!
@@ -395,9 +399,11 @@ class WorkflowYAMLLoader:
         registry: dict[str, Any],
         connection_manager: ConnectionManager | None = None,
         init_components: bool = False,
+        max_workers: int | None = None,
     ) -> dict[str, Node]:
         """
         Create nodes without dependencies from the given data.
+        Automatically uses parallel processing for multiple nodes (>1).
 
         Args:
             data: Dictionary containing node data.
@@ -408,6 +414,7 @@ class WorkflowYAMLLoader:
             registry: Registry of node types.
             connection_manager: Optional connection manager.
             init_components: Flag to initialize components.
+            max_workers: Maximum number of worker threads for node parallel processing.
 
         Returns:
             A dictionary of newly created nodes without dependencies.
@@ -416,72 +423,149 @@ class WorkflowYAMLLoader:
             WorkflowYAMLLoaderException: If node data is invalid or duplicates are found.
         """
         new_nodes = {}
+        get_node_kwargs = dict(
+            nodes=nodes,
+            flows=flows,
+            connections=connections,
+            prompts=prompts,
+            registry=registry,
+            connection_manager=connection_manager,
+            init_components=init_components,
+        )
+
+        nodes_to_create = {}
         for node_id, node_data in data.items():
             if node_id in nodes:
                 continue
-
             if node_id in new_nodes:
                 raise WorkflowYAMLLoaderException(f"Node '{node_id}' already exists")
+            nodes_to_create[node_id] = node_data
 
-            if not (node_type := node_data.get("type")):
-                raise WorkflowYAMLLoaderException(f"Value 'type' for node '{node_id}' not found")
+        if len(nodes_to_create) <= 1:
+            for node_id, node_data in nodes_to_create.items():
+                try:
+                    node_id, node = cls.get_node_without_depends(
+                        node_id=node_id,
+                        node_data=node_data,
+                        **get_node_kwargs,
+                    )
+                    new_nodes[node_id] = node
+                except WorkflowYAMLLoaderException:
+                    raise
 
-            node_cls = cls.get_entity_by_type(entity_type=node_type, entity_registry=registry)
+            return new_nodes
 
-            # Init node params
-            node_init_data = node_data.copy()
-            if node_id:
-                node_init_data["id"] = node_id
-            node_init_data.pop("type", None)
-            node_init_data.pop("depends", None)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_node_id = {
+                executor.submit(
+                    cls.get_node_without_depends,
+                    node_id=node_id,
+                    node_data=node_data,
+                    **get_node_kwargs,
+                ): node_id
+                for node_id, node_data in nodes_to_create.items()
+            }
 
-            if "is_postponed_component_init" not in node_init_data:
-                node_init_data["is_postponed_component_init"] = True
-
-            if "connection" in node_init_data:
-                get_node_conn = (
-                    cls.get_node_vector_store_connection
-                    if isinstance(node_cls, ConnectionNode)
-                    else cls.get_node_connection
-                )
-                node_init_data["connection"] = get_node_conn(
-                    node_id=node_id, node_data=node_data, connections=connections
-                )
-            if prompt_data := node_init_data.get("prompt"):
-                node_init_data["prompt"] = (
-                    cls.get_node_prompt(node_id=node_id, node_data=node_data, prompts=prompts)
-                    if isinstance(prompt_data, str)
-                    else cls.init_prompt(prompt_data)
-                )
-            if "flow" in node_init_data:
-                node_init_data["flow"] = cls.get_node_flow(node_id=node_id, node_data=node_data, flows=flows)
-            if "flows" in node_init_data:
-                node_init_data["flows"] = cls.get_node_flows(node_id=node_id, node_data=node_data, flows=flows)
-            try:
-
-                node_init_data = cls.get_updated_node_init_data_with_initialized_nodes(
-                    node_init_data=node_init_data,
-                    nodes=nodes,
-                    flows=flows,
-                    connections=connections,
-                    prompts=prompts,
-                    registry=registry,
-                    connection_manager=connection_manager,
-                    init_components=init_components,
-                )
-
-                node = node_cls(**node_init_data)
-
-                if init_components and getattr(node, "init_components", False):
-                    node.init_components(connection_manager=connection_manager)
-                    node.is_postponed_component_init = False
-
-            except Exception as e:
-                raise WorkflowYAMLLoaderException(f"Node '{node_id}' data is invalid. Error: {e}")
-
-            new_nodes[node_id] = node
+            for future in as_completed(future_to_node_id):
+                node_id = future_to_node_id[future]
+                try:
+                    result_node_id, node = future.result()
+                    new_nodes[result_node_id] = node
+                except WorkflowYAMLLoaderException:
+                    raise
+                except Exception as e:
+                    raise WorkflowYAMLLoaderException(f"Node '{node_id}' processing failed. Error: {e}")
 
         return new_nodes
+
+    @classmethod
+    def get_node_without_depends(
+        cls,
+        node_id: str,
+        node_data: dict,
+        nodes: dict[str, Node],
+        flows: dict[str, Flow],
+        connections: dict[str, BaseConnection],
+        prompts: dict[str, Prompt],
+        registry: dict[str, Any],
+        connection_manager: ConnectionManager | None = None,
+        init_components: bool = False,
+    ) -> tuple[str, Node]:
+        """
+        Create a single node without dependencies from the given data.
+
+        Args:
+            node_id: Node identifier.
+            node_data: Dictionary containing node data.
+            nodes: Existing nodes dictionary.
+            flows: Existing flows dictionary.
+            connections: Existing connections dictionary.
+            prompts: Existing prompts dictionary.
+            registry: Registry of node types.
+            connection_manager: Optional connection manager.
+            init_components: Flag to initialize components.
+
+        Returns:
+            A tuple of (node_id, node).
+
+        Raises:
+            WorkflowYAMLLoaderException: If node data is invalid.
+        """
+        if not (node_type := node_data.get("type")):
+            raise WorkflowYAMLLoaderException(f"Value 'type' for node '{node_id}' not found")
+
+        node_cls = cls.get_entity_by_type(entity_type=node_type, entity_registry=registry)
+
+        # Init node params
+        node_init_data = node_data.copy()
+        if node_id:
+            node_init_data["id"] = node_id
+        node_init_data.pop("type", None)
+        node_init_data.pop("depends", None)
+
+        if "is_postponed_component_init" not in node_init_data:
+            node_init_data["is_postponed_component_init"] = True
+
+        if "connection" in node_init_data:
+            get_node_conn = (
+                cls.get_node_vector_store_connection
+                if isinstance(node_cls, ConnectionNode)
+                else cls.get_node_connection
+            )
+            node_init_data["connection"] = get_node_conn(node_id=node_id, node_data=node_data, connections=connections)
+        if prompt_data := node_init_data.get("prompt"):
+            node_init_data["prompt"] = (
+                cls.get_node_prompt(node_id=node_id, node_data=node_data, prompts=prompts)
+                if isinstance(prompt_data, str)
+                else cls.init_prompt(prompt_data)
+            )
+        if "flow" in node_init_data:
+            node_init_data["flow"] = cls.get_node_flow(node_id=node_id, node_data=node_data, flows=flows)
+        if "flows" in node_init_data:
+            node_init_data["flows"] = cls.get_node_flows(node_id=node_id, node_data=node_data, flows=flows)
+
+        try:
+            node_init_data = cls.get_updated_node_init_data_with_initialized_nodes(
+                node_init_data=node_init_data,
+                nodes=nodes,
+                flows=flows,
+                connections=connections,
+                prompts=prompts,
+                registry=registry,
+                connection_manager=connection_manager,
+                init_components=init_components,
+            )
+
+            node = node_cls(**node_init_data)
+
+            if init_components and getattr(node, "init_components", False):
+                node.init_components(connection_manager=connection_manager)
+                node.is_postponed_component_init = False
+
+        except Exception as e:
+            raise WorkflowYAMLLoaderException(f"Node '{node_id}' data is invalid. Error: {e}")
+
+        return node_id, node
 
     @classmethod
     def get_nodes(
@@ -494,6 +578,7 @@ class WorkflowYAMLLoader:
         registry: dict[str, Any],
         connection_manager: ConnectionManager | None = None,
         init_components: bool = False,
+        max_workers: int | None = None,
     ):
         """
         Create nodes with dependencies from the given data.
@@ -507,6 +592,7 @@ class WorkflowYAMLLoader:
             registry: Registry of node types.
             connection_manager: Optional connection manager.
             init_components: Flag to initialize components.
+            max_workers: Maximum number of worker threads for node parallel processing.
 
         Returns:
             A dictionary of newly created nodes with dependencies.
@@ -521,6 +607,7 @@ class WorkflowYAMLLoader:
             registry=registry,
             connection_manager=connection_manager,
             init_components=init_components,
+            max_workers=max_workers,
         )
 
         all_nodes = nodes | new_nodes
@@ -539,6 +626,7 @@ class WorkflowYAMLLoader:
         registry: dict[str, Any],
         connection_manager: ConnectionManager | None = None,
         init_components: bool = False,
+        max_workers: int | None = None,
     ) -> dict[str, Node]:
         """
         Get nodes that are dependent on flows.
@@ -551,6 +639,7 @@ class WorkflowYAMLLoader:
             registry: Registry of node types.
             connection_manager: Optional connection manager.
             init_components: Flag to initialize components.
+            max_workers: Maximum number of worker threads for node parallel processing.
 
         Returns:
             A dictionary of nodes that are dependent on flows.
@@ -586,6 +675,7 @@ class WorkflowYAMLLoader:
                 registry=registry,
                 connection_manager=connection_manager,
                 init_components=init_components,
+                max_workers=max_workers,
             )
 
         return dependant_nodes
@@ -731,6 +821,7 @@ class WorkflowYAMLLoader:
         file_path: str | PathLike,
         connection_manager: ConnectionManager | None = None,
         init_components: bool = False,
+        max_workers: int | None = None,
     ) -> WorkflowYamlData:
         """
         Load data from a YAML file and parse it.
@@ -739,6 +830,7 @@ class WorkflowYAMLLoader:
             file_path: Path to the YAML file.
             connection_manager: Optional connection manager.
             init_components: Flag to initialize components.
+            max_workers: Maximum number of worker threads for node parallel processing.
 
         Returns:
             Parsed WorkflowYamlData object.
@@ -748,6 +840,7 @@ class WorkflowYAMLLoader:
             data=data,
             connection_manager=connection_manager,
             init_components=init_components,
+            max_workers=max_workers,
         )
 
     @classmethod
@@ -782,6 +875,7 @@ class WorkflowYAMLLoader:
         data: dict,
         connection_manager: ConnectionManager | None = None,
         init_components: bool = False,
+        max_workers: int | None = None,
     ) -> WorkflowYamlData:
         """
         Parse dynamiq workflow data.
@@ -790,6 +884,7 @@ class WorkflowYAMLLoader:
             data: Dictionary containing workflow data.
             connection_manager: Optional connection manager.
             init_components: Flag to initialize components.
+            max_workers: Maximum number of worker threads for node parallel processing.
 
         Returns:
             Parsed WorkflowYamlData object.
@@ -818,6 +913,7 @@ class WorkflowYAMLLoader:
                 registry=node_registry,
                 connection_manager=connection_manager,
                 init_components=init_components,
+                max_workers=max_workers,
             )
             nodes.update(dependant_nodes)
 
@@ -838,6 +934,7 @@ class WorkflowYAMLLoader:
                 registry=node_registry,
                 connection_manager=connection_manager,
                 init_components=init_components,
+                max_workers=max_workers,
             )
             nodes.update(non_dependant_nodes)
 
