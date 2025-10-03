@@ -231,9 +231,8 @@ def format_value(
             formatted_dict[k] = formatted_v
         return formatted_dict
 
-    if for_tracing and isinstance(value, list):
-        if len(value) > truncate_limit:
-            value = value[:truncate_limit]
+    if for_tracing and isinstance(value, list) and len(value) > truncate_limit:
+        value = value[:truncate_limit]
 
     if isinstance(value, (list, tuple, set)):
         formatted_list = []

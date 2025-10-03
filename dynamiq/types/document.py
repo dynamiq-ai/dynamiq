@@ -29,12 +29,12 @@ class Document(BaseModel):
         Returns:
             dict: Dictionary representation of the Document.
         """
-        data = self.model_dump(**kwargs)
+        data = self.model_dump(exclude={"embedding"}, **kwargs)
 
-        if for_tracing and self.embedding is not None:
-            original_length = len(data["embedding"])
-            if original_length > truncate_limit:
-                data["embedding"] = data["embedding"][:truncate_limit]
+        if for_tracing and self.embedding is not None and len(self.embedding) > truncate_limit:
+            data["embedding"] = self.embedding[:truncate_limit]
+        else:
+            data["embedding"] = self.embedding
 
         return data
 
