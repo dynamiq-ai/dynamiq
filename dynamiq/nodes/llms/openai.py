@@ -78,8 +78,9 @@ class OpenAI(BaseLLM):
             new_params.pop("max_tokens", None)
             new_params.pop("temperature", None)
         elif model_lower.startswith("gpt-5"):
-            new_params["verbosity"] = self.verbosity
-            new_params["reasoning_effort"] = self.reasoning_effort
+            if "chat" not in model_lower:
+                new_params["verbosity"] = self.verbosity
+                new_params["reasoning_effort"] = self.reasoning_effort
             new_params["max_completion_tokens"] = self.max_tokens
             new_params.pop("stop", None)
             new_params.pop("max_tokens", None)
