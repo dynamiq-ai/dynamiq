@@ -4,7 +4,7 @@ connections:
 
 nodes:
   memory-agent:
-    type: dynamiq.nodes.agents.react.ReActAgent
+    type: dynamiq.nodes.agents.Agent
     llm:
       id: react-agent-llm
       type: dynamiq.nodes.llms.OpenAI

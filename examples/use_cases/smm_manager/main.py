@@ -4,7 +4,7 @@ import os
 from mailgun_tool import MailGunTool
 
 from dynamiq.connections import E2B, HttpApiKey
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from examples.llm_setup import setup_llm
 
@@ -46,7 +46,7 @@ FILE_PATH = "data/emails.txt"
 llm = setup_llm()
 
 
-agent = ReActAgent(
+agent = Agent(
     name="AI Agent",
     llm=llm,
     tools=[mailgun_tool, tool_code],

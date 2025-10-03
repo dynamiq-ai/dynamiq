@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from dynamiq import connections, prompts
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     JSONParsingError,
@@ -11,7 +12,6 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
@@ -45,14 +45,14 @@ def openai_node(openai_connection):
 
 @pytest.fixture
 def default_react_agent(openai_node, mock_llm_executor):
-    """ReActAgent with DEFAULT inference mode."""
-    return ReActAgent(name="Test Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    """Agent with DEFAULT inference mode."""
+    return Agent(name="Test Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
 
 
 @pytest.fixture
 def xml_react_agent(openai_node, mock_llm_executor):
-    """ReActAgent with XML inference mode."""
-    return ReActAgent(name="Test XML Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.XML)
+    """Agent with XML inference mode."""
+    return Agent(name="Test XML Agent", llm=openai_node, tools=[], inference_mode=InferenceMode.XML)
 
 
 @pytest.fixture
@@ -117,7 +117,7 @@ def test_sanitize_tool_name(default_react_agent, input_name, expected_output):
 
 def test_generate_prompt_xml_mode(openai_node, mock_llm_executor):
     """Test prompt generation in XML inference mode."""
-    agent = ReActAgent(name="XMLPromptAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.XML)
+    agent = Agent(name="XMLPromptAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.XML)
 
     prompt = agent.generate_prompt()
 
@@ -129,7 +129,7 @@ def test_generate_prompt_xml_mode(openai_node, mock_llm_executor):
 
 def test_set_prompt_block(openai_node, mock_llm_executor):
     """Test modifying prompt blocks."""
-    agent = ReActAgent(name="PromptBlockTestAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
+    agent = Agent(name="PromptBlockTestAgent", llm=openai_node, tools=[], inference_mode=InferenceMode.DEFAULT)
 
     custom_instructions = "Your goal is to analyze the given text and identify key points."
     agent.set_block("instructions", custom_instructions)

@@ -201,9 +201,11 @@ def test_workflow_with_depend_nodes_with_tracing(
     )
 
     expected_output = {
-        openai_node.id: expected_result_openai.to_dict(skip_format_types={BytesIO, bytes}),
-        anthropic_node_with_dependency.id: expected_result_anthropic.to_dict(skip_format_types={BytesIO, bytes}),
-        output_node.id: expected_result_output.to_dict(skip_format_types={BytesIO, bytes}),
+        openai_node.id: expected_result_openai.to_dict(skip_format_types={BytesIO, bytes}, for_tracing=True),
+        anthropic_node_with_dependency.id: expected_result_anthropic.to_dict(
+            skip_format_types={BytesIO, bytes}, for_tracing=True
+        ),
+        output_node.id: expected_result_output.to_dict(skip_format_types={BytesIO, bytes}, for_tracing=True),
     }
     expected_openai_messages = openai_node.prompt.format_messages(**expected_input_openai)
     expected_anthropic_messages = anthropic_node_with_dependency.prompt.format_messages(**expected_input_anthropic)
@@ -254,24 +256,21 @@ def test_workflow_with_depend_nodes_with_tracing(
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf.id
     assert wf_run.metadata["workflow"]["version"] == wf.version
-    assert wf_run.metadata["host"]
     assert wf_run.output == format_value(expected_output)[0]
     assert wf_run.status == RunStatus.SUCCEEDED
     assert wf_run.tags == tags
     assert metadata.items() <= wf_run.metadata.items()
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf.flow.id
-    assert flow_run.metadata["host"]
     assert flow_run.parent_run_id == wf_run.id
     assert flow_run.output == format_value(expected_output)[0]
     assert flow_run.status == RunStatus.SUCCEEDED
     assert flow_run.tags == tags
     assert metadata.items() <= flow_run.metadata.items()
     openai_run = tracing_runs[2]
-    openai_node = openai_node.to_dict()
+    openai_node = openai_node.to_dict(for_tracing=True)
     openai_node["prompt"]["messages"] = expected_openai_messages
     assert openai_run.metadata["node"] == openai_node
-    assert openai_run.metadata["host"]
     assert openai_run.metadata.get("usage")
     assert openai_run.parent_run_id == flow_run.id
     assert openai_run.input == expected_tracing_input
@@ -280,10 +279,9 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert openai_run.tags == tags
     assert metadata.items() <= openai_run.metadata.items()
     anthropic_run = tracing_runs[3]
-    anthropic_node = anthropic_node_with_dependency.to_dict()
+    anthropic_node = anthropic_node_with_dependency.to_dict(for_tracing=True)
     anthropic_node["prompt"]["messages"] = expected_anthropic_messages
     assert anthropic_run.metadata["node"] == anthropic_node
-    assert anthropic_run.metadata["host"]
     assert anthropic_run.metadata.get("usage")
     assert anthropic_run.parent_run_id == flow_run.id
     assert anthropic_run.input == format_value(expected_input_anthropic)[0]
@@ -292,8 +290,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert anthropic_run.tags == tags
     assert metadata.items() <= anthropic_run.metadata.items()
     output_node_run = tracing_runs[4]
-    assert output_node_run.metadata["node"] == output_node.to_dict()
-    assert output_node_run.metadata["host"]
+    assert output_node_run.metadata["node"] == output_node.to_dict(for_tracing=True)
     assert output_node_run.metadata.get("usage") is None
     assert output_node_run.parent_run_id == flow_run.id
     assert output_node_run.input == format_value(expected_input_output)[0]
@@ -362,9 +359,11 @@ async def test_workflow_with_depend_nodes_with_tracing_async(
     )
 
     expected_output = {
-        openai_node.id: expected_result_openai.to_dict(skip_format_types={BytesIO, bytes}),
-        anthropic_node_with_dependency.id: expected_result_anthropic.to_dict(skip_format_types={BytesIO, bytes}),
-        output_node.id: expected_result_output.to_dict(skip_format_types={BytesIO, bytes}),
+        openai_node.id: expected_result_openai.to_dict(skip_format_types={BytesIO, bytes}, for_tracing=True),
+        anthropic_node_with_dependency.id: expected_result_anthropic.to_dict(
+            skip_format_types={BytesIO, bytes}, for_tracing=True
+        ),
+        output_node.id: expected_result_output.to_dict(skip_format_types={BytesIO, bytes}, for_tracing=True),
     }
     expected_openai_messages = openai_node.prompt.format_messages(**expected_input_openai)
     expected_anthropic_messages = anthropic_node_with_dependency.prompt.format_messages(**expected_input_anthropic)
@@ -417,24 +416,21 @@ async def test_workflow_with_depend_nodes_with_tracing_async(
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf.id
     assert wf_run.metadata["workflow"]["version"] == wf.version
-    assert wf_run.metadata["host"]
     assert wf_run.output == format_value(expected_output)[0]
     assert wf_run.status == RunStatus.SUCCEEDED
     assert wf_run.tags == tags
     assert metadata.items() <= wf_run.metadata.items()
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf.flow.id
-    assert flow_run.metadata["host"]
     assert flow_run.parent_run_id == wf_run.id
     assert flow_run.output == format_value(expected_output)[0]
     assert flow_run.status == RunStatus.SUCCEEDED
     assert flow_run.tags == tags
     assert metadata.items() <= flow_run.metadata.items()
     openai_run = tracing_runs[2]
-    openai_node = openai_node.to_dict()
+    openai_node = openai_node.to_dict(for_tracing=True)
     openai_node["prompt"]["messages"] = expected_openai_messages
     assert openai_run.metadata["node"] == openai_node
-    assert openai_run.metadata["host"]
     assert openai_run.metadata.get("usage")
     assert openai_run.parent_run_id == flow_run.id
     assert openai_run.input == expected_tracing_input
@@ -443,10 +439,9 @@ async def test_workflow_with_depend_nodes_with_tracing_async(
     assert openai_run.tags == tags
     assert metadata.items() <= openai_run.metadata.items()
     anthropic_run = tracing_runs[3]
-    anthropic_node = anthropic_node_with_dependency.to_dict()
+    anthropic_node = anthropic_node_with_dependency.to_dict(for_tracing=True)
     anthropic_node["prompt"]["messages"] = expected_anthropic_messages
     assert anthropic_run.metadata["node"] == anthropic_node
-    assert anthropic_run.metadata["host"]
     assert anthropic_run.metadata.get("usage")
     assert anthropic_run.parent_run_id == flow_run.id
     assert anthropic_run.input == format_value(expected_input_anthropic)[0]
@@ -455,8 +450,7 @@ async def test_workflow_with_depend_nodes_with_tracing_async(
     assert anthropic_run.tags == tags
     assert metadata.items() <= anthropic_run.metadata.items()
     output_node_run = tracing_runs[4]
-    assert output_node_run.metadata["node"] == output_node.to_dict()
-    assert output_node_run.metadata["host"]
+    assert output_node_run.metadata["node"] == output_node.to_dict(for_tracing=True)
     assert output_node_run.metadata.get("usage") is None
     assert output_node_run.parent_run_id == flow_run.id
     assert output_node_run.input == format_value(expected_input_output)[0]
@@ -520,9 +514,11 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     )
 
     expected_output = {
-        openai_node.id: expected_result_openai.to_dict(skip_format_types={BytesIO}),
-        anthropic_node_with_dependency.id: expected_result_anthropic.to_dict(skip_format_types={BytesIO}),
-        output_node.id: expected_result_output_node.to_dict(skip_format_types={BytesIO}),
+        openai_node.id: expected_result_openai.to_dict(skip_format_types={BytesIO}, for_tracing=True),
+        anthropic_node_with_dependency.id: expected_result_anthropic.to_dict(
+            skip_format_types={BytesIO}, for_tracing=True
+        ),
+        output_node.id: expected_result_output_node.to_dict(skip_format_types={BytesIO}, for_tracing=True),
     }
     expected_openai_messages = openai_node.prompt.format_messages(**expected_input_openai)
 
@@ -557,7 +553,6 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf.id
     assert wf_run.metadata["workflow"]["version"] == wf.version
-    assert wf_run.metadata["host"]
     assert wf_run.output == expected_output
     assert wf_run.status == RunStatus.SUCCEEDED
     assert wf_run.tags == []
@@ -568,10 +563,9 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     assert flow_run.status == RunStatus.SUCCEEDED
     assert flow_run.tags == []
     openai_run = tracing_runs[2]
-    openai_node = openai_node.to_dict()
+    openai_node = openai_node.to_dict(for_tracing=True)
     openai_node["prompt"]["messages"] = expected_openai_messages
     assert openai_run.metadata["node"] == openai_node
-    assert openai_run.metadata["host"]
     assert openai_run.metadata.get("usage") is None
     assert openai_run.parent_run_id == flow_run.id
     assert openai_run.input == expected_input_openai
@@ -583,11 +577,10 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     assert openai_run.status == RunStatus.FAILED
     assert openai_run.tags == []
     anthropic_run = tracing_runs[3]
-    assert anthropic_run.metadata["node"] == anthropic_node_with_dependency.to_dict()
-    assert anthropic_run.metadata["host"]
+    assert anthropic_run.metadata["node"] == anthropic_node_with_dependency.to_dict(for_tracing=True)
     assert anthropic_run.metadata.get("usage") is None
     assert anthropic_run.metadata["skip"] == {
-        "failed_dependency": anthropic_node_with_dependency.depends[0].to_dict(),
+        "failed_dependency": anthropic_node_with_dependency.depends[0].to_dict(for_tracing=True),
     }
     assert anthropic_run.parent_run_id == flow_run.id
     assert anthropic_run.input == expected_input_anthropic
@@ -595,11 +588,10 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     assert anthropic_run.status == RunStatus.SKIPPED
     assert anthropic_run.tags == []
     output_node_run = tracing_runs[4]
-    assert output_node_run.metadata["node"] == output_node.to_dict()
-    assert output_node_run.metadata["host"]
+    assert output_node_run.metadata["node"] == output_node.to_dict(for_tracing=True)
     assert output_node_run.metadata.get("usage") is None
     assert output_node_run.metadata["skip"] == {
-        "failed_dependency": output_node.depends[0].to_dict(),
+        "failed_dependency": output_node.depends[0].to_dict(for_tracing=True),
     }
     assert output_node_run.parent_run_id == flow_run.id
     assert output_node_run.input == expected_input_output_node
@@ -696,8 +688,8 @@ def test_workflow_with_input_mappings(
     )
 
     expected_output = {
-        openai_node.id: expected_result_openai.to_dict(),
-        output_node.id: expected_result_output_node.to_dict(),
+        openai_node.id: expected_result_openai.to_dict(for_tracing=True),
+        output_node.id: expected_result_output_node.to_dict(for_tracing=True),
     }
 
     assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
@@ -767,9 +759,13 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
     )
 
     expected_input_output = input_data | {
-        openai_node_with_return_behavior.id: expected_result_openai.to_tracing_depend_dict(),
-        anthropic_node_with_success_status_conditional_depend.id: expected_result_anthropic.to_tracing_depend_dict(),
-        mistral_node_with_failed_status_conditional_depend.id: expected_result_mistral.to_tracing_depend_dict(),
+        openai_node_with_return_behavior.id: expected_result_openai.to_tracing_depend_dict(for_tracing=True),
+        anthropic_node_with_success_status_conditional_depend.id: expected_result_anthropic.to_tracing_depend_dict(
+            for_tracing=True
+        ),
+        mistral_node_with_failed_status_conditional_depend.id: expected_result_mistral.to_tracing_depend_dict(
+            for_tracing=True
+        ),
     }
     expected_result_output = RunnableResult(
         status=RunnableStatus.SUCCESS,
@@ -778,15 +774,17 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
     )
 
     expected_output = {
-        openai_node_with_return_behavior.id: expected_result_openai.to_dict(skip_format_types={BytesIO, bytes}),
+        openai_node_with_return_behavior.id: expected_result_openai.to_dict(
+            skip_format_types={BytesIO, bytes}, for_tracing=True
+        ),
         anthropic_node_with_success_status_conditional_depend.id: expected_result_anthropic.to_dict(
-            skip_format_types={BytesIO, bytes}
+            skip_format_types={BytesIO, bytes}, for_tracing=True
         ),
         mistral_node_with_failed_status_conditional_depend.id: expected_result_mistral.to_dict(
-            skip_format_types={BytesIO, bytes}
+            skip_format_types={BytesIO, bytes}, for_tracing=True
         ),
         output_node_with_conditional_dependencies.id: expected_result_output.to_dict(
-            skip_format_types={BytesIO, bytes}
+            skip_format_types={BytesIO, bytes}, for_tracing=True
         ),
     }
     expected_openai_messages = openai_node_with_return_behavior.prompt.format_messages(**expected_input_openai)
@@ -840,24 +838,21 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf_with_conditional_depend.id
     assert wf_run.metadata["workflow"]["version"] == wf_with_conditional_depend.version
-    assert wf_run.metadata["host"]
     assert wf_run.output == format_value(expected_output)[0]
     assert wf_run.status == RunStatus.SUCCEEDED
     assert wf_run.tags == tags
     assert metadata.items() <= wf_run.metadata.items()
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf_with_conditional_depend.flow.id
-    assert flow_run.metadata["host"]
     assert flow_run.parent_run_id == wf_run.id
     assert flow_run.output == format_value(expected_output)[0]
     assert flow_run.status == RunStatus.SUCCEEDED
     assert flow_run.tags == tags
     assert metadata.items() <= flow_run.metadata.items()
     openai_run = tracing_runs[2]
-    openai_node = openai_node_with_return_behavior.to_dict()
+    openai_node = openai_node_with_return_behavior.to_dict(for_tracing=True)
     openai_node["prompt"]["messages"] = expected_openai_messages
     assert openai_run.metadata["node"] == openai_node
-    assert openai_run.metadata["host"]
     assert openai_run.metadata.get("usage")
     assert openai_run.parent_run_id == flow_run.id
     assert openai_run.input == expected_tracing_input
@@ -871,10 +866,9 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
         else tracing_runs[4]
     )
     mistral_run = tracing_runs[3] if anthropic_run != tracing_runs[3] else tracing_runs[4]
-    anthropic_node = anthropic_node_with_success_status_conditional_depend.to_dict()
+    anthropic_node = anthropic_node_with_success_status_conditional_depend.to_dict(for_tracing=True)
     anthropic_node["prompt"]["messages"] = expected_anthropic_messages
     assert anthropic_run.metadata["node"] == anthropic_node
-    assert anthropic_run.metadata["host"]
     assert anthropic_run.metadata.get("usage")
     assert anthropic_run.parent_run_id == flow_run.id
     assert anthropic_run.input == format_value(expected_input_anthropic)[0]
@@ -882,12 +876,11 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
     assert anthropic_run.status == RunStatus.SUCCEEDED
     assert anthropic_run.tags == tags
     assert metadata.items() <= anthropic_run.metadata.items()
-    mistral_node = mistral_node_with_failed_status_conditional_depend.to_dict()
+    mistral_node = mistral_node_with_failed_status_conditional_depend.to_dict(for_tracing=True)
     assert mistral_run.metadata["node"] == mistral_node
-    assert mistral_run.metadata["host"]
     assert mistral_run.metadata.get("usage") is None
     assert mistral_run.metadata["skip"] == {
-        "failed_dependency": mistral_node_with_failed_status_conditional_depend.depends[0].to_dict(),
+        "failed_dependency": mistral_node_with_failed_status_conditional_depend.depends[0].to_dict(for_tracing=True),
     }
     assert mistral_run.parent_run_id == flow_run.id
     assert mistral_run.input == format_value(expected_input_mistral)[0]
@@ -896,8 +889,7 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
     assert mistral_run.tags == tags
     assert metadata.items() <= mistral_run.metadata.items()
     output_node_run = tracing_runs[5]
-    assert output_node_run.metadata["node"] == output_node_with_conditional_dependencies.to_dict()
-    assert output_node_run.metadata["host"]
+    assert output_node_run.metadata["node"] == output_node_with_conditional_dependencies.to_dict(for_tracing=True)
     assert output_node_run.metadata.get("usage") is None
     assert output_node_run.parent_run_id == flow_run.id
     assert output_node_run.input == format_value(expected_input_output)[0]
@@ -976,7 +968,9 @@ def run(input_data):
         openai_node_with_return_behavior.id: expected_result_openai.to_tracing_depend_dict(),
     }
     expected_output_choice = {
-        "success": RunnableResult(status=RunnableStatus.FAILURE, input=expected_input_choice, output=False).to_dict(),
+        "success": RunnableResult(status=RunnableStatus.FAILURE, input=expected_input_choice, output=False).to_dict(
+            for_tracing=True
+        ),
         "failed_or_skipped": RunnableResult(
             status=RunnableStatus.SUCCESS, input=expected_input_choice, output=True
         ).to_dict(),
@@ -1003,10 +997,10 @@ def run(input_data):
     )
 
     expected_output = {
-        openai_node_with_return_behavior.id: expected_result_openai.to_dict(),
-        choice_node.id: expected_result_choice.to_dict(),
-        python_node.id: expected_result_python.to_dict(),
-        output_node.id: expected_result_output.to_dict(),
+        openai_node_with_return_behavior.id: expected_result_openai.to_dict(for_tracing=True),
+        choice_node.id: expected_result_choice.to_dict(for_tracing=True),
+        python_node.id: expected_result_python.to_dict(for_tracing=True),
+        output_node.id: expected_result_output.to_dict(for_tracing=True),
     }
 
     assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)

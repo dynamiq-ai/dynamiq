@@ -2,10 +2,9 @@ from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.connections import E2B, ScaleSerp
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.in_memory import InMemory
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.agents.simple import SimpleAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
@@ -30,7 +29,7 @@ AGENT_ROLE_WRITER = (
 )
 
 
-def setup_agent(streaming_enabled: bool, streaming_mode: str) -> ReActAgent:
+def setup_agent(streaming_enabled: bool, streaming_mode: str) -> Agent:
     """
     Initializes an AI agent with a specified role and streaming configuration.
     """
@@ -43,7 +42,7 @@ def setup_agent(streaming_enabled: bool, streaming_mode: str) -> ReActAgent:
 
     tool_search = ScaleSerpTool(connection=ScaleSerp())
 
-    agent_coding = ReActAgent(
+    agent_coding = Agent(
         name="Coding Agent",
         id="agent",
         llm=llm,
@@ -52,7 +51,7 @@ def setup_agent(streaming_enabled: bool, streaming_mode: str) -> ReActAgent:
         memory=memory,
     )
 
-    agent_search = ReActAgent(
+    agent_search = Agent(
         name="Search Agent",
         id="agent",
         llm=llm,
@@ -61,7 +60,7 @@ def setup_agent(streaming_enabled: bool, streaming_mode: str) -> ReActAgent:
         memory=memory,
     )
 
-    agent_writer = SimpleAgent(
+    agent_writer = Agent(
         name="Writer Agent",
         id="writer",
         llm=llm,

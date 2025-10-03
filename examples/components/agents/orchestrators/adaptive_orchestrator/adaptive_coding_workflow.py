@@ -4,9 +4,9 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import E2B
 from dynamiq.flows import Flow
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder
@@ -51,7 +51,7 @@ def run_coding_task():
     tool_python = E2BInterpreterTool(connection=tool_python_connection)
     llm = setup_llm()
 
-    agent_coding = ReActAgent(
+    agent_coding = Agent(
         name="Coding Agent",
         llm=llm,
         tools=[tool_python],

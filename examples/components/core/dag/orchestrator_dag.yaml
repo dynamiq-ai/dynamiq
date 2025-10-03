@@ -19,7 +19,7 @@ nodes:
         model: gpt-3.5-turbo
     agents:
       - id: agent-researcher
-        type: dynamiq.nodes.agents.ReActAgent
+        type: dynamiq.nodes.agents.Agent
         llm:
           id: agent-researcher-llm
           type: dynamiq.nodes.llms.OpenAI
@@ -38,7 +38,7 @@ nodes:
               connection: openai-conn
               model: gpt-3.5-turbo
       - id: agent-writer
-        type: dynamiq.nodes.agents.SimpleAgent
+        type: dynamiq.nodes.agents.Agent
         llm:
           id: agent-writer-llm
           type: dynamiq.nodes.llms.OpenAI

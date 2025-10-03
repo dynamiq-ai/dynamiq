@@ -15,7 +15,7 @@ from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, create_model, model_validator
 
 from dynamiq.cache.utils import cache_wf_entity
-from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler
+from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
 from dynamiq.connections import BaseConnection
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes.dry_run import DryRunMixin
@@ -92,6 +92,11 @@ class Transformer(BaseModel):
     path: str | None = None
     selector: dict[str, str] | None = None
 
+    def to_dict(self, for_tracing: bool = False, **kwargs) -> dict | None:
+        if for_tracing and self.path is None and self.selector is None:
+            return None
+        return self.model_dump(**kwargs)
+
 
 class InputTransformer(Transformer):
     """Input transformer for nodes."""
@@ -111,6 +116,11 @@ class CachingConfig(BaseModel):
         enabled (bool): Whether caching is enabled for the node.
     """
     enabled: bool = False
+
+    def to_dict(self, for_tracing: bool = False, **kwargs) -> dict:
+        if for_tracing and not self.enabled:
+            return {"enabled": False}
+        return self.model_dump(**kwargs)
 
 
 class NodeReadyToRun(BaseModel):
@@ -152,8 +162,15 @@ class NodeDependency(BaseModel):
         Returns:
             dict: A dictionary representation of the instance.
         """
+        for_tracing: bool = kwargs.get("for_tracing", False)
+        node_value: dict
+        if for_tracing:
+            node_value = {"id": self.node.id, "name": self.node.name, "type": self.node.type}
+        else:
+            node_value = self.node.to_dict(**kwargs)
+
         return {
-            "node": self.node.to_dict(**kwargs),
+            "node": node_value,
             "option": self.option,
             "condition": self.condition.model_dump() if self.condition else None,
         }
@@ -614,6 +631,11 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             "vector_store": True,
             "depends": True,
             "input_mapping": True,
+            "input_transformer": True,
+            "output_transformer": True,
+            "caching": True,
+            "streaming": True,
+            "approval": True,
         }
 
     @property
@@ -638,6 +660,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         Returns:
             dict: A dictionary representation of the instance.
         """
+        for_tracing: bool = kwargs.pop("for_tracing", False)
         exclude = kwargs.pop(
             "exclude", self.to_dict_exclude_params if include_secure_params else self.to_dict_exclude_secure_params
         )
@@ -646,8 +669,22 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             serialize_as_any=kwargs.pop("serialize_as_any", True),
             **kwargs,
         )
-        data["depends"] = [depend.to_dict(**kwargs) for depend in self.depends]
+
+        it = self.input_transformer.to_dict(for_tracing=for_tracing, **kwargs)
+        if it is not None:
+            data["input_transformer"] = it
+        ot = self.output_transformer.to_dict(for_tracing=for_tracing, **kwargs)
+        if ot is not None:
+            data["output_transformer"] = ot
+        data["caching"] = self.caching.to_dict(for_tracing=for_tracing, **kwargs)
+        data["streaming"] = self.streaming.to_dict(for_tracing=for_tracing, **kwargs)
+        data["approval"] = self.approval.to_dict(for_tracing=for_tracing, **kwargs)
+
+        data["depends"] = [depend.to_dict(for_tracing=for_tracing, **kwargs) for depend in self.depends]
         data["input_mapping"] = format_value(self.input_mapping)[0]
+
+        if for_tracing:
+            data = {k: v for k, v in data.items() if v is not None or k in ("input", "output")}
         return data
 
     def send_streaming_approval_message(
@@ -818,7 +855,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                 transformed_input = input_data | {
                     k: result.to_tracing_depend_dict() for k, result in depends_result.items()
                 }
-                skip_data = {"failed_dependency": e.failed_depend.to_dict()}
+                skip_data = {"failed_dependency": e.failed_depend.to_dict(for_tracing=True)}
                 self.run_on_node_skip(
                     callbacks=config.callbacks,
                     skip_data=skip_data,
@@ -1046,7 +1083,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_start(self.to_dict(), input_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1066,7 +1106,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_end(self.model_dump(), output_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_end(self.to_dict(**dict_kwargs), output_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1086,7 +1129,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_error(self.to_dict(), error, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_error(self.to_dict(**dict_kwargs), error, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1108,7 +1154,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_skip(self.to_dict(), skip_data, input_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_skip(self.to_dict(**dict_kwargs), skip_data, input_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1131,7 +1180,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_execute_start(self.to_dict(), input_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_execute_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1151,7 +1203,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_execute_end(self.to_dict(), output_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_execute_end(self.to_dict(**dict_kwargs), output_data, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1171,7 +1226,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_execute_error(self.model_dump(), error, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_execute_error(self.to_dict(**dict_kwargs), error, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1189,7 +1247,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_execute_run(self.to_dict(), **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_execute_run(self.to_dict(**dict_kwargs), **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
@@ -1209,7 +1270,10 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         for callback in callbacks + self.callbacks:
             try:
-                callback.on_node_execute_stream(self.to_dict(), chunk, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_node_execute_stream(self.to_dict(**dict_kwargs), chunk, **kwargs)
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 

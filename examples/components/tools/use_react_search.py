@@ -1,13 +1,13 @@
 """
 This script sets up and runs a question-answering system using the Dynamiq framework.
-It uses a ReActAgent with a Tavily search tool and an Anthropic LLM model.
+It uses a Agent with a Tavily search tool and an Anthropic LLM model.
 """
 
 import time
 from typing import Any
 
 from dynamiq.connections import ScaleSerp, Tavily
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.tools.tavily import TavilyTool
 from dynamiq.nodes.types import InferenceMode
@@ -28,12 +28,12 @@ Sourced links should be placed at the end of the response. You should not use an
 """  # noqa: E501
 
 
-def setup_agent() -> ReActAgent:
+def setup_agent() -> Agent:
     """
-    Set up and configure the ReActAgent with necessary tools and LLM.
+    Set up and configure the Agent with necessary tools and LLM.
 
     Returns:
-        ReActAgent: Configured agent ready to process queries.
+        Agent: Configured agent ready to process queries.
     """
     serp_connection = ScaleSerp()
     tool_search = ScaleSerpTool(connection=serp_connection)
@@ -44,17 +44,17 @@ def setup_agent() -> ReActAgent:
     llm = setup_llm()
 
     # Create and return the agent
-    return ReActAgent(
+    return Agent(
         name="React Agent", llm=llm, tools=[tool_search, tool_tavily], role=AGENT_ROLE, inference_mode=InferenceMode.XML
     )
 
 
-def process_query(agent: ReActAgent, query: str) -> dict[str, Any]:
+def process_query(agent: Agent, query: str) -> dict[str, Any]:
     """
     Process a single query using the given agent.
 
     Args:
-        agent (ReActAgent): The agent to use for processing the query.
+        agent (Agent): The agent to use for processing the query.
         query (str): The user's query.
 
     Returns:

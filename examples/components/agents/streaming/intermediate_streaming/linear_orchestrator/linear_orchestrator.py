@@ -6,8 +6,8 @@ from dynamiq import Workflow
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.connections import Tavily as TavilyConnection
 from dynamiq.flows import Flow
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators import LinearAgentManager, LinearOrchestrator
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools import TavilyTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -37,7 +37,7 @@ def run_orchestrator(request: str, send_handler: AsyncStreamingIteratorCallbackH
 
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o-mini", temperature=0)
 
-    research_agent = ReActAgent(
+    research_agent = Agent(
         name="Research Agent",
         id="Research Agent",
         llm=llm,
@@ -47,7 +47,7 @@ def run_orchestrator(request: str, send_handler: AsyncStreamingIteratorCallbackH
         streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
     )
 
-    writer_agent = ReActAgent(
+    writer_agent = Agent(
         name="Writer Agent",
         id="Writer Agent",
         llm=llm,

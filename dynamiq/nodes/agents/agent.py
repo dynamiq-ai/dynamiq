@@ -8,8 +8,9 @@ from typing import Any, Callable, Union, get_args, get_origin
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
-from dynamiq.callbacks import ReActAgentStreamingParserCallback, StreamingQueueCallbackHandler
-from dynamiq.nodes.agents.base import Agent, AgentIntermediateStep, AgentIntermediateStepModelObservation
+from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
+from dynamiq.nodes.agents.base import Agent as BaseAgent
+from dynamiq.nodes.agents.base import AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     AgentUnknownToolException,
@@ -686,10 +687,10 @@ TYPE_MAPPING = {
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
 
-class ReActAgent(Agent):
-    """Agent that uses the ReAct strategy for processing tasks by interacting with tools in a loop."""
+class Agent(BaseAgent):
+    """Unified Agent that uses a ReAct-style strategy for processing tasks by interacting with tools in a loop."""
 
-    name: str = "React Agent"
+    name: str = "Agent"
     max_loops: int = Field(default=15, ge=2)
     inference_mode: InferenceMode = Field(default=InferenceMode.DEFAULT)
     behaviour_on_max_loops: Behavior = Field(
@@ -1097,7 +1098,7 @@ class ReActAgent(Agent):
                 original_streaming_enabled = self.llm.streaming.enabled
 
                 if self.streaming.enabled:
-                    streaming_callback = ReActAgentStreamingParserCallback(
+                    streaming_callback = AgentStreamingParserCallback(
                         agent=self,
                         config=config,
                         loop_num=loop_num,

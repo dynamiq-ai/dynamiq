@@ -1,7 +1,7 @@
 from .base import BaseCallbackHandler, NodeCallbackHandler
 from .streaming import (
     AsyncStreamingIteratorCallbackHandler,
-    ReActAgentStreamingParserCallback,
+    AgentStreamingParserCallback,
     StreamingQueueCallbackHandler,
 )
 from .tracing import DynamiqTracingCallbackHandler, TracingCallbackHandler

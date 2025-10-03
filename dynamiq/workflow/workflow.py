@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, computed_field
 
+from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.flows import BaseFlow, Flow
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
@@ -113,12 +114,13 @@ class Workflow(BaseModel, Runnable):
             dict: A dictionary representation of the instance.
         """
         exclude = kwargs.pop("exclude", self.to_dict_exclude_params)
+        for_tracing: bool = kwargs.pop("for_tracing", False)
         data = self.model_dump(
             exclude=exclude,
             serialize_as_any=kwargs.pop("serialize_as_any", True),
             **kwargs,
         )
-        data["flow"] = self.flow.to_dict(include_secure_params=include_secure_params, **kwargs)
+        data["flow"] = self.flow.to_dict(include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs)
         return data
 
     def to_yaml_file_data(self) -> "WorkflowYamlData":
@@ -227,7 +229,10 @@ class Workflow(BaseModel, Runnable):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_workflow_start(self.model_dump(), input_data, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_workflow_start(self.to_dict(**dict_kwargs), input_data, **kwargs)
 
     def run_on_workflow_end(
         self, output: Any, config: RunnableConfig = None, **kwargs: Any
@@ -241,7 +246,10 @@ class Workflow(BaseModel, Runnable):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_workflow_end(self.model_dump(), output, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_workflow_end(self.to_dict(**dict_kwargs), output, **kwargs)
 
     def run_on_workflow_error(
         self, error: BaseException, config: RunnableConfig = None, **kwargs: Any
@@ -255,4 +263,7 @@ class Workflow(BaseModel, Runnable):
         """
         if config and config.callbacks:
             for callback in config.callbacks:
-                callback.on_workflow_error(self.model_dump(), error, **kwargs)
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                callback.on_workflow_error(self.to_dict(**dict_kwargs), error, **kwargs)

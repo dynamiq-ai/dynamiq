@@ -254,7 +254,7 @@ class LLMDocumentRanker(Node):
             run_depends=self._run_depends,
             **run_kwargs,
         )
-        self._run_depends = [NodeDependency(node=self.llm).to_dict()]
+        self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
         if llm_result.status != RunnableStatus.SUCCESS:
             logger.error(f"Node {self.name} - {self.id}: LLM execution failed: {llm_result.error.to_dict()}")
             raise ValueError("LLMDocumentRanker LLM execution failed")

@@ -490,6 +490,9 @@ class Agent(Node):
             data["files"] = [{"name": getattr(f, "name", f"file_{i}")} for i, f in enumerate(self.files)]
         if self.images:
             data["images"] = [{"name": getattr(f, "name", f"image_{i}")} for i, f in enumerate(self.images)]
+
+        data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
+
         return data
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
@@ -748,7 +751,7 @@ class Agent(Node):
                 run_depends=self._run_depends,
                 **kwargs,
             )
-            self._run_depends = [NodeDependency(node=self.llm).to_dict()]
+            self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
             if llm_result.status != RunnableStatus.SUCCESS:
                 error_message = f"LLM '{self.llm.name}' failed: {llm_result.error.message}"
                 raise ValueError({error_message})
@@ -948,7 +951,7 @@ class Agent(Node):
             run_depends=self._run_depends,
             **child_kwargs,
         )
-        self._run_depends = [NodeDependency(node=tool).to_dict()]
+        self._run_depends = [NodeDependency(node=tool).to_dict(for_tracing=True)]
         if tool_result.status != RunnableStatus.SUCCESS:
             error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
             if tool_result.error.recoverable:

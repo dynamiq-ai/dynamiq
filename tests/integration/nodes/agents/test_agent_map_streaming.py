@@ -7,13 +7,13 @@ from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.callbacks.streaming import StreamingIteratorCallbackHandler
 from dynamiq.callbacks.tracing import RunType
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import InferenceMode, ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.operators import Map
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.python import Python
-from dynamiq.nodes.types import Behavior
+from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.types.streaming import StreamingConfig, StreamingMode
 
@@ -79,7 +79,7 @@ def run(input_data):
     exa_tool = ExaTool(connection=connections.Exa(api_key="test-api-key"))
     firecrawl_tool = FirecrawlTool(connection=connections.Firecrawl(api_key="test-api-key"))
 
-    agent = ReActAgent(
+    agent = Agent(
         name="React Agent",
         llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
         inference_mode=InferenceMode.DEFAULT,
@@ -154,7 +154,7 @@ def run(input_data):
     exa_tool = ExaTool(connection=connections.Exa(api_key="test-api-key"))
     firecrawl_tool = FirecrawlTool(connection=connections.Firecrawl(api_key="test-api-key"))
 
-    agent = ReActAgent(
+    agent = Agent(
         name="React Agent",
         llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
         inference_mode=InferenceMode.DEFAULT,

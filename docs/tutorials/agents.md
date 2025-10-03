@@ -1,6 +1,6 @@
 # Agents Tutorial
 
-## Simple ReAct Agent
+## Simple Agent
 
 An agent that has access to the E2B Code Interpreter and is capable of solving complex coding tasks.
 
@@ -11,7 +11,7 @@ An agent that has access to the E2B Code Interpreter and is capable of solving c
 ```python
 from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.connections import OpenAI as OpenAIConnection, E2B as E2BConnection
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 ```
 
@@ -39,12 +39,12 @@ llm = OpenAI(
 )
 ```
 
-**Create the ReAct Agent**
+**Create the Agent**
 
 Create an agent that uses the LLM and the E2B tool to solve coding tasks.
 
 ```python
-agent = ReActAgent(
+agent = Agent(
     name="react-agent",
     llm=llm,
     tools=[e2b_tool],
@@ -82,8 +82,7 @@ from dynamiq.connections import (OpenAI as OpenAIConnection,
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
-from dynamiq.nodes.agents.reflection import ReflectionAgent
+from dynamiq.nodes.agents import Agent, ReflectionAgent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 ```
@@ -118,7 +117,7 @@ llm = OpenAI(
 Create agents with specific roles and goals.
 
 ```python
-coding_agent = ReActAgent(
+coding_agent = Agent(
     name="coding-agent",
     llm=llm,
     tools=[python_tool],
@@ -136,7 +135,7 @@ planner_agent = ReflectionAgent(
           "and provide a detailed action plan."),
 )
 
-search_agent = ReActAgent(
+search_agent = Agent(
     name="search-agent",
     llm=llm,
     tools=[search_tool],

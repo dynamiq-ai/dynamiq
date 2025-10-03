@@ -4,10 +4,9 @@ from dynamiq import Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import ScaleSerp
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.base import Agent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
-from dynamiq.nodes.agents.react import ReActAgent
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -99,7 +98,7 @@ def run_workflow(input_data: dict) -> dict:
     tool_search = ScaleSerpTool(connection=http_connection_serp)
 
     # Create agents
-    agent_selection_city = ReActAgent(
+    agent_selection_city = Agent(
         name="City Selection Expert",
         role="An expert in analyzing travel data to pick ideal destinations",
         goal=(
@@ -110,7 +109,7 @@ def run_workflow(input_data: dict) -> dict:
         max_loops=15,
     )
 
-    agent_city_guide = ReActAgent(
+    agent_city_guide = Agent(
         name="City Guide Expert",
         role="An expert in gathering information about a city",
         goal=(

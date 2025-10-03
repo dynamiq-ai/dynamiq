@@ -2,11 +2,12 @@
 
 import abc
 from datetime import datetime
+from functools import cached_property
 from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class FileInfo(BaseModel):
@@ -55,6 +56,24 @@ class FileStore(abc.ABC, BaseModel):
     This interface provides a unified way to interact with different
     file storage backends (in-memory, file system, cloud storage, etc.).
     """
+
+    @computed_field
+    @cached_property
+    def type(self) -> str:
+        """Returns the backend type as a string."""
+        return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
+
+    def to_dict(self, **kwargs) -> dict[str, Any]:
+        """Convert the FileStore instance to a dictionary.
+
+        Returns:
+            dict: Dictionary representation of the FileStore instance.
+        """
+        for param in ("include_secure_params", "for_tracing"):
+            kwargs.pop(param, None)
+        data = self.model_dump(**kwargs)
+        data["type"] = self.type
+        return data
 
     @abc.abstractmethod
     def list_files_bytes(self) -> list[BytesIO]:
@@ -164,3 +183,11 @@ class FileStoreConfig(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def to_dict(self, **kwargs) -> dict[str, Any]:
+        """Convert the FileStoreConfig instance to a dictionary."""
+        for param in ("include_secure_params", "for_tracing"):
+            kwargs.pop(param, None)
+        config_data = self.model_dump(exclude={"backend"}, **kwargs)
+        config_data["backend"] = self.backend.to_dict()
+        return config_data

@@ -7,7 +7,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.connections import Tavily as TavilyConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools import TavilyTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -128,7 +128,7 @@ def run_agent(
     except Exception as e:
         return f"Error setting up LLM: {str(e)}"
 
-    research_agent = ReActAgent(
+    research_agent = Agent(
         name="TestAgent",
         id="TestAgent",
         llm=llm,

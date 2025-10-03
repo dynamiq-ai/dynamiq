@@ -2,7 +2,7 @@ from database_tool import DatabaseQueryTool, SQLiteConnection
 
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.in_memory import InMemory
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from examples.llm_setup import setup_llm
 
 AGENT_PERSONALITY = """
@@ -38,7 +38,7 @@ llm = setup_llm()
 memory = Memory(backend=InMemory())
 
 # Create the agent
-dynamiq_name_assistant = ReActAgent(
+dynamiq_name_assistant = Agent(
     name="Dynamiq Name Assistant",
     llm=llm,
     tools=[db_tool],

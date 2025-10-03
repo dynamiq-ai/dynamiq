@@ -163,7 +163,7 @@ Parameter Guide:
             config=config,
             **(kwargs | {"parent_run_id": kwargs.get("run_id")}),
         )
-        self._run_depends = [NodeDependency(node=self.llm).to_dict()]
+        self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
         if result.status != RunnableStatus.SUCCESS:
             raise ValueError("LLM execution failed")
         return result.output["content"]

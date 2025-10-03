@@ -236,7 +236,7 @@ class GraphOrchestrator(Orchestrator):
             run_depends=self._run_depends,
             **kwargs,
         )
-        self._run_depends = [NodeDependency(node=self.manager).to_dict()]
+        self._run_depends = [NodeDependency(node=self.manager).to_dict(for_tracing=True)]
 
         if manager_result.status != RunnableStatus.SUCCESS:
             error = manager_result.error.to_dict()
@@ -293,7 +293,7 @@ class GraphOrchestrator(Orchestrator):
                     input_data=input_data, config=config, run_depends=self._run_depends, **kwargs
                 ).output.get("content")
 
-                self._run_depends = [NodeDependency(node=condition).to_dict()]
+                self._run_depends = [NodeDependency(node=condition).to_dict(for_tracing=True)]
 
                 if not isinstance(next_state, str):
                     raise OrchestratorError(
@@ -361,7 +361,7 @@ class GraphOrchestrator(Orchestrator):
 
                     output = output.output
                     self.context = self.context | output["context"]
-                    self._run_depends = [NodeDependency(node=state).to_dict()]
+                    self._run_depends = [NodeDependency(node=state).to_dict(for_tracing=True)]
                     self._chat_history = self._chat_history + output["history_messages"]
 
                 state = self._get_next_state(state, config=config, **kwargs)

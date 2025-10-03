@@ -2,7 +2,7 @@ import base64
 import io
 import os
 
-from dynamiq.nodes.agents.react import ReActAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
@@ -158,7 +158,7 @@ def create_agent():
     Create and configure the agent with necessary tools.
 
     Returns:
-        ReActAgent: A configured Dynamiq ReActAgent ready to run.
+        Agent: A configured Dynamiq agent ready to run.
     """
     statistics_tool = Python(
         name="statistics_tool",
@@ -177,7 +177,7 @@ def create_agent():
 
     file_store_config = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
 
-    agent_software = ReActAgent(
+    agent_software = Agent(
         name="Agent",
         llm=llm,
         tools=[statistics_tool],

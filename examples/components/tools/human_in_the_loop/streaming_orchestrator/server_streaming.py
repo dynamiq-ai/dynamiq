@@ -9,7 +9,7 @@ from dynamiq import Workflow
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.flows import Flow
-from dynamiq.nodes.agents import SimpleAgent
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphAgentManager, GraphOrchestrator
 from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.node import InputTransformer, NodeDependency
@@ -55,7 +55,7 @@ def create_orchestrator() -> GraphOrchestrator:
         manager=GraphAgentManager(llm=llm),
     )
 
-    agent = SimpleAgent(llm=llm)
+    agent = Agent(llm=llm)
     human_feedback_tool = HumanFeedbackTool(
         input_transformer=InputTransformer(
             selector={
