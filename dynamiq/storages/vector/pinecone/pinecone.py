@@ -4,6 +4,7 @@ from copy import copy
 from functools import partial
 from typing import TYPE_CHECKING, Any, Optional
 
+from pinecone.core.client.exceptions import NotFoundException
 from pydantic import Field, field_validator
 
 from dynamiq.connections import Pinecone
@@ -182,10 +183,10 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
         Returns:
             The initialized Pinecone index object.
         """
-        available_indexes = self.client.list_indexes().index_list["indexes"]
-        indexes_names = [index["name"] for index in available_indexes]
-
-        if self.index_name not in indexes_names:
+        try:
+            index = self.client.Index(name=self.index_name)
+            return index
+        except NotFoundException:
             if self.create_if_not_exist and self.index_type is not None:
                 logger.debug(f"Index {self.index_name} does not exist. Creating a new index.")
                 self.client.create_index(
@@ -197,14 +198,11 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
                 )
                 self._track_collection(self.index_name)
                 return self.client.Index(name=self.index_name)
-            else:
-                raise ValueError(
-                    f"Index {self.index_name} does not exist."
-                    f"'create_if_not_exist' must be set to True and 'index_type' must be specified."
-                )
-        else:
-            logger.debug(f"Index {self.index_name} already exists. Connecting to it.")
-            return self.client.Index(name=self.index_name)
+
+            raise ValueError(
+                f"Index {self.index_name} does not exist. "
+                f"'create_if_not_exist' must be set to True and 'index_type' must be specified."
+            )
 
     def _set_dimension(self, dimension: int):
         """
