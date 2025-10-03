@@ -226,6 +226,7 @@ def format_value(
                 force_format_types,
                 for_tracing,
                 path=new_path,
+                truncate_limit=truncate_limit,
             )
             formatted_dict[k] = formatted_v
         return formatted_dict
@@ -244,6 +245,7 @@ def format_value(
                 force_format_types,
                 for_tracing,
                 path=new_path,
+                truncate_limit=truncate_limit,
             )
             formatted_list.append(formatted_v)
 

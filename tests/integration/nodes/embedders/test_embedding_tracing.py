@@ -9,6 +9,7 @@ from dynamiq.nodes.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types import Document
 from dynamiq.utils import format_value
+from dynamiq.utils.utils import TRUNCATE_EMBEDDINGS_LIMIT
 
 
 def test_workflow_with_openai_text_embedder(mock_embedding_executor_truncate_tracing, mock_embedding_tracing_output):
@@ -59,7 +60,9 @@ def test_workflow_with_openai_text_embedder(mock_embedding_executor_truncate_tra
     assert openai_run.parent_run_id == flow_run.id
     assert openai_run.input == input
     assert openai_run.output == format_value(
-        {"query": "I love pizza!", **mock_embedding_tracing_output}, for_tracing=True
+        {"query": "I love pizza!", **mock_embedding_tracing_output},
+        for_tracing=True,
+        truncate_limit=TRUNCATE_EMBEDDINGS_LIMIT,
     )
     assert openai_run.status == RunStatus.SUCCEEDED
 

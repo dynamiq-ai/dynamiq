@@ -68,7 +68,7 @@ class BaseConnection(BaseModel, ABC):
             dict: A dictionary representation of the connection instance.
         """
         if for_tracing:
-            return {"id": self.node.id, "name": self.node.name, "type": self.node.type}
+            return {"id": self.id, "type": self.type}
         else:
             return self.model_dump(**kwargs)
 
