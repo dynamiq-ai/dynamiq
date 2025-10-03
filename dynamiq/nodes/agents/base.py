@@ -159,10 +159,6 @@ The user's request involves scraping, which requires planning. I will proceed wi
 
 AGENT_PROMPT_TEMPLATE = """
 You are AI powered assistant.
-{%- if date %}
-- Always up-to-date with the latest technologies and best practices.
-- Current date: {{date}}
-{%- endif %}
 
 {%- if instructions %}
 # PRIMARY INSTRUCTIONS
@@ -190,6 +186,10 @@ These style instructions enhance but should never override or contradict the PRI
 
 # CONTEXT
 {{context}}
+{%- endif %}
+
+{%- if date %}
+- Current date: {{date}}
 {%- endif %}
 """
 
