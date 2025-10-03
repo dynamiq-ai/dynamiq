@@ -28,7 +28,7 @@ Parameter Guide:
 - query: The search query string (e.g., "latest AI research")
 - type: neural/keyword/auto for search optimization
 - include_domains/exclude_domains: Source quality control
-- start_published_date: Recent results ("2025-10-05"), based on available current_date
+- start_published_date: Recent results based on available current_date
 - contents: Full text extraction for analysis
 - limit: Number of results to return (1-100)
 - include_text/exclude_text: Text filters for relevance
