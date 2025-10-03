@@ -146,11 +146,11 @@ class RunnableResult(BaseModel):
 
         data = {
             "status": self.status.value,
-            "input": format_value(self.input, skip_format_types, force_format_types)[0],
-            "output": format_value(self.output, skip_format_types, force_format_types)[0],
+            "input": format_value(self.input, skip_format_types, force_format_types),
+            "output": format_value(self.output, skip_format_types, force_format_types),
         }
         if self.error:
-            data["error"] = format_value(self.error, skip_format_types, force_format_types)[0]
+            data["error"] = format_value(self.error, skip_format_types, force_format_types)
 
         return data
 

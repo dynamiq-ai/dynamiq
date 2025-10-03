@@ -4,6 +4,8 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
+from dynamiq.utils.utils import TRUNCATE_EMBEDDINGS_LIMIT
+
 
 class Document(BaseModel):
     """Document class for Dynamiq.
@@ -21,13 +23,20 @@ class Document(BaseModel):
     embedding: list | None = None
     score: float | None = None
 
-    def to_dict(self, **kwargs) -> dict:
+    def to_dict(self, for_tracing: bool = False, truncate_limit: int = TRUNCATE_EMBEDDINGS_LIMIT, **kwargs) -> dict:
         """Convert the Document object to a dictionary.
 
         Returns:
             dict: Dictionary representation of the Document.
         """
-        return self.model_dump(**kwargs)
+        data = self.model_dump(exclude={"embedding"}, **kwargs)
+
+        if for_tracing and self.embedding is not None and len(self.embedding) > truncate_limit:
+            data["embedding"] = self.embedding[:truncate_limit]
+        else:
+            data["embedding"] = self.embedding
+
+        return data
 
 
 class DocumentCreationMode(str, enum.Enum):

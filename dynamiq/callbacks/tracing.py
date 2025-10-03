@@ -199,7 +199,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
                 **self.metadata,
             },
             tags=self.tags,
-            input=format_value(kwargs.get("input_data"), truncate_enabled=True)[0],
+            input=format_value(kwargs.get("input_data"), for_tracing=True),
         )
         return run
 
@@ -223,7 +223,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             source_id=self.source_id,
             session_id=self.session_id,
             start_time=datetime.now(UTC),
-            input=format_value(input_data, truncate_enabled=True)[0],
+            input=format_value(input_data, for_tracing=True),
             metadata={
                 "workflow": {"id": serialized.get("id"), "version": serialized.get("version")},
                 **self.metadata,
@@ -243,7 +243,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-        run.output = format_value(output_data, truncate_enabled=True)[0]
+        run.output = format_value(output_data, for_tracing=True)
         run.status = RunStatus.SUCCEEDED
 
         self.flush()
@@ -288,7 +288,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             session_id=self.session_id,
             start_time=datetime.now(UTC),
             parent_run_id=parent_run_id,
-            input=format_value(input_data, truncate_enabled=True)[0],
+            input=format_value(input_data, for_tracing=True),
             metadata={"flow": {"id": serialized.get("id")}, **self.metadata},
             tags=self.tags,
         )
@@ -305,7 +305,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-        run.output = format_value(output_data, truncate_enabled=True)[0]
+        run.output = format_value(output_data, for_tracing=True)
         run.status = RunStatus.SUCCEEDED
         # If parent_run_id is None, the run is the highest in the execution tree
         if run.parent_run_id is None:
@@ -341,7 +341,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run_id = get_run_id(kwargs)
         run = self._get_node_base_run(serialized, **kwargs)
-        run.input = format_value(input_data, truncate_enabled=True)[0]
+        run.input = format_value(input_data, for_tracing=True)
         self.runs[run_id] = run
 
     def on_node_end(
@@ -356,7 +356,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-        run.output = format_value(output_data, truncate_enabled=True)[0]
+        run.output = format_value(output_data, for_tracing=True)
         run.status = RunStatus.SUCCEEDED
         run.metadata["is_output_from_cache"] = kwargs.get("is_output_from_cache", False)
         # If parent_run_id is None, the run is the highest in the execution tree
@@ -405,10 +405,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             run = self._get_node_base_run(serialized, **kwargs)
             self.runs[run_id] = run
 
-        run.input = format_value(input_data, truncate_enabled=True)[0]
+        run.input = format_value(input_data, for_tracing=True)
         run.end_time = run.start_time
         run.status = RunStatus.SKIPPED
-        run.metadata["skip"] = format_value(skip_data)[0]
+        run.metadata["skip"] = format_value(skip_data)
 
     def on_node_execute_start(
         self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any

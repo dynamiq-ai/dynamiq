@@ -9,6 +9,7 @@ from dynamiq.nodes.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types import Document
 from dynamiq.utils import format_value
+from dynamiq.utils.utils import TRUNCATE_EMBEDDINGS_LIMIT
 
 
 def test_workflow_with_openai_text_embedder(mock_embedding_executor_truncate_tracing, mock_embedding_tracing_output):
@@ -48,17 +49,20 @@ def test_workflow_with_openai_text_embedder(mock_embedding_executor_truncate_tra
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf_openai_ai.id
     assert wf_run.metadata["workflow"]["version"] == wf_openai_ai.version
+    assert wf_run.output == format_value(expected_output)
     assert wf_run.status == RunStatus.SUCCEEDED
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf_openai_ai.flow.id
     assert flow_run.parent_run_id == wf_run.id
+    assert flow_run.output == format_value(expected_output, for_tracing=True)
     assert flow_run.status == RunStatus.SUCCEEDED
     openai_run = tracing_runs[2]
     assert openai_run.parent_run_id == flow_run.id
     assert openai_run.input == input
-    assert (
-        openai_run.output
-        == format_value({"query": "I love pizza!", **mock_embedding_tracing_output}, truncate_enabled=True)[0]
+    assert openai_run.output == format_value(
+        {"query": "I love pizza!", **mock_embedding_tracing_output},
+        for_tracing=True,
+        truncate_limit=TRUNCATE_EMBEDDINGS_LIMIT,
     )
     assert openai_run.status == RunStatus.SUCCEEDED
 
@@ -123,10 +127,12 @@ def test_workflow_with_openai_document_embedder(mock_embedding_executor_truncate
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf_openai_ai.id
     assert wf_run.metadata["workflow"]["version"] == wf_openai_ai.version
+    assert wf_run.output == format_value(expected_output, for_tracing=True)
     assert wf_run.status == RunStatus.SUCCEEDED
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf_openai_ai.flow.id
     assert flow_run.parent_run_id == wf_run.id
+    assert flow_run.output == format_value(expected_output, for_tracing=True)
     assert flow_run.status == RunStatus.SUCCEEDED
     openai_run = tracing_runs[2]
     assert openai_run.parent_run_id == flow_run.id
@@ -137,7 +143,7 @@ def test_workflow_with_openai_document_embedder(mock_embedding_executor_truncate
             "usage": {"usage": {"completion_tokens": 0, "prompt_tokens": 6, "total_tokens": 6}},
         },
     }
-    assert openai_run.output == format_value(embedder_tracing_output, truncate_enabled=True)[0]
+    assert openai_run.output == format_value(embedder_tracing_output, for_tracing=True)
     assert openai_run.status == RunStatus.SUCCEEDED
     mock_embedding_executor_truncate_tracing.assert_called_once_with(
         input=[document[0].content],
