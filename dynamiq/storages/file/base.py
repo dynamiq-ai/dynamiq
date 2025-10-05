@@ -186,8 +186,10 @@ class FileStoreConfig(BaseModel):
 
     def to_dict(self, **kwargs) -> dict[str, Any]:
         """Convert the FileStoreConfig instance to a dictionary."""
-        for param in ("include_secure_params", "for_tracing"):
-            kwargs.pop(param, None)
+        for_tracing = kwargs.pop("for_tracing", False)
+        if for_tracing and not self.enabled:
+            return {"enabled": False}
+        kwargs.pop("include_secure_params", None)
         config_data = self.model_dump(exclude={"backend"}, **kwargs)
         config_data["backend"] = self.backend.to_dict()
         return config_data

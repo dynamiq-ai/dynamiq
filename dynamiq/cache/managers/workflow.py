@@ -84,9 +84,9 @@ class WorkflowCacheManager(CacheManager):
         Returns:
             str: Generated cache key.
         """
-        input_data_formatted = format_value(self._sort_dict(input_data))[0]
+        input_data_formatted = format_value(self._sort_dict(input_data))
         input_data_hash = self.hash(self.serializer.dumps(input_data_formatted))
-        kwargs_formatted = format_value(self._sort_dict(kwargs))[0]
+        kwargs_formatted = format_value(self._sort_dict(kwargs))
         kwargs_hash = self.hash(self.serializer.dumps(kwargs_formatted))
         return f"{entity_id}:{input_data_hash}:{kwargs_hash}"
 

@@ -61,13 +61,16 @@ class BaseConnection(BaseModel, ABC):
         """
         return {}
 
-    def to_dict(self, **kwargs) -> dict:
+    def to_dict(self, for_tracing: bool = False, **kwargs) -> dict:
         """Converts the connection instance to a dictionary.
 
         Returns:
             dict: A dictionary representation of the connection instance.
         """
-        return self.model_dump(**kwargs)
+        if for_tracing:
+            return {"id": self.id, "type": self.type}
+        else:
+            return self.model_dump(**kwargs)
 
     @abstractmethod
     def connect(self):
