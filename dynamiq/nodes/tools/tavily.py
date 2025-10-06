@@ -39,9 +39,10 @@ Parameter Guide:
 
 
 Examples:
-- {"query": "React performance 2024", "search_depth": "advanced"}
-- {"query": "GPT-4 news", "topic": "news", "time_range": "week"}
-- {"query": "ML tutorials", "include_domains": ["coursera.org"]}"""
+- {"query": "React performance optimization", "search_depth": "advanced"}
+- {"query": "latest AI developments", "topic": "news", "time_range": "week"}
+- {"query": "machine learning tutorials", "include_domains": ["coursera.org", "kaggle.com"]}
+- {"query": "Python best practices", "include_answer": true, "max_results": 10}"""
 
 
 class TavilyInputSchema(BaseModel):

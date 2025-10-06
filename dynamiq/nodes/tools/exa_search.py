@@ -28,7 +28,7 @@ Parameter Guide:
 - query: The search query string (e.g., "latest AI research")
 - type: neural/keyword/auto for search optimization
 - include_domains/exclude_domains: Source quality control
-- start_published_date: Recent results ("2024-01-01")
+- start_published_date: Recent results based on available current_date
 - contents: Full text extraction for analysis
 - limit: Number of results to return (1-100)
 - include_text/exclude_text: Text filters for relevance
@@ -36,8 +36,7 @@ Parameter Guide:
 
 Examples:
 - {"query": "AI research papers", "type": "neural", "num_results": 10}
-- {"query": "pandas tutorial", "include_domains": ["medium.com"], "contents": true}
-- {"query": "climate change", "start_published_date": "2024-01-01"}"""  # noqa: E501
+- {"query": "pandas tutorial", "include_domains": ["medium.com"], "contents": true}"""  # noqa: E501
 
 
 class QueryType(str, Enum):
