@@ -1,4 +1,5 @@
-from typing import Any, ClassVar, Literal
+import json
+from typing import Any, ClassVar, Iterator, Literal
 
 from pydantic import BaseModel, Field
 
@@ -54,7 +55,12 @@ class VectorStoreRetriever(Node):
     similarity_threshold: float | None = None
 
     input_schema: ClassVar[type[VectorStoreRetrieverInputSchema]] = VectorStoreRetrieverInputSchema
-    _EXCLUDED_METADATA_FIELDS: ClassVar[tuple[str, ...]] = ("embedding", "embeddings", "vector", "vectors")
+    _EXCLUDED_METADATA_FIELDS: ClassVar[tuple[str, ...]] = (
+        "embedding",
+        "embeddings",
+        "vector",
+        "vectors",
+    )
 
     def __init__(self, **kwargs):
         """
@@ -117,24 +123,137 @@ class VectorStoreRetriever(Node):
         Returns:
             str: Formatted content of the documents.
         """
-        formatted_docs = []
-        for i, doc in enumerate(documents):
+        formatted_docs: list[str] = []
+
+        normalized_metadata_fields: list[str] | None = None
+        include_score = False
+        if metadata_fields is not None:
+            seen_fields: set[str] = set()
+            cleaned_fields: list[str] = []
+            for field in metadata_fields:
+                stripped = field.strip() if field else ""
+                if not stripped:
+                    continue
+                lowered = stripped.lower()
+                if lowered in seen_fields:
+                    continue
+                if lowered == "score":
+                    include_score = True
+                    seen_fields.add(lowered)
+                    continue
+                seen_fields.add(lowered)
+                cleaned_fields.append(stripped)
+
+            if cleaned_fields:
+                normalized_metadata_fields = cleaned_fields
+            elif include_score:
+                normalized_metadata_fields = []
+
+        for index, doc in enumerate(documents):
             metadata = doc.metadata or {}
-            formatted_doc = f"Source {i + 1}\n"
+            metadata_lines: list[str] = []
 
-            if metadata_fields is not None:
-                for field in metadata_fields:
-                    if field in metadata:
-                        formatted_doc += f"{field.capitalize()}: {metadata[field]}\n"
+            if normalized_metadata_fields is not None:
+                if include_score and doc.score is not None:
+                    metadata_lines.append(self._format_metadata_line("Score", doc.score))
+
+                for label_parts, value in self._iter_metadata_entries(metadata, normalized_metadata_fields):
+                    metadata_lines.append(self._format_metadata_line(" - ".join(label_parts), value))
             else:
-                for field, value in metadata.items():
-                    field_lower = field.lower()
-                    if field_lower not in self._EXCLUDED_METADATA_FIELDS and "id" not in field_lower:
-                        formatted_doc += f"{field.capitalize()}: {value}\n"
+                if doc.score is not None:
+                    metadata_lines.append(self._format_metadata_line("Score", doc.score))
 
-            formatted_doc += f"Content: {doc.content}\n"
+                for label_parts, value in self._iter_metadata_entries(metadata, None):
+                    metadata_lines.append(self._format_metadata_line(" - ".join(label_parts), value))
+
+            metadata_block = "\n\n".join(metadata_lines) if metadata_lines else "No metadata available."
+            content_block = doc.content or ""
+
+            formatted_doc = (
+                f"== Source {index + 1} ==\n\n"
+                f"== Metadata ==\n{metadata_block}\n\n"
+                f"== Content (Source {index + 1}) ==\n{content_block}"
+            ).rstrip()
             formatted_docs.append(formatted_doc)
+
         return "\n\n".join(formatted_docs)
+
+    @staticmethod
+    def _prettify_field_name(field_name: str) -> str:
+        return field_name.replace("_", " ").strip().title() or field_name
+
+    @classmethod
+    def _format_metadata_line(cls, field: str, value: Any) -> str:
+        formatted_value = cls._stringify_metadata_value(value)
+        return f"{field}: {formatted_value}"
+
+    @staticmethod
+    def _stringify_metadata_value(value: Any) -> str:
+        if isinstance(value, (dict, list)):
+            try:
+                return json.dumps(value, indent=2, sort_keys=True)
+            except (TypeError, ValueError):
+                return str(value)
+        return str(value)
+
+    def _resolve_metadata_path(
+        self,
+        metadata: dict[str, Any],
+        field: str,
+    ) -> tuple[Any | None, list[str]]:
+        if not metadata:
+            return None, []
+
+        parts = field.split(".")
+        current: Any = metadata
+        actual_path: list[str] = []
+
+        for part in parts:
+            if not isinstance(current, dict):
+                return None, []
+
+            matching_key = next((key for key in current.keys() if key.lower() == part.lower()), None)
+            if matching_key is None:
+                return None, []
+
+            actual_path.append(matching_key)
+            current = current[matching_key]
+
+        return current, actual_path
+
+    def _iter_metadata_entries(
+        self,
+        metadata: dict[str, Any],
+        requested_fields: list[str] | None,
+    ) -> Iterator[tuple[list[str], Any]]:
+        if not metadata:
+            return
+
+        if requested_fields is None:
+            for key, value in metadata.items():
+                if key.lower() in self._EXCLUDED_METADATA_FIELDS:
+                    continue
+                yield from self._flatten_metadata(value, [self._prettify_field_name(key)])
+            return
+
+        for field in requested_fields:
+            value, path = self._resolve_metadata_path(metadata, field)
+            if not path:
+                continue
+
+            label_parts = [self._prettify_field_name(part) for part in path]
+            yield from self._flatten_metadata(value, label_parts)
+
+    def _flatten_metadata(self, value: Any, label_parts: list[str]) -> Iterator[tuple[list[str], Any]]:
+        if isinstance(value, dict):
+            for key, nested_value in value.items():
+                yield from self._flatten_metadata(
+                    nested_value,
+                    label_parts + [self._prettify_field_name(key)],
+                )
+            return
+
+        yield label_parts or ["Metadata"], value
 
     def execute(
         self, input_data: VectorStoreRetrieverInputSchema, config: RunnableConfig | None = None, **kwargs
