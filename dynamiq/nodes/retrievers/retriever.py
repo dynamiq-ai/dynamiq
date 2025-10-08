@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, ClassVar, Iterator, Literal
 
 from pydantic import BaseModel, Field
@@ -61,6 +62,8 @@ class VectorStoreRetriever(Node):
         "vector",
         "vectors",
     )
+    _EXCLUDED_METADATA_TOKENS: ClassVar[tuple[str, ...]] = ("id", "hash")
+    _EXPECTED_METADATA_KEYWORDS: ClassVar[tuple[str, ...]] = ("url", "link", "source", "file", "title")
 
     def __init__(self, **kwargs):
         """
@@ -156,23 +159,19 @@ class VectorStoreRetriever(Node):
             if normalized_metadata_fields is not None:
                 if include_score and doc.score is not None:
                     metadata_lines.append(self._format_metadata_line("Score", doc.score))
-
-                for label_parts, value in self._iter_metadata_entries(metadata, normalized_metadata_fields):
-                    metadata_lines.append(self._format_metadata_line(" - ".join(label_parts), value))
             else:
                 if doc.score is not None:
                     metadata_lines.append(self._format_metadata_line("Score", doc.score))
 
-                for label_parts, value in self._iter_metadata_entries(metadata, None):
-                    metadata_lines.append(self._format_metadata_line(" - ".join(label_parts), value))
+            metadata_lines.extend(self._generate_metadata_lines(metadata, normalized_metadata_fields))
 
             metadata_block = "\n\n".join(metadata_lines) if metadata_lines else "No metadata available."
             content_block = doc.content or ""
 
             formatted_doc = (
-                f"== Source {index + 1} ==\n\n"
-                f"== Metadata ==\n{metadata_block}\n\n"
-                f"== Content (Source {index + 1}) ==\n{content_block}"
+                f"\n\n== Source {index + 1} ==\n\n"
+                f"\n\n== Metadata ==\n{metadata_block}\n\n"
+                f"\n\n== Content (Source {index + 1}) ==\n\n{content_block}"
             ).rstrip()
             formatted_docs.append(formatted_doc)
 
@@ -180,21 +179,41 @@ class VectorStoreRetriever(Node):
 
     @staticmethod
     def _prettify_field_name(field_name: str) -> str:
-        return field_name.replace("_", " ").strip().title() or field_name
+        if not field_name:
+            return field_name
+
+        cleaned = field_name.replace("_", " ").strip()
+        lowered = cleaned.lower()
+        if lowered.startswith("dynamiq"):
+            cleaned = cleaned[len("dynamiq") :].lstrip(" -_/")
+
+        prettified = cleaned.strip().title()
+        return prettified or field_name
 
     @classmethod
     def _format_metadata_line(cls, field: str, value: Any) -> str:
         formatted_value = cls._stringify_metadata_value(value)
         return f"{field}: {formatted_value}"
 
-    @staticmethod
-    def _stringify_metadata_value(value: Any) -> str:
+    @classmethod
+    def _stringify_metadata_value(cls, value: Any) -> str:
         if isinstance(value, (dict, list)):
             try:
-                return json.dumps(value, indent=2, sort_keys=True)
+                serialized = json.dumps(value, indent=2, sort_keys=True)
+                return cls._postprocess_metadata_string(serialized)
             except (TypeError, ValueError):
-                return str(value)
-        return str(value)
+                return cls._postprocess_metadata_string(str(value))
+        return cls._postprocess_metadata_string(str(value))
+
+    @staticmethod
+    def _postprocess_metadata_string(value: str) -> str:
+        if not value:
+            return value
+
+        if value.lower().startswith("dynamiq"):
+            trimmed = value[7:]
+            return trimmed.lstrip("/\\ ")
+        return value
 
     def _resolve_metadata_path(
         self,
@@ -225,15 +244,15 @@ class VectorStoreRetriever(Node):
         self,
         metadata: dict[str, Any],
         requested_fields: list[str] | None,
-    ) -> Iterator[tuple[list[str], Any]]:
+    ) -> Iterator[tuple[list[str], list[str], Any]]:
         if not metadata:
             return
 
         if requested_fields is None:
             for key, value in metadata.items():
-                if key.lower() in self._EXCLUDED_METADATA_FIELDS:
+                if self._should_exclude_metadata_key(key):
                     continue
-                yield from self._flatten_metadata(value, [self._prettify_field_name(key)])
+                yield from self._flatten_metadata(value, [self._prettify_field_name(key)], [key])
             return
 
         for field in requested_fields:
@@ -241,19 +260,113 @@ class VectorStoreRetriever(Node):
             if not path:
                 continue
 
-            label_parts = [self._prettify_field_name(part) for part in path]
-            yield from self._flatten_metadata(value, label_parts)
+            if any(self._should_exclude_metadata_key(part) for part in path):
+                continue
 
-    def _flatten_metadata(self, value: Any, label_parts: list[str]) -> Iterator[tuple[list[str], Any]]:
+            label_parts = [self._prettify_field_name(part) for part in path]
+            yield from self._flatten_metadata(value, label_parts, path)
+
+    def _flatten_metadata(
+        self,
+        value: Any,
+        label_parts: list[str],
+        raw_parts: list[str],
+    ) -> Iterator[tuple[list[str], list[str], Any]]:
         if isinstance(value, dict):
             for key, nested_value in value.items():
+                if self._should_exclude_metadata_key(key):
+                    continue
                 yield from self._flatten_metadata(
                     nested_value,
                     label_parts + [self._prettify_field_name(key)],
+                    raw_parts + [key],
                 )
             return
 
-        yield label_parts or ["Metadata"], value
+        yield (label_parts or ["Metadata"]), raw_parts, value
+
+    def _generate_metadata_lines(
+        self,
+        metadata: dict[str, Any],
+        requested_fields: list[str] | None,
+    ) -> list[str]:
+        if not metadata:
+            return []
+
+        base_entries = list(self._iter_metadata_entries(metadata, requested_fields))
+
+        expected_source_entries = (
+            base_entries if requested_fields is None else list(self._iter_metadata_entries(metadata, None))
+        )
+
+        expected_entries: list[tuple[list[str], list[str], Any]] = []
+        expected_paths: set[tuple[str, ...]] = set()
+        for display_parts, raw_parts, value in expected_source_entries:
+            if not self._contains_expected_keyword(raw_parts):
+                continue
+            path_key = self._normalize_raw_path(raw_parts)
+            if path_key in expected_paths:
+                continue
+            expected_entries.append((display_parts, raw_parts, value))
+            expected_paths.add(path_key)
+
+        seen_paths: set[tuple[str, ...]] = set()
+        lines_by_path: dict[tuple[str, ...], str] = {}
+        general_lines: list[str] = []
+
+        for display_parts, raw_parts, value in base_entries:
+            path_key = self._normalize_raw_path(raw_parts)
+            if path_key in seen_paths:
+                continue
+            seen_paths.add(path_key)
+            line = self._format_metadata_line(" - ".join(display_parts), value)
+            lines_by_path[path_key] = line
+            if path_key not in expected_paths:
+                general_lines.append(line)
+
+        expected_lines: list[str] = []
+        for display_parts, raw_parts, value in expected_entries:
+            path_key = self._normalize_raw_path(raw_parts)
+            if path_key not in seen_paths:
+                line = self._format_metadata_line(" - ".join(display_parts), value)
+                lines_by_path[path_key] = line
+                seen_paths.add(path_key)
+            expected_lines.append(lines_by_path[path_key])
+
+        return general_lines + expected_lines
+
+    @staticmethod
+    def _normalize_raw_path(raw_parts: list[str]) -> tuple[str, ...]:
+        return tuple(part.lower() for part in raw_parts)
+
+    @classmethod
+    def _should_exclude_metadata_key(cls, key: str) -> bool:
+        if not key:
+            return False
+
+        lowered_key = key.lower()
+        if lowered_key in cls._EXCLUDED_METADATA_FIELDS:
+            return True
+
+        tokens = cls._tokenize_metadata_key(key)
+        return any(token in cls._EXCLUDED_METADATA_TOKENS for token in tokens)
+
+    @classmethod
+    def _contains_expected_keyword(cls, raw_parts: list[str]) -> bool:
+        for part in raw_parts:
+            tokens = cls._tokenize_metadata_key(part)
+            if any(token in cls._EXPECTED_METADATA_KEYWORDS for token in tokens):
+                return True
+        return False
+
+    @staticmethod
+    def _tokenize_metadata_key(key: str) -> list[str]:
+        if not key:
+            return []
+
+        normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key)
+        normalized = re.sub(r"[^0-9a-zA-Z]+", "_", normalized)
+        return [token for token in normalized.lower().split("_") if token]
 
     def execute(
         self, input_data: VectorStoreRetrieverInputSchema, config: RunnableConfig | None = None, **kwargs
