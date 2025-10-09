@@ -371,7 +371,12 @@ class Agent(Node):
     )
 
     input_message: Message | VisionMessage | None = None
-    role: str | None = ""
+    role: str | None = Field(
+        default=None,
+        description="""Agent basic instructions.
+            Can be used to provide additional context or instructions to the agent.
+            Accepts Jinja templates to provide additional parameters.""",
+    )
     description: str | None = Field(default=None, description="Short human-readable description of the agent.")
     _prompt_blocks: dict[str, str] = PrivateAttr(default_factory=dict)
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -381,7 +386,7 @@ class Agent(Node):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
-    _json_schema_fields: ClassVar[list[str]] = ["role", "description"]
+    _json_schema_fields: ClassVar[list[str]] = ["role", "description", "streaming"]
 
     @classmethod
     def _generate_json_schema(

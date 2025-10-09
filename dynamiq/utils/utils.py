@@ -321,7 +321,8 @@ def is_called_from_async_context() -> bool:
 def clear_annotation(annotation: Any) -> Any:
     """
     Returns the first non-None type if the annotation allows multiple types;
-    otherwise, returns the annotation itself.
+    otherwise, returns the annotation itself. If the annotation is a BaseModel class,
+    returns object.
 
     Args:
         annotation (Any): Provided annotation.

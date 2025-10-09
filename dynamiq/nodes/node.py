@@ -292,13 +292,27 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         for name in fields or cls._json_schema_fields:
             field = cls.model_fields[name]
             annotation = clear_annotation(field.annotation)
+
+            schema_annotation = annotation
+            if isinstance(annotation, type) and issubclass(annotation, BaseModel) and annotation is not BaseModel:
+                schema_annotation = object
+
             parameter_name = name
             if field.alias:
                 parameter_name = field.alias
             if hasattr(annotation, "_generate_json_schema"):
                 generated_schemas[name] = annotation._generate_json_schema()
             else:
-                fields_to_include[parameter_name] = (annotation, Field(..., description=field.description))
+                description = (
+                    field.description
+                    if field.description
+                    else (
+                        annotation.__doc__
+                        if issubclass(annotation, BaseModel) and annotation.__doc__
+                        else "No description."
+                    )
+                )
+                fields_to_include[parameter_name] = (schema_annotation, Field(..., description=description))
 
         model = create_model(cls.__name__, **fields_to_include)
         schema = model.model_json_schema()
@@ -306,7 +320,11 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         for param, param_schema in generated_schemas.items():
             schema["properties"][param] = param_schema
 
-        class_type = f"{cls.__module__.rsplit('.', 1)[0]}.{cls.__name__}"
+        if "type" in kwargs:
+            class_type = kwargs["type"]
+        else:
+            class_type = f"{cls.__module__}.{cls.__name__}"
+
         schema["properties"]["type"] = {"type": "string", "enum": [class_type]}
 
         if "required" not in schema:
