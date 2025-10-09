@@ -38,8 +38,8 @@ class HttpClientError(HttpBaseError):
 
 class DynamiqTracingClient(BaseTracingClient):
 
-    def __init__(self, base_url: str = DYNAMIQ_BASE_URL, access_key: str | None = None, timeout: float = 60.0):
-        self.base_url = base_url
+    def __init__(self, base_url: str | None = None, access_key: str | None = None, timeout: float = 60.0):
+        self.base_url = base_url or DYNAMIQ_BASE_URL
         self.access_key = access_key or get_env_var("DYNAMIQ_ACCESS_KEY") or get_env_var("DYNAMIQ_SERVICE_TOKEN")
         if self.access_key is None:
             raise ValueError("No API key provided")
