@@ -690,10 +690,10 @@ class E2BInterpreterTool(ConnectionNode):
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
 
-        session_id = sandbox.sandbox_id
+        tool_data = {"tool_session_id": sandbox.sandbox_id, "tool_session_url": sandbox.envd_api_url}
         self.run_on_node_execute_run(
             config.callbacks,
-            session_id=session_id,
+            tool_data=tool_data,
             **kwargs,
         )
 
