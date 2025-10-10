@@ -242,6 +242,9 @@ class AWS(BaseConnection):
     )
     region: str = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_REGION"))
     profile: str | None = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_PROFILE"))
+    session_token: str | None = Field(
+        default_factory=partial(get_env_var, "AWS_SESSION_TOKEN")
+    )
 
     def connect(self):
         pass
@@ -257,6 +260,7 @@ class AWS(BaseConnection):
             params["aws_access_key_id"] = self.access_key_id
             params["aws_secret_access_key"] = self.secret_access_key
             params["aws_region_name"] = self.region
+            params["aws_session_token"] = self.session_token
         return params
 
     def get_boto3_session(self):
@@ -268,6 +272,8 @@ class AWS(BaseConnection):
         elif self.access_key_id and self.secret_access_key:
             params["aws_access_key_id"] = self.access_key_id
             params["aws_secret_access_key"] = self.secret_access_key
+            if self.session_token:
+                params["aws_session_token"] = self.session_token
         if self.region:
             params["region_name"] = self.region
         return boto3.Session(**params)
