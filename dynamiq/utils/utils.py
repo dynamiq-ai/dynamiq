@@ -254,7 +254,13 @@ def format_value(
         return value.to_dict(skip_format_types=skip_format_types, force_format_types=force_format_types)
     if isinstance(value, BaseModel):
         dict_kwargs = {"for_tracing": for_tracing} if for_tracing else {}
-        base_dict = value.to_dict(**dict_kwargs) if hasattr(value, "to_dict") else value.model_dump()
+        if hasattr(value, "to_dict"):
+            try:
+                base_dict = value.to_dict(**dict_kwargs)
+            except Exception:
+                base_dict = value.to_dict()
+        else:
+            base_dict = value.model_dump()
 
         return base_dict
     if isinstance(value, Exception):
