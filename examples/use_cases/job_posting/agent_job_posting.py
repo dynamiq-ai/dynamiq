@@ -86,7 +86,8 @@ def _writer_agent(llm, file_reader: FileReaderTool | None) -> Agent:
     role = (
         "You are the Job Posting Writer sub-agent.\n"
         "- Always expect tool input as {'input': '<draft context>'}.\n"
-        "- Produce a markdown job post with sections: Overview, Responsibilities, Must-Haves, Nice-to-Haves, Benefits, How to Apply.\n"
+        "- Produce a markdown job post with sections: Overview, "
+        "Responsibilities, Must-Haves, Nice-to-Haves, Benefits, How to Apply.\n"
         "- Mirror the company's tone and weave in the value proposition.\n"
         "- Cite any external sources in footnotes if included."
     )
