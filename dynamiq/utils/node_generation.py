@@ -10,6 +10,7 @@ from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 from dynamiq.utils import generate_uuid
 
+
 def validate_input_transformer(messages: list[Message], node_data: Node) -> str:
     """
     Validates input transformer for Agents and LLM nodes

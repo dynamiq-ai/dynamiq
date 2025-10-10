@@ -1,4 +1,3 @@
-
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
@@ -24,4 +23,3 @@ class KnowledgebaseRetriever(Node):
 
     def execute(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs) -> Any:
         return
-
