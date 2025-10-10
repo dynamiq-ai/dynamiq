@@ -131,7 +131,6 @@ def run_workflow(input_data: dict) -> dict:
         llm=llm_agent,
     )
 
-    # Create a linear orchestrator
     orchestrator = GraphOrchestrator(
         manager=agent_manager,
         final_summarizer=True,

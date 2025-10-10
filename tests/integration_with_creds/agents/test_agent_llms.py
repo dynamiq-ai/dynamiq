@@ -6,7 +6,6 @@ from dynamiq.connections import Anthropic as AnthropicConnection
 from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.utils import extract_thought_from_intermediate_steps
 from dynamiq.nodes.llms import Anthropic, Gemini, OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -125,28 +124,18 @@ def check_for_emoji(text):
 def run_and_assert_agent(agent: Agent, agent_input, expected_answer, run_config):
     """Helper function to run agent and perform common assertions."""
     agent_output = None
-    intermediate_steps = None
 
     try:
         result = agent.run(input_data=agent_input, config=run_config)
 
         if result.status != RunnableStatus.SUCCESS:
-            intermediate_steps = (
-                result.output.get("intermediate_steps", "N/A") if isinstance(result.output, dict) else "N/A"
-            )
             pytest.fail(f"Agent run failed with status '{result.status}'. Output: {result.output}.")
 
         if isinstance(result.output, dict):
             if "content" in result.output:
                 agent_output = result.output["content"]
-            if "intermediate_steps" in result.output:
-                intermediate_steps = result.output["intermediate_steps"]
         else:
             agent_output = result.output
-
-        thought = None
-        if intermediate_steps:
-            thought = extract_thought_from_intermediate_steps(intermediate_steps)
 
     except Exception as e:
         pytest.fail(f"Agent run failed with exception: {e}")
@@ -163,14 +152,6 @@ def run_and_assert_agent(agent: Agent, agent_input, expected_answer, run_config)
         assert has_emoji, f"Expected emoji in agent output, but none found: '{agent_output}'"
     else:
         has_emoji = check_for_emoji(agent_output)
-
-    if agent.inference_mode == InferenceMode.DEFAULT:
-        thought_found = thought is not None or "Thought:" in str(intermediate_steps)
-        assert thought_found, "Expected thought process to be present in DEFAULT mode"
-
-    elif agent.inference_mode == InferenceMode.XML:
-        thought_found = thought is not None or "<thought>" in str(intermediate_steps)
-        assert thought_found, "Expected <thought> tags to be present in XML mode"
 
 
 @pytest.mark.skip(reason="Model access limited by current API key")

@@ -261,84 +261,62 @@ print('--- Agent 2: Output ---\n', result.output[second_agent.id].get("output").
 
 ### Multi-agent orchestration
 ```python
-from dynamiq.connections import (OpenAI as OpenAIConnection,
-                                 ScaleSerp as ScaleSerpConnection,
-                                 E2B as E2BConnection)
-from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
-from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
+from dynamiq import Workflow
+from dynamiq.connections import OpenAI as OpenAIConnection, ScaleSerp as ScaleSerpConnection
+from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
+from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
+from dynamiq.nodes.types import Behavior, InferenceMode
 
-# Initialize tools
-python_tool = E2BInterpreterTool(
-    connection=E2BConnection(api_key="E2B_API_KEY")
-)
-search_tool = ScaleSerpTool(
-    connection=ScaleSerpConnection(api_key="SCALESERP_API_KEY")
-)
-
-# Initialize LLM
 llm = OpenAI(
     connection=OpenAIConnection(api_key="OPENAI_API_KEY"),
     model="gpt-4o",
     temperature=0.1,
 )
 
-# Define agents
-coding_agent = Agent(
-    name="coding-agent",
-    llm=llm,
-    tools=[python_tool],
-    role=("Expert agent with coding skills."
-          "Goal is to provide the solution to the input task"
-          "using Python software engineering skills."),
-    max_loops=15,
-)
+search_tool = ScaleSerpTool(connection=ScaleSerpConnection(api_key="SCALESERP_API_KEY"))
 
-planner_agent = Agent(
-    name="planner-agent",
-    llm=llm,
-    role=("Expert agent with planning skills."
-          "Goal is to analyze complex requests"
-          "and provide a detailed action plan."),
-)
-
-search_agent = Agent(
-    name="search-agent",
+research_agent = Agent(
+    name="Research Analyst",
+    role="Find recent market news and provide referenced highlights.",
     llm=llm,
     tools=[search_tool],
-    role=("Expert agent with web search skills."
-          "Goal is to provide the solution to the input task"
-          "using web search and summarization skills."),
-    max_loops=10,
+    inference_mode=InferenceMode.XML,
+    max_loops=6,
+    behaviour_on_max_loops=Behavior.RETURN,
 )
 
-# Initialize the adaptive agent manager
-agent_manager = AdaptiveAgentManager(llm=llm)
-
-# Create the orchestrator
-orchestrator = AdaptiveOrchestrator(
-    name="adaptive-orchestrator",
-    agents=[coding_agent, planner_agent, search_agent],
-    manager=agent_manager,
+writer_agent = Agent(
+    name="Brief Writer",
+    role="Turn research highlights into a concise executive brief.",
+    llm=llm,
+    inference_mode=InferenceMode.XML,
+    max_loops=4,
+    behaviour_on_max_loops=Behavior.RETURN,
 )
 
-# Define the input task
-input_task = (
-    "Use coding skills to gather data about Nvidia and Intel stock prices for the last 10 years, "
-    "calculate the average per year for each company, and create a table. Then craft a report "
-    "and add a conclusion: what would have been better if I had invested $100 ten years ago?"
+manager_agent = Agent(
+    name="Manager",
+    role=(
+        "Delegate research and writing to sub-agents.\n"
+        "Always call tools with {'input': '<task>'} payloads and assemble the final brief."
+    ),
+    llm=llm,
+    tools=[research_agent, writer_agent],
+    inference_mode=InferenceMode.XML,
+    parallel_tool_calls_enabled=True,
+    max_loops=8,
+    behaviour_on_max_loops=Behavior.RETURN,
 )
 
-# Run the orchestrator
-result = orchestrator.run(
-    input_data={"input": input_task},
+workflow = Workflow(flow=Flow(nodes=[manager_agent]))
+
+result = workflow.run(
+    input_data={"input": "Summarize the latest developments in battery technology for investors."},
 )
 
-# Print the result
-print(result.output.get("content"))
+print(result.output[manager_agent.id]["output"]["content"])
 
 ```
 

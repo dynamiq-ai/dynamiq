@@ -1,39 +1,33 @@
-# Literature Overview Examples
+# Literature Overview Example
 
-This directory contains examples demonstrating how to use Dynamiq agents and orchestrators to generate a literature overview on a given topic. The examples showcase different approaches to orchestrating agents and utilizing tools for research and content generation.
+This directory provides a single example that shows how Dynamiq agents can be composed as tools to research and draft a literature overview on demand.
 
-## Examples
+## Components
 
-### Using Planner (Linear Orchestrator)
+- **`agent_literature_overview.py`** – entry point that wires a manager agent with three sub-agents (research, citation curation, writing) and executes the workflow.
+- **`examples/components/tools/custom_tools/scraper.py`** – supplies the `ScraperSummarizerTool` used by the research agent to turn scraped pages into concise notes.
 
-- **`main_planner.py`**: Demonstrates a linear workflow using a `LinearOrchestrator` to manage a sequence of agents:
-    - **Research Analyst:** Uses `ScaleSerpTool` and `ScraperSummarizerTool` to research the topic and gather relevant information.
-    - **Writer and Editor:** Creates a literature overview based on the research findings.
-    - The workflow saves the final output to a markdown file.
+## Workflow
 
-### Using Adaptive Orchestrator
+1. An LLM is provisioned through `examples.llm_setup.setup_llm` (defaults to OpenAI) and both `ScaleSerpTool` and `ScraperSummarizerTool` are prepared for evidence gathering.
+2. Sub-agents are instantiated with explicit instructions to accept payloads shaped as `{'input': ...}` when invoked as tools.
+3. The manager agent receives the user brief, delegates tasks (in parallel when possible), and synthesizes the final markdown report.
+4. The completed overview is printed to the console and saved to `literature_overview.md`.
 
-- **`main_orchestrator.py`**: Showcases an adaptive workflow using an `AdaptiveOrchestrator` to dynamically manage agent execution:
-    - **Research Analyst:** Similar to the previous example, uses `ScaleSerpTool` for research.
-    - **Writer and Editor:** Creates the literature overview.
-    - The `AdaptiveOrchestrator` decides which agent to execute next based on the current state of the workflow.
-    - The workflow saves the final output to a markdown file.
+## Prerequisites
+
+Ensure the relevant API keys are exported before running the script:
+
+- `OPENAI_API_KEY` (or the provider configured in `examples/llm_setup.py`)
+- `SCALESERP_API_KEY`
+- `ZENROWS_API_KEY`
+- Optionally `ANTHROPIC_API_KEY` if you switch providers
 
 ## Usage
 
-1. **Set up environment variables:**
-   - `OPENAI_API_KEY`: Your OpenAI API key.
-   - `ANTHROPIC_API_KEY`: Your Anthropic API key.
-   - `SCALESERP_API_KEY`: Your ScaleSerp API key.
-   - `ZENROWS_API_KEY`: Your ZenRows API key.
-2. **Run the desired example:**
-   - For the linear workflow: `python main_planner.py`
-   - For the adaptive workflow: `python main_orchestrator.py`
+```bash
+cd examples/use_cases/literature_overview
+python agent_literature_overview.py
+```
 
-## Key Concepts
-
-- **Agent Orchestration:** Managing the execution and interaction of multiple agents to achieve a complex goal.
-- **Linear Orchestration:** Agents are executed in a predefined sequence.
-- **Adaptive Orchestration:** The order of agent execution is dynamically determined based on the workflow's state.
-- **Research Tools:** Utilizing tools like `ScaleSerpTool` and `ScraperSummarizerTool` to gather information from the web.
-- **Content Generation:** Leveraging LLMs to generate well-structured and informative content based on research findings.
+You will be prompted for the topic and optional focus areas. To reuse the workflow programmatically, import and call `run_literature_overview` with your own prompt data.

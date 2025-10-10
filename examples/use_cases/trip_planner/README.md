@@ -1,49 +1,32 @@
-# Trip Planner Examples
+# Trip Planner Example
 
-This directory contains examples demonstrating how to use Dynamiq agents and orchestrators to build a trip planning application. The examples showcase different approaches to orchestrating agents and utilizing tools for research and content generation.
+This directory contains a single example that demonstrates how to coordinate Dynamiq agents as tools to research and assemble a multi-day trip guide.
 
 ## Components
 
-### `prompts.py`
+- **`prompts.py`** – helper utilities that validate input data and build the customer prompt handed to the manager agent.
+- **`agent_trip_planner.py`** – the main entry point that wires a manager agent with three specialized sub-agents (city selection, city guide, itinerary writer) and runs the workflow.
 
-- Defines functions for generating customer prompts for trip planning.
-- Includes functions for validating input data and formatting prompts.
+## How It Works
 
-## Examples
+1. The script provisions an LLM through `examples.llm_setup.setup_llm` (defaults to OpenAI) and a `ScaleSerpTool` for web search.
+2. Three sub-agents are instantiated with clear roles and instructions to expect `{'input': ...}` payloads when invoked as tools.
+3. A manager agent receives the traveler request, delegates work to the sub-agents (optionally in parallel), and synthesizes their findings into a final itinerary.
+4. The generated itinerary is printed to the console and saved to `trip_plan.md`.
 
-### Using Planner (Linear Orchestrator)
+## Prerequisites
 
-- **`main_planner.py`**: Demonstrates a linear workflow using a `LinearOrchestrator` to manage a sequence of agents:
-    - **City Selection Expert:** Analyzes travel data to select the best city based on criteria like weather, events, and costs.
-    - **City Guide Expert:** Gathers information about the chosen city, including attractions, customs, and recommendations.
-    - **City Guide Writer:** Creates a detailed travel guide based on the gathered information.
-    - The workflow takes user input for trip details and saves the final output to a markdown file.
+Set the required API keys before running the example:
 
-### Using Adaptive Orchestrator
-
-- **`main_orchestrator.py`**: Showcases an adaptive workflow using an `AdaptiveOrchestrator` to dynamically manage agent execution:
-    - **City Selection Expert:** Similar to the previous example, analyzes travel data to select the best city.
-    - **City Guide Expert:** Gathers information about the chosen city, including attractions, customs, and recommendations.
-    - **City Guide Writer:** Creates a detailed travel guide based on the gathered information.
-    - The `AdaptiveOrchestrator` decides which agent to execute next based on the current state of the workflow.
-    - The workflow takes user input for trip details and saves the final output to a markdown file.
+- `OPENAI_API_KEY` (or the key for the provider configured in `examples/llm_setup.py`)
+- `SCALESERP_API_KEY`
+- Optionally `ANTHROPIC_API_KEY` if you switch the model provider to Anthropic
 
 ## Usage
 
-1. **Set up environment variables:**
-   - `OPENAI_API_KEY`: Your OpenAI API key.
-   - `ANTHROPIC_API_KEY`: Your Anthropic API key.
-   - `SCALESERP_API_KEY`: Your ScaleSerp API key.
-   - `ZENROWS_API_KEY`: Your ZenRows API key.
-2. **Run the desired example:**
-   - For the linear workflow: `python main_planner.py`
-   - For the adaptive workflow: `python main_orchestrator.py`
+```bash
+cd examples/use_cases/trip_planner
+python agent_trip_planner.py
+```
 
-## Key Concepts
-
-- **Agent Orchestration:** Managing the execution and interaction of multiple agents to achieve a complex goal.
-- **Linear Orchestration:** Agents are executed in a predefined sequence.
-- **Adaptive Orchestration:** The order of agent execution is dynamically determined based on the workflow's state.
-- **Research Tools:** Utilizing tools like `ScaleSerpTool` and `ZenRowsTool` to gather information from the web.
-- **Content Generation:** Leveraging LLMs to generate well-structured and informative travel guides.
-- **Prompt Engineering:** Crafting effective prompts to guide the agents' actions and ensure relevant output.
+You will be prompted for the traveler location, candidate cities, trip dates, and interests. Adjust the default LLM provider or model by editing `examples/llm_setup.py` or by supplying arguments to `run_trip_planner` if you import the helper in your own scripts.

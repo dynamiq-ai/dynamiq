@@ -111,10 +111,9 @@ def run_workflow(prompt: str, files_to_upload: list[io.BytesIO]) -> tuple[str, d
         )
 
         content = result.output.get("content")
-        intermediate_steps = result.output.get("intermediate_steps", {})
         files = result.output.get("files", {})
 
-        return content, intermediate_steps, files
+        return content, files
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         return "", {}, {}
@@ -261,7 +260,7 @@ if __name__ == "__main__":
         file_path=FILE_PATH, filename=FILE_PATH.split("/")[-1], description=FILE_DESCRIPTION
     )
 
-    output, steps, files = run_workflow(prompt=PROMPT, files_to_upload=[csv_file_io])
+    output, files = run_workflow(prompt=PROMPT, files_to_upload=[csv_file_io])
 
     logger.info("---------------------------------Result-------------------------------------")
     logger.info(output)

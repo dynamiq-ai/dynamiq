@@ -1,38 +1,32 @@
-# Job Posting Example with Planner
+# Job Posting Example
 
-This directory contains an example demonstrating how to use Dynamiq agents and a planner to automate the process of creating a job posting. The workflow leverages multiple agents with specialized roles to research the company, write the job description, review and edit the content, and finally generate a well-structured job posting in markdown format.
+This example shows how to compose Dynamiq agents as tools to research, draft, and polish a job posting end-to-end.
 
 ## Components
 
-### `main.py`
+- **`agent_job_posting.py`** – entry point that wires a manager agent with research, value-proposition, writing, and editing sub-agents, plus optional company brief ingestion.
+- **`job_example.md`** – sample company brief that can be fed to the workflow (optional).
 
-- Defines the workflow logic for creating a job posting.
-- Initializes connections to Anthropic and ScaleSerp.
-- Creates instances of `Agent` for research, writing, and reviewing.
-- Creates a `LinearOrchestrator` to manage the workflow of multiple agents.
-- Executes the workflow with a sample input containing company information and hiring needs.
+## Workflow
 
-## Workflow Logic
+1. `examples.llm_setup.setup_llm` provisions the large language model (defaults to OpenAI) and a `ScaleSerpTool` for web research. If a company brief file exists, a `FileReaderTool` is configured as well.
+2. Sub-agents are instantiated with instructions to accept payloads shaped as `{'input': ...}` when invoked as tools.
+3. The manager agent receives the hiring brief, delegates work (parallelizing research and messaging where helpful), and synthesizes the final markdown job post.
+4. The finished posting is printed to the console and saved as `job_posting.md`.
 
-1. The user provides input data containing company information (link, domain, hiring needs, benefits).
-2. The `LinearOrchestrator` receives the input and distributes tasks to the agents:
-   - **Researcher Analyst:** Analyzes the company website and provided description to extract insights on culture, values, and specific needs.
-   - **Job Description Writer:** Uses insights from the Researcher Analyst to create a detailed and engaging job posting.
-   - **Job Description Reviewer and Editor:** Reviews the job description for accuracy, engagement, and alignment with the company's values.
-3. Each agent utilizes its assigned tools (e.g., ScaleSerp for web search) to complete its task.
-4. The `LinearOrchestrator` collects the outputs from each agent and generates a final, formatted job posting in markdown.
+## Prerequisites
+
+Export the required API keys prior to running the script:
+
+- `OPENAI_API_KEY` (or the provider configured in `examples/llm_setup.py`)
+- `SCALESERP_API_KEY`
+- Optionally `ANTHROPIC_API_KEY` if you switch the provider
 
 ## Usage
 
-1. **Set up environment variables:**
-   - `ANTHROPIC_API_KEY`: Your Anthropic API key.
-   - `SCALESERP_API_KEY`: Your ScaleSerp API key.
-2. **Run the workflow:** `python main.py`
+```bash
+cd examples/use_cases/job_posting
+python agent_job_posting.py
+```
 
-## Key Concepts
-
-- **Planner:** A high-level agent that orchestrates the workflow and assigns tasks to specialized agents.
-- **Agent Specialization:** Designing agents with specific roles and expertise to handle different aspects of the task.
-- **Tool Usage:** Leveraging tools to enhance the capabilities of agents (e.g., web search, file access).
-- **Iterative Refinement:** The workflow allows for iterative refinement of the job posting through the reviewer agent.
-- **Automated Output:** The final job posting is automatically generated in markdown format, ready for use.
+You will be prompted for company details, hiring needs, tone preferences, and an optional path to a company brief (defaults to `job_example.md` when present). To reuse the logic programmatically, import and call `run_job_posting` with your own payload.

@@ -69,32 +69,29 @@ print(result.output.get("content"))
 
 ---
 
-## Multi-agent Orchestration
+## Manager-led Multi-Agent Workflow
+
+This pattern treats specialist agents as tools that a manager agent can call, allowing you to parallelize work and keep responsibilities focused.
 
 ### Step-by-Step Guide
 
 **Import Necessary Libraries**
 
 ```python
-from dynamiq.connections import (OpenAI as OpenAIConnection,
-                                 ScaleSerp as ScaleSerpConnection,
-                                 E2B as E2BConnection)
+from dynamiq import Workflow
+from dynamiq.connections import OpenAI as OpenAIConnection, ScaleSerp as ScaleSerpConnection
+from dynamiq.flows import Flow
+from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.agents.orchestrators.adaptive import AdaptiveOrchestrator
-from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
-from dynamiq.nodes.agents import Agent, ReflectionAgent
-from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
+from dynamiq.nodes.types import Behavior, InferenceMode
 ```
 
 **Initialize Tools**
 
-Set up the tools required for coding and web search tasks.
+Set up any external tools your specialists need. Here we use a web search tool to gather fresh market information.
 
 ```python
-python_tool = E2BInterpreterTool(
-    connection=E2BConnection(api_key="$E2B_API_KEY")
-)
 search_tool = ScaleSerpTool(
     connection=ScaleSerpConnection(api_key="$SCALESERP_API_KEY")
 )
@@ -102,95 +99,75 @@ search_tool = ScaleSerpTool(
 
 **Initialize LLM**
 
-Configure the Large Language Model (LLM) with the necessary parameters.
+Configure the shared Large Language Model that all agents will use.
 
 ```python
 llm = OpenAI(
     connection=OpenAIConnection(api_key="$OPENAI_API_KEY"),
     model="gpt-4o",
-    temperature=0.2,
+    temperature=0.1,
 )
 ```
 
-**Define Agents**
+**Define Specialist Agents**
 
-Create agents with specific roles and goals.
+Create the agents that perform research and writing. Each specializes in a single task and expects inputs under the `"input"` key when invoked as a tool.
 
 ```python
-coding_agent = Agent(
-    name="coding-agent",
-    llm=llm,
-    tools=[python_tool],
-    role=("Expert agent with coding skills."
-          "Goal is to provide the solution to the input task"
-          "using Python software engineering skills."),
-    max_loops=15,
-)
-
-planner_agent = ReflectionAgent(
-    name="planner-agent",
-    llm=llm,
-    role=("Expert agent with planning skills."
-          "Goal is to analyze complex requests" 
-          "and provide a detailed action plan."),
-)
-
-search_agent = Agent(
-    name="search-agent",
+research_agent = Agent(
+    name="Research Analyst",
+    role="Find recent market news and provide referenced highlights.",
     llm=llm,
     tools=[search_tool],
-    role=("Expert agent with web search skills."
-          "Goal is to provide the solution to the input task"
-          "using web search and summarization skills."),
-    max_loops=10,
+    inference_mode=InferenceMode.XML,
+    max_loops=6,
+    behaviour_on_max_loops=Behavior.RETURN,
+)
+
+writer_agent = Agent(
+    name="Brief Writer",
+    role="Turn research highlights into a concise executive brief.",
+    llm=llm,
+    inference_mode=InferenceMode.XML,
+    max_loops=4,
+    behaviour_on_max_loops=Behavior.RETURN,
 )
 ```
 
-**Initialize the Adaptive Agent Manager**
+**Define the Manager Agent**
 
-Set up the manager to handle the orchestration of multiple agents.
-
-```python
-agent_manager = AdaptiveAgentManager(llm=llm)
-```
-
-**Create the Orchestrator**
-
-Create an orchestrator to manage the execution of multiple agents.
+The manager agent coordinates the specialists, calls them as tools, and assembles the final answer.
 
 ```python
-orchestrator = AdaptiveOrchestrator(
-    name="adaptive-orchestrator",
-    agents=[coding_agent, planner_agent, search_agent],
-    manager=agent_manager,
+manager_agent = Agent(
+    name="Manager",
+    role=(
+        "Delegate research and writing to sub-agents.\n"
+        "Always call tools with {'input': '<task>'} payloads and assemble the final brief."
+    ),
+    llm=llm,
+    tools=[research_agent, writer_agent],
+    inference_mode=InferenceMode.XML,
+    parallel_tool_calls_enabled=True,
+    max_loops=8,
+    behaviour_on_max_loops=Behavior.RETURN,
 )
 ```
 
-**Define the Input Task**
+**Create and Run the Workflow**
 
-Specify the task that the orchestrator will handle.
-
-```python
-input_task = (
-    "Use coding skills to gather data about Nvidia and Intel stock prices for the last 10 years, "
-    "calculate the average per year for each company, and create a table. Then craft a report "
-    "and add a conclusion: what would have been better if I had invested $100 ten years ago?"
-)
-```
-
-**Run the Orchestrator**
-
-Execute the orchestrator with the defined input task.
+Wrap the manager agent in a workflow and provide an input brief. The manager will delegate work to the sub-agents and return a synthesized result.
 
 ```python
-result = orchestrator.run(
-    input_data={"input": input_task},
+workflow = Workflow(flow=Flow(nodes=[manager_agent]))
+
+result = workflow.run(
+    input_data={"input": "Summarize the latest developments in battery technology for investors."},
 )
 
-# Print the result
-print(result.output.get("content"))
+print(result.output[manager_agent.id]["output"]["content"])
 ```
 
 ---
 
-This tutorial provides a comprehensive guide to setting up and running agents using Dynamiq. By following these steps, you can create agents capable of solving complex tasks and orchestrate multiple agents to handle more sophisticated workflows.
+This tutorial provides a comprehensive guide to setting up and running agents using Dynamiq. By following these steps, you can create individual agents to tackle complex tasks and combine specialists under a manager to deliver richer multi-agent workflows.
