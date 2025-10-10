@@ -259,7 +259,7 @@ print('--- Agent 2: Input ---\n', result.output[second_agent.id].get("input").ge
 print('--- Agent 2: Output ---\n', result.output[second_agent.id].get("output").get('content'))
 ```
 
-### Agents as tools under a manager
+### Multi-agent orchestration
 ```python
 from dynamiq import Workflow
 from dynamiq.connections import OpenAI as OpenAIConnection, ScaleSerp as ScaleSerpConnection
