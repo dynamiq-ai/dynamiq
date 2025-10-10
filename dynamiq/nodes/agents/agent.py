@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from typing import Any, Callable, Union, get_args, get_origin
 
+import regex
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
@@ -798,13 +799,13 @@ class Agent(BaseAgent):
             thought_match = re.search(thought_pattern, output, re.DOTALL)
             thought = thought_match.group(1).strip() if thought_match else None
 
-            action_pattern = r"Action:\s*(.*?)\nAction Input:\s*((?:[\[{][\s\S]*?[\]}]))"
+            action_pattern = r"Action:\s*(.*?)\nAction Input:\s*(\{(?:[^{}]|(?R))*\})"
 
             remaining_text = output
             actions = []
 
             while "Action:" in remaining_text:
-                action_match = re.search(action_pattern, remaining_text, re.DOTALL)
+                action_match = regex.search(action_pattern, remaining_text, re.DOTALL)
                 if not action_match:
                     break
 
