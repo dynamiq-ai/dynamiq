@@ -29,7 +29,7 @@ class Input(Pass):
             "query": {
                 "type": "Any"
             },
-            "files: {
+            "files": {
                 "type": "list[files]"
             }
         }
