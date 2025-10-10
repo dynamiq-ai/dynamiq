@@ -386,7 +386,7 @@ class Agent(Node):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
-    _json_schema_fields: ClassVar[list[str]] = ["role", "description", "streaming"]
+    _json_schema_fields: ClassVar[list[str]] = ["role", "description"]
 
     @classmethod
     def _generate_json_schema(
