@@ -681,7 +681,6 @@ class E2BInterpreterTool(ConnectionNode):
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n" f"{str(input_data.model_dump())[:300]}")
         config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         if self.persistent_sandbox and self._sandbox:
             sandbox = self._sandbox
@@ -690,6 +689,13 @@ class E2BInterpreterTool(ConnectionNode):
             self._install_default_packages(sandbox)
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
+
+        tool_data = {"tool_session_id": sandbox.sandbox_id, "tool_session_url": sandbox.envd_api_url}
+        self.run_on_node_execute_run(
+            config.callbacks,
+            tool_data=tool_data,
+            **kwargs,
+        )
 
         if sandbox and self.is_files_allowed:
             try:
