@@ -1,87 +1,166 @@
-import sys
-import uuid
+from __future__ import annotations
 
+import json
+import logging
+import os
+import uuid
+from typing import Iterable
+
+from dynamiq import Workflow
+from dynamiq.callbacks import DynamiqTracingCallbackHandler, TracingCallbackHandler
 from dynamiq.connections import AWS
+from dynamiq.flows import Flow
 from dynamiq.memory import Memory
 from dynamiq.memory.backends.dynamo_db import DynamoDB
 from dynamiq.nodes.agents import Agent
+from dynamiq.runnables import RunnableConfig
+from dynamiq.utils import JsonWorkflowEncoder
 from examples.llm_setup import setup_llm
 
+LOGGER = logging.getLogger(__name__)
 
-def setup_agent():
-    """Sets up the Agent with DynamoDB memory."""
+WORKFLOW_ID = "dynamodb-memory-workflow"
+DEFAULT_HELLO_PROMPT = "Hello, I'm Alex and I love reading science fiction books."
+DEFAULT_FACT_PROMPT = "What do you remember about me?"
+
+
+def setup_agent() -> Agent:
+    """Initialise the chat agent with DynamoDB-backed memory."""
     llm = setup_llm()
 
     try:
         aws_connection = AWS()
-
-        dynamo_db = DynamoDB(
-            connection=aws_connection,
-            table_name="default",
-            create_if_not_exist=True,
+        session = aws_connection.get_boto3_session()
+        credentials = session.get_credentials()
+        frozen = credentials.get_frozen_credentials() if credentials else None
+        LOGGER.debug(
+            "AWS session initialised (access key prefix=%s, token=%s)",
+            (frozen.access_key[:4] + "***") if frozen else "<missing>",
+            "present" if frozen and frozen.token else "missing",
         )
-        print("DynamoDB backend initialized. Connection test performed during init.")
-
-    except Exception as e:
-        print(f"FATAL: Failed to initialize DynamoDB backend: {e}", file=sys.stderr)
-        print("Please ensure DynamoDB is running and accessible with correct credentials.", file=sys.stderr)
+        dynamo_backend = DynamoDB(
+            connection=aws_connection,
+            table_name=os.getenv("DYNAMODB_TABLE", "dynamiq-chat-memory"),
+            create_if_not_exist=bool(os.getenv("DYNAMODB_CREATE_TABLE", "true").lower() in {"1", "true", "yes"}),
+        )
+        LOGGER.info("DynamoDB backend initialised and connection verified.")
+    except Exception as error:
+        LOGGER.error("Failed to initialise DynamoDB backend: %s", error)
         raise
 
-    memory = Memory(backend=dynamo_db, message_limit=50)
-
-    AGENT_ROLE = "Helpful assistant focusing on the current conversation."
-    agent = Agent(
+    memory = Memory(backend=dynamo_backend, message_limit=50)
+    return Agent(
         name="ChatAgent",
         llm=llm,
-        role=AGENT_ROLE,
-        id="agent",
+        role="Helpful assistant that remembers the conversation using DynamoDB.",
+        id="chat-memory-agent",
         memory=memory,
     )
-    return agent
 
 
-def chat_loop(agent: Agent):
-    """Runs the main chat loop."""
-    print("\nWelcome to the AI Chat (DynamoDB Backend)! (Type 'exit' to end)")
+def build_workflow() -> Workflow:
+    """Create a workflow with a single DynamoDB-enabled agent node."""
+    agent = setup_agent()
+    return Workflow(id=WORKFLOW_ID, flow=Flow(nodes=[agent]))
 
-    user_id = f"user_{uuid.uuid4().hex[:6]}"
-    session_id = f"session_{uuid.uuid4().hex[:8]}"
 
-    print("--- Starting New Chat ---")
-    print(f"   User ID: {user_id}")
-    print(f"   Session ID: {session_id}")
-    print("-------------------------")
+def _resolve_trace_runs(callbacks: Iterable[object] | None) -> dict:
+    for callback in callbacks or []:
+        if isinstance(callback, TracingCallbackHandler):
+            return getattr(callback, "runs", {})
+    return {}
 
-    while True:
-        try:
-            user_input = input(f"{user_id} You: ")
-            if user_input.lower() == "exit":
-                break
-            if not user_input.strip():
-                continue
 
-            agent_input = {"input": user_input, "user_id": user_id, "session_id": session_id}
+def _get_agent_output(workflow: Workflow, wf_result) -> dict:
+    """Extract the single-agent output dictionary from the workflow result."""
+    if not workflow.flow.nodes:
+        return {}
 
-            response = agent.run(agent_input)
-            response_content = response.output.get("content", "...")
-            print(f"AI ({agent.name}): {response_content}")
+    agent_id = workflow.flow.nodes[0].id
+    agent_result = wf_result.output.get(agent_id, {})
+    return agent_result.get("output", {})
 
-        except KeyboardInterrupt:
-            print("\nExiting chat loop.")
-            break
-        except Exception as e:
-            print(f"\nAn error occurred: {e}", file=sys.stderr)
-            break
 
-    print("\n--- Chat Session Ended ---")
+def run_workflow(
+    callbacks: list[TracingCallbackHandler] | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
+    input_text: str | None = None,
+):
+    """Run the DynamoDB memory workflow once and return the agent output with trace runs."""
+
+    if input_text is None:
+        raise ValueError("input_text must be provided for the workflow run.")
+
+    if callbacks is None:
+        callbacks = [TracingCallbackHandler()]
+
+    user_id = user_id or f"user-{uuid.uuid4().hex[:6]}"
+    session_id = session_id or f"session-{uuid.uuid4().hex[:8]}"
+
+    LOGGER.info("Running workflow '%s' for user=%s session=%s", WORKFLOW_ID, user_id, session_id)
+
+    workflow = build_workflow()
+
+    result = workflow.run(
+        input_data={
+            "input": input_text,
+            "user_id": user_id,
+            "session_id": session_id,
+        },
+        config=RunnableConfig(callbacks=callbacks),
+    )
+
+    agent_output = _get_agent_output(workflow, result)
+    LOGGER.info("Workflow output: %s", agent_output.get("content"))
+
+    trace_runs = _resolve_trace_runs(callbacks)
+    if trace_runs:
+        json.dumps({"runs": [run.to_dict() for run in trace_runs.values()]}, cls=JsonWorkflowEncoder)
+
+    return agent_output, trace_runs
+
+
+def run_workflow_with_ui_tracing(
+    input_text: str,
+    base_url: str = os.environ.get("DYNAMIQ_TRACE_BASE_URL", "https://collector.sandbox.getdynamiq.ai"),
+    access_key: str | None = os.environ.get("DYNAMIQ_TRACE_ACCESS_KEY"),
+    handler_kwargs: dict | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
+):
+    """Execute the workflow once with Dynamiq UI tracing enabled."""
+
+    tracing = DynamiqTracingCallbackHandler(
+        base_url=base_url,
+        access_key=access_key,
+        **(handler_kwargs or {}),
+    )
+    output, traces = run_workflow(
+        callbacks=[tracing],
+        user_id=user_id,
+        session_id=session_id,
+        input_text=input_text,
+    )
+    return output, traces, tracing
 
 
 if __name__ == "__main__":
-    try:
-        print("Setting up agent with DynamoDB backend...")
-        chat_agent = setup_agent()
-        print("Agent setup complete.")
-        chat_loop(chat_agent)
-    except Exception as e:
-        print(f"\nApplication failed during setup or execution: {e}", file=sys.stderr)
-    print("\nChat application finished.")
+    shared_user = "def"
+    shared_session = "def"
+
+    first_output, _, _ = run_workflow_with_ui_tracing(
+        input_text=DEFAULT_HELLO_PROMPT,
+        user_id=shared_user,
+        session_id=shared_session,
+    )
+
+    second_output, _, _ = run_workflow_with_ui_tracing(
+        input_text=DEFAULT_FACT_PROMPT,
+        user_id=shared_user,
+        session_id=shared_session,
+    )
+
+    LOGGER.info("=== DYNAMODB MEMORY WORKFLOW OUTPUT ===")
+    LOGGER.info("First turn: %s", first_output.get("content"))
+    LOGGER.info("Second turn: %s", second_output.get("content"))

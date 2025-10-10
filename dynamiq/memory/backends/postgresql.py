@@ -66,8 +66,9 @@ class PostgreSQL(MemoryBackend):
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict[str, Any]:
         """Converts the instance to a dictionary."""
         exclude = kwargs.pop("exclude", self.to_dict_exclude_params.copy())
+        for_tracing = kwargs.pop("for_tracing", False)
         data = self.model_dump(exclude=exclude, **kwargs)
-        data["connection"] = self.connection.to_dict(include_secure_params=include_secure_params)
+        data["connection"] = self.connection.to_dict(for_tracing=for_tracing)
         if "type" not in data:
             data["type"] = self.type
         return data
