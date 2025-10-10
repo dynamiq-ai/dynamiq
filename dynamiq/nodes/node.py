@@ -323,7 +323,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         if "type" in kwargs:
             class_type = kwargs["type"]
         else:
-            class_type = f"{cls.__module__}.{cls.__name__}"
+            class_type = f"{cls.__module__.rsplit('.', 1)[0]}.{cls.__name__}"
 
         schema["properties"]["type"] = {"type": "string", "enum": [class_type]}
 

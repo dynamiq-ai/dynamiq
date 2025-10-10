@@ -3,13 +3,12 @@ import types
 from typing import Any, Union, get_args
 
 from dynamiq.nodes import Node
-from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents import BaseAgent as Agent
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import ConnectionNode
 from dynamiq.prompts import Message, MessageRole, Prompt
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
 from dynamiq.utils import generate_uuid
-
 
 def validate_input_transformer(messages: list[Message], node_data: Node) -> str:
     """
@@ -167,6 +166,8 @@ def generate_yaml_data(node_cls: type[Node], node_info: dict[str, Any]) -> tuple
 
     if issubclass(node_cls, Agent):
         for index, tool in enumerate(node_info["tools"]):
+            if tool["type"] == "dynamiq.nodes.utils.KnowledgebaseRetriever":
+                continue
             entity_cls = WorkflowYAMLLoader.get_entity_by_type(tool["type"])
             connection_id = add_connection(entity_cls, data)
             data["nodes"][node_id]["tools"][index]["connection"] = connection_id
