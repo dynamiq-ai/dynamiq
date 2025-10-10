@@ -477,6 +477,9 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         if prompt_messages := kwargs.get("prompt_messages"):
             run.metadata["node"]["prompt"]["messages"] = prompt_messages
 
+        if tool_data := kwargs.get("tool_data"):
+            run.metadata["tool_data"] = tool_data
+
     def flush(self):
         """Flush the runs to the tracing client."""
         if self.client:
