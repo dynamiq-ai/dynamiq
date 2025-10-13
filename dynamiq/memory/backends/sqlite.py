@@ -86,6 +86,7 @@ class SQLite(MemoryBackend):
             dict: Dictionary representation of the instance
         """
         kwargs.pop("include_secure_params", None)
+        kwargs.pop("for_tracing", None)
         data = super().to_dict(**kwargs)
 
         if not include_secure_params:

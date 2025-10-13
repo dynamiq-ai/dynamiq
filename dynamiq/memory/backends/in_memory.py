@@ -67,7 +67,7 @@ class InMemory(MemoryBackend):
         """Define parameters to exclude during serialization."""
         return {"messages": True}
 
-    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict[str, Any]:
+    def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict[str, Any]:
         """Converts the instance to a dictionary."""
         return super().to_dict(include_secure_params=include_secure_params, **kwargs)
 

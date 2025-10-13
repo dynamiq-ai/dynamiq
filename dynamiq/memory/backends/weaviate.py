@@ -65,23 +65,16 @@ class Weaviate(MemoryBackend):
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
         """Define parameters to exclude during serialization."""
-        return super().to_dict_exclude_params | {
-            "embedder": True,
-            "_vector_store": True,
-            "connection": {
-                "api_key": True,
-                "url": True,
-                "http_host": True,
-                "grpc_host": True,
-            },
-        }
+        return super().to_dict_exclude_params | {"embedder": True, "_vector_store": True, "connection": True}
 
-    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict[str, Any]:
+    def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict[str, Any]:
         """Converts the instance to a dictionary."""
         exclude = kwargs.pop("exclude", self.to_dict_exclude_params.copy())
         data = self.model_dump(exclude=exclude, **kwargs)
-
-        data["embedder"] = self.embedder.to_dict(include_secure_params=include_secure_params, **kwargs)
+        data["connection"] = self.connection.to_dict(for_tracing=for_tracing)
+        data["embedder"] = self.embedder.to_dict(
+            include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs
+        )
 
         if "type" not in data:
             data["type"] = self.type
