@@ -1,9 +1,11 @@
 import io
 import re
 import textwrap
+from copy import deepcopy
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, ClassVar, Union
+from uuid import uuid4
 
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
@@ -748,7 +750,7 @@ class Agent(Node):
                 input_data={},
                 config=config,
                 prompt=Prompt(messages=messages),
-                run_depends=self._run_depends,
+                run_depends=deepcopy(self._run_depends),
                 **kwargs,
             )
             self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
@@ -867,7 +869,59 @@ class Agent(Node):
                 merged_input[key] = value
                 debug_info.append(f"  - From {source}: Set {key}={value}")
 
-    def _run_tool(self, tool: Node, tool_input: dict, config, **kwargs) -> Any:
+    def _regenerate_node_ids(self, obj: Any) -> Any:
+        """Recursively assign new IDs to cloned nodes and nested models."""
+        if isinstance(obj, BaseModel):
+            if hasattr(obj, "id"):
+                setattr(obj, "id", str(uuid4()))
+
+            for field_name in getattr(obj, "model_fields", {}):
+                value = getattr(obj, field_name)
+                if isinstance(value, list):
+                    setattr(obj, field_name, [self._regenerate_node_ids(item) for item in value])
+                elif isinstance(value, dict):
+                    setattr(obj, field_name, {k: self._regenerate_node_ids(v) for k, v in value.items()})
+                else:
+                    setattr(obj, field_name, self._regenerate_node_ids(value))
+            return obj
+        if isinstance(obj, list):
+            return [self._regenerate_node_ids(item) for item in obj]
+        if isinstance(obj, dict):
+            return {k: self._regenerate_node_ids(v) for k, v in obj.items()}
+        return obj
+
+    def _clone_tool_for_execution(self, tool: Node, config: RunnableConfig | None) -> tuple[Node, RunnableConfig]:
+        """Clone tool and align config overrides so each execution is isolated."""
+        base_config = ensure_config(config)
+        try:
+            tool_copy = self._regenerate_node_ids(tool.clone())
+        except Exception as e:
+            logger.warning(f"Agent {self.name} - {self.id}: failed to clone tool {tool.name}: {e}")
+            return tool, base_config
+
+        local_config = base_config
+        try:
+            local_config = base_config.model_copy(deep=False)
+            original_override = base_config.nodes_override.get(tool.id)
+            if original_override:
+                local_config.nodes_override[tool_copy.id] = original_override
+        except Exception as e:
+            logger.warning(
+                f"Agent {self.name} - {self.id}: failed to prepare config override for cloned tool {tool.name}: {e}"
+            )
+            local_config = base_config
+
+        return tool_copy, local_config
+
+    def _run_tool(
+        self,
+        tool: Node,
+        tool_input: dict,
+        config,
+        update_run_depends: bool = True,
+        collect_dependency: bool = False,
+        **kwargs,
+    ) -> Any:
         """Runs a specific tool with the given input."""
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
@@ -945,13 +999,21 @@ class Agent(Node):
                 if nested_tp:
                     child_kwargs = child_kwargs | {"tool_params": nested_tp}
 
-        tool_result = tool.run(
+        tool_to_run = tool
+        tool_config = ensure_config(config)
+        if getattr(self, "parallel_tool_calls_enabled", False):
+            tool_to_run, tool_config = self._clone_tool_for_execution(tool, tool_config)
+
+        tool_result = tool_to_run.run(
             input_data=merged_input,
-            config=config,
-            run_depends=self._run_depends,
+            config=tool_config,
+            run_depends=deepcopy(self._run_depends),
             **child_kwargs,
         )
-        self._run_depends = [NodeDependency(node=tool).to_dict(for_tracing=True)]
+        dependency_node = tool_to_run if tool_to_run is not tool else tool
+        dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
+        if update_run_depends:
+            self._run_depends = [dependency_dict]
         if tool_result.status != RunnableStatus.SUCCESS:
             error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
             if tool_result.error.recoverable:
@@ -970,7 +1032,11 @@ class Agent(Node):
 
         self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
 
-        return tool_result_content_processed, tool_result.output.get("files", [])
+        output_files = tool_result.output.get("files", [])
+        if collect_dependency:
+            return tool_result_content_processed, output_files, dependency_dict
+
+        return tool_result_content_processed, output_files
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
         """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
