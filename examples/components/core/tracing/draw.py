@@ -175,7 +175,7 @@ def draw_reflection_agent_graph_in_png(
 def draw_react_agent_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "react_agent_graph.png")
 ) -> None:
-    from examples.components.agents.agents.react_agent_wf import run_workflow
+    from examples.components.agents.agents.agent_wf import run_workflow
 
     _, traces = run_workflow()
 
@@ -186,29 +186,9 @@ def draw_react_agent_graph_in_png(
 def draw_job_posting_linear_agent_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "job_posting_linear_agent_graph.png")
 ) -> None:
-    from examples.use_cases.job_posting.main import run_planner
+    from examples.use_cases.job_posting.agent_job_posting import run_job_posting
 
-    _, traces = run_planner()
-    graph = get_graph_by_traces([run for _, run in traces.items()])
-    draw_graph_in_png(graph, output_path)
-
-
-def draw_literature_overview_adaptive_agent_graph_in_png(
-    output_path: str = os.path.join(os.path.dirname(__file__), "literature_overview_adaptive_agent.png")
-) -> None:
-    from examples.use_cases.literature_overview.main_orchestrator import run_workflow
-
-    _, traces = run_workflow()
-    graph = get_graph_by_traces([run for _, run in traces.items()])
-    draw_graph_in_png(graph, output_path)
-
-
-def draw_adaptive_coding_react_agent_graph_in_png(
-    output_path: str = os.path.join(os.path.dirname(__file__), "adaptive_coding_react_agent.png")
-) -> None:
-    from examples.components.agents.orchestrators.adaptive_orchestrator.adaptive_coding_workflow import run_coding_task
-
-    _, traces = run_coding_task()
+    _, traces = run_job_posting()
     graph = get_graph_by_traces([run for _, run in traces.items()])
     draw_graph_in_png(graph, output_path)
 
@@ -231,7 +211,7 @@ def draw_multi_tool_workflow_graph_in_png(
 def draw_agent_tool_workflow_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "agent_tool_workflow_graph.png")
 ) -> None:
-    from examples.components.agents.agents.use_react_agent_with_agent_tool import run_workflow
+    from examples.components.agents.agents.use_agent_with_agent_tool import run_workflow
 
     """Draw the execution graph of the agent-as-tool workflow."""
     output, traces = run_workflow()
@@ -247,7 +227,7 @@ def draw_react_agent_filestore_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "react_agent_filestore_graph.png")
 ) -> None:
     """Draw the execution graph of the React agent with file store workflow."""
-    from examples.components.core.dag.yaml_react_agent_example import run_yaml_react_agent_example
+    from examples.components.core.dag.yaml_agent_example import run_yaml_react_agent_example
 
     output, traces = run_yaml_react_agent_example()
 
@@ -258,15 +238,29 @@ def draw_react_agent_filestore_graph_in_png(
     return output
 
 
+def draw_agent_tool_parallel_workflow_graph_in_png(
+    output_path: str = os.path.join(os.path.dirname(__file__), "agent_tool_workflow_graph.png")
+) -> None:
+    from examples.components.agents.agents.use_agent_with_parallel_agent_tool import run_workflow
+
+    """Draw the execution graph of the agent-as-tool workflow."""
+    output, traces = run_workflow()
+
+    graph = get_graph_by_traces([run for _, run in traces.items()])
+    draw_graph_in_png(graph, output_path)
+
+    logger.info(f"Graph saved to {output_path}")
+    return output
+
+
 if __name__ == "__main__":
     draw_simple_agent_graph_in_png()
     draw_reflection_agent_graph_in_png()
     draw_react_agent_graph_in_png()
     draw_job_posting_linear_agent_graph_in_png()
-    draw_literature_overview_adaptive_agent_graph_in_png()
-    draw_adaptive_coding_react_agent_graph_in_png()
     draw_simple_graph_orchestrator_graph_in_png()
     draw_graph_orchestrator_graph_in_png()
     draw_multi_tool_workflow_graph_in_png()
     draw_agent_tool_workflow_graph_in_png()
     draw_react_agent_filestore_graph_in_png()
+    draw_agent_tool_parallel_workflow_graph_in_png()
