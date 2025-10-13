@@ -142,6 +142,8 @@ def add_connection(node: Node, data: dict[str, Any]) -> str:
 
 
 def generate_yaml_data(node_cls: type[Node], node_info: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    from dynamiq.utils.workflow_generation import KnowledgebaseRetriever
+
     """
     Generates WorkflowYamlLoader compatible data.
 
@@ -167,7 +169,7 @@ def generate_yaml_data(node_cls: type[Node], node_info: dict[str, Any]) -> tuple
 
     if issubclass(node_cls, Agent):
         for index, tool in enumerate(node_info["tools"]):
-            if tool["type"] == "dynamiq.nodes.utils.KnowledgebaseRetriever":
+            if tool["type"] == KnowledgebaseRetriever().type:
                 continue
             entity_cls = WorkflowYAMLLoader.get_entity_by_type(tool["type"])
             connection_id = add_connection(entity_cls, data)

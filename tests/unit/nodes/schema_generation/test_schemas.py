@@ -4,9 +4,14 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic, Gemini, OpenAI, WatsonX
 from dynamiq.nodes.node import ConnectionNode
 from dynamiq.nodes.tools import E2BInterpreterTool, ScaleSerpTool, TavilyTool
-from dynamiq.nodes.utils import Input, KnowledgebaseRetriever, Output
+from dynamiq.nodes.utils import Input, Output
 from dynamiq.serializers.loaders.yaml import WorkflowYAMLLoader
-from dynamiq.utils.node_generation import add_connection, generate_data_from_schema, generate_node
+from dynamiq.utils.workflow_generation import (
+    KnowledgebaseRetriever,
+    add_connection,
+    generate_data_from_schema,
+    generate_node,
+)
 
 
 @pytest.mark.parametrize(
