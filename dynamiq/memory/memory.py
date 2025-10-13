@@ -47,10 +47,11 @@ class Memory(BaseModel):
 
     def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict[str, Any]:
         """Converts the instance to a dictionary."""
-        for param in ("include_secure_params", "for_tracing"):
-            kwargs.pop(param, None)
+        for_tracing = kwargs.pop("for_tracing", False)
         data = self.model_dump(exclude=kwargs.pop("exclude", self.to_dict_exclude_params), **kwargs)
-        data["backend"] = self.backend.to_dict(include_secure_params=include_secure_params, **kwargs)
+        data["backend"] = self.backend.to_dict(
+            include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs
+        )
         return data
 
     def add(self, role: MessageRole, content: str, metadata: dict[str, Any] | None = None) -> None:
