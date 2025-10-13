@@ -28,6 +28,9 @@ class Input(Pass):
         "properties": {
             "query": {
                 "type": "Any"
+            },
+            "files": {
+                "type": "list[files]"
             }
         }
     """,
