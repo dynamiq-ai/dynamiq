@@ -50,8 +50,6 @@ class OpenAI(BaseLLM):
         if kwargs.get("client") is None and kwargs.get("connection") is None:
             kwargs["connection"] = OpenAIConnection()
         super().__init__(**kwargs)
-        print("Initializing OpenAI LLM")
-        print(self.model)
 
     @cached_property
     def is_o_series_model(self) -> bool:
