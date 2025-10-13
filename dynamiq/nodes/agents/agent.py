@@ -1884,7 +1884,12 @@ class Agent(BaseAgent):
         return execution_result, {}
 
     def _run_single_tool(
-        self, tool_name: str, tool_input: dict[str, Any], config: RunnableConfig, **kwargs
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        config: RunnableConfig,
+        update_run_depends: bool = True,
+        **kwargs,
     ) -> dict[str, Any]:
         tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
         if not tool:
@@ -1894,16 +1899,25 @@ class Agent(BaseAgent):
                 "tool_input": tool_input,
                 "result": f"Unknown tool: {tool_name}. Please use only available tools.",
                 "files": {},
+                "dependency": None,
             }
 
         try:
-            tool_result, tool_files = self._run_tool(tool, tool_input, config, **kwargs)
+            tool_result, tool_files, dependency = self._run_tool(
+                tool,
+                tool_input,
+                config,
+                update_run_depends=update_run_depends,
+                collect_dependency=True,
+                **kwargs,
+            )
             return {
                 "tool_name": tool.name,
                 "success": True,
                 "tool_input": tool_input,
                 "result": tool_result,
                 "files": tool_files,
+                "dependency": dependency,
             }
         except RecoverableAgentException as e:
             error_message = f"{type(e).__name__}: {e}"
@@ -1914,6 +1928,7 @@ class Agent(BaseAgent):
                 "tool_input": tool_input,
                 "result": error_message,
                 "files": {},
+                "dependency": None,
             }
 
     def _stream_tool_result(self, result: dict[str, Any], config: RunnableConfig, **kwargs) -> None:
@@ -1969,6 +1984,7 @@ class Agent(BaseAgent):
                         "tool_input": tool_input,
                         "result": error_message,
                         "files": {},
+                        "dependency": None,
                     }
                 )
                 continue
@@ -1977,7 +1993,13 @@ class Agent(BaseAgent):
         if prepared_tools:
             if len(prepared_tools) == 1:
                 tool_payload = prepared_tools[0]
-                res = self._run_single_tool(tool_payload["name"], tool_payload["input"], config, **kwargs)
+                res = self._run_single_tool(
+                    tool_payload["name"],
+                    tool_payload["input"],
+                    config,
+                    update_run_depends=True,
+                    **kwargs,
+                )
                 res["order"] = tool_payload["order"]
                 all_results.append(res)
                 self._stream_tool_result(res, config, **kwargs)
@@ -1991,6 +2013,7 @@ class Agent(BaseAgent):
                             tool_payload["name"],
                             tool_payload["input"],
                             config,
+                            False,
                             **kwargs,
                         )
                         future_map[future] = tool_payload
@@ -2010,6 +2033,7 @@ class Agent(BaseAgent):
                                 "tool_input": tool_input,
                                 "result": error_message,
                                 "files": {},
+                                "dependency": None,
                             }
                         res["order"] = tool_payload["order"]
                         all_results.append(res)
@@ -2018,13 +2042,19 @@ class Agent(BaseAgent):
         observation_parts: list[str] = []
         aggregated_files: dict[str, Any] = {}
 
-        for result in sorted(all_results, key=lambda r: r.get("order", 0)):
+        ordered_results = sorted(all_results, key=lambda r: r.get("order", 0))
+
+        for result in ordered_results:
             tool_name = result.get("tool_name", UNKNOWN_TOOL_NAME)
             result_content = result.get("result", "")
             success_status = "SUCCESS" if result.get("success") else "ERROR"
             observation_parts.append(f"--- {tool_name} has resulted in {success_status} ---\n{result_content}")
 
             self._merge_tool_files(aggregated_files, tool_name, result.get("files"))
+
+        dependencies = [result.get("dependency") for result in ordered_results if result.get("dependency")]
+        if dependencies:
+            self._run_depends = dependencies
 
         combined_observation = "\n\n".join(observation_parts)
 
