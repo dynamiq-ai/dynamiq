@@ -49,16 +49,17 @@ class Qdrant(MemoryBackend):
         return super().to_dict_exclude_params | {
             "embedder": True,
             "vector_store": True,
-            "connection": {
-                "api_key": True,
-            },
+            "connection": True,
         }
 
-    def to_dict(self, include_secure_params: bool = False, **kwargs) -> dict:
+    def to_dict(self, include_secure_params: bool = False, for_tracing: bool = False, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
         kwargs.pop("include_secure_params", None)
         data = super().to_dict(**kwargs)
-        data["embedder"] = self.embedder.to_dict(include_secure_params=include_secure_params, **kwargs)
+        data["connection"] = self.connection.to_dict(for_tracing=for_tracing)
+        data["embedder"] = self.embedder.to_dict(
+            include_secure_params=include_secure_params, for_tracing=for_tracing, **kwargs
+        )
         return data
 
     def model_post_init(self, __context) -> None:
