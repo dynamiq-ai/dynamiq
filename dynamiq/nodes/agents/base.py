@@ -657,7 +657,6 @@ class Agent(Node):
 
         execution_result = {
             "content": result,
-            "intermediate_steps": self._intermediate_steps,
         }
 
         if self.file_store_backend and not self.file_store_backend.is_empty():
@@ -1284,7 +1283,6 @@ class AgentManager(Agent):
 
         execution_result = {
             "content": result,
-            "intermediate_steps": self._intermediate_steps,
         }
         logger.info(f"Agent {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 

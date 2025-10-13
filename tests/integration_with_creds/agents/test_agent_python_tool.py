@@ -77,10 +77,6 @@ def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config)
         logger.info(f"Agent raw result object: {result}")
 
         if result.status != RunnableStatus.SUCCESS:
-            intermediate_steps = (
-                result.output.get("intermediate_steps", "N/A") if isinstance(result.output, dict) else "N/A"
-            )
-            logger.info(f"Intermediate Steps on Failure: {intermediate_steps}")
             pytest.fail(f"Agent run failed with status '{result.status}'. Output: {result.output}.")
 
         if isinstance(result.output, dict) and "content" in result.output:
