@@ -48,7 +48,7 @@ def setup_react_agent() -> Agent:
     Returns:
         Agent: Configured ReAct agent.
     """
-    llm = setup_llm()
+    llm = setup_llm(model_provider="gpt", model_name="gpt-5-pro")
 
     # Create tools
     tool_search = ScaleSerpTool(connection=ScaleSerp())
@@ -162,9 +162,7 @@ def setup_react_agent_rag() -> Agent:
     return agent
 
 
-def run_workflow(
-    agent: Agent = setup_react_agent_http_python(), input_prompt: str = QUERY_FOR_HTTP_TOOL
-) -> tuple[str, dict]:
+def run_workflow(agent: Agent = setup_react_agent(), input_prompt: str = QUERY_FOR_HTTP_TOOL) -> tuple[str, dict]:
     """
     Execute a workflow using the ReAct agent to process a predefined query.
 
