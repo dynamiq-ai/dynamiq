@@ -690,7 +690,12 @@ class E2BInterpreterTool(ConnectionNode):
             if self.files:
                 self._upload_files(files=self.files, sandbox=sandbox)
 
-        tool_data = {"tool_session_id": sandbox.sandbox_id, "tool_session_url": sandbox.envd_api_url}
+        try:
+            tool_session_host = sandbox.get_host(port=sandbox.envd_port)
+        except Exception:
+            logger.warning(f"Tool {self.name} - {self.id}: failed to get host")
+            tool_session_host = None
+        tool_data = {"tool_session_id": sandbox.sandbox_id, "tool_session_host": tool_session_host}
         self.run_on_node_execute_run(
             config.callbacks,
             tool_data=tool_data,
