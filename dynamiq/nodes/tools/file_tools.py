@@ -220,17 +220,11 @@ class FileReadTool(Node):
             str: Extracted text content from the file
         """
 
-        print("starting converton ")
-        print(detected_type)
         try:
             if detected_type in self.converter_mapping:
 
-                print("starting converton 123")
-                print(instructions)
-
                 # Use custom converter for images with instructions
                 if detected_type == FileType.IMAGE and instructions:
-                    print("Asdasdasd")
                     converter = LLMImageConverter(llm=self.llm, extraction_instruction=instructions)
                     converter_name = f"{converter.name} (with custom instructions)"
                 else:
@@ -242,7 +236,6 @@ class FileReadTool(Node):
                 if not hasattr(file, "name"):
                     file.name = filename
 
-                print(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []})
                 converter_input = {"files": [file]}
                 result = converter.run(
                     input_data=converter_input,
@@ -340,7 +333,6 @@ class FileReadTool(Node):
                         file_io, filename, detected_type, config, input_data.instructions, **kwargs
                     )
 
-                    print(text_content)
                     if text_content:
                         logger.info(
                             f"Tool {self.name} - {self.id}: successfully processed file and extracted text content"
