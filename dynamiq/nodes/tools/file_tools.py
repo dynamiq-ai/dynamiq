@@ -1,23 +1,80 @@
-import mimetypes
+import logging
+from io import BytesIO
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
-from dynamiq.nodes.agents.utils import bytes_to_data_url
+from dynamiq.nodes.converters import (
+    DOCXFileConverter,
+    HTMLConverter,
+    LLMImageConverter,
+    PPTXFileConverter,
+    PyPDFConverter,
+    TextFileConverter,
+)
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.nodes.node import ensure_config
-from dynamiq.prompts.prompts import (
-    Prompt,
-    VisionMessage,
-    VisionMessageImageContent,
-    VisionMessageImageURL,
-    VisionMessageTextContent,
-)
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.file.base import FileStore
-from dynamiq.utils.logger import logger
+from dynamiq.utils.file_types import EXTENSION_MAP, FileType
+
+logger = logging.getLogger(__name__)
+
+
+def detect_file_type(file: BytesIO, filename: str) -> FileType | None:
+    """
+    Detect the file type based on file extension.
+
+    Args:
+        file: The file object (BytesIO)
+        filename: The filename to extract extension from
+
+    Returns:
+        FileType: The detected file type, or None if not found
+    """
+    try:
+        # Get filename from file object if not provided
+        if not filename and hasattr(file, "name"):
+            filename = file.name
+
+        if not filename:
+            logger.warning("No filename provided for file type detection")
+            return None
+
+        # Extract file extension
+        file_ext = filename.split(".")[-1] if "." in filename else ""
+        file_ext = file_ext.lower()
+
+        if not file_ext:
+            logger.warning(f"No file extension found in filename: {filename}")
+            return None
+
+        # Check against extension map
+        for file_type, extensions in EXTENSION_MAP.items():
+            if file_ext in extensions:
+                logger.info(f"Detected file type: {file_type} for file: {filename}")
+                return file_type
+
+        logger.warning(f"Unknown file extension: {file_ext} for file: {filename}")
+        return None
+
+    except Exception as e:
+        logger.warning(f"File type detection failed for {filename}: {str(e)}")
+        return None
+
+
+DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP = {
+    FileType.PDF: PyPDFConverter,
+    FileType.DOCUMENT: DOCXFileConverter,
+    FileType.PRESENTATION: PPTXFileConverter,
+    FileType.HTML: HTMLConverter,
+    FileType.TEXT: TextFileConverter,
+    FileType.MARKDOWN: TextFileConverter,
+    FileType.IMAGE: LLMImageConverter,
+}
 
 
 class FileReadInputSchema(BaseModel):
@@ -41,34 +98,40 @@ class FileWriteInputSchema(BaseModel):
 
 class FileReadTool(Node):
     """
-    A tool for reading files from storage.
+    A tool for reading files from storage with intelligent file processing.
 
-    This tool can be passed to ReAct agents to read files
-    from the configured storage backend. For large files, it automatically
-    returns chunked content showing first, middle, and last parts.
+    This tool can be passed to ReAct agents to read files from the configured storage backend.
+    It automatically detects file types and processes them using appropriate converters to extract text content.
+    For large files, it automatically returns chunked content showing first, middle, and last parts.
+    For images and PDFs with instructions, uses LLM processing if the model supports vision/PDF input.
 
     Attributes:
         group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
         name (str): The name of the tool.
         description (str): A brief description of the tool.
         file_store (FileStore): File storage to read from.
+        llm (BaseLLM): LLM that will be used to process files.
         max_size (int): Maximum size in bytes before chunking (default: 10000).
         chunk_size (int): Size of each chunk in bytes (default: 1000).
+        converter_mapping (dict[FileType, Node]): Mapping of file types to converters.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "FileReadTool"
     description: str = """
-        Reads files from storage based on the provided file path.
+        Reads files from storage based on the provided file path with intelligent file processing.
+        Automatically detects file types (PDF, DOCX, PPTX, HTML, TXT, IMAGE, etc.) and extracts text content.
         For large files (configurable threshold), returns first, middle, and last chunks as bytes with separators.
         For images and PDFs with instructions, uses LLM processing if the model supports vision/PDF input.
 
         Usage Examples:
-            - Read small file: {"file_path": "config.txt"}
+            - Read text file: {"file_path": "config.txt"}
+            - Read PDF: {"file_path": "report.pdf"}
+            - Read DOCX: {"file_path": "document.docx"}
+            - Read image: {"file_path": "image.png"} (extracts text using LLM)
             - Read large file: {"file_path": "large_data.json"}
-            - Read huge file: {"file_path": "huge_file.csv"}
-            - Read image: {"file_path": "image.png", "instructions": "Describe the image in detail"}
-            - Read PDF: {"file_path": "report.pdf", "instructions": "Summarize the report"}
+            - Read image with instructions: {"file_path": "image.png", "instructions": "Describe the image in detail"}
+            - Read PDF with instructions: {"file_path": "report.pdf", "instructions": "Summarize the report"}
 
         Parameters:
             - file_path: Path of the file to read
@@ -78,49 +141,136 @@ class FileReadTool(Node):
     file_store: FileStore = Field(..., description="File storage to read from.")
     max_size: int = Field(default=10000, description="Maximum size in bytes before chunking (default: 10000)")
     chunk_size: int = Field(default=1000, description="Size of each chunk in bytes (default: 1000)")
+    converter_mapping: dict[FileType, Node] | None = None
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileReadInputSchema]] = FileReadInputSchema
 
-    def _is_image(self, file_path: str, content: bytes) -> bool:
-        """Check if the file is an image."""
-        mime_type, _ = mimetypes.guess_type(file_path)
-        if mime_type and mime_type.startswith("image/"):
-            return True
+    def init_components(self, connection_manager: ConnectionManager | None = None):
+        """
+        Initialize the components of the FileReadTool.
 
-        if content.startswith(b"\x89PNG") or content.startswith(b"\xFF\xD8\xFF") or content.startswith(b"GIF8"):
-            return True
+        Args:
+            connection_manager (ConnectionManager, optional): The connection manager to use.
+                Defaults to a new ConnectionManager instance.
+        """
+        connection_manager = connection_manager or ConnectionManager()
+        super().init_components(connection_manager)
 
-        return False
+        self._setup_converters(connection_manager)
 
-    def _process_with_llm(self, content: bytes, instructions: str, config: RunnableConfig, **kwargs) -> dict[str, Any]:
-        """Process file content with LLM using vision capabilities."""
-        from dynamiq.runnables import RunnableStatus
+    def _setup_converters(self, connection_manager: ConnectionManager | None = None):
+        """Setup internal converter components."""
+        connection_manager = connection_manager or ConnectionManager()
 
-        llm_result = self.llm.run(
-            input_data={},
-            prompt=Prompt(
-                messages=[
-                    VisionMessage(
-                        role="user",
-                        content=[
-                            VisionMessageTextContent(text=instructions),
-                            VisionMessageImageContent(image_url=VisionMessageImageURL(url=bytes_to_data_url(content))),
-                        ],
-                    )
-                ]
-            ),
-            config=config,
-            **(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []}),
-        )
+        if not self.converter_mapping:
+            # Create default converter instances
+            self.converter_mapping = {}
+            for file_type, converter_class in DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP.items():
+                if file_type == FileType.IMAGE and converter_class == LLMImageConverter:
+                    # ImageLLMConverter requires an LLM instance
+                    self.converter_mapping[file_type] = converter_class(llm=self.llm)
+                else:
+                    self.converter_mapping[file_type] = converter_class()
 
-        if llm_result.status != RunnableStatus.SUCCESS:
-            error_message = f"LLM processing failed with status '{llm_result.status}'"
-            if llm_result.error:
-                error_message += f": {llm_result.error.message}"
-            logger.warning(f"Tool {self.name} - {self.id}: {error_message}")
-            return {"content": error_message}
+        # Initialize components for converters in the mapping
+        initialized_converters = set()
+        for converter in self.converter_mapping.values():
+            if id(converter) not in initialized_converters:
+                if converter.is_postponed_component_init:
+                    converter.init_components(connection_manager)
+                initialized_converters.add(id(converter))
+                logger.info(f"Initialized converter: {converter.name}")
 
-        return {"content": llm_result.output["content"]}
+    def _detect_file_type(self, file: BytesIO, filename: str, config: RunnableConfig, **kwargs) -> FileType | None:
+        """
+        Detect the file type using custom detection function.
+
+        Args:
+            file: The file to analyze
+            filename: The filename for file type detection
+            config: Runtime configuration
+            **kwargs: Additional arguments
+
+        Returns:
+            FileType: The detected file type, or None if detection fails
+        """
+        return detect_file_type(file, filename)
+
+    def _process_file_with_converter(
+        self,
+        file: BytesIO,
+        filename: str,
+        detected_type: FileType,
+        config: RunnableConfig,
+        instructions: str | None = None,
+        **kwargs,
+    ) -> str:
+        """
+        Process a file using the appropriate converter to extract text content.
+
+        Args:
+            file: The file to process
+            filename: The filename
+            detected_type: The detected file type
+            config: Runtime configuration
+            instructions: Custom instructions for image processing
+            **kwargs: Additional arguments
+
+        Returns:
+            str: Extracted text content from the file
+        """
+
+        print("starting converton ")
+        print(detected_type)
+        try:
+            if detected_type in self.converter_mapping:
+
+                print("starting converton 123")
+                print(instructions)
+
+                # Use custom converter for images with instructions
+                if detected_type == FileType.IMAGE and instructions:
+                    print("Asdasdasd")
+                    converter = LLMImageConverter(llm=self.llm, extraction_instruction=instructions)
+                    converter_name = f"{converter.name} (with custom instructions)"
+                else:
+                    converter = self.converter_mapping[detected_type]
+                    converter_name = converter.name
+
+                # Reset file position
+                file.seek(0)
+                if not hasattr(file, "name"):
+                    file.name = filename
+
+                print(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []})
+                converter_input = {"files": [file]}
+                result = converter.run(
+                    input_data=converter_input,
+                    config=config,
+                    **(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []}),
+                )
+
+                if result.status == RunnableStatus.SUCCESS:
+                    documents = result.output.get("documents", [])
+                    if documents:
+                        # Extract text content from all documents
+                        text_content = "\n\n".join([doc.content for doc in documents if hasattr(doc, "content")])
+                        logger.info(f"Successfully extracted text using {converter_name}")
+                        return text_content
+                    else:
+                        logger.warning(f"No documents extracted by {converter_name}")
+                        return ""
+                else:
+                    logger.warning(f"Converter {converter_name} failed: {result.error}")
+                    return ""
+
+            else:
+                logger.warning(f"No converter available for file type: {detected_type}")
+                return ""
+
+        except Exception as e:
+            logger.warning(f"File processing failed with converter: {str(e)}")
+            return ""
 
     @property
     def to_dict_exclude_params(self):
@@ -130,7 +280,10 @@ class FileReadTool(Node):
         Returns:
             dict: A dictionary defining the parameters to exclude.
         """
-        return super().to_dict_exclude_params | {"llm": True}
+        return super().to_dict_exclude_params | {
+            "llm": True,
+            "converter_mapping": True,
+        }
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary.
@@ -140,6 +293,10 @@ class FileReadTool(Node):
         """
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
+        if self.converter_mapping:
+            data["converter_mapping"] = {
+                file_type.value: converter.to_dict(**kwargs) for file_type, converter in self.converter_mapping.items()
+            }
         return data
 
     def execute(
@@ -151,6 +308,7 @@ class FileReadTool(Node):
         """
         Executes the file read operation and returns the file content.
         For large files, returns first, middle, and last chunks instead of full content.
+        Automatically detects file type and extracts text content when possible.
         """
         logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
 
@@ -167,22 +325,55 @@ class FileReadTool(Node):
             content = self.file_store.retrieve(input_data.file_path)
             content_size = len(content)
 
-            # Only use LLM processing for images/PDFs with instructions and if LLM supports the specific type
-            if input_data.instructions:
-                is_image = self._is_image(input_data.file_path, content)
+            # Always attempt file processing with converters
+            try:
+                # Create BytesIO object for file processing
+                file_io = BytesIO(content)
+                filename = input_data.file_path.split("/")[-1]  # Extract filename from path
 
-                # Check if we should use LLM processing based on file type and LLM capabilities
-                if is_image and self.llm.is_vision_supported:
-                    logger.info(f"Tool {self.name} - {self.id}: processing image with LLM (vision supported)")
-                    return self._process_with_llm(content, input_data.instructions, config, **kwargs)
-                elif is_image and not self.llm.is_vision_supported:
-                    error_msg = (
-                        f"Cannot process image file '{input_data.file_path}' with current LLM. "
-                        f"The model '{self.llm.model}' does not support vision/image processing."
+                # Detect file type
+                detected_type = self._detect_file_type(file_io, filename, config, **kwargs)
+
+                if detected_type:
+                    # Process file with appropriate converter
+                    text_content = self._process_file_with_converter(
+                        file_io, filename, detected_type, config, input_data.instructions, **kwargs
                     )
-                    logger.warning(f"Tool {self.name} - {self.id}: {error_msg}")
-                    return {"content": error_msg}
 
+                    print(text_content)
+                    if text_content:
+                        logger.info(
+                            f"Tool {self.name} - {self.id}: successfully processed file and extracted text content"
+                        )
+
+                        # If the extracted text is large, return chunked content
+                        if len(text_content) > self.max_size:
+                            logger.info(
+                                f"Tool {self.name} - {self.id}: extracted text is large ({len(text_content)} chars),"
+                                " returning chunks"
+                            )
+                            chunked_content = self._create_chunked_text_content(
+                                text_content, self.chunk_size, input_data.file_path
+                            )
+                            return {"content": chunked_content}
+                        else:
+                            return {"content": text_content}
+                    else:
+                        logger.warning(
+                            f"Tool {self.name} - {self.id}: no text content extracted from file,"
+                            "falling back to raw content"
+                        )
+                else:
+                    logger.warning(
+                        f"Tool {self.name} - {self.id}: could not detect file type, falling back to raw content"
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"Tool {self.name} - {self.id}: file processing failed: {str(e)}, falling back to raw content"
+                )
+
+            # Fallback to raw content if processing fails or no text extracted
             # If file is small enough, return full content
             if content_size <= self.max_size:
                 logger.info(f"Tool {self.name} - {self.id}: returning full content ({content_size} bytes)")
@@ -241,6 +432,45 @@ class FileReadTool(Node):
         )
 
         return chunked_bytes
+
+    def _create_chunked_text_content(self, content: str, chunk_size: int, file_path: str) -> str:
+        """
+        Create chunked text content showing first, middle, and last parts of a large text.
+
+        Args:
+            content: The text content as string
+            chunk_size: Size of each chunk in characters
+            file_path: Path of the file being read
+
+        Returns:
+            str: Concatenated string containing first, middle, and last chunks
+        """
+        total_size = len(content)
+
+        first_chunk = content[:chunk_size]
+
+        middle_start = total_size // 2 - chunk_size // 2
+        middle_chunk = content[middle_start : middle_start + chunk_size]
+
+        last_chunk = content[-chunk_size:] if total_size > chunk_size else content
+
+        separator = f"\n\n--- CHUNKED TEXT FILE: {file_path} ({total_size:,} characters total) ---\n"
+        first_sep = f"\n--- FIRST {len(first_chunk):,} CHARACTERS ---\n"
+        middle_sep = f"\n--- MIDDLE {len(middle_chunk):,} CHARACTERS (from position {middle_start:,}) ---\n"
+        last_sep = f"\n--- LAST {len(last_chunk):,} CHARACTERS ---\n"
+
+        chunked_text = (
+            separator
+            + first_sep
+            + first_chunk
+            + middle_sep
+            + middle_chunk
+            + last_sep
+            + last_chunk
+            + "\n\n--- END OF CHUNKED TEXT FILE ---\n"
+        )
+
+        return chunked_text
 
 
 class FileWriteTool(Node):
