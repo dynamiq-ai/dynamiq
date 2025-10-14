@@ -1,4 +1,5 @@
 import logging
+import os
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
@@ -36,7 +37,6 @@ def detect_file_type(file: BytesIO, filename: str) -> FileType | None:
         FileType: The detected file type, or None if not found
     """
     try:
-        # Get filename from file object if not provided
         if not filename and hasattr(file, "name"):
             filename = file.name
 
@@ -44,15 +44,13 @@ def detect_file_type(file: BytesIO, filename: str) -> FileType | None:
             logger.warning("No filename provided for file type detection")
             return None
 
-        # Extract file extension
-        file_ext = filename.split(".")[-1] if "." in filename else ""
+        file_ext = os.path.splitext(filename)[1][1:] if filename else ""
         file_ext = file_ext.lower()
 
         if not file_ext:
             logger.warning(f"No file extension found in filename: {filename}")
             return None
 
-        # Check against extension map
         for file_type, extensions in EXTENSION_MAP.items():
             if file_ext in extensions:
                 logger.info(f"Detected file type: {file_type} for file: {filename}")
@@ -163,16 +161,13 @@ class FileReadTool(Node):
         connection_manager = connection_manager or ConnectionManager()
 
         if not self.converter_mapping:
-            # Create default converter instances
             self.converter_mapping = {}
             for file_type, converter_class in DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP.items():
                 if file_type == FileType.IMAGE and converter_class == LLMImageConverter:
-                    # ImageLLMConverter requires an LLM instance
                     self.converter_mapping[file_type] = converter_class(llm=self.llm)
                 else:
                     self.converter_mapping[file_type] = converter_class()
 
-        # Initialize components for converters in the mapping
         initialized_converters = set()
         for converter in self.converter_mapping.values():
             if id(converter) not in initialized_converters:
@@ -223,7 +218,6 @@ class FileReadTool(Node):
         try:
             if detected_type in self.converter_mapping:
 
-                # Use custom converter for images with instructions
                 if detected_type == FileType.IMAGE and instructions:
                     converter = LLMImageConverter(llm=self.llm, extraction_instruction=instructions)
                     converter_name = f"{converter.name} (with custom instructions)"
@@ -246,7 +240,6 @@ class FileReadTool(Node):
                 if result.status == RunnableStatus.SUCCESS:
                     documents = result.output.get("documents", [])
                     if documents:
-                        # Extract text content from all documents
                         text_content = "\n\n".join([doc.content for doc in documents if hasattr(doc, "content")])
                         logger.info(f"Successfully extracted text using {converter_name}")
                         return text_content
@@ -318,13 +311,10 @@ class FileReadTool(Node):
             content = self.file_store.retrieve(input_data.file_path)
             content_size = len(content)
 
-            # Always attempt file processing with converters
             try:
-                # Create BytesIO object for file processing
                 file_io = BytesIO(content)
                 filename = input_data.file_path.split("/")[-1]  # Extract filename from path
 
-                # Detect file type
                 detected_type = self._detect_file_type(file_io, filename, config, **kwargs)
 
                 if detected_type:
