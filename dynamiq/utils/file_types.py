@@ -4,9 +4,11 @@ import enum
 class FileType(str, enum.Enum):
     IMAGE = "image"
     DOCUMENT = "document"
+    DOCX_DOCUMENT = "docx_document"
     PDF = "pdf"
     SPREADSHEET = "spreadsheet"
     PRESENTATION = "presentation"
+    PPTX_PRESENTATION = "pptx_presentation"
     ARCHIVE = "archive"
     AUDIO = "audio"
     VIDEO = "video"
@@ -40,10 +42,12 @@ EXTENSION_MAP = {
         "heic",
         "avif",
     },
+    FileType.DOCX_DOCUMENT: {"docx"},
     FileType.DOCUMENT: {"doc", "docx", "odt", "rtf"},
     FileType.PDF: {"pdf"},
     FileType.SPREADSHEET: {"xls", "xlsx", "csv", "ods"},
     FileType.PRESENTATION: {"ppt", "pptx", "odp"},
+    FileType.PPTX_PRESENTATION: {"pptx"},
     FileType.ARCHIVE: {
         "zip",
         "rar",

@@ -66,8 +66,8 @@ def detect_file_type(file: BytesIO, filename: str) -> FileType | None:
 
 DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP = {
     FileType.PDF: PyPDFConverter,
-    FileType.DOCUMENT: DOCXFileConverter,
-    FileType.PRESENTATION: PPTXFileConverter,
+    FileType.DOCX_DOCUMENT: DOCXFileConverter,
+    FileType.PPTX_PRESENTATION: PPTXFileConverter,
     FileType.HTML: HTMLConverter,
     FileType.TEXT: TextFileConverter,
     FileType.MARKDOWN: TextFileConverter,
@@ -98,7 +98,7 @@ class FileReadTool(Node):
     """
     A tool for reading files from storage with intelligent file processing.
 
-    This tool can be passed to ReAct agents to read files from the configured storage backend.
+    This tool can be passed to Agents to read files from the configured storage backend.
     It automatically detects file types and processes them using appropriate converters to extract text content.
     For large files, it automatically returns chunked content showing first, middle, and last parts.
     For images and PDFs with instructions, uses LLM processing if the model supports vision/PDF input.
@@ -459,7 +459,7 @@ class FileWriteTool(Node):
     """
     A tool for writing files to storage.
 
-    This tool can be passed to ReAct agents to write files
+    This tool can be passed to Agents to write files
     to the configured storage backend.
 
     Attributes:
