@@ -1287,7 +1287,8 @@ class Agent(BaseAgent):
                                 error_detail="The model returned an empty reply while XML format was required.",
                                 llm_generated_output=llm_generated_output,
                                 extra_guidance=(
-                                    "Respond with <thought>...</thought> and either <action>/<action_input> or <answer> tags, "
+                                    "Respond with <thought>...</thought> and "
+                                    "either <action>/<action_input> or <answer> tags, "
                                     "making sure to address the latest observation."
                                 ),
                             )
@@ -1363,13 +1364,6 @@ class Agent(BaseAgent):
                                 self.tracing_final(loop_num, final_answer, config, kwargs)
                                 return final_answer
 
-                            except ParsingError as e:
-                                logger.error(f"XMLParser: Empty or invalid XML response: {e}")
-                                raise ActionParsingException(
-                                    "The previous response was empty or invalid. Please provide the required XML tags.",
-                                    recoverable=True,
-                                )
-
                             except TagNotFoundError:
                                 logger.debug("XMLParser: Not a final answer structure, trying action structure.")
                                 try:
@@ -1386,12 +1380,21 @@ class Agent(BaseAgent):
                                 except ParsingError as e:
                                     logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
                                     raise ActionParsingException(
-                                        "The previous response was empty or invalid. Provide <thought> with either <action>/<action_input> or <answer>.",
+                                        "The previous response was empty or invalid. "
+                                        "Provide <thought> with either <action>/<action_input> or <answer>.",
                                         recoverable=True,
                                     )
                                 except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
                                     logger.error(f"XMLParser: Failed to parse XML for action or answer: {e}")
                                     raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
+
+                            except ParsingError as e:
+                                logger.error(f"XMLParser: Empty or invalid XML response: {e}")
+                                raise ActionParsingException(
+                                    "The previous response was empty or invalid. "
+                                    "Please provide the required XML tags.",
+                                    recoverable=True,
+                                )
 
                             except (XMLParsingError, JSONParsingError) as e:
                                 logger.error(f"XMLParser: Error parsing potential final answer XML: {e}")
@@ -1578,12 +1581,14 @@ class Agent(BaseAgent):
                 extra_guidance = None
                 if self.inference_mode == InferenceMode.XML:
                     extra_guidance = (
-                        "Ensure the reply contains <thought> along with either <action>/<action_input> or a final "
+                        "Ensure the reply contains <thought> along "
+                        "with either <action>/<action_input> or a final "
                         "<answer> tag."
                     )
                 elif self.inference_mode == InferenceMode.DEFAULT:
                     extra_guidance = (
-                        "Provide 'Thought:' and either 'Action:' with a JSON 'Action Input:' or a final 'Answer:' section."
+                        "Provide 'Thought:' and either 'Action:' "
+                        "with a JSON 'Action Input:' or a final 'Answer:' section."
                     )
 
                 self._append_recovery_instruction(

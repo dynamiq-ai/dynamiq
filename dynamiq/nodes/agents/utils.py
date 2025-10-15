@@ -417,6 +417,11 @@ class XMLParser:
                 result.update(xml_data)
                 remaining_required = [tag for tag in remaining_required if tag not in result]
                 remaining_optional = [tag for tag in remaining_optional if tag not in result]
+        except TagNotFoundError as e:
+            logger.debug(
+                "XMLParser: lxml extraction missing tag (will retry via fallback): %s",
+                e,
+            )
         except Exception as e:
             logger.warning(f"XMLParser: XML parsing failed: {e}")
 
