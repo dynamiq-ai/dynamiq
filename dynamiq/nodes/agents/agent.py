@@ -864,6 +864,35 @@ class Agent(BaseAgent):
             ),
         ).model_dump(by_alias=True)
 
+    def _append_recovery_instruction(
+        self,
+        *,
+        error_label: str,
+        error_detail: str,
+        llm_generated_output: str | None,
+        extra_guidance: str | None = None,
+    ) -> None:
+        """Append a correction instruction to prompt for recoverable agent errors."""
+
+        error_context = llm_generated_output if llm_generated_output else "No response generated"
+
+        self._prompt.messages.append(
+            Message(role=MessageRole.ASSISTANT, content=f"Previous response:\n{error_context}", static=True)
+        )
+
+        guidance_suffix = f" {extra_guidance.strip()}" if extra_guidance else ""
+
+        correction_message = (
+            "Correction Instruction: The previous response could not be parsed due to the "
+            f"following error: '{error_label}: {error_detail}'. Please regenerate the response "
+            "strictly following the required format, ensuring all tags or labeled sections are "
+            "present and correctly structured, and that any JSON content is valid." + guidance_suffix
+        )
+
+        self._prompt.messages.append(
+            Message(role=MessageRole.USER, content=correction_message, static=True)
+        )
+
     def _extract_final_answer(self, output: str) -> str:
         """Extracts the final thought and answer as a tuple from the output string."""
         match = re.search(r"Thought:\s*(.*?)\s*Answer:\s*(.*)", output, re.DOTALL)
@@ -1152,6 +1181,18 @@ class Agent(BaseAgent):
 
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
 
+                        if not llm_generated_output or not llm_generated_output.strip():
+                            self._append_recovery_instruction(
+                                error_label="EmptyResponse",
+                                error_detail="The model returned an empty reply while using the Thought/Action format.",
+                                llm_generated_output=llm_generated_output,
+                                extra_guidance=(
+                                    "Re-evaluate the latest observation and respond with 'Thought:' followed by either "
+                                    "an 'Action:' plus JSON 'Action Input:' or a final 'Answer:' section."
+                                ),
+                            )
+                            continue
+
                         if "Answer:" in llm_generated_output:
                             thought, final_answer = self._extract_final_answer(llm_generated_output)
 
@@ -1240,6 +1281,18 @@ class Agent(BaseAgent):
 
                         self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
 
+                        if not llm_generated_output or not llm_generated_output.strip():
+                            self._append_recovery_instruction(
+                                error_label="EmptyResponse",
+                                error_detail="The model returned an empty reply while XML format was required.",
+                                llm_generated_output=llm_generated_output,
+                                extra_guidance=(
+                                    "Respond with <thought>...</thought> and either <action>/<action_input> or <answer> tags, "
+                                    "making sure to address the latest observation."
+                                ),
+                            )
+                            continue
+
                         if self.parallel_tool_calls_enabled:
                             try:
                                 parsed_result = XMLParser.parse_unified_xml_format(llm_generated_output)
@@ -1287,19 +1340,14 @@ class Agent(BaseAgent):
                                 )
 
                             except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
-                                self._prompt.messages.append(
-                                    Message(role=MessageRole.ASSISTANT, content=llm_generated_output)
-                                )
-                                self._prompt.messages.append(
-                                    Message(
-                                        role=MessageRole.USER,
-                                        content=f"Correction Instruction: "
-                                        f"The previous response could not be parsed due to "
-                                        f"the following error: '{type(e).__name__}: {e}'. "
-                                        f"Please regenerate the response strictly following the "
-                                        f"required XML format, ensuring all tags are present and "
-                                        f"correctly structured, and that any JSON content is valid.",
-                                    )
+                                self._append_recovery_instruction(
+                                    error_label=type(e).__name__,
+                                    error_detail=str(e),
+                                    llm_generated_output=llm_generated_output,
+                                    extra_guidance=(
+                                        "Return <thought> with the resolved plan and list tool calls inside <tools>, "
+                                        "or mark the run as final with <answer>."
+                                    ),
                                 )
                                 continue
                         else:
@@ -1315,6 +1363,13 @@ class Agent(BaseAgent):
                                 self.tracing_final(loop_num, final_answer, config, kwargs)
                                 return final_answer
 
+                            except ParsingError as e:
+                                logger.error(f"XMLParser: Empty or invalid XML response: {e}")
+                                raise ActionParsingException(
+                                    "The previous response was empty or invalid. Please provide the required XML tags.",
+                                    recoverable=True,
+                                )
+
                             except TagNotFoundError:
                                 logger.debug("XMLParser: Not a final answer structure, trying action structure.")
                                 try:
@@ -1328,6 +1383,12 @@ class Agent(BaseAgent):
                                     action = parsed_data.get("action")
                                     action_input = parsed_data.get("action_input")
                                     self.log_reasoning(thought, action, action_input, loop_num)
+                                except ParsingError as e:
+                                    logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
+                                    raise ActionParsingException(
+                                        "The previous response was empty or invalid. Provide <thought> with either <action>/<action_input> or <answer>.",
+                                        recoverable=True,
+                                    )
                                 except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
                                     logger.error(f"XMLParser: Failed to parse XML for action or answer: {e}")
                                     raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
@@ -1514,20 +1575,22 @@ class Agent(BaseAgent):
                         **kwargs,
                     )
             except ActionParsingException as e:
-                error_context = llm_generated_output if llm_generated_output else "No response generated"
-                self._prompt.messages.append(
-                    Message(role=MessageRole.ASSISTANT, content=f"Previous response:\n{error_context}", static=True)
-                )
-                self._prompt.messages.append(
-                    Message(
-                        role=MessageRole.USER,
-                        content=f"Correction Instruction: The previous response could not be parsed due to "
-                        f"the following error: '{type(e).__name__}: {e}'. "
-                        f"Please regenerate the response strictly following the "
-                        f"required XML format, ensuring all tags are present and "
-                        f"correctly structured, and that any JSON content (like action_input) is valid.",
-                        static=True,
+                extra_guidance = None
+                if self.inference_mode == InferenceMode.XML:
+                    extra_guidance = (
+                        "Ensure the reply contains <thought> along with either <action>/<action_input> or a final "
+                        "<answer> tag."
                     )
+                elif self.inference_mode == InferenceMode.DEFAULT:
+                    extra_guidance = (
+                        "Provide 'Thought:' and either 'Action:' with a JSON 'Action Input:' or a final 'Answer:' section."
+                    )
+
+                self._append_recovery_instruction(
+                    error_label=type(e).__name__,
+                    error_detail=str(e),
+                    llm_generated_output=llm_generated_output,
+                    extra_guidance=extra_guidance,
                 )
                 continue
 

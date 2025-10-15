@@ -374,8 +374,11 @@ class XMLParser:
         for tag in XMLParser.DEFAULT_PRESERVE_TAGS:
             if tag not in preserve_format_tags:
                 preserve_format_tags.append(tag)
+        logger.info(f"DEBUG INSIDE XML PARSER - text:\n{text}\n---end of text")
 
         cleaned_text = XMLParser._clean_content(text)
+        logger.info(f"DEBUG INSIDE XML PARSER - cleanedtext:\n{cleaned_text}\n---end of cleaned text")
+
         if not cleaned_text:
             if text and text.strip():
                 cleaned_text = text.strip()
