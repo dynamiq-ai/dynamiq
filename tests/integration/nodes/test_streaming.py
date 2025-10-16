@@ -68,3 +68,31 @@ def test_node_streaming(
         name="OpenAI", group="llms", type="dynamiq.nodes.llms.OpenAI"
     )
     assert all(source == expected_streaming_node_source for _, _, source in node_output)
+
+
+def test_node_streaming_disabled_without_streaming_callback(
+    node_with_streaming,
+    mock_llm_response_text,
+    mock_llm_executor,
+):
+    input_data = {"a": 1, "b": 2}
+    wf = Workflow(flow=flows.Flow(nodes=[node_with_streaming]))
+
+    response = wf.run(
+        input_data=input_data,
+        config=RunnableConfig(callbacks=[]),
+    )
+
+    expected_output = {
+        node_with_streaming.id: RunnableResult(
+            status=RunnableStatus.SUCCESS,
+            input=input_data,
+            output={"content": mock_llm_response_text},
+        ).to_dict()
+    }
+
+    assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
+
+    assert mock_llm_executor.call_count == 1
+    call_kwargs = mock_llm_executor.call_args[1]
+    assert call_kwargs.get("stream") is False
