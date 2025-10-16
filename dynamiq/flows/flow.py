@@ -278,7 +278,7 @@ class Flow(BaseFlow):
                         self._ts.done(*results.keys())
 
                     # Wait for ready nodes to be processed and reduce CPU usage
-                    time.sleep(0.005)
+                    time.sleep(0.003)
 
                 run_executor.shutdown()
 
@@ -349,7 +349,7 @@ class Flow(BaseFlow):
                         self._ts.done(*results.keys())
 
                     # Wait for ready nodes to be processed and reduce CPU usage by yielding control to the event loop
-                    await asyncio.sleep(0.005)
+                    await asyncio.sleep(0.003)
 
             output = self._get_output()
             self.run_on_flow_end(output, config, **merged_kwargs)
