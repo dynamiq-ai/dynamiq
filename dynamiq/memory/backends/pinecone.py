@@ -6,7 +6,7 @@ from dynamiq.connections import Pinecone as PineconeConnection
 from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.nodes.embedders.base import DocumentEmbedder, DocumentEmbedderInputSchema
 from dynamiq.prompts import Message
-from dynamiq.storages.vector.pinecone import PineconeVectorStore
+from dynamiq.storages.vector.pinecone import PineconeSimilarityMetric, PineconeVectorStore
 from dynamiq.storages.vector.pinecone.pinecone import PineconeIndexType
 from dynamiq.types import Document
 from dynamiq.utils import TruncationMethod, truncate_text_for_embedding
@@ -28,6 +28,7 @@ class Pinecone(MemoryBackend):
     index_type: PineconeIndexType
     index_name: str = Field(default="conversations")
     dimension: int = Field(default=1536)
+    metric: PineconeSimilarityMetric = Field(default=PineconeSimilarityMetric.COSINE)
     create_if_not_exist: bool = Field(default=True)
     namespace: str = Field(default="default")
     cloud: str | None = Field(default=None)
@@ -72,6 +73,7 @@ class Pinecone(MemoryBackend):
                 namespace=self.namespace,
                 create_if_not_exist=self.create_if_not_exist,
                 dimension=self.dimension,
+                metric=self.metric,
                 index_type=self.index_type,
                 cloud=self.cloud,
                 region=self.region,

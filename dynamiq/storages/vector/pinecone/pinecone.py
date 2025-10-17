@@ -35,12 +35,18 @@ def validate_pinecone_index_name(index_name: str) -> str:
 
 
 class PineconeIndexType(str, enum.Enum):
-    """
-    This enum defines various index types for different Pinecone deployments.
-    """
+    """Pinecone index deployment types."""
 
     SERVERLESS = "serverless"
     POD = "pod"
+
+
+class PineconeSimilarityMetric(str, enum.Enum):
+    """Supported Pinecone similarity metrics."""
+
+    COSINE = "cosine"
+    EUCLIDEAN = "euclidean"
+    DOT_PRODUCT = "dotproduct"
 
 
 class PineconeVectorStoreParams(BaseVectorStoreParams):
@@ -55,7 +61,7 @@ class PineconeVectorStoreParams(BaseVectorStoreParams):
 class PineconeWriterVectorStoreParams(PineconeVectorStoreParams, BaseWriterVectorStoreParams):
     batch_size: int = 100
     dimension: int = 1536
-    metric: str = "cosine"
+    metric: PineconeSimilarityMetric = PineconeSimilarityMetric.COSINE
     index_type: PineconeIndexType | None = None
     cloud: str | None = Field(default_factory=partial(get_env_var, "PINECONE_CLOUD"))
     region: str | None = Field(default_factory=partial(get_env_var, "PINECONE_REGION"))
@@ -75,7 +81,7 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
         namespace: str = "default",
         batch_size: int = 100,
         dimension: int = 1536,
-        metric: str = "cosine",
+        metric: PineconeSimilarityMetric = PineconeSimilarityMetric.COSINE,
         create_if_not_exist: bool = False,
         index_type: PineconeIndexType | None = None,
         cloud: str | None = None,
@@ -97,7 +103,7 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
             namespace (str): Namespace for the index. Defaults to 'default'.
             batch_size (int): Size of batches for operations. Defaults to 100.
             dimension (int): Number of dimensions for vectors. Defaults to 1536.
-            metric (str): Metric for calculating vector similarity. Defaults to 'cosine'.
+            metric (PineconeSimilarityMetric | str): Metric for calculating vector similarity. Defaults to 'cosine'.
             content_key (Optional[str]): The field used to store content in the storage. Defaults to 'content'.
             dry_run_config (Optional[DryRunConfig]): Configuration for dry run mode. Defaults to None.
             **index_creation_kwargs: Additional arguments for index creation.
@@ -118,7 +124,18 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
         self.create_if_not_exist = create_if_not_exist
 
         self.batch_size = batch_size
-        self.metric = metric
+
+        if isinstance(metric, str):
+            try:
+                metric = PineconeSimilarityMetric(metric.lower())
+            except ValueError as exc:
+                msg = (
+                    f"Unsupported Pinecone similarity metric '{metric}'. "
+                    f"Please choose one of: {', '.join(m.value for m in PineconeSimilarityMetric)}"
+                )
+                raise ValueError(msg) from exc
+
+        self.metric: PineconeSimilarityMetric = metric
         self.dimension = dimension
         self.cloud = cloud
         self.region = region
@@ -193,7 +210,7 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
                     name=self.index_name,
                     spec=self._spec,
                     dimension=self.dimension,
-                    metric=self.metric,
+                    metric=self.metric.value,
                     **self.index_creation_kwargs,
                 )
                 self._track_collection(self.index_name)
