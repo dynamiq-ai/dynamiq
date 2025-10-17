@@ -249,7 +249,7 @@ class Workflow(BaseModel, Runnable):
                 dict_kwargs = {}
                 if isinstance(callback, TracingCallbackHandler):
                     dict_kwargs["for_tracing"] = True
-                callback.on_workflow_end(self.to_dict(**dict_kwargs), output, **kwargs)
+                callback.on_workflow_end(self.to_dict(**dict_kwargs), output, config=config, **kwargs)
 
     def run_on_workflow_error(
         self, error: BaseException, config: RunnableConfig = None, **kwargs: Any

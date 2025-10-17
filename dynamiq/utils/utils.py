@@ -181,6 +181,7 @@ def format_value(
     force_format_types: set = None,
     for_tracing: bool = False,
     truncate_limit: int = TRUNCATE_LIST_LIMIT,
+    serialize_files_content: bool = False,
     **kwargs,
 ) -> Any:
     """Format a value for serialization.
@@ -191,6 +192,7 @@ def format_value(
         force_format_types (set, optional): Types to force formatting.
         for_tracing (bool, optional): Whether to format value regarding tracing standard.
         truncate_limit (int): The maximum allowed length for the value; if exceeded, the value will be truncated.
+        serialize_files_content (bool, optional): Whether to serialize files content in the output.
         **kwargs: Additional keyword arguments.
 
     Returns:
@@ -211,7 +213,13 @@ def format_value(
         return value
 
     if isinstance(value, BytesIO):
-        return getattr(value, "name", None) or encode_bytes(value.getvalue())
+        if serialize_files_content:
+            return {
+                "name": getattr(value, "name", None),
+                "content": encode_bytes(value.getvalue()),
+            }
+        else:
+            return getattr(value, "name", None) or encode_bytes(value.getvalue())
     if isinstance(value, bytes):
         return encode_bytes(value)
 
@@ -227,6 +235,7 @@ def format_value(
                 for_tracing,
                 path=new_path,
                 truncate_limit=truncate_limit,
+                serialize_files_content=serialize_files_content,
             )
             formatted_dict[k] = formatted_v
         return formatted_dict
@@ -245,6 +254,7 @@ def format_value(
                 for_tracing,
                 path=new_path,
                 truncate_limit=truncate_limit,
+                serialize_files_content=serialize_files_content,
             )
             formatted_list.append(formatted_v)
 

@@ -24,6 +24,7 @@ class RunnableConfig(BaseModel):
         callbacks (list[BaseCallbackHandler]): List of callback handlers.
         cache (CacheConfig | None): Cache configuration.
         max_node_workers (int | None): Maximum number of node workers.
+        serialize_output_files_content (bool): Whether to serialize files content in the output. Defaults to False.
     """
 
     run_id: str | None = Field(default_factory=generate_uuid)
@@ -32,6 +33,7 @@ class RunnableConfig(BaseModel):
     max_node_workers: int | None = None
     nodes_override: dict[str, NodeRunnableConfig] = {}
     dry_run: DryRunConfig | None = None
+    serialize_output_files_content: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
