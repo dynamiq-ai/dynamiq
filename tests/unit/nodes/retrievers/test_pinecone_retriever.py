@@ -12,13 +12,14 @@ from dynamiq.nodes.retrievers.pinecone import (
 )  # Adjust the import based on your module structure
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.vector import PineconeVectorStore
+from dynamiq.storages.vector.pinecone import PineconeSimilarityMetric
 
 
 @pytest.fixture
 def mock_pinecone_vector_store():
     mock_store = MagicMock(spec=PineconeVectorStore)
     mock_store.client = MagicMock()  # Add the client attribute to the mock
-    mock_store.metric = "cosine"
+    mock_store.metric = PineconeSimilarityMetric.COSINE
     return mock_store
 
 
