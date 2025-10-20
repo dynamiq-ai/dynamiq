@@ -1,3 +1,4 @@
+import inspect
 from datetime import datetime
 from functools import cached_property
 from os import PathLike
@@ -206,7 +207,7 @@ class Workflow(BaseModel, Runnable):
 
         result = await self.flow.run_async(input_data, config, **merge(merged_kwargs, {"parent_run_id": run_id}))
         if result.status == RunnableStatus.SUCCESS:
-            self.run_on_workflow_end(result.output, config, **merged_kwargs)
+            await self.run_on_workflow_end_async(result.output, config, **merged_kwargs)
             logger.info(
                 f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}."
             )
@@ -250,6 +251,32 @@ class Workflow(BaseModel, Runnable):
                 if isinstance(callback, TracingCallbackHandler):
                     dict_kwargs["for_tracing"] = True
                 callback.on_workflow_end(self.to_dict(**dict_kwargs), output, config=config, **kwargs)
+
+    async def run_on_workflow_end_async(self, output: Any, config: RunnableConfig = None, **kwargs: Any):
+        """Run callbacks on workflow end asynchronously.
+
+        Executes all registered callbacks when the workflow completes successfully.
+        Supports both synchronous and asynchronous callback handlers.
+
+        Args:
+            output (Any): Output data from the workflow execution.
+            config (RunnableConfig, optional): Configuration for the run.
+                Contains callbacks list and serialization settings. Defaults to None.
+            **kwargs: Additional keyword arguments passed to callbacks.
+
+        Note:
+            - Automatically detects if callbacks are coroutine functions and awaits them
+        """
+        if config and config.callbacks:
+            for callback in config.callbacks:
+                dict_kwargs = {}
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+
+                if inspect.iscoroutinefunction(callback.on_workflow_end):
+                    await callback.on_workflow_end(self.to_dict(**dict_kwargs), output, config=config, **kwargs)
+                else:
+                    callback.on_workflow_end(self.to_dict(**dict_kwargs), output, config=config, **kwargs)
 
     def run_on_workflow_error(
         self, error: BaseException, config: RunnableConfig = None, **kwargs: Any
