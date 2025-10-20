@@ -242,9 +242,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
 
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-
         run.output = format_value(output_data, for_tracing=True)
-
         run.status = RunStatus.SUCCEEDED
 
         self.flush()
@@ -357,9 +355,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         """
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-
         run.output = format_value(output_data, for_tracing=True)
-
         run.status = RunStatus.SUCCEEDED
         run.metadata["is_output_from_cache"] = kwargs.get("is_output_from_cache", False)
         # If parent_run_id is None, the run is the highest in the execution tree
