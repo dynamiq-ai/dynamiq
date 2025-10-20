@@ -129,11 +129,10 @@ class FileReadTool(Node):
             - Read image: {"file_path": "image.png"} (extracts text using LLM)
             - Read large file: {"file_path": "large_data.json"}
             - Read image with instructions: {"file_path": "image.png", "instructions": "Describe the image in detail"}
-            - Read PDF with instructions: {"file_path": "report.pdf", "instructions": "Summarize the report"}
 
         Parameters:
             - file_path: Path of the file to read
-            - instructions: Optional instructions for LLM processing of images/PDFs
+            - instructions: Optional instructions for LLM processing of images.
     """
     llm: BaseLLM = Field(..., description="LLM that will be used to process files.")
     file_store: FileStore = Field(..., description="File storage to read from.")
