@@ -374,7 +374,6 @@ class XMLParser:
         for tag in XMLParser.DEFAULT_PRESERVE_TAGS:
             if tag not in preserve_format_tags:
                 preserve_format_tags.append(tag)
-
         cleaned_text = XMLParser._clean_content(text)
         if not cleaned_text:
             if text and text.strip():
@@ -414,6 +413,11 @@ class XMLParser:
                 result.update(xml_data)
                 remaining_required = [tag for tag in remaining_required if tag not in result]
                 remaining_optional = [tag for tag in remaining_optional if tag not in result]
+        except TagNotFoundError as e:
+            logger.debug(
+                "XMLParser: lxml extraction missing tag (will retry via fallback): %s",
+                e,
+            )
         except Exception as e:
             logger.warning(f"XMLParser: XML parsing failed: {e}")
 
