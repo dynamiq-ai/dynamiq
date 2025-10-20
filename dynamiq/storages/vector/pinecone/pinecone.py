@@ -125,7 +125,7 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
 
         self.batch_size = batch_size
 
-        self.metric: PineconeSimilarityMetric = metric
+        self.metric = metric
         self.dimension = dimension
         self.cloud = cloud
         self.region = region
