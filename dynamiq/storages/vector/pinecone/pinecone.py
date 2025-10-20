@@ -103,7 +103,7 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
             namespace (str): Namespace for the index. Defaults to 'default'.
             batch_size (int): Size of batches for operations. Defaults to 100.
             dimension (int): Number of dimensions for vectors. Defaults to 1536.
-            metric (PineconeSimilarityMetric | str): Metric for calculating vector similarity. Defaults to 'cosine'.
+            metric (PineconeSimilarityMetric): Metric for calculating vector similarity. Defaults to 'cosine'.
             content_key (Optional[str]): The field used to store content in the storage. Defaults to 'content'.
             dry_run_config (Optional[DryRunConfig]): Configuration for dry run mode. Defaults to None.
             **index_creation_kwargs: Additional arguments for index creation.
