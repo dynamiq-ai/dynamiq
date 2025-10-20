@@ -125,16 +125,6 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
 
         self.batch_size = batch_size
 
-        if isinstance(metric, str):
-            try:
-                metric = PineconeSimilarityMetric(metric.lower())
-            except ValueError as exc:
-                msg = (
-                    f"Unsupported Pinecone similarity metric '{metric}'. "
-                    f"Please choose one of: {', '.join(m.value for m in PineconeSimilarityMetric)}"
-                )
-                raise ValueError(msg) from exc
-
         self.metric: PineconeSimilarityMetric = metric
         self.dimension = dimension
         self.cloud = cloud
