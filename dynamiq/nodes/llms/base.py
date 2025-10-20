@@ -7,6 +7,7 @@ from litellm import get_max_tokens, supports_vision
 from litellm.utils import supports_pdf_input
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
+from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
@@ -414,11 +415,15 @@ class BaseLLM(ConnectionNode):
             tools=tools,
             response_format=response_format,
         )
-
+        # Check if a streaming callback is available in the config and enable streaming only if it is
+        # This is to avoid unnecessary streaming to reduce CPU usage
+        is_streaming_callback_available = any(
+            isinstance(callback, BaseStreamingCallbackHandler) for callback in config.callbacks
+        )
         common_params: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "stream": self.streaming.enabled,
+            "stream": self.streaming.enabled and is_streaming_callback_available,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "tools": tools,
@@ -436,9 +441,10 @@ class BaseLLM(ConnectionNode):
         common_params = self.update_completion_params(common_params)
 
         response = self._completion(**common_params)
-
         handle_completion = (
-            self._handle_streaming_completion_response if self.streaming.enabled else self._handle_completion_response
+            self._handle_streaming_completion_response
+            if self.streaming.enabled and is_streaming_callback_available
+            else self._handle_completion_response
         )
 
         return handle_completion(
