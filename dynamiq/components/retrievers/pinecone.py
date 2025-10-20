@@ -2,6 +2,7 @@ from typing import Any
 
 from dynamiq.components.retrievers.utils import filter_documents_by_threshold
 from dynamiq.storages.vector import PineconeVectorStore
+from dynamiq.storages.vector.pinecone import PineconeSimilarityMetric
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
@@ -43,8 +44,8 @@ class PineconeDocumentRetriever:
         self.similarity_threshold = similarity_threshold
 
     def _higher_is_better(self) -> bool:
-        metric = (self.vector_store.metric or "").lower()
-        return metric not in {"euclidean", "l2", "l2_distance"}
+        metric = self.vector_store.metric
+        return metric != PineconeSimilarityMetric.EUCLIDEAN
 
     def run(
         self,

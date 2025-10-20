@@ -1,1 +1,1 @@
-from .pinecone import PineconeVectorStore
+from .pinecone import PineconeSimilarityMetric, PineconeVectorStore
