@@ -45,11 +45,7 @@ class PineconeDocumentRetriever:
 
     def _higher_is_better(self) -> bool:
         metric = self.vector_store.metric
-
-        if metric == PineconeSimilarityMetric.EUCLIDEAN:
-            return False
-        else:
-            return True
+        return metric != PineconeSimilarityMetric.EUCLIDEAN
 
     def run(
         self,
