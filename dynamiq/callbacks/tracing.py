@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.callbacks import BaseCallbackHandler
 from dynamiq.callbacks.base import get_execution_run_id, get_parent_run_id, get_run_id
 from dynamiq.clients import BaseTracingClient, DynamiqTracingClient
-from dynamiq.runnables.base import RunnableConfig
 from dynamiq.utils import JsonWorkflowEncoder, format_value, generate_uuid
 
 UTC = timezone.utc
@@ -232,35 +231,19 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             tags=self.tags,
         )
 
-    def on_workflow_end(
-        self, serialized: dict[str, Any], output_data: dict[str, Any], config: RunnableConfig = None, **kwargs: Any
-    ):
+    def on_workflow_end(self, serialized: dict[str, Any], output_data: dict[str, Any], **kwargs: Any):
         """Called when the workflow ends.
 
         Args:
             serialized (dict[str, Any]): Serialized workflow data.
             output_data (dict[str, Any]): Output data from the workflow.
-            config (RunnableConfig, optional): Configuration for the run. Defaults to None.
             **kwargs (Any): Additional arguments.
         """
 
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
-        output_node_name = None
-        if "flow" in serialized and "nodes" in serialized["flow"]:
-            for node in serialized["flow"]["nodes"]:
-                if node.get("type") == "dynamiq.nodes.utils.Output":
-                    output_node_name = node.get("name")
-                    break
 
         run.output = format_value(output_data, for_tracing=True)
-
-        if output_node_name:
-            run.output[output_node_name] = format_value(
-                output_data[output_node_name],
-                for_tracing=True,
-                serialize_files_content=config.serialize_output_files_content if config else False,
-            )
 
         run.status = RunStatus.SUCCEEDED
 
@@ -375,23 +358,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
 
-        # Check if this is an OutputNode and handle serialization accordingly
-        if serialized.get("type") == "dynamiq.nodes.utils.Output" and "output" in output_data:
-            # For OutputNode, serialize content separately with serialize_content key
-            serialized_output = {}
-            for key, value in output_data.items():
-                if key == "output":
-                    serialized_output["serialize_content"] = format_value(
-                        value,
-                        for_tracing=True,
-                        serialize_files_content=False,  # Node outputs typically don't need file serialization
-                    )
-                else:
-                    serialized_output[key] = format_value(value, for_tracing=True)
-            run.output = serialized_output
-        else:
-            # For other nodes, use regular serialization
-            run.output = format_value(output_data, for_tracing=True)
+        run.output = format_value(output_data, for_tracing=True)
 
         run.status = RunStatus.SUCCEEDED
         run.metadata["is_output_from_cache"] = kwargs.get("is_output_from_cache", False)
