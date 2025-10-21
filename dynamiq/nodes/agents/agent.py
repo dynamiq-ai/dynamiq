@@ -1124,7 +1124,6 @@ class Agent(BaseAgent):
             stop_sequences.extend([
                 "\nObservation:",
                 "Observation:",
-                "\n<observation",
                 "</output>\n<",
                 "</output><",
             ])
