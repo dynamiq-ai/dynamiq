@@ -87,9 +87,15 @@ class XMLParser:
             cleaned = re.sub(r"^```.*?\n", "", cleaned)
             cleaned = re.sub(r"\n```$", "", cleaned)
 
-        xml_match = re.search(r"<(\w+)\b[^>]*>.*?</\1>", cleaned, re.DOTALL)
-        if xml_match:
-            cleaned = xml_match.group(0)
+        xml_matches = list(re.finditer(r"<(\w+)\b[^>]*>.*?</\1>", cleaned, re.DOTALL))
+        if xml_matches:
+            for match in reversed(xml_matches):
+                candidate = match.group(0)
+                if "<answer" in candidate:
+                    cleaned = candidate
+                    break
+            else:
+                cleaned = xml_matches[-1].group(0)
 
         return cleaned
 
