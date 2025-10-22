@@ -1,9 +1,11 @@
-from dynamiq.connections import Firecrawl
+from dynamiq.connections.connections import E2B, ScaleSerp
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.utils import SummarizationConfig
-from dynamiq.nodes.tools.firecrawl import FirecrawlTool
+from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
+from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.storages.file import InMemoryFileStore
+from dynamiq.storages.file.base import FileStoreConfig
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
@@ -18,10 +20,12 @@ https://clutch.co/developers/artificial-intelligence/generative?page=1
 PROMPT2 = """Create long research on state of AI in EU. Give report for each country."""
 
 if __name__ == "__main__":
-    connection_firecrawl = Firecrawl()
+    connection_scale_serp = ScaleSerp()
 
-    tool_scrape = FirecrawlTool(connection=connection_firecrawl)
-    llm = setup_llm(model_provider="claude", model_name="claude-3-7-sonnet-20250219", temperature=0)
+    tool_scrape = ScaleSerpTool(connection=connection_scale_serp)
+    e2b = E2B()
+    tool_code = E2BInterpreterTool(connection=e2b)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-5", temperature=0)
 
     storage = InMemoryFileStore()
 
@@ -29,11 +33,11 @@ if __name__ == "__main__":
         name="Agent",
         id="Agent",
         llm=llm,
-        tools=[tool_scrape],
+        tools=[tool_scrape, tool_code],
         role=AGENT_ROLE,
         max_loops=30,
         inference_mode=InferenceMode.XML,
-        file_store=storage,
+        file_store=FileStoreConfig(enabled=True, backend=storage, agent_file_write_enabled=True),
         summarization_config=SummarizationConfig(enabled=True, max_token_context_length=100000),
     )
 

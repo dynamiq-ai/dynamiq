@@ -25,6 +25,7 @@ from dynamiq.nodes.agents.exceptions import (
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
+from dynamiq.nodes.tools import ContextManagerTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
@@ -765,6 +766,19 @@ class Agent(BaseAgent):
 
         return self
 
+    @model_validator(mode="after")
+    def _ensure_context_manager_tool(self):
+        """Automatically add ContextManagerTool when summarization is enabled."""
+        try:
+            if self.summarization_config.enabled:
+                has_context_tool = any(isinstance(t, ContextManagerTool) for t in self.tools)
+                if not has_context_tool:
+                    # Add with a stable name for addressing from the agent
+                    self.tools.append(ContextManagerTool(llm=self.llm, name="context-manager"))
+        except Exception as e:
+            logger.error(f"Failed to ensure ContextManagerTool: {e}")
+        return self
+
     def _parse_thought(self, output: str) -> tuple[str | None, str | None]:
         """Extracts thought from the output string."""
         thought_match = re.search(
@@ -1072,15 +1086,23 @@ class Agent(BaseAgent):
         )
         return base
 
-    def update_system_message(self):
-        system_message = Message(
-            role=MessageRole.SYSTEM,
-            content=self.generate_prompt(
-                tools_name=self.tool_names, input_formats=self.generate_input_formats(self.tools)
-            ),
-            static=True,
-        )
-        self._prompt.messages = [system_message, *self._prompt.messages[1:]]
+    def _apply_context_manager_tool_effect(self, tool_result: Any, history_offset: int) -> None:
+        """Apply context cleaning effect after ContextManagerTool call.
+
+        Keeps default prefix (up to history_offset), replaces the rest with a copy of the last prefix message,
+        and appends an observation with the tool_result summary.
+        """
+        try:
+            new_messages = self._prompt.messages[:history_offset]
+            if new_messages:
+                new_messages.append(new_messages[-1].copy())
+            self._prompt.messages = new_messages
+
+            observation = f"\nObservation: {tool_result}\n"
+            self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
+        except Exception:
+            observation = f"\nObservation: {tool_result}\n"
+            self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
     def _run_agent(
         self,
@@ -1518,8 +1540,11 @@ class Agent(BaseAgent):
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
 
-                    observation = f"\nObservation: {tool_result}\n"
-                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
+                    if isinstance(tool, ContextManagerTool):
+                        self._apply_context_manager_tool_effect(tool_result, history_offset)
+                    else:
+                        observation = f"\nObservation: {tool_result}\n"
+                        self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
                     if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                         if tool is not None:
