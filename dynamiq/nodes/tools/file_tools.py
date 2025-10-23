@@ -224,7 +224,6 @@ class FileReadTool(Node):
                     converter = self.converter_mapping[detected_type]
                     converter_name = converter.name
 
-                # Reset file position
                 file.seek(0)
                 if not hasattr(file, "name"):
                     file.name = filename
@@ -313,7 +312,6 @@ class FileReadTool(Node):
                 detected_type = self._detect_file_type(file_io, filename, config, **kwargs)
 
                 if detected_type:
-                    # Process file with appropriate converter
                     text_content = self._process_file_with_converter(
                         file_io, filename, detected_type, config, input_data.instructions, **kwargs
                     )
