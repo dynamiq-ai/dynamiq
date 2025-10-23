@@ -198,7 +198,7 @@ class FileReadTool(Node):
         config: RunnableConfig,
         instructions: str | None = None,
         **kwargs,
-    ) -> str:
+    ) -> str | None:
         """
         Process a file using the appropriate converter to extract text content.
 
@@ -211,7 +211,7 @@ class FileReadTool(Node):
             **kwargs: Additional arguments
 
         Returns:
-            str: Extracted text content from the file
+            str | None: Extracted text content from the file, or None if not available
         """
 
         try:
@@ -244,18 +244,14 @@ class FileReadTool(Node):
                         return text_content
                     else:
                         logger.warning(f"No documents extracted by {converter_name}")
-                        return ""
                 else:
                     logger.warning(f"Converter {converter_name} failed: {result.error}")
-                    return ""
 
             else:
                 logger.warning(f"No converter available for file type: {detected_type}")
-                return ""
 
         except Exception as e:
             logger.warning(f"File processing failed with converter: {str(e)}")
-            return ""
 
     @property
     def to_dict_exclude_params(self):
@@ -312,7 +308,7 @@ class FileReadTool(Node):
 
             try:
                 file_io = BytesIO(content)
-                filename = input_data.file_path.split("/")[-1]  # Extract filename from path
+                filename = os.path.basename(input_data.file_path)
 
                 detected_type = self._detect_file_type(file_io, filename, config, **kwargs)
 
