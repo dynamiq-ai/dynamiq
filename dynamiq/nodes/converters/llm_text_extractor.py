@@ -377,8 +377,7 @@ class LLMImageConverter(Node):
             input_data=input_data,
             prompt=prompt,
             config=config,
-            run_depends=self._run_depends,
-            **run_kwargs,
+            **(run_kwargs | {"run_depends": self._run_depends}),
         )
         self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
 
