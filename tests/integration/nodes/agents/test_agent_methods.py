@@ -332,6 +332,40 @@ def test_xmlparser_parse_with_special_characters_in_answer():
     assert "14% & 20%" in result["answer"]
 
 
+def test_xmlparser_parse_escapes_reserved_tag_mentions():
+    """Parser should escape reserved tag mentions inside text nodes."""
+    text = """<output>
+  <thought>
+    The previous attempt failed because the model mentioned the <answer> tag without closing it properly.
+  </thought>
+  <answer>
+    Proper final answer content.
+  </answer>
+</output>"""
+
+    result = XMLParser.parse(text, required_tags=["thought", "answer"])
+
+    assert "&lt;answer&gt;" in result["thought"]
+    assert "Proper final answer content." in result["answer"]
+
+
+def test_xmlparser_parse_escapes_stray_closing_tag_mentions():
+    """Stray closing tags in prose should be escaped and not break parsing."""
+    text = """<output>
+  <thought>
+    Reminder: never output </answer> before you are done.
+  </thought>
+  <answer>
+    Another final answer.
+  </answer>
+</output>"""
+
+    result = XMLParser.parse(text, required_tags=["thought", "answer"])
+
+    assert "&lt;/answer&gt;" in result["thought"]
+    assert "Another final answer." in result["answer"]
+
+
 def test_xmlparser_parse_with_unclosed_answer_tag():
     """Test that XML parser correctly handles unclosed answer tags."""
     text = """<output>
