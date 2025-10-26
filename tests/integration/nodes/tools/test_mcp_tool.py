@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -45,6 +46,22 @@ def mock_get_input_schema(schema_dict: dict[str, Any]):
     return create_model(schema_dict.get("title", "MCPToolSchema"), **fields)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def cleanup_event_loops():
+    """Cleanup event loops after all tests in the module to prevent hanging."""
+    yield
+    try:
+        loop = asyncio.get_event_loop()
+        if loop and not loop.is_closed():
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+    except RuntimeError:
+        pass
+
+
 @pytest.fixture
 def llm_model():
     connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="api-key")
@@ -53,13 +70,20 @@ def llm_model():
 
 @pytest.fixture
 def sse_server_connection():
-    return MCPSse(url="https://example.com/")
+    connection = MCPSse(url="https://example.com/")
+    yield connection
+    # Cleanup: ensure any async resources are closed
+    if hasattr(connection, "close") and callable(connection.close):
+        try:
+            connection.close()
+        except Exception:
+            pass
 
 
 @pytest.fixture
 def mock_mcp_tools(sse_server_connection):
     with patch.object(MCPTool, "get_input_schema", side_effect=mock_get_input_schema):
-        return {
+        tools = {
             "add": MCPTool(
                 name="add",
                 description="Add two numbers",
@@ -94,13 +118,20 @@ def mock_mcp_tools(sse_server_connection):
                 connection=sse_server_connection,
             ),
         }
+        yield tools
 
 
 @pytest.fixture
 def mcp_server_tool(sse_server_connection, mock_mcp_tools):
     tool = MCPServer(connection=sse_server_connection)
     tool._mcp_tools = mock_mcp_tools
-    return tool
+    yield tool
+    # Cleanup: ensure any async resources are closed
+    if hasattr(tool, "close") and callable(tool.close):
+        try:
+            tool.close()
+        except Exception:
+            pass
 
 
 @pytest.mark.asyncio
