@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -44,22 +43,6 @@ def mock_get_input_schema(schema_dict: dict[str, Any]):
         description = field_spec.get("description", None)
         fields[field_name] = (field_type, Field(default, description=description))
     return create_model(schema_dict.get("title", "MCPToolSchema"), **fields)
-
-
-@pytest.fixture(scope="module", autouse=True)
-def cleanup_event_loops():
-    """Cleanup event loops after all tests in the module to prevent hanging."""
-    yield
-    try:
-        loop = asyncio.get_event_loop()
-        if loop and not loop.is_closed():
-            pending = asyncio.all_tasks(loop)
-            for task in pending:
-                task.cancel()
-            if pending:
-                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-    except RuntimeError:
-        pass
 
 
 @pytest.fixture
@@ -137,7 +120,7 @@ def mcp_server_tool(sse_server_connection, mock_mcp_tools):
 @pytest.mark.asyncio
 async def test_get_mcp_tools(mcp_server_tool, sse_server_connection):
     with patch.object(MCPServer, "initialize_tools", new=AsyncMock()) as mock_init:
-        tools = mcp_server_tool.get_mcp_tools()
+        tools = await mcp_server_tool.get_mcp_tools_async()
         mock_init.assert_not_awaited()
 
         expected_tools = [
