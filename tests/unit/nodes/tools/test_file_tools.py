@@ -45,7 +45,8 @@ def test_file_read_tool(file_store, sample_file_path, llm_model):
 
     assert isinstance(result, RunnableResult)
     assert result.status == RunnableStatus.SUCCESS
-    assert result.output["content"].decode("utf-8") == test_content
+    # FileReadTool now returns text content (string) after processing
+    assert result.output["content"] == test_content
 
 
 def test_file_write_tool(file_store):
@@ -136,7 +137,7 @@ def test_file_tools_integration(file_store, llm_model):
     read_input = {"file_path": "test/integration.txt"}
     read_result = read_tool.run(read_input)
     assert read_result.status == RunnableStatus.SUCCESS
-    assert read_result.output["content"].decode("utf-8") == "Integration test content"
+    assert read_result.output["content"] == "Integration test content"
 
     # Test different storage instances
     storage2 = InMemoryFileStore()
@@ -146,4 +147,4 @@ def test_file_tools_integration(file_store, llm_model):
     input_data = {"file_path": "test.txt"}
 
     result2 = read_tool2.run(input_data)
-    assert result2.output["content"].decode("utf-8") == "Content from storage 2"
+    assert result2.output["content"] == "Content from storage 2"
