@@ -996,7 +996,6 @@ class Agent(BaseAgent):
     def summarize_history(
         self,
         input_message,
-        history_offset: int,
         summary_offset: int,
         config: RunnableConfig | None = None,
         **kwargs,
@@ -1006,7 +1005,6 @@ class Agent(BaseAgent):
 
         Args:
             input_message (Message | VisionMessage): User request message.
-            history_offset (int): Offset to the first message in the conversation history within the prompt.
             summary_offset (int): Offset to the position of the first message in prompt that was not summarized.
             config (RunnableConfig | None): Configuration for the agent run.
             **kwargs: Additional parameters for running the agent.
@@ -1018,7 +1016,7 @@ class Agent(BaseAgent):
         messages_history = "\nHistory to extract information from: \n"
         summary_sections = []
 
-        offset = max(history_offset, summary_offset - self.summarization_config.context_history_length)
+        offset = max(self._history_offset, summary_offset - self.summarization_config.context_history_length)
         for index, message in enumerate(self._prompt.messages[offset:]):
             if message.role == MessageRole.USER:
                 if (index + offset >= summary_offset) and ("Observation:" in message.content):
@@ -1121,7 +1119,8 @@ class Agent(BaseAgent):
         else:
             self._prompt.messages = [system_message, input_message]
 
-        summary_offset = history_offset = len(self._prompt.messages)
+        summary_offset = self._history_offset = len(self._prompt.messages)
+
         stop_sequences = []
         if self.inference_mode == InferenceMode.DEFAULT:
             stop_sequences.extend(["Observation: ", "\nObservation:"])
@@ -1492,9 +1491,7 @@ class Agent(BaseAgent):
                                     **kwargs,
                                 )
 
-                                tool_result, tool_files = self._run_tool(
-                                    tool, action_input, config, history_offset=history_offset, **kwargs
-                                )
+                                tool_result, tool_files = self._run_tool(tool, action_input, config, **kwargs)
 
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
@@ -1533,7 +1530,7 @@ class Agent(BaseAgent):
                             tool_result = f"{type(e).__name__}: {e}"
 
                     if isinstance(tool, ContextManagerTool):
-                        _apply_context_manager_tool_effect(self._prompt, tool_result, history_offset)
+                        _apply_context_manager_tool_effect(self._prompt, tool_result, self._history_offset)
 
                     observation = f"\nObservation: {tool_result}\n"
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
@@ -1618,9 +1615,7 @@ class Agent(BaseAgent):
 
             if self.summarization_config.enabled:
                 if self.is_token_limit_exceeded():
-                    summary_offset = self.summarize_history(
-                        input_message, history_offset, summary_offset, config=config, **kwargs
-                    )
+                    summary_offset = self.summarize_history(input_message, summary_offset, config=config, **kwargs)
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (

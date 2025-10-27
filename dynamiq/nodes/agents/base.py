@@ -386,6 +386,11 @@ class Agent(Node):
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
+    _history_offset: int = PrivateAttr(
+        default=2,
+        description="Offset to the first message in the conversation history within the prompt. "
+        "By default, it is 2, which is the offset to the system message and the first user message. ",
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
@@ -924,7 +929,6 @@ class Agent(Node):
         tool_input: dict,
         config,
         update_run_depends: bool = True,
-        history_offset: int = None,
         collect_dependency: bool = False,
         **kwargs,
     ) -> Any:
@@ -932,7 +936,7 @@ class Agent(Node):
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
         if isinstance(tool, ContextManagerTool):
-            merged_input["history"] = self._prompt.messages[history_offset:]
+            merged_input["history"] = self._prompt.messages[self._history_offset :]
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
