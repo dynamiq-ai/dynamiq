@@ -268,14 +268,13 @@ class Flow(BaseFlow):
 
                 while self._ts.is_active():
                     ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
-                    if ready_nodes:
-                        results = run_executor.execute(
-                            ready_nodes=ready_nodes,
-                            config=config,
-                            **(merged_kwargs | {"parent_run_id": run_id}),
-                        )
-                        self._results.update(results)
-                        self._ts.done(*results.keys())
+                    results = run_executor.execute(
+                        ready_nodes=ready_nodes,
+                        config=config,
+                        **(merged_kwargs | {"parent_run_id": run_id}),
+                    )
+                    self._results.update(results)
+                    self._ts.done(*results.keys())
 
                     # Wait for ready nodes to be processed and reduce CPU usage
                     time.sleep(0.003)

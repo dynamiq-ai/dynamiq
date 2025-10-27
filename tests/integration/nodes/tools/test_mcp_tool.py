@@ -120,7 +120,7 @@ def mcp_server_tool(sse_server_connection, mock_mcp_tools):
 @pytest.mark.asyncio
 async def test_get_mcp_tools(mcp_server_tool, sse_server_connection):
     with patch.object(MCPServer, "initialize_tools", new=AsyncMock()) as mock_init:
-        tools = await mcp_server_tool.get_mcp_tools_async()
+        tools = mcp_server_tool.get_mcp_tools()
         mock_init.assert_not_awaited()
 
         expected_tools = [

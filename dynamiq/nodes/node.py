@@ -1006,7 +1006,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             raise error
         finally:
             if executor is not None:
-                executor.shutdown(wait=False)
+                executor.shutdown()
 
     def execute_with_timeout(
         self,
