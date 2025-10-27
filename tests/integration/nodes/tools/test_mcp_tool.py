@@ -53,13 +53,20 @@ def llm_model():
 
 @pytest.fixture
 def sse_server_connection():
-    return MCPSse(url="https://example.com/")
+    connection = MCPSse(url="https://example.com/")
+    yield connection
+    # Cleanup: ensure any async resources are closed
+    if hasattr(connection, "close") and callable(connection.close):
+        try:
+            connection.close()
+        except Exception:
+            pass
 
 
 @pytest.fixture
 def mock_mcp_tools(sse_server_connection):
     with patch.object(MCPTool, "get_input_schema", side_effect=mock_get_input_schema):
-        return {
+        tools = {
             "add": MCPTool(
                 name="add",
                 description="Add two numbers",
@@ -94,19 +101,26 @@ def mock_mcp_tools(sse_server_connection):
                 connection=sse_server_connection,
             ),
         }
+        yield tools
 
 
 @pytest.fixture
 def mcp_server_tool(sse_server_connection, mock_mcp_tools):
     tool = MCPServer(connection=sse_server_connection)
     tool._mcp_tools = mock_mcp_tools
-    return tool
+    yield tool
+    # Cleanup: ensure any async resources are closed
+    if hasattr(tool, "close") and callable(tool.close):
+        try:
+            tool.close()
+        except Exception:
+            pass
 
 
 @pytest.mark.asyncio
 async def test_get_mcp_tools(mcp_server_tool, sse_server_connection):
     with patch.object(MCPServer, "initialize_tools", new=AsyncMock()) as mock_init:
-        tools = mcp_server_tool.get_mcp_tools()
+        tools = await mcp_server_tool.get_mcp_tools_async()
         mock_init.assert_not_awaited()
 
         expected_tools = [

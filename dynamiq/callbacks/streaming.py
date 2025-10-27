@@ -74,7 +74,11 @@ class InferenceMode(str, Enum):
     STRUCTURED_OUTPUT = "STRUCTURED_OUTPUT"
 
 
-class StreamingQueueCallbackHandler(BaseCallbackHandler):
+class BaseStreamingCallbackHandler(BaseCallbackHandler):
+    """Base callback handler for streaming events."""
+
+
+class StreamingQueueCallbackHandler(BaseStreamingCallbackHandler):
     """Callback handler for streaming events to a queue.
 
     Attributes:
@@ -284,7 +288,7 @@ class AsyncStreamingIteratorCallbackHandler(StreamingQueueCallbackHandler):
             yield item
 
 
-class AgentStreamingParserCallback(BaseCallbackHandler):
+class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
     """Agent callback that parses LLM streaming output in real time and streams structured chunks.
 
     This callback attaches to the underlying LLM node (group == 'llms'), incrementally parses the

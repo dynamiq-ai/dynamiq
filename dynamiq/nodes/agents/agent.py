@@ -1140,8 +1140,15 @@ class Agent(BaseAgent):
 
         summary_offset = history_offset = len(self._prompt.messages)
         stop_sequences = []
-        if self.inference_mode in [InferenceMode.XML, InferenceMode.DEFAULT]:
+        if self.inference_mode == InferenceMode.DEFAULT:
             stop_sequences.extend(["Observation: ", "\nObservation:"])
+        elif self.inference_mode == InferenceMode.XML:
+            stop_sequences.extend([
+                "\nObservation:",
+                "Observation:",
+                "</output>\n<",
+                "</output><",
+            ])
         self.llm.stop = stop_sequences
 
         for loop_num in range(1, self.max_loops + 1):

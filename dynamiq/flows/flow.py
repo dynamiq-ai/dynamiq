@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import datetime
 from functools import cached_property
 from graphlib import CycleError, TopologicalSorter
@@ -267,13 +268,17 @@ class Flow(BaseFlow):
 
                 while self._ts.is_active():
                     ready_nodes = self._get_nodes_ready_to_run(input_data=input_data)
-                    results = run_executor.execute(
-                        ready_nodes=ready_nodes,
-                        config=config,
-                        **(merged_kwargs | {"parent_run_id": run_id}),
-                    )
-                    self._results.update(results)
-                    self._ts.done(*results.keys())
+                    if ready_nodes:
+                        results = run_executor.execute(
+                            ready_nodes=ready_nodes,
+                            config=config,
+                            **(merged_kwargs | {"parent_run_id": run_id}),
+                        )
+                        self._results.update(results)
+                        self._ts.done(*results.keys())
+
+                    # Wait for ready nodes to be processed and reduce CPU usage
+                    time.sleep(0.003)
 
                 run_executor.shutdown()
 
@@ -343,10 +348,8 @@ class Flow(BaseFlow):
                         self._results.update(results)
                         self._ts.done(*results.keys())
 
-                    else:
-                        # If no nodes are ready yet but the sorter is still active,
-                        # yield control to allow other async operations to progress
-                        await asyncio.sleep(0)
+                    # Wait for ready nodes to be processed and reduce CPU usage by yielding control to the event loop
+                    await asyncio.sleep(0.003)
 
             output = self._get_output()
             self.run_on_flow_end(output, config, **merged_kwargs)

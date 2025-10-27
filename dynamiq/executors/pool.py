@@ -62,6 +62,9 @@ class PoolExecutor(BaseExecutor):
             dict[str, RunnableResult]: A dictionary of node IDs and their execution results.
         """
         self.run_nodes(ready_nodes=ready_nodes, config=config, **kwargs)
+        if not self.node_by_future:
+            return {}
+
         completed_node_futures, _ = futures.wait(
             fs=self.node_by_future.keys(), return_when=futures.FIRST_COMPLETED
         )
