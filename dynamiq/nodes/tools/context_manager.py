@@ -22,6 +22,9 @@ Task:
  additional notes.
 - Omit chit-chat and non-essential details. Use clear, structured formatting.
 
+History to compress:
+{history}
+
 Output strictly in this structure:
 
 ## Reasoning overview of what is reasoning flow
@@ -91,11 +94,11 @@ class ContextManagerTool(Node):
     description: str = (
         "Cleans prior message history and replaces it with a concise, self-contained summary.\n\n"
         "WARNING: Before calling this tool, the agent must save any necessary information (f.e in FileStore),\n"
-        "because previous messages will be removed and replaced by the summary."
-        "You can also provide notes to the tool to preserve important information without being processed by the LLM."
+        "because previous messages will be removed and replaced by the summary. "
+        "You can also provide notes to the tool to preserve important information without being processed by the LLM. "
         "Make sure to provide all necessary information for the agent to stay on track and"
-        " not lose any important details."
-        "You can also disable history preservation, only notes will be preserved."
+        " not lose any important details. "
+        "You can also disable history preservation, only notes will be preserved. "
         "Disable history when you don't care about the history and only want to preserve notes."
     )
 
