@@ -87,9 +87,15 @@ class XMLParser:
             cleaned = re.sub(r"^```.*?\n", "", cleaned)
             cleaned = re.sub(r"\n```$", "", cleaned)
 
-        xml_match = re.search(r"<(\w+)\b[^>]*>.*?</\1>", cleaned, re.DOTALL)
-        if xml_match:
-            cleaned = xml_match.group(0)
+        xml_matches = list(re.finditer(r"<(\w+)\b[^>]*>.*?</\1>", cleaned, re.DOTALL))
+        if xml_matches:
+            for match in reversed(xml_matches):
+                candidate = match.group(0)
+                if "<answer" in candidate:
+                    cleaned = candidate
+                    break
+            else:
+                cleaned = xml_matches[-1].group(0)
 
         return cleaned
 
@@ -150,6 +156,8 @@ class XMLParser:
         if optional_tags:
             tags_to_process.update(optional_tags)
 
+        text = XMLParser._escape_unbalanced_reserved_tags(text, tags_to_process)
+
         for tag in tags_to_process:
             content = XMLParser.extract_content_with_regex_fallback(text, tag)
             if content:
@@ -159,6 +167,47 @@ class XMLParser:
                 text = modified_text
 
         return extracted_contents
+
+    @staticmethod
+    def _escape_unbalanced_reserved_tags(text: str, tags: Sequence[str]) -> str:
+        """Escape reserved tag tokens that appear in prose instead of well-formed XML."""
+
+        if not text:
+            return text
+
+        for tag in tags:
+            open_tag = f"<{tag}>"
+            close_tag = f"</{tag}>"
+
+            # Replace stray closing tags without matching opening tags
+            search_start = 0
+            while True:
+                close_index = text.find(close_tag, search_start)
+                if close_index == -1:
+                    break
+
+                opening_index = text.rfind(open_tag, 0, close_index)
+                if opening_index == -1:
+                    text = text[:close_index] + f"&lt;/{tag}&gt;" + text[close_index + len(close_tag) :]
+                    search_start = close_index + len(f"&lt;/{tag}&gt;")
+                else:
+                    search_start = close_index + len(close_tag)
+
+            # Replace stray opening tags without matching closing tags
+            search_start = 0
+            while True:
+                open_index = text.find(open_tag, search_start)
+                if open_index == -1:
+                    break
+
+                closing_index = text.find(close_tag, open_index + len(open_tag))
+                if closing_index == -1:
+                    text = text[:open_index] + f"&lt;{tag}&gt;" + text[open_index + len(open_tag) :]
+                    search_start = open_index + len(f"&lt;{tag}&gt;")
+                else:
+                    search_start = open_index + len(open_tag)
+
+        return text
 
     @staticmethod
     def _parse_with_lxml(cleaned_text: str) -> LET._Element | None:
@@ -384,6 +433,12 @@ class XMLParser:
                 else:
                     return {}
 
+        tags_to_process = set(XMLParser.DEFAULT_PRESERVE_TAGS)
+        if required_tags:
+            tags_to_process.update(required_tags)
+        if optional_tags:
+            tags_to_process.update(optional_tags)
+
         extracted_contents = XMLParser.preprocess_xml_content(cleaned_text, required_tags, optional_tags)
 
         modified_text = cleaned_text
@@ -437,10 +492,33 @@ class XMLParser:
             if content:
                 result[tag] = content
 
+        if result:
+            result = XMLParser._restore_placeholder_mentions(result, tags_to_process)
+
         if json_fields and result:
             result = XMLParser._parse_json_fields(result, json_fields)
 
         return result
+
+    @staticmethod
+    def _restore_placeholder_mentions(data: dict[str, Any], tags: Sequence[str]) -> dict[str, Any]:
+        """Replace placeholder artifacts with escaped tag mentions."""
+
+        restored = {}
+        for key, value in data.items():
+            if isinstance(value, str):
+                for tag in tags:
+                    placeholder = f"<{tag}>CONTENT_PLACEHOLDER_{tag}</{tag}>"
+                    if placeholder in value:
+                        value = value.replace(placeholder, f"&lt;{tag}&gt;")
+                    # Escape any remaining raw occurrences of reserved tags
+                    value = value.replace(f"<{tag}>", f"&lt;{tag}&gt;")
+                    value = value.replace(f"</{tag}>", f"&lt;/{tag}&gt;")
+                restored[key] = value
+            else:
+                restored[key] = value
+
+        return restored
 
     @staticmethod
     def extract_first_tag_lxml(text: str, tags: Sequence[str]) -> str | None:
