@@ -387,9 +387,7 @@ class Agent(Node):
     _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _history_offset: int = PrivateAttr(
-        default=2,
-        description="Offset to the first message in the conversation history within the prompt. "
-        "By default, it is 2, which is the offset to the system message and the first user message. ",
+        default=2,  # Offset to the first message (default: 2 — system and initial user messages).
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
