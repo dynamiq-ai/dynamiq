@@ -956,50 +956,61 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             Exception: If all retry attempts fail.
         """
         config = ensure_config(config)
+        timeout = self.error_handling.timeout_seconds
 
         error = None
         n_attempt = self.error_handling.max_retries + 1
-        for attempt in range(n_attempt):
-            merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
+        executor = None
 
-            self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
+        try:
+            if timeout is not None:
+                executor = ThreadPoolExecutor()
 
-            try:
-                output = self.execute_with_timeout(
-                    self.error_handling.timeout_seconds,
-                    input_data,
-                    config,
-                    **merged_kwargs,
-                )
+            for attempt in range(n_attempt):
+                merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
 
-                self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
-                return output
-            except TimeoutError as e:
-                error = e
-                self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                logger.warning(f"Node {self.name} - {self.id}: timeout.")
-            except Exception as e:
-                error = e
-                self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
-                logger.error(f"Node {self.name} - {self.id}: execution error: {e}")
+                self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
 
-            # do not sleep after the last attempt
-            if attempt < n_attempt - 1:
-                time_to_sleep = self.error_handling.retry_interval_seconds * (
-                    self.error_handling.backoff_rate**attempt
-                )
-                logger.info(
-                    f"Node {self.name} - {self.id}: retrying in {time_to_sleep} seconds."
-                )
-                time.sleep(time_to_sleep)
+                try:
+                    if executor and timeout is not None:
+                        output = self.execute_with_timeout(
+                            executor=executor,
+                            timeout=timeout,
+                            input_data=input_data,
+                            config=config,
+                            **merged_kwargs,
+                        )
+                    else:
+                        output = self.execute(input_data=input_data, config=config, **merged_kwargs)
 
-        logger.error(
-            f"Node {self.name} - {self.id}: execution failed after {n_attempt} attempts."
-        )
-        raise error
+                    self.run_on_node_execute_end(config.callbacks, output, **merged_kwargs)
+                    return output
+                except TimeoutError as e:
+                    error = e
+                    self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
+                    logger.warning(f"Node {self.name} - {self.id}: timeout.")
+                except Exception as e:
+                    error = e
+                    self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
+                    logger.error(f"Node {self.name} - {self.id}: execution error: {e}")
+
+                # do not sleep after the last attempt
+                if attempt < n_attempt - 1:
+                    time_to_sleep = self.error_handling.retry_interval_seconds * (
+                        self.error_handling.backoff_rate**attempt
+                    )
+                    logger.info(f"Node {self.name} - {self.id}: retrying in {time_to_sleep} seconds.")
+                    time.sleep(time_to_sleep)
+
+            logger.error(f"Node {self.name} - {self.id}: execution failed after {n_attempt} attempts.")
+            raise error
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=False)
 
     def execute_with_timeout(
         self,
+        executor: ThreadPoolExecutor,
         timeout: float | None,
         input_data: dict[str, Any] | BaseModel,
         config: RunnableConfig = None,
@@ -1009,6 +1020,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         Execute the node with a timeout.
 
         Args:
+            executor (ThreadPoolExecutor): Thread pool executor to use.
             timeout (float | None): Timeout duration in seconds.
             input_data (dict[str, Any]): Input data for the node.
             config (RunnableConfig, optional): Configuration for the runnable.
@@ -1020,15 +1032,14 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         Raises:
             Exception: If execution fails or times out.
         """
-        with ThreadPoolExecutor() as executor:
-            future = executor.submit(self.execute, input_data, config=config, **kwargs)
+        future = executor.submit(self.execute, input_data, config=config, **kwargs)
 
-            try:
-                result = future.result(timeout=timeout)
-            except Exception as e:
-                raise e
+        try:
+            result = future.result(timeout=timeout)
+        except Exception as e:
+            raise e
 
-            return result
+        return result
 
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
