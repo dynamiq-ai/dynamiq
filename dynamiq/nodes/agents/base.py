@@ -23,6 +23,7 @@ from dynamiq.nodes.agents.utils import (
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.tools import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
@@ -923,11 +924,15 @@ class Agent(Node):
         tool_input: dict,
         config,
         update_run_depends: bool = True,
+        history_offset: int = None,
         collect_dependency: bool = False,
         **kwargs,
     ) -> Any:
         """Runs a specific tool with the given input."""
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
+
+        if isinstance(tool, ContextManagerTool):
+            merged_input["history"] = self._prompt.messages[history_offset:]
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (

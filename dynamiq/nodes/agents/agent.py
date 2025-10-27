@@ -26,6 +26,7 @@ from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLP
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools import ContextManagerTool
+from dynamiq.nodes.tools.context_manager import _apply_context_manager_tool_effect
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
@@ -1086,24 +1087,6 @@ class Agent(BaseAgent):
         )
         return base
 
-    def _apply_context_manager_tool_effect(self, tool_result: Any, history_offset: int) -> None:
-        """Apply context cleaning effect after ContextManagerTool call.
-
-        Keeps default prefix (up to history_offset), replaces the rest with a copy of the last prefix message,
-        and appends an observation with the tool_result summary.
-        """
-        try:
-            new_messages = self._prompt.messages[:history_offset]
-            if new_messages:
-                new_messages.append(new_messages[-1].copy())
-            self._prompt.messages = new_messages
-
-            observation = f"\nObservation: {tool_result}\n"
-            self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
-        except Exception:
-            observation = f"\nObservation: {tool_result}\n"
-            self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
-
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
@@ -1502,7 +1485,9 @@ class Agent(BaseAgent):
                                     **kwargs,
                                 )
 
-                                tool_result, tool_files = self._run_tool(tool, action_input, config, **kwargs)
+                                tool_result, tool_files = self._run_tool(
+                                    tool, action_input, config, history_offset=history_offset, **kwargs
+                                )
 
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
@@ -1541,10 +1526,10 @@ class Agent(BaseAgent):
                             tool_result = f"{type(e).__name__}: {e}"
 
                     if isinstance(tool, ContextManagerTool):
-                        self._apply_context_manager_tool_effect(tool_result, history_offset)
-                    else:
-                        observation = f"\nObservation: {tool_result}\n"
-                        self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
+                        _apply_context_manager_tool_effect(self._prompt, tool_result, history_offset)
+
+                    observation = f"\nObservation: {tool_result}\n"
+                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
                     if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
                         if tool is not None:

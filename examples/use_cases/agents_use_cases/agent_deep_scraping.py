@@ -17,7 +17,8 @@ https://clutch.co/developers/artificial-intelligence/generative?page=1
  and generate csv like file with this structure
  Company Name,Rating,Reviews,Location,Minimum Project Size,Hourly Rate,Company Size,Services Focus."""
 
-PROMPT2 = """Create long research on state of AI in EU. Give report for each country."""
+PROMPT2 = """Create long research on state of AI in EU. Give report for each country.
+Once you saved usefull information you can clean context"""
 
 if __name__ == "__main__":
     connection_scale_serp = ScaleSerp()
@@ -25,7 +26,7 @@ if __name__ == "__main__":
     tool_scrape = ScaleSerpTool(connection=connection_scale_serp)
     e2b = E2B()
     tool_code = E2BInterpreterTool(connection=e2b)
-    llm = setup_llm(model_provider="gpt", model_name="gpt-5", temperature=0)
+    llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0)
 
     storage = InMemoryFileStore()
 
@@ -41,7 +42,7 @@ if __name__ == "__main__":
         summarization_config=SummarizationConfig(enabled=True, max_token_context_length=100000),
     )
 
-    result = agent.run(input_data={"input": PROMPT1, "files": None})
+    result = agent.run(input_data={"input": PROMPT2, "files": None})
 
     output_content = result.output.get("content")
     logger.info("RESULT")

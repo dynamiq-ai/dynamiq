@@ -45,12 +45,21 @@ class ContextManagerInputSchema(BaseModel):
     """Input for ContextManagerTool.
 
     - history: The recent conversation/messages to compress. Can be a single string or list of strings.
+    - is_history_preserved: Preserve the history with summarization. If False, the history will not be preserved,
+     only notes will.
     - notes: Verbatim content that must be preserved as-is (not processed by LLM) and prepended to the result.
     """
 
-    history: list[str] | str = Field(
+    history: list[Message] | None = Field(
         ..., description="Conversation history to be summarized and used to replace prior messages"
     )
+
+    is_history_preserved: bool = Field(
+        default=True,
+        description="Preserve the history with summarization. If False, the history will not be preserved,"
+        " only notes will.",
+    )
+
     notes: str | None = Field(
         default=None,
         description=(
@@ -86,6 +95,8 @@ class ContextManagerTool(Node):
         "You can also provide notes to the tool to preserve important information without being processed by the LLM."
         "Make sure to provide all necessary information for the agent to stay on track and"
         " not lose any important details."
+        "You can also disable history preservation, only notes will be preserved."
+        "Disable history when you don't care about the history and only want to preserve notes."
     )
 
     llm: BaseLLM = Field(..., description="LLM used to produce the compressed context summary")
@@ -118,13 +129,26 @@ class ContextManagerTool(Node):
         data["llm"] = self.llm.to_dict(**kwargs)
         return data
 
-    def _build_prompt(self, history: str) -> str:
-        return self.prompt_template.format(history=history)
+    def _build_prompt(self, history: list[Message]) -> str:
+        formatted_history = "\n\n---\n\n".join([f"{m.role}: {str(m.content)}" for m in history])
+        return self.prompt_template.format(history=formatted_history)
 
-    def _normalize_history(self, history: list[str] | str) -> str:
-        if isinstance(history, list):
-            return "\n\n---\n\n".join(history)
-        return str(history)
+    def _summarize_history(self, history: list[Message], config: RunnableConfig, **kwargs) -> str:
+        prompt_content = self._build_prompt(history)
+
+        result = self.llm.run(
+            input_data={},
+            prompt=Prompt(messages=[Message(role="user", content=prompt_content, static=True)]),
+            config=config,
+            **(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []}),
+        )
+
+        self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
+
+        if result.status != RunnableStatus.SUCCESS:
+            raise ValueError("LLM execution failed during context compression")
+
+        return result.output.get("content", "").strip()
 
     def execute(
         self, input_data: ContextManagerInputSchema, config: RunnableConfig | None = None, **kwargs
@@ -144,29 +168,32 @@ class ContextManagerTool(Node):
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        history_text = self._normalize_history(input_data.history)
-        prompt_content = self._build_prompt(history_text)
+        summary = ""
 
-        logger.debug(f"Tool {self.name} - {self.id}: starting context compression")
-
-        result = self.llm.run(
-            input_data={},
-            prompt=Prompt(messages=[Message(role="user", content=prompt_content, static=True)]),
-            config=config,
-            **(kwargs | {"parent_run_id": kwargs.get("run_id")}),
-        )
-
-        self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
-
-        if result.status != RunnableStatus.SUCCESS:
-            raise ValueError("LLM execution failed during context compression")
-
-        summary = result.output.get("content", "").strip()
-        summary = f"\nContext compressed; Summary:\n {summary}"
+        if input_data.is_history_preserved:
+            summary = self._summarize_history(input_data.history, config, **kwargs)
+            summary = f"\nContext compressed; Summary:\n {summary}"
 
         if input_data.notes:
             summary = f"Notes: {input_data.notes}\n\n{summary}"
 
         logger.debug(f"Tool {self.name} - {self.id}: context compression completed, summary length: {len(summary)}")
 
-        return {"content": summary, "keep_last_n": input_data.keep_last_n}
+        return {"content": summary}
+
+
+def _apply_context_manager_tool_effect(prompt: Prompt, tool_result: Any, history_offset: int) -> None:
+    """Apply context cleaning effect after ContextManagerTool call.
+
+    Keeps default prefix (up to history_offset), replaces the rest with a copy of the last prefix message,
+    and appends an observation with the tool_result summary.
+    """
+
+    try:
+        new_messages = prompt.messages[:history_offset]
+        if new_messages:
+            new_messages.append(prompt.messages[-1].copy())
+        prompt.messages = new_messages
+
+    except Exception as e:
+        logger.error(f"Error applying context manager tool effect: {e}")
