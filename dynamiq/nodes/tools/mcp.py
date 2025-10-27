@@ -253,20 +253,9 @@ Usage Strategy:
             list[MCPTool]: A list of initialized MCPTool instances.
         """
         if is_called_from_async_context():
-            # Run in separate thread with its own isolated event loop
-            def _run_in_new_loop():
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    return new_loop.run_until_complete(self.get_mcp_tools_async(select_all=select_all))
-                finally:
-                    new_loop.close()
-                    asyncio.set_event_loop(None)
-
             with ThreadPoolExecutor() as executor:
-                future = executor.submit(_run_in_new_loop)
+                future = executor.submit(lambda: asyncio.run(self.get_mcp_tools_async(select_all=select_all)))
                 return future.result()
-
         return asyncio.run(self.get_mcp_tools_async(select_all=select_all))
 
     async def get_mcp_tools_async(self, select_all: bool = False) -> list[MCPTool]:
