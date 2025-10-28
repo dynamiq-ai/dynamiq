@@ -1,3 +1,4 @@
+from .context_manager import ContextManagerTool
 from .e2b_sandbox import E2BInterpreterTool
 from .exa_search import ExaTool
 from .file_tools import FileListTool, FileReadTool, FileWriteTool
