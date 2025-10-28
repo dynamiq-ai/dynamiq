@@ -44,16 +44,16 @@ AGENT_QUERY = """
 What are top 10 best places to visit in Rome, Italy?
 Write the answers to the vector store as a list of dictionaries using the following schema:
 
-{{
+{
     "documents": [
-        {{
+        {
             "content": "<the content of the vector store entry>",
-            "metadata": {{
+            "metadata": {
                 "<field name>": "<field value>",
-            }},
-        }},
+            },
+        },
     ]
-}}
+}
 """
 
 

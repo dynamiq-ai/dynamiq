@@ -16,14 +16,14 @@ from dynamiq.utils.logger import logger
 class VectorStoreWriterInputSchema(BaseModel):
     documents: list[Document] | list[dict] = Field(
         ...,
-        description="""Parameter to provide documents to write to the vector store.""",
+        description="Parameter to provide documents to write to the vector store.",
     )
 
     @model_validator(mode="after")
     def validate_input_documents(self):
         """
         Validate the input documents by converting list of dictionaries
-        to Documents (when using the agent) and ensuring metadata is never None.
+        to Documents (when using inside an agent) and ensuring metadata is never None.
         """
         if self.documents:
             if isinstance(self.documents[0], dict):
