@@ -4,10 +4,12 @@ from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dynamiq.auth import AuthConfig, AuthCredential, AuthCredentialType, AuthScheme, AuthSchemeLocation, AuthSchemeType
 from dynamiq.connections import Exa
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.tools.context import ToolExecutionContext
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -214,6 +216,39 @@ class ExaTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
+        tool_context = kwargs.get("tool_context")
+        auth_payload: dict[str, Any] | None = None
+        if isinstance(tool_context, ToolExecutionContext):
+            auth_payload = tool_context.get_auth() or {}
+
+        headers = dict(getattr(self.connection, "headers", {}) or {})
+        if auth_payload:
+            api_key = auth_payload.get("api_key")
+            if api_key:
+                headers["x-api-key"] = api_key
+            header_overrides = auth_payload.get("headers")
+            if isinstance(header_overrides, dict):
+                headers.update(header_overrides)
+
+        if "x-api-key" not in headers or not headers["x-api-key"]:
+            if isinstance(tool_context, ToolExecutionContext):
+                auth_config = AuthConfig(
+                    scheme=AuthScheme(
+                        type=AuthSchemeType.API_KEY,
+                        name="x-api-key",
+                        location=AuthSchemeLocation.HEADER,
+                        description="Exa API key required for authenticated requests.",
+                    ),
+                    credential=AuthCredential(type=AuthCredentialType.API_KEY),
+                    metadata={"provider": "exa"},
+                )
+                tool_context.request_auth(
+                    auth_config,
+                    message="Provide an Exa API key so the search tool can authenticate.",
+                    extra={"endpoint": "https://api.exa.ai"},
+                )
+            return {"content": "Authentication required for Exa Search Tool."}
+
         payload = {
             "query": input_data.query,
             "useAutoprompt": (
@@ -257,7 +292,7 @@ class ExaTool(ConnectionNode):
                 method=self.connection.method,
                 url=connection_url,
                 json=payload,
-                headers=self.connection.headers,
+                headers=headers,
             )
             response.raise_for_status()
             search_result = response.json()

@@ -10,10 +10,16 @@ from uuid import uuid4
 from jinja2 import Template
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
 
+from dynamiq.auth import AuthConfig, AuthRequest, InMemoryCredentialManager
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
+from dynamiq.nodes.agents.exceptions import (
+    AgentUnknownToolException,
+    InvalidActionException,
+    ToolAuthRequiredException,
+    ToolExecutionException,
+)
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     FileMappedInput,
@@ -23,6 +29,7 @@ from dynamiq.nodes.agents.utils import (
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.tools.context import ToolExecutionContext
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
@@ -289,6 +296,74 @@ class ToolParams(BaseModel):
     by_id_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_id")
 
 
+class ToolAuthConfig(BaseModel):
+    global_auth: AuthConfig | dict[str, Any] = Field(default_factory=dict, alias="global")
+    by_name_auth: dict[str, Union[dict[str, Any], "ToolAuthConfig", AuthConfig]] = Field(
+        default_factory=dict, alias="by_name"
+    )
+    by_id_auth: dict[str, Union[dict[str, Any], "ToolAuthConfig", AuthConfig]] = Field(
+        default_factory=dict, alias="by_id"
+    )
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def get_auth_payload(self, tool: Node) -> dict[str, Any] | None:
+        payload: dict[str, Any] = {}
+
+        if self.global_auth:
+            payload = self._merge_payload(self.global_auth, payload)
+
+        name_auth_any = self.by_name_auth.get(getattr(tool, "name", "")) or self.by_name_auth.get(
+            Agent.sanitize_tool_name(getattr(tool, "name", ""))
+        )
+        if isinstance(name_auth_any, ToolAuthConfig):
+            nested_payload = name_auth_any.get_auth_payload(tool)
+            if nested_payload:
+                payload = self._merge_payload(nested_payload, payload)
+        elif name_auth_any:
+            payload = self._merge_payload(name_auth_any, payload)
+
+        id_auth_any = self.by_id_auth.get(getattr(tool, "id", ""))
+        if isinstance(id_auth_any, ToolAuthConfig):
+            nested_payload = id_auth_any.get_auth_payload(tool)
+            if nested_payload:
+                payload = self._merge_payload(nested_payload, payload)
+        elif id_auth_any:
+            payload = self._merge_payload(id_auth_any, payload)
+
+        return payload or None
+
+    def get_nested_config(self, tool: Node) -> "ToolAuthConfig | None":
+        nested_any = (
+            self.by_id_auth.get(getattr(tool, "id", ""))
+            or self.by_name_auth.get(getattr(tool, "name", ""))
+            or self.by_name_auth.get(Agent.sanitize_tool_name(getattr(tool, "name", "")))
+        )
+
+        if isinstance(nested_any, ToolAuthConfig):
+            return nested_any
+        if isinstance(nested_any, dict):
+            try:
+                return ToolAuthConfig.model_validate(nested_any)
+            except Exception:
+                return None
+        if isinstance(nested_any, AuthConfig):
+            return ToolAuthConfig(global_auth=nested_any)
+        return None
+
+    @staticmethod
+    def _merge_payload(source: dict[str, Any] | AuthConfig, existing: dict[str, Any] | None) -> dict[str, Any]:
+        source_payload: dict[str, Any]
+        if isinstance(source, AuthConfig):
+            source_payload = source.to_tool_payload()
+        else:
+            source_payload = source
+
+        if not existing:
+            return source_payload
+
+        return deep_merge(source_payload, existing)
+
+
 class AgentInputSchema(BaseModel):
     input: str = Field(default="", description="Text input for the agent.")
     images: list[str | bytes | io.BytesIO] | None = Field(
@@ -312,11 +387,27 @@ class AgentInputSchema(BaseModel):
         json_schema_extra={"is_accessible_to_agent": False},
     )
 
+    tool_auth: ToolAuthConfig | None = Field(
+        default_factory=ToolAuthConfig,
+        description=(
+            "Structured authentication payloads for tools. Use 'global' for all tools, "
+            "'by_name' for tool names, or 'by_id' for tool IDs. Values are provided to tools via kwargs."
+        ),
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+
     @field_validator("tool_params", mode="before")
     @classmethod
     def handle_empty_tool_params(cls, v):
         if v == "" or v is None:
             return ToolParams()
+        return v
+
+    @field_validator("tool_auth", mode="before")
+    @classmethod
+    def handle_empty_tool_auth(cls, v):
+        if v == "" or v is None:
+            return ToolAuthConfig()
         return v
 
     @model_validator(mode="after")
@@ -384,6 +475,9 @@ class Agent(Node):
     _prompt_variables: dict[str, Any] = PrivateAttr(default_factory=dict)
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
+    _tool_context_state: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
+    _pending_auth_requests: list[AuthRequest] = PrivateAttr(default_factory=list)
+    _credential_manager: InMemoryCredentialManager = PrivateAttr(default_factory=InMemoryCredentialManager)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -519,7 +613,8 @@ class Agent(Node):
                 tool.init_components(connection_manager)
             tool.is_optimized_for_agents = True
 
-    def sanitize_tool_name(self, s: str):
+    @staticmethod
+    def sanitize_tool_name(s: str):
         """Sanitize tool name to follow [^a-zA-Z0-9_-]."""
         s = s.replace(" ", "-")
         sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", s)
@@ -556,7 +651,7 @@ class Agent(Node):
         Returns:
             dict: Processed metadata
         """
-        EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata", "files", "images", "tool_params"}
+        EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata", "files", "images", "tool_params", "tool_auth"}
         custom_metadata = input_data.get("metadata", {}).copy()
         custom_metadata.update({k: v for k, v in input_data.items() if k not in EXCLUDED_KEYS})
 
@@ -597,6 +692,8 @@ class Agent(Node):
 
         logger.info(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
+        self._pending_auth_requests.clear()
+        self._tool_context_state = {}
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -650,19 +747,35 @@ class Agent(Node):
 
         if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
+        if input_data.tool_auth is not None:
+            kwargs["tool_auth"] = input_data.tool_auth
 
         self._prompt_variables.update(dict(input_data))
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
-        result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+        auth_status = "success"
 
-        if use_memory:
+        try:
+            result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+        except ToolAuthRequiredException as auth_exc:
+            auth_status = "auth_required"
+            request_message = auth_exc.auth_request.message or "Authentication is required to continue."
+            result = request_message
+
+        if use_memory and auth_status == "success":
             self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
 
         execution_result = {
             "content": result,
+            "status": auth_status,
         }
+
+        if self._pending_auth_requests:
+            execution_result["auth_requests"] = [
+                request.model_dump(mode="json") for request in self._pending_auth_requests
+            ]
+            self._pending_auth_requests.clear()
 
         if self.file_store_backend and not self.file_store_backend.is_empty():
             execution_result["files"] = self.file_store_backend.list_files_bytes()
@@ -860,6 +973,61 @@ class Agent(Node):
             )
         return tool
 
+    def _handle_tool_auth_request(self, tool: Node, auth_request: AuthRequest | AuthConfig | dict[str, Any]) -> None:
+        """Record auth requests so higher layers can surface them."""
+        request: AuthRequest
+        if isinstance(auth_request, AuthRequest):
+            request = auth_request
+        elif isinstance(auth_request, AuthConfig):
+            request = AuthRequest(required=auth_request)
+        else:
+            request = AuthRequest(required=None, extra={"payload": auth_request}, message=auth_request.get("message"))
+
+        request.tool_id = request.tool_id or getattr(tool, "id", "")
+        request.tool_name = request.tool_name or getattr(tool, "name", "")
+        if not request.message and isinstance(request.required, AuthConfig):
+            request.message = request.required.metadata.get("message")
+
+        self._pending_auth_requests.append(request)
+        logger.debug(
+            "Agent %s - %s: tool %s requested authentication payload: %s",
+            self.name,
+            self.id,
+            request.tool_name,
+            request.model_dump(mode="json"),
+        )
+
+    def _emit_auth_request(
+        self,
+        tool: Node,
+        auth_request: AuthRequest,
+        config: RunnableConfig | None,
+        **kwargs,
+    ) -> None:
+        """Send a placeholder auth-request event through the streaming pipeline."""
+        callbacks = config.callbacks if config else []
+        request_dict = auth_request.model_dump(mode="json")
+
+        self.run_on_node_auth_request(callbacks, auth_request, **kwargs)
+
+        if self.streaming.enabled:
+            try:
+                self.stream_content(
+                    content={"type": "auth_request", "event": "dynamiq_request_credential", **request_dict},
+                    source=auth_request.tool_name or self.name,
+                    step="auth_request",
+                    config=config,
+                    **kwargs,
+                )
+            except Exception as stream_err:
+                logger.error(
+                    "Agent %s - %s: failed to stream auth request for tool %s: %s",
+                    self.name,
+                    self.id,
+                    auth_request.tool_name,
+                    stream_err,
+                )
+
     def _apply_parameters(self, merged_input: dict, params: dict, source: str, debug_info: list = None):
         """Apply parameters from the specified source to the merged input."""
         if debug_info is None:
@@ -934,6 +1102,14 @@ class Agent(Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
+        raw_tool_auth = kwargs.get("tool_auth")
+        if isinstance(raw_tool_auth, dict):
+            tool_auth_config = ToolAuthConfig.model_validate(raw_tool_auth)
+        elif isinstance(raw_tool_auth, ToolAuthConfig):
+            tool_auth_config = raw_tool_auth
+        else:
+            tool_auth_config = None
+
         if self.file_store_backend and tool.is_files_allowed:
             for field_name, field in tool.input_schema.model_fields.items():
                 if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
@@ -987,6 +1163,19 @@ class Agent(Node):
         child_kwargs = kwargs | {"recoverable_error": True}
         is_child_agent = isinstance(tool, Agent)
 
+        auth_payload: dict[str, Any] | None = None
+        if tool_auth_config is not None:
+            auth_payload = tool_auth_config.get_auth_payload(tool)
+            if not auth_payload:
+                auth_payload = None
+
+        cached_payload = self._credential_manager.get_payload(tool)
+        if cached_payload:
+            if auth_payload:
+                auth_payload = deep_merge(auth_payload, cached_payload)
+            else:
+                auth_payload = deepcopy(cached_payload)
+
         if is_child_agent and tool_params:
             nested_any = (
                 tool_params.by_id_params.get(getattr(tool, "id", ""))
@@ -1003,21 +1192,42 @@ class Agent(Node):
                 if nested_tp:
                     child_kwargs = child_kwargs | {"tool_params": nested_tp}
 
+        if is_child_agent and tool_auth_config is not None:
+            nested_auth = tool_auth_config.get_nested_config(tool)
+            if nested_auth:
+                child_kwargs = child_kwargs | {"tool_auth": nested_auth}
+        elif auth_payload:
+            child_kwargs = child_kwargs | {"tool_auth": auth_payload}
+
         tool_to_run = tool
         tool_config = ensure_config(config)
         if getattr(self, "parallel_tool_calls_enabled", False):
             tool_to_run, tool_config = self._clone_tool_for_execution(tool, tool_config)
 
+        tool_context = ToolExecutionContext(
+            auth_payload=auth_payload,
+            state=self._tool_context_state.setdefault(getattr(tool, "id", ""), {}),
+            request_auth_callback=lambda auth_cfg: self._handle_tool_auth_request(tool, auth_cfg),
+        )
+
+        if auth_payload:
+            self._credential_manager.store_payload(tool, auth_payload)
+
         tool_result = tool_to_run.run(
             input_data=merged_input,
             config=tool_config,
             run_depends=deepcopy(self._run_depends),
+            tool_context=tool_context,
             **child_kwargs,
         )
         dependency_node = tool_to_run if tool_to_run is not tool else tool
         dependency_dict = NodeDependency(node=dependency_node).to_dict(for_tracing=True)
         if update_run_depends:
             self._run_depends = [dependency_dict]
+        if tool_context.requested_auth:
+            self._emit_auth_request(tool, tool_context.requested_auth, tool_config, **kwargs)
+            raise ToolAuthRequiredException(tool_context.requested_auth, recoverable=True)
+
         if tool_result.status != RunnableStatus.SUCCESS:
             error_message = f"Tool '{tool.name}' failed: {tool_result.error.to_dict()}"
             if tool_result.error.recoverable:

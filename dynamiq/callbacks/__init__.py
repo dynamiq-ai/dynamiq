@@ -1,3 +1,4 @@
+from .auth import AuthRequestLoggingCallback
 from .base import BaseCallbackHandler, NodeCallbackHandler
 from .streaming import (
     AsyncStreamingIteratorCallbackHandler,

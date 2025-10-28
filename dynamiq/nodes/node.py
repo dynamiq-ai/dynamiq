@@ -1304,6 +1304,34 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
+    def run_on_node_auth_request(
+        self,
+        callbacks: list[BaseCallbackHandler],
+        auth_request: Any,
+        **kwargs,
+    ) -> None:
+        """
+        Run callbacks when a tool requests authentication.
+
+        Args:
+            callbacks (list[BaseCallbackHandler]): List of callback handlers.
+            auth_request (Any): Authentication request payload.
+            **kwargs: Additional keyword arguments.
+        """
+        for callback in callbacks + self.callbacks:
+            try:
+                dict_kwargs = {}
+                payload = auth_request
+                if isinstance(callback, TracingCallbackHandler):
+                    dict_kwargs["for_tracing"] = True
+                    if hasattr(auth_request, "model_dump"):
+                        payload = auth_request.model_dump(mode="json")
+                elif hasattr(auth_request, "model_dump"):
+                    payload = auth_request.model_dump(mode="python")
+                callback.on_node_auth_request(self.to_dict(**dict_kwargs), payload, **kwargs)
+            except Exception as e:
+                logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
+
     @abstractmethod
     def execute(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs) -> Any:
         """

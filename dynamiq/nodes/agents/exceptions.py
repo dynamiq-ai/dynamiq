@@ -1,3 +1,6 @@
+from dynamiq.auth import AuthRequest
+
+
 class RecoverableAgentException(Exception):
     """
     Base exception class for recoverable agent errors.
@@ -36,6 +39,17 @@ class ToolExecutionException(RecoverableAgentException):
     """
 
     pass
+
+
+class ToolAuthRequiredException(RecoverableAgentException):
+    """
+    Exception raised when a tool requires authentication before continuing.
+    Carries the corresponding AuthRequest payload for client handling.
+    """
+
+    def __init__(self, auth_request: AuthRequest, message: str | None = None, **kwargs):
+        self.auth_request = auth_request
+        super().__init__(message or "Tool requires authentication before it can continue.", **kwargs)
 
 
 class InvalidActionException(RecoverableAgentException):

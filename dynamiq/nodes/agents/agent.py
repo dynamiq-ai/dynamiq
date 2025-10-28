@@ -20,6 +20,7 @@ from dynamiq.nodes.agents.exceptions import (
     ParsingError,
     RecoverableAgentException,
     TagNotFoundError,
+    ToolAuthRequiredException,
     XMLParsingError,
 )
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
@@ -1522,6 +1523,8 @@ class Agent(BaseAgent):
                             else:
                                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
 
+                        except ToolAuthRequiredException as auth_exc:
+                            raise auth_exc
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
 
@@ -1995,6 +1998,8 @@ class Agent(BaseAgent):
                 "files": tool_files,
                 "dependency": dependency,
             }
+        except ToolAuthRequiredException:
+            raise
         except RecoverableAgentException as e:
             error_message = f"{type(e).__name__}: {e}"
             logger.error(error_message)
@@ -2100,6 +2105,8 @@ class Agent(BaseAgent):
                         tool_input = tool_payload["input"]
                         try:
                             res = future.result()
+                        except ToolAuthRequiredException:
+                            raise
                         except Exception as e:
                             error_message = f"Error executing tool {tool_name}: {str(e)}"
                             logger.error(error_message)

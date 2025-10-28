@@ -85,6 +85,16 @@ class NodeCallbackHandler(ABC):
         """
         pass
 
+    def on_node_auth_request(self, serialized: dict[str, Any], auth_request: dict[str, Any], **kwargs: Any):
+        """Called when a tool requests authentication.
+
+        Args:
+            serialized (dict[str, Any]): Serialized node data.
+            auth_request (dict[str, Any]): Authentication request details.
+            **kwargs (Any): Additional arguments.
+        """
+        pass
+
     def on_node_skip(
         self, serialized: dict[str, Any], skip_data: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
     ):
