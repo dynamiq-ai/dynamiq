@@ -549,7 +549,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         output = jsonpath_mapper(output, transformer.selector)
         return output
 
-    def transform_output(self, output_data: Any) -> Any:
+    def transform_output(self, output_data: Any, **kwargs) -> Any:
         """
         Transform output data from the node.
 
@@ -889,7 +889,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             output, from_cache = cache(self.execute_with_retry)(transformed_input, config, **merged_kwargs)
 
             merged_kwargs["is_output_from_cache"] = from_cache
-            transformed_output = self.transform_output(output)
+            transformed_output = self.transform_output(output, config=config, **kwargs)
 
             self.run_on_node_end(config.callbacks, transformed_output, **merged_kwargs)
 
