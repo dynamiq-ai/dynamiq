@@ -877,7 +877,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                 )
 
             transformed_input = self.validate_input_schema(
-                self.transform_input(input_data=input_data, depends_result=depends_result, **kwargs), **kwargs
+                self.transform_input(input_data=input_data, depends_result=depends_result, config=config, **kwargs), **kwargs
             )
             self.run_on_node_start(config.callbacks, dict(transformed_input), **merged_kwargs)
             cache = cache_wf_entity(
