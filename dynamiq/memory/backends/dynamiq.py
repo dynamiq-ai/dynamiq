@@ -18,30 +18,13 @@ class DynamiqMemoryError(Exception):
 class Dynamiq(MemoryBackend):
     """Memory backend backed by the Dynamiq API."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, underscore_attrs_are_private=True)
 
     name: str = "Dynamiq"
     connection: DynamiqConnection = Field(default_factory=DynamiqConnection)
-    project_id: str | None = Field(
-        default=None,
-        description="Optional project identifier used when locating existing memory resources.",
-    )
-    memory_id: str | None = Field(
-        default=None,
-        description="Identifier of the remote memory resource.",
-    )
-    timeout: float = Field(default=10.0, description="Timeout in seconds for API requests.")
-    base_path: str = Field(default="/v1/memories", description="Base path for memory-related API endpoints.")
-
-    def model_post_init(self, __context: Any) -> None:
-        """Ensure the backend is associated with a remote memory resource."""
-        if not self.memory_id:
-            self.memory_id = self._resolve_memory_id()
-            if not self.memory_id:
-                raise DynamiqMemoryError(
-                    "memory_id must be provided or resolvable via project_id for Dynamiq backend."
-                )
-            logger.debug("Dynamiq backend resolved memory_id=%s", self.memory_id)
+    memory_id: str = Field(min_length=1, description="Identifier of the remote memory resource.")
+    _timeout: float = 10.0
+    _base_path: str = "/v1/memories"
 
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
@@ -56,9 +39,6 @@ class Dynamiq(MemoryBackend):
 
     def add(self, message: Message) -> None:
         """Create a new memory item via the remote API."""
-        if not self.memory_id:
-            raise DynamiqMemoryError("Memory ID is not configured.")
-
         payload = {
             "role": message.role.value if isinstance(message.role, MessageRole) else message.role,
             "content": message.content,
@@ -68,7 +48,7 @@ class Dynamiq(MemoryBackend):
         logger.debug("Creating remote memory item for memory_id=%s", self.memory_id)
         self._request(
             HTTPMethod.POST,
-            f"{self.base_path}/{self.memory_id}/items",
+            f"{self._base_path}/{self.memory_id}/items",
             json=payload,
         )
 
@@ -132,9 +112,6 @@ class Dynamiq(MemoryBackend):
 
     def _list_items(self, limit: int | None = None, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """Fetch raw memory items from the API."""
-        if not self.memory_id:
-            raise DynamiqMemoryError("Memory ID is not configured.")
-
         params: dict[str, Any] = {}
         if limit is not None:
             params["limit"] = limit
@@ -143,7 +120,7 @@ class Dynamiq(MemoryBackend):
 
         response = self._request(
             HTTPMethod.GET,
-            f"{self.base_path}/{self.memory_id}/items",
+            f"{self._base_path}/{self.memory_id}/items",
             params=params or None,
         )
         if not response:
@@ -164,41 +141,6 @@ class Dynamiq(MemoryBackend):
 
         logger.warning("Unexpected response shape when listing memory items: %s", response)
         return []
-
-    def _resolve_memory_id(self) -> str | None:
-        """Determine a memory_id via remote lookup if possible."""
-        record = self._find_memory()
-        if record and isinstance(record, dict):
-            return record.get("id") or record.get("memory_id")
-        return None
-
-    def _find_memory(self) -> dict[str, Any] | None:
-        """Attempt to find an existing memory for the configured project."""
-        params = {"project_id": self.project_id} if self.project_id else None
-        response = self._request(HTTPMethod.GET, self.base_path, params=params)
-
-        if isinstance(response, dict):
-            records = (
-                response.get("items")
-                or response.get("data")
-                or response.get("results")
-                or response.get("records")
-                or response.get("memories")
-            )
-        elif isinstance(response, list):
-            records = response
-        else:
-            records = None
-
-        if not records:
-            return None
-
-        if not isinstance(records, list):
-            logger.warning("Unexpected records format when listing memories: %s", records)
-            return None
-
-        first = next((record for record in records if isinstance(record, dict)), None)
-        return first
 
     def _items_to_messages(self, items: list[dict[str, Any]]) -> list[Message]:
         """Convert raw API records into Message objects."""
@@ -267,7 +209,7 @@ class Dynamiq(MemoryBackend):
                 headers=headers,
                 params=params,
                 json=json,
-                timeout=self.timeout,
+                timeout=self._timeout,
             )
         except Exception as exc:
             raise DynamiqMemoryError(f"Failed to call Dynamiq API: {exc}") from exc
