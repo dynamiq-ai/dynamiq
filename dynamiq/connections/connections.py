@@ -155,18 +155,18 @@ class HttpApiKey(BaseApiKeyConnection):
         }
 
 
-class DynamiqInternal(HttpApiKey):
+class Dynamiq(HttpApiKey):
     """
-    Represents a connection to the internal Dynamiq service.
+    Represents a connection to the Dynamiq service.
 
     The base URL and API key can be provided explicitly or sourced from the
-    ``DYNAMIQ_INTERNAL_API_URL`` and ``DYNAMIQ_INTERNAL_API_KEY`` environment variables.
+    ``DYNAMIQ_URL`` and ``DYNAMIQ_API_KEY`` environment variables.
     """
 
     url: str = Field(
-        default_factory=partial(get_env_var, "DYNAMIQ_INTERNAL_API_URL", "https://api.sandbox.getdynamiq.ai")
+        default_factory=partial(get_env_var, "DYNAMIQ_URL", "https://api.getdynamiq.ai")
     )
-    api_key: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_INTERNAL_API_KEY", ""))
+    api_key: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_API_KEY", ""))
 
     def connect(self):
         """

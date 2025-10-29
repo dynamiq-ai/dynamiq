@@ -3,25 +3,25 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
-from dynamiq.connections import DynamiqInternal, HTTPMethod
+from dynamiq.connections import Dynamiq as DynamiqConnection, HTTPMethod
 from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
 
 
-class DynamiqInternalMemoryError(Exception):
-    """Base exception for errors raised by the Dynamiq Internal memory backend."""
+class DynamiqMemoryError(Exception):
+    """Base exception for errors raised by the Dynamiq memory backend."""
 
     pass
 
 
-class Internal(MemoryBackend):
-    """Memory backend backed by the Dynamiq internal API."""
+class Dynamiq(MemoryBackend):
+    """Memory backend backed by the Dynamiq API."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    name: str = "DynamiqInternal"
-    connection: DynamiqInternal = Field(default_factory=DynamiqInternal)
+    name: str = "Dynamiq"
+    connection: DynamiqConnection = Field(default_factory=DynamiqConnection)
     project_id: str | None = Field(
         default=None,
         description="Optional project identifier used when locating existing memory resources.",
@@ -38,10 +38,10 @@ class Internal(MemoryBackend):
         if not self.memory_id:
             self.memory_id = self._resolve_memory_id()
             if not self.memory_id:
-                raise DynamiqInternalMemoryError(
-                    "memory_id must be provided or resolvable via project_id for Dynamiq internal backend."
+                raise DynamiqMemoryError(
+                    "memory_id must be provided or resolvable via project_id for Dynamiq backend."
                 )
-            logger.debug("DynamiqInternal backend resolved memory_id=%s", self.memory_id)
+            logger.debug("Dynamiq backend resolved memory_id=%s", self.memory_id)
 
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
@@ -57,7 +57,7 @@ class Internal(MemoryBackend):
     def add(self, message: Message) -> None:
         """Create a new memory item via the remote API."""
         if not self.memory_id:
-            raise DynamiqInternalMemoryError("Memory ID is not configured.")
+            raise DynamiqMemoryError("Memory ID is not configured.")
 
         payload = {
             "role": message.role.value if isinstance(message.role, MessageRole) else message.role,
@@ -100,8 +100,8 @@ class Internal(MemoryBackend):
         return len(messages) == 0
 
     def clear(self) -> None:
-        """Not supported by the Dynamiq internal API."""
-        raise DynamiqInternalMemoryError("Clearing remote memories is not supported by the Dynamiq internal backend.")
+        """Not supported by the Dynamiq API."""
+        raise DynamiqMemoryError("Clearing remote memories is not supported by the Dynamiq backend.")
 
     def _apply_limit(self, messages: list[Message], limit: int | None, newest: bool = False) -> list[Message]:
         """Apply limit to message list optionally keeping the most recent entries."""
@@ -133,7 +133,7 @@ class Internal(MemoryBackend):
     def _list_items(self, limit: int | None = None, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """Fetch raw memory items from the API."""
         if not self.memory_id:
-            raise DynamiqInternalMemoryError("Memory ID is not configured.")
+            raise DynamiqMemoryError("Memory ID is not configured.")
 
         params: dict[str, Any] = {}
         if limit is not None:
@@ -245,10 +245,10 @@ class Internal(MemoryBackend):
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
     ) -> Any:
-        """Execute an HTTP request against the Dynamiq internal API."""
+        """Execute an HTTP request against the Dynamiq API."""
         base_url = (self.connection.conn_params.get("api_base") or "").rstrip("/")
         if not base_url:
-            raise DynamiqInternalMemoryError("Dynamiq internal API base URL is not configured.")
+            raise DynamiqMemoryError("Dynamiq API base URL is not configured.")
 
         if not path.startswith("/"):
             path = f"/{path}"
@@ -270,12 +270,10 @@ class Internal(MemoryBackend):
                 timeout=self.timeout,
             )
         except Exception as exc:
-            raise DynamiqInternalMemoryError(f"Failed to call Dynamiq internal API: {exc}") from exc
+            raise DynamiqMemoryError(f"Failed to call Dynamiq API: {exc}") from exc
 
         if response.status_code >= 400:
-            raise DynamiqInternalMemoryError(
-                f"Request to Dynamiq internal API failed: {response.status_code} {response.text}"
-            )
+            raise DynamiqMemoryError(f"Request to Dynamiq API failed: {response.status_code} {response.text}")
 
         if response.status_code == 204 or not response.content:
             return None
@@ -283,5 +281,5 @@ class Internal(MemoryBackend):
         try:
             return response.json()
         except ValueError:
-            logger.debug("Received non-JSON response from Dynamiq internal API for %s: %s", url, response.text)
+            logger.debug("Received non-JSON response from Dynamiq API for %s: %s", url, response.text)
             return response.text
