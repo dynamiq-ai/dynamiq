@@ -167,17 +167,21 @@ class Dynamiq(HttpApiKey):
         default_factory=partial(get_env_var, "DYNAMIQ_URL", "https://api.getdynamiq.ai")
     )
     api_key: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_API_KEY", ""))
+    headers: dict[str, Any] = Field(default_factory=dict)
 
-    def connect(self):
-        """
-        Returns a requests session pre-configured with bearer authentication if an API key is available.
-        """
-        import requests
-
-        session = requests.Session()
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Ensure bearer token is included in default headers."""
         if self.api_key:
-            session.headers.update({"Authorization": f"Bearer {self.api_key}"})
-        return session
+            self.headers.setdefault("Authorization", f"Bearer {self.api_key}")
+        return self
+
+    @property
+    def conn_params(self) -> dict:
+        params = super().conn_params.copy()
+        if self.headers:
+            params["headers"] = self.headers.copy()
+        return params
 
 
 class Http(BaseConnection):

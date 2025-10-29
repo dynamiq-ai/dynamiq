@@ -205,6 +205,18 @@ class Dynamiq(MemoryBackend):
             if data.get("metadata"):
                 metadata.update({k: v for k, v in data["metadata"].items() if k not in metadata})
 
+            user_id = item.get("user_id")
+            if user_id and "user_id" not in metadata:
+                metadata["user_id"] = user_id
+
+            session_id = item.get("session_id")
+            if session_id and "session_id" not in metadata:
+                metadata["session_id"] = session_id
+
+            item_type = item.get("type")
+            if item_type and "type" not in metadata:
+                metadata["type"] = item_type
+
             created_at = item.get("created_at") or data.get("created_at")
             updated_at = item.get("updated_at") or data.get("updated_at")
             timestamp = metadata.get("timestamp") or created_at or item.get("timestamp")
@@ -265,23 +277,22 @@ class Dynamiq(MemoryBackend):
         json: dict[str, Any] | None = None,
     ) -> Any:
         """Execute an HTTP request against the Dynamiq API."""
-        base_url = (self.connection.conn_params.get("api_base") or "").rstrip("/")
+        conn_params = self.connection.conn_params
+        base_url = (conn_params.get("api_base") or "").rstrip("/")
         if not base_url:
             raise DynamiqMemoryError("Dynamiq API base URL is not configured.")
 
-        if not path.startswith("/"):
-            path = f"/{path}"
-
-        url = f"{base_url}{path}"
+        url = f"{base_url}/{path.lstrip('/')}"
         headers = {"Content-Type": "application/json"}
-        api_key = self.connection.conn_params.get("api_key")
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        conn_headers = conn_params.get("headers")
+        if isinstance(conn_headers, dict):
+            headers.update(conn_headers)
 
         client = self.connection.connect()
+        verb = method.value if isinstance(method, HTTPMethod) else method
         try:
             response = client.request(
-                method.value if isinstance(method, HTTPMethod) else method,
+                verb,
                 url,
                 headers=headers,
                 params=params,
