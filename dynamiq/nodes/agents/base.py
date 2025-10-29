@@ -23,6 +23,7 @@ from dynamiq.nodes.agents.utils import (
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
+from dynamiq.nodes.tools import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
@@ -385,6 +386,9 @@ class Agent(Node):
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
+    _history_offset: int = PrivateAttr(
+        default=2,  # Offset to the first message (default: 2 — system and initial user messages).
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
@@ -928,6 +932,9 @@ class Agent(Node):
     ) -> Any:
         """Runs a specific tool with the given input."""
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
+
+        if isinstance(tool, ContextManagerTool):
+            merged_input["history"] = self._prompt.messages[self._history_offset :]
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (

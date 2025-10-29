@@ -25,6 +25,8 @@ from dynamiq.nodes.agents.exceptions import (
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
+from dynamiq.nodes.tools import ContextManagerTool
+from dynamiq.nodes.tools.context_manager import _apply_context_manager_tool_effect
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
@@ -765,6 +767,19 @@ class Agent(BaseAgent):
 
         return self
 
+    @model_validator(mode="after")
+    def _ensure_context_manager_tool(self):
+        """Automatically add ContextManagerTool when summarization is enabled."""
+        try:
+            if self.summarization_config.enabled:
+                has_context_tool = any(isinstance(t, ContextManagerTool) for t in self.tools)
+                if not has_context_tool:
+                    # Add with a stable name for addressing from the agent
+                    self.tools.append(ContextManagerTool(llm=self.llm, name="context-manager"))
+        except Exception as e:
+            logger.error(f"Failed to ensure ContextManagerTool: {e}")
+        return self
+
     def _parse_thought(self, output: str) -> tuple[str | None, str | None]:
         """Extracts thought from the output string."""
         thought_match = re.search(
@@ -981,7 +996,6 @@ class Agent(BaseAgent):
     def summarize_history(
         self,
         input_message,
-        history_offset: int,
         summary_offset: int,
         config: RunnableConfig | None = None,
         **kwargs,
@@ -991,7 +1005,6 @@ class Agent(BaseAgent):
 
         Args:
             input_message (Message | VisionMessage): User request message.
-            history_offset (int): Offset to the first message in the conversation history within the prompt.
             summary_offset (int): Offset to the position of the first message in prompt that was not summarized.
             config (RunnableConfig | None): Configuration for the agent run.
             **kwargs: Additional parameters for running the agent.
@@ -1003,7 +1016,7 @@ class Agent(BaseAgent):
         messages_history = "\nHistory to extract information from: \n"
         summary_sections = []
 
-        offset = max(history_offset, summary_offset - self.summarization_config.context_history_length)
+        offset = max(self._history_offset, summary_offset - self.summarization_config.context_history_length)
         for index, message in enumerate(self._prompt.messages[offset:]):
             if message.role == MessageRole.USER:
                 if (index + offset >= summary_offset) and ("Observation:" in message.content):
@@ -1072,16 +1085,6 @@ class Agent(BaseAgent):
         )
         return base
 
-    def update_system_message(self):
-        system_message = Message(
-            role=MessageRole.SYSTEM,
-            content=self.generate_prompt(
-                tools_name=self.tool_names, input_formats=self.generate_input_formats(self.tools)
-            ),
-            static=True,
-        )
-        self._prompt.messages = [system_message, *self._prompt.messages[1:]]
-
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
@@ -1116,7 +1119,8 @@ class Agent(BaseAgent):
         else:
             self._prompt.messages = [system_message, input_message]
 
-        summary_offset = history_offset = len(self._prompt.messages)
+        summary_offset = self._history_offset = len(self._prompt.messages)
+
         stop_sequences = []
         if self.inference_mode == InferenceMode.DEFAULT:
             stop_sequences.extend(["Observation: ", "\nObservation:"])
@@ -1525,6 +1529,9 @@ class Agent(BaseAgent):
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
 
+                    if isinstance(tool, ContextManagerTool):
+                        _apply_context_manager_tool_effect(self._prompt, tool_result, self._history_offset)
+
                     observation = f"\nObservation: {tool_result}\n"
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
@@ -1608,9 +1615,7 @@ class Agent(BaseAgent):
 
             if self.summarization_config.enabled:
                 if self.is_token_limit_exceeded():
-                    summary_offset = self.summarize_history(
-                        input_message, history_offset, summary_offset, config=config, **kwargs
-                    )
+                    summary_offset = self.summarize_history(input_message, summary_offset, config=config, **kwargs)
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
