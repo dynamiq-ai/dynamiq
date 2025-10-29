@@ -18,11 +18,21 @@ class DynamiqMemoryError(Exception):
 class Dynamiq(MemoryBackend):
     """Memory backend backed by the Dynamiq API."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, underscore_attrs_are_private=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str = "Dynamiq"
     connection: DynamiqConnection = Field(default_factory=DynamiqConnection)
     memory_id: str = Field(min_length=1, description="Identifier of the remote memory resource.")
+    user_id: str | None = Field(default=None, description="Optional default user identifier for memory items.")
+    session_id: str | None = Field(
+        default=None,
+        description="Optional default session identifier for memory items.",
+    )
+    default_page_size: int = Field(
+        default=100,
+        ge=1,
+        description="Default page size used when retrieving memory items.",
+    )
     _timeout: float = 10.0
     _base_path: str = "/v1/memories"
 
@@ -39,10 +49,25 @@ class Dynamiq(MemoryBackend):
 
     def add(self, message: Message) -> None:
         """Create a new memory item via the remote API."""
-        payload = {
+        metadata = dict(message.metadata or {})
+        effective_user_id = metadata.get("user_id") or self.user_id
+        effective_session_id = metadata.get("session_id") or self.session_id
+
+        if not effective_user_id:
+            raise DynamiqMemoryError("User identifier is required to create a memory item.")
+        if not effective_session_id:
+            raise DynamiqMemoryError("Session identifier is required to create a memory item.")
+
+        data_payload = {
             "role": message.role.value if isinstance(message.role, MessageRole) else message.role,
-            "content": message.content,
-            "metadata": message.metadata or {},
+            "content": self._format_content_payload(message.content),
+        }
+
+        payload: dict[str, Any] = {
+            "user_id": effective_user_id,
+            "session_id": effective_session_id,
+            "type": "message",
+            "data": data_payload,
         }
 
         logger.debug("Creating remote memory item for memory_id=%s", self.memory_id)
@@ -62,7 +87,7 @@ class Dynamiq(MemoryBackend):
         self, query: str | None = None, filters: dict[str, Any] | None = None, limit: int | None = None
     ) -> list[Message]:
         """Retrieve memory items optionally filtering by metadata and simple text query."""
-        items = self._list_items(filters=filters)
+        items = self._list_items(limit=limit, filters=filters)
         messages = self._items_to_messages(items)
 
         if query:
@@ -112,9 +137,20 @@ class Dynamiq(MemoryBackend):
 
     def _list_items(self, limit: int | None = None, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """Fetch raw memory items from the API."""
-        params: dict[str, Any] = {}
-        if limit is not None:
-            params["limit"] = limit
+        filters = filters.copy() if filters else {}
+        effective_user_id = filters.pop("user_id", None) or self.user_id
+        effective_session_id = filters.pop("session_id", None) or self.session_id
+
+        if not effective_user_id:
+            raise DynamiqMemoryError("User identifier is required to list memory items.")
+        if not effective_session_id:
+            raise DynamiqMemoryError("Session identifier is required to list memory items.")
+
+        params: dict[str, Any] = {
+            "user_id": effective_user_id,
+            "session_id": effective_session_id,
+            "page_size": limit if limit is not None else self.default_page_size,
+        }
         if filters:
             params.update(filters)
 
@@ -127,20 +163,24 @@ class Dynamiq(MemoryBackend):
             return []
 
         if isinstance(response, dict):
-            for candidate in ("items", "data", "results"):
-                if candidate in response and isinstance(response[candidate], list):
-                    return response[candidate]
-            if isinstance(response.get("item"), list):
-                return response["item"]
-            if isinstance(response.get("records"), list):
-                return response["records"]
-            if isinstance(response.get("messages"), list):
-                return response["messages"]
-        elif isinstance(response, list):
-            return response
+            data = response.get("data")
+            if isinstance(data, list):
+                return data
 
         logger.warning("Unexpected response shape when listing memory items: %s", response)
         return []
+
+    def _format_content_payload(self, content: Any) -> list[dict[str, Any]]:
+        """Normalize message content into the Dynamiq API payload structure."""
+        if isinstance(content, list):
+            return content
+
+        if isinstance(content, str):
+            text = content
+        else:
+            text = str(content) if content is not None else ""
+
+        return [{"type": "text", "text": text}]
 
     def _items_to_messages(self, items: list[dict[str, Any]]) -> list[Message]:
         """Convert raw API records into Message objects."""
@@ -148,21 +188,58 @@ class Dynamiq(MemoryBackend):
         for item in items:
             if not isinstance(item, dict):
                 continue
-            role_value = item.get("role") or item.get("message_role") or MessageRole.USER.value
+
+            data = item.get("data") if isinstance(item.get("data"), dict) else {}
+            role_value = (
+                data.get("role")
+                or item.get("role")
+                or item.get("message_role")
+                or MessageRole.USER.value
+            )
             try:
                 role = MessageRole(role_value)
             except ValueError:
                 role = MessageRole.USER
 
             metadata = dict(item.get("metadata") or {})
-            timestamp = metadata.get("timestamp") or item.get("timestamp") or item.get("created_at")
+            if data.get("metadata"):
+                metadata.update({k: v for k, v in data["metadata"].items() if k not in metadata})
+
+            created_at = item.get("created_at") or data.get("created_at")
+            updated_at = item.get("updated_at") or data.get("updated_at")
+            timestamp = metadata.get("timestamp") or created_at or item.get("timestamp")
+            if created_at and "created_at" not in metadata:
+                metadata["created_at"] = created_at
+            if updated_at and "updated_at" not in metadata:
+                metadata["updated_at"] = updated_at
+
             if timestamp and "timestamp" not in metadata:
                 metadata["timestamp"] = self._coerce_timestamp(timestamp)
 
-            messages.append(Message(role=role, content=item.get("content", ""), metadata=metadata))
+            content = self._extract_content_text(data) or item.get("content", "")
+            messages.append(Message(role=role, content=content, metadata=metadata))
 
         messages.sort(key=lambda msg: msg.metadata.get("timestamp", 0))
         return messages
+
+    def _extract_content_text(self, data: dict[str, Any]) -> str:
+        """Extract textual content from Dynamiq API message payloads."""
+        content = data.get("content")
+        if isinstance(content, list):
+            text_chunks = [
+                str(chunk.get("text"))
+                for chunk in content
+                if isinstance(chunk, dict) and chunk.get("type") == "text" and chunk.get("text")
+            ]
+            return "\n\n".join(text_chunks).strip()
+
+        if isinstance(content, str):
+            return content
+
+        if content is not None:
+            return str(content)
+
+        return ""
 
     def _coerce_timestamp(self, value: Any) -> float:
         """Convert timestamp representations to float seconds."""
