@@ -5,15 +5,16 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
-AGENT_ROLE = """{% raw %}
+AGENT_ROLE = """
 Senior Data Scientist and Programmer with the ability to write well-structured Python code.
 You have access to Python tools and the web to search for the best solutions to problems.
 Generally, you follow these rules:
     - ALWAYS FORMAT YOUR RESPONSE IN MARKDOWN.
     - Use double quotes for property names.
     - Ensure the code is correct and runnable; reiterate if it does not work.
-{% endraw %}
 {{ my_role }}
+{% raw %}
+{% endraw %}
 """
 
 
