@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, PrivateAttr
 
-from dynamiq.connections import Dynamiq as DynamiqConnection, HTTPMethod
+from dynamiq.connections import Dynamiq as DynamiqConnection
+from dynamiq.connections import HTTPMethod
 from dynamiq.memory.backends.base import MemoryBackend
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.utils.logger import logger
@@ -28,13 +29,16 @@ class Dynamiq(MemoryBackend):
         default=None,
         description="Optional default session identifier for memory items.",
     )
+    timeout: float = Field(
+        default=10,
+        description="Timeout in seconds for API requests.",
+    )
     default_page_size: int = Field(
         default=100,
         ge=1,
         description="Default page size used when retrieving memory items.",
     )
-    _timeout: float = 10.0
-    _base_path: str = "/v1/memories"
+    _base_path: str = PrivateAttr(default="/v1/memories")
 
     @property
     def to_dict_exclude_params(self) -> dict[str, bool]:
@@ -297,7 +301,7 @@ class Dynamiq(MemoryBackend):
                 headers=headers,
                 params=params,
                 json=json,
-                timeout=self._timeout,
+                timeout=self.timeout,
             )
         except Exception as exc:
             raise DynamiqMemoryError(f"Failed to call Dynamiq API: {exc}") from exc

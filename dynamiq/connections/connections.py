@@ -166,14 +166,14 @@ class Dynamiq(HttpApiKey):
     url: str = Field(
         default_factory=partial(get_env_var, "DYNAMIQ_URL", "https://api.getdynamiq.ai")
     )
-    api_key: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_API_KEY", ""))
+    api_key: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_API_KEY"))
     headers: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def setup_headers(self):
         """Ensure bearer token is included in default headers."""
         if self.api_key:
-            self.headers.setdefault("Authorization", f"Bearer {self.api_key}")
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
         return self
 
     @property
