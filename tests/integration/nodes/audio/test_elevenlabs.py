@@ -5,7 +5,7 @@ import pytest
 from dynamiq import Workflow, connections
 from dynamiq.flows import Flow
 from dynamiq.nodes.audio import ElevenLabsSTS, ElevenLabsTTS, Voices
-from dynamiq.runnables import RunnableResult, RunnableStatus
+from dynamiq.runnables import RunnableStatus
 
 
 def test_workflow_with_elevenlabstts(mock_elevenlabs_response_text, requests_mock):
@@ -35,13 +35,25 @@ def test_workflow_with_elevenlabstts(mock_elevenlabs_response_text, requests_moc
     )
     response = wf_elevenlabs.run(input_data=data)
 
-    expected_result = RunnableResult(
-        status=RunnableStatus.SUCCESS,
-        input=data,
-        output={"content": mock_elevenlabs_response_text},
-    ).to_dict(skip_format_types={bytes})
+    assert response.status == RunnableStatus.SUCCESS
+    assert response.input == data
 
-    expected_output = {wf_elevenlabs.flow.nodes[0].id: expected_result}
+    node_output = response.output[wf_elevenlabs.flow.nodes[0].id]
+    assert node_output["status"] == RunnableStatus.SUCCESS.value
+    assert node_output["input"] == data
+
+    assert node_output["output"]["content"] == mock_elevenlabs_response_text
+
+    assert "files" in node_output["output"]
+    assert isinstance(node_output["output"]["files"], list)
+    assert len(node_output["output"]["files"]) == 1
+
+    audio_file = node_output["output"]["files"][0]
+    assert isinstance(audio_file, BytesIO)
+    assert audio_file.name == "audio.mp3"
+    assert audio_file.content_type == "audio/mpeg"
+    assert audio_file.read() == mock_elevenlabs_response_text
+
     expected_headers = connection.headers | {"xi-api-key": connection.api_key}
     expected_data = connection.data | {
         "model_id": "eleven_monolingual_v1",
@@ -53,11 +65,6 @@ def test_workflow_with_elevenlabstts(mock_elevenlabs_response_text, requests_moc
             "use_speaker_boost": True,
         },
     }
-    assert response == RunnableResult(
-        status=RunnableStatus.SUCCESS,
-        input=data,
-        output=expected_output,
-    )
 
     assert call_mock.call_count == 1
     assert call_mock.last_request.url == connection.url + Voices.Dave
@@ -95,19 +102,26 @@ def test_workflow_with_elevenlabssts(
     )
     response = wf_elevenlabs.run(input_data=data)
 
-    expected_result = RunnableResult(
-        status=RunnableStatus.SUCCESS,
-        input=data,
-        output={"content": mock_elevenlabs_response_text},
-    ).to_dict(skip_format_types={BytesIO, bytes})
+    assert response.status == RunnableStatus.SUCCESS
+    assert response.input == data
 
-    expected_output = {wf_elevenlabs.flow.nodes[0].id: expected_result}
+    node_output = response.output[wf_elevenlabs.flow.nodes[0].id]
+    assert node_output["status"] == RunnableStatus.SUCCESS.value
+    assert node_output["input"] == data
+
+    assert node_output["output"]["content"] == mock_elevenlabs_response_text
+
+    assert "files" in node_output["output"]
+    assert isinstance(node_output["output"]["files"], list)
+    assert len(node_output["output"]["files"]) == 1
+
+    audio_file = node_output["output"]["files"][0]
+    assert isinstance(audio_file, BytesIO)
+    assert audio_file.name == "audio.mp3"
+    assert audio_file.content_type == "audio/mpeg"
+    assert audio_file.read() == mock_elevenlabs_response_text
+
     expected_headers = connection.headers | {"xi-api-key": connection.api_key}
-    assert response == RunnableResult(
-        status=RunnableStatus.SUCCESS,
-        input=data,
-        output=expected_output,
-    )
 
     assert call_mock.called_once
     assert call_mock.last_request.url == connection.url + Voices.Dave
