@@ -33,10 +33,10 @@ class Dynamiq(MemoryBackend):
         default=10,
         description="Timeout in seconds for API requests.",
     )
-    default_page_size: int = Field(
+    limit: int = Field(
         default=100,
         ge=1,
-        description="Default page size used when retrieving memory items.",
+        description="Default limit used when retrieving memory items.",
     )
     _base_path: str = PrivateAttr(default="/v1/memories")
 
@@ -85,7 +85,7 @@ class Dynamiq(MemoryBackend):
         """Return all memory items from the remote store."""
         items = self._list_items(limit=limit)
         messages = self._items_to_messages(items)
-        return self._apply_limit(messages, limit, newest=True)
+        return messages
 
     def search(
         self, query: str | None = None, filters: dict[str, Any] | None = None, limit: int | None = None
@@ -101,7 +101,7 @@ class Dynamiq(MemoryBackend):
         if filters:
             messages = self._filter_messages(messages, filters)
 
-        return self._apply_limit(messages, limit, newest=True)
+        return messages
 
     def is_empty(self) -> bool:
         """Check whether the remote memory is empty."""
@@ -111,15 +111,6 @@ class Dynamiq(MemoryBackend):
     def clear(self) -> None:
         """Not supported by the Dynamiq API."""
         raise DynamiqMemoryError("Clearing remote memories is not supported by the Dynamiq backend.")
-
-    def _apply_limit(self, messages: list[Message], limit: int | None, newest: bool = False) -> list[Message]:
-        """Apply limit to message list optionally keeping the most recent entries."""
-        if limit is None or len(messages) <= limit:
-            return messages
-
-        if newest:
-            return messages[-limit:]
-        return messages[:limit]
 
     def _filter_messages(self, messages: list[Message], filters: dict[str, Any]) -> list[Message]:
         """Filter messages by metadata."""
@@ -153,7 +144,8 @@ class Dynamiq(MemoryBackend):
         params: dict[str, Any] = {
             "user_id": effective_user_id,
             "session_id": effective_session_id,
-            "page_size": limit if limit is not None else self.default_page_size,
+            "page_size": limit if limit is not None else self.limit,
+            "sort": "-created_at",
         }
         if filters:
             params.update(filters)
@@ -194,28 +186,19 @@ class Dynamiq(MemoryBackend):
                 continue
 
             data = item.get("data") if isinstance(item.get("data"), dict) else {}
-            role_value = (
-                data.get("role")
-                or item.get("role")
-                or item.get("message_role")
-                or MessageRole.USER.value
-            )
+            role_value = data.get("role") or MessageRole.USER.value
             try:
                 role = MessageRole(role_value)
             except ValueError:
                 role = MessageRole.USER
 
-            metadata = dict(item.get("metadata") or {})
-            if data.get("metadata"):
-                metadata.update({k: v for k, v in data["metadata"].items() if k not in metadata})
+            metadata = dict(data.get("metadata") or {})
+            item_metadata = item.get("metadata")
+            if isinstance(item_metadata, dict):
+                metadata.update({k: v for k, v in item_metadata.items() if k not in metadata})
 
-            user_id = item.get("user_id")
-            if user_id and "user_id" not in metadata:
-                metadata["user_id"] = user_id
-
-            session_id = item.get("session_id")
-            if session_id and "session_id" not in metadata:
-                metadata["session_id"] = session_id
+            metadata["user_id"] = item.get("user_id")
+            metadata["session_id"] = item.get("session_id")
 
             item_type = item.get("type")
             if item_type and "type" not in metadata:
@@ -223,19 +206,21 @@ class Dynamiq(MemoryBackend):
 
             created_at = item.get("created_at") or data.get("created_at")
             updated_at = item.get("updated_at") or data.get("updated_at")
-            timestamp = metadata.get("timestamp") or created_at or item.get("timestamp")
             if created_at and "created_at" not in metadata:
                 metadata["created_at"] = created_at
             if updated_at and "updated_at" not in metadata:
                 metadata["updated_at"] = updated_at
 
-            if timestamp and "timestamp" not in metadata:
-                metadata["timestamp"] = self._coerce_timestamp(timestamp)
+            if created_at and "timestamp" not in metadata:
+                metadata["timestamp"] = self._coerce_timestamp(created_at)
 
             content = self._extract_content_text(data) or item.get("content", "")
             messages.append(Message(role=role, content=content, metadata=metadata))
 
-        messages.sort(key=lambda msg: msg.metadata.get("timestamp", 0))
+        messages.sort(
+            key=lambda msg: (msg.metadata or {}).get("timestamp") or 0,
+            reverse=True,
+        )
         return messages
 
     def _extract_content_text(self, data: dict[str, Any]) -> str:
