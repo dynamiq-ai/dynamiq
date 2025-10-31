@@ -5,3 +5,4 @@ from .pgvector import PGVectorDocumentWriter
 from .pinecone import PineconeDocumentWriter
 from .qdrant import QdrantDocumentWriter
 from .weaviate import WeaviateDocumentWriter
+from .writer import VectorStoreWriter
