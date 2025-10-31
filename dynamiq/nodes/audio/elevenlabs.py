@@ -99,7 +99,7 @@ class ElevenLabsTTS(ConnectionNode):
 
     def execute(
         self, input_data: ElevenLabsTTSInputSchema, config: RunnableConfig = None, **kwargs
-    ) -> dict[str, bytes]:
+    ) -> dict[str, bytes | list[io.BytesIO]]:
         """Execute the audio generation process.
 
         This method takes input data and returns the result.
@@ -110,8 +110,9 @@ class ElevenLabsTTS(ConnectionNode):
             **kwargs: Additional keyword arguments.
 
         Returns:
-             dict: A dictionary with the following key:
-                - "content" (bytes): Bytes containing the audio generation result.
+             dict: A dictionary with the following keys:
+                - "content" (bytes): Raw bytes containing the audio generation result.
+                - "files" (list[io.BytesIO]): List containing a single BytesIO file object.
         """
         input_dict = {
             "model_id": self.model,
@@ -133,8 +134,15 @@ class ElevenLabsTTS(ConnectionNode):
         )
         if response.status_code != 200:
             response.raise_for_status()
+
+        audio_bytes = response.content
+        audio_file = io.BytesIO(audio_bytes)
+        audio_file.name = "audio.mp3"
+        audio_file.content_type = "audio/mpeg"
+
         return {
-            "content": response.content,
+            "content": audio_bytes,
+            "files": [audio_file],
         }
 
 
@@ -188,7 +196,7 @@ class ElevenLabsSTS(ConnectionNode):
 
     def execute(
         self, input_data: ElevenLabsSTSInputSchema, config: RunnableConfig = None, **kwargs
-    ) -> dict[str, bytes]:
+    ) -> dict[str, bytes | list[io.BytesIO]]:
         """Execute the audio generation process.
 
         This method takes input data and returns the result.
@@ -200,8 +208,9 @@ class ElevenLabsSTS(ConnectionNode):
             **kwargs: Additional keyword arguments.
 
         Returns:
-             dict: A dictionary with the following key:
-                - "content" (bytes): Bytes containing the audio generation result.
+             dict: A dictionary with the following keys:
+                - "content" (bytes): Raw bytes containing the audio generation result.
+                - "files" (list[io.BytesIO]): List containing a single BytesIO file object.
         """
         input_dict = {
             "model_id": self.model,
@@ -226,6 +235,13 @@ class ElevenLabsSTS(ConnectionNode):
         )
         if response.status_code != 200:
             response.raise_for_status()
+
+        audio_bytes = response.content
+        audio_file = io.BytesIO(audio_bytes)
+        audio_file.name = "audio.mp3"
+        audio_file.content_type = "audio/mpeg"
+
         return {
-            "content": response.content,
+            "content": audio_bytes,
+            "files": [audio_file],
         }
