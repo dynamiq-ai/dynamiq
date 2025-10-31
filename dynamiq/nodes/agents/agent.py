@@ -90,6 +90,8 @@ Answer: [Your direct response]
 
 IMPORTANT RULES:
 - ALWAYS start with "Thought:" even for simple responses
+- Keep the explanation on the same line as the label (e.g., Thought: I should...), without leading spaces or blank lines
+- Avoid starting the thought with phrases like "The user..." or "The model..."; refer to yourself in the first person (e.g., "I should...")
 - Explain why this specific tool is the right choice
 - Ensure Action Input is valid JSON without markdown formatting
 - Use proper JSON syntax with double quotes for keys and string values
@@ -142,6 +144,8 @@ For questions that don't require tools:
 
 CRITICAL XML FORMAT RULES:
 - ALWAYS include <thought> tags with detailed reasoning
+- Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags
+- Write thoughts in the first person (e.g., "I will...", "I should...")
 - Explain why this specific tool is the right choice
 - For tool use, include action and action_input tags
 - For direct answers, only include thought and answer tags
@@ -357,6 +361,8 @@ Answer: [Your direct response]
 
 **FORMAT RULES:**
 - ALWAYS start with "Thought:" explaining your approach
+- Keep the content on the same line as each label (e.g., Thought: I should...), without leading spaces or blank lines
+- Refer to yourself in the first person when explaining your reasoning (e.g., "I will check...", not "The assistant will...")
 - Valid JSON only - no markdown formatting
 - Double quotes for JSON keys and string values
 - No code blocks (```) around JSON
@@ -421,6 +427,8 @@ Observation: [Result(s) from the tool(s)]
 
 CRITICAL XML FORMAT RULES:
 - Always include strategic thinking in <thought> tags
+- Start content immediately after each opening tag; avoid leading newlines or indentation within the tags
+- Express reasoning in the first person (e.g., "I will compare...", "I should review...")
 - Group parallel tool calls in single <tool_calls> block
 - JSON in <input> tags MUST be on single line with proper escaping
 - NO line breaks or control characters inside JSON strings
@@ -472,6 +480,8 @@ Answer: [Your complete answer to the user's question]
 
 IMPORTANT RULES:
 - ALWAYS start with "Thought:" to explain your reasoning process
+- Keep the explanation on the same line as "Thought:" without inserting blank lines or leading spaces
+- Use first-person language when thinking or answering (e.g., "I think...", "I recommend...")
 - Provide a clear, direct answer after your thought
 - If you cannot fully answer, explain why in your thought
 - Be thorough and helpful in your response
@@ -571,6 +581,8 @@ Answer: [Your complete response to the user's question]
 
 IMPORTANT RULES:
 - ALWAYS begin with "Thought:" to show your reasoning process
+- Keep the explanation on the same line as the label, avoiding leading spaces or blank lines
+- Write your reasoning in first person (e.g., "I should...", "I know...")
 - Use the "Thought" section to analyze the question and plan your response
 - Only after thinking through the problem, provide your answer
 - If you cannot fully answer, explain why in your thinking
@@ -591,6 +603,7 @@ REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in y
 
 IMPORTANT RULES:
 - ALWAYS include <thought> tags with detailed reasoning
+- Place text immediately after each opening tag without leading newlines or indentation
 - Only use thought and answer tags
 - Properly close all XML tags
 - Do not use markdown formatting inside XML

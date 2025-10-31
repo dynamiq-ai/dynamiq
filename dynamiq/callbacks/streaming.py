@@ -311,6 +311,10 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         self._state_start_index: int = 0
         self._state_last_emit_index: int = 0
         self._answer_started: bool = False
+        self._state_has_emitted: dict[str, bool] = {
+            StreamingState.REASONING: False,
+            StreamingState.ANSWER: False,
+        }
 
         # Set a tail guard to avoid streaming parts of the next tag that may arrive in next chunk
         self._tail_guard: int = TAIL_GUARD_SIZE
@@ -441,6 +445,13 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
         if self.agent.streaming.mode == StreamingMode.FINAL and step != StreamingState.ANSWER:
             return
 
+        if step in self._state_has_emitted:
+            if not self._state_has_emitted[step]:
+                trimmed = content.lstrip("\r\n ")
+                if not trimmed:
+                    return
+                content = trimmed
+
         # Format content based on the step type
         if step == StreamingState.REASONING:
             thought_model = StreamingThought(thought=content, loop_num=self.loop_num)
@@ -455,6 +466,8 @@ class AgentStreamingParserCallback(BaseStreamingCallbackHandler):
             config=self.config,
             **(self.kwargs | {"loop_num": self.loop_num}),
         )
+        if step in self._state_has_emitted:
+            self._state_has_emitted[step] = True
 
     def _process_default_mode(self, final_answer_only: bool) -> None:
         if self._current_state is None:

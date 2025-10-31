@@ -22,7 +22,7 @@ def run_workflow_with_streaming():
     """
     # Set up LLM
     llm = OpenAI(
-        model="gpt-4o",
+        model="openai/gpt-5-chat-latest",
         temperature=0.7,
     )
 
@@ -36,7 +36,7 @@ def run_workflow_with_streaming():
         streaming=StreamingConfig(
             enabled=True,
             event="research_stream",  # Custom event channel name
-            mode=StreamingMode.FINAL,
+            mode=StreamingMode.ALL,
         ),
         max_loops=5,
         inference_mode=InferenceMode.DEFAULT,
