@@ -12,6 +12,63 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
 
+DESCRIPTION_VECTOR_STORE_WRITER = """Writes documents (or text) to a vector store.
+
+Key Capabilities:
+- Adding textual content to the vector store as separate database entries
+- Adding metadata to the vector store entries
+
+Parameter Guide:
+- documents: List of strings to write to the vector store along with their metadata.
+
+Guildelines:
+- The vector story entry metadata may consist of the following fields (but is not limited to):
+    - url
+    - title
+    - description
+    - author
+    - published_date
+    - source
+    - category
+    - tags
+    - etc.
+- If any metadata field is provided by the user, it should be included in the vector store entry metadata.
+- The input documents should be a list of dictionaries with the following structure:
+    - { "documents": [{"content": "<content of the vector store entry>","metadata": {"<field name>": "<field value>"}}]}
+
+Examples:
+- {
+    "documents": [
+        {
+            "content": "Artificial intelligence is transforming healthcare by improving diagnostics and patient care.",
+            "metadata": {
+                "title": "AI in Healthcare",
+                "author": "Jane Doe",
+                "published_date": "2025-09-10",
+                "source": "Nature Medicine",
+                "url": "https://www.nature.com/articles/ai-healthcare",
+                "category": "Healthcare",
+                "tags": ["AI", "medicine", "technology"]
+            }
+        }
+    ]
+}
+- {
+    "documents": [
+        {
+            "content": "OpenAI has announced a new framework for autonomous agents capable of reasoning and planning.",
+            "metadata": {
+                "title": "Next-Gen AI Agents",
+                "author": "OpenAI Research Team",
+                "published_date": "2025-07-01",
+                "category": "Artificial Intelligence",
+                "tags": ["AI", "agents", "research"]
+            }
+        }
+    ]
+}
+"""
+
 
 class VectorStoreWriterInputSchema(BaseModel):
     documents: list[Document] | list[dict] = Field(
@@ -55,7 +112,7 @@ class VectorStoreWriter(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "VectorStore Writer"
-    description: str = "A node for writing documents to a vector store."
+    description: str = DESCRIPTION_VECTOR_STORE_WRITER
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     document_embedder: DocumentEmbedder
     document_writer: Writer
@@ -155,7 +212,7 @@ class VectorStoreWriter(Node):
             upserted_count = document_writer_output.output.get("upserted_count", 0)
             logger.debug(f"Tool {self.name} - {self.id}: wrote {upserted_count} documents to vector store")
 
-            result = {"upserted_count": upserted_count}
+            result = {"upserted_count": upserted_count, "content": f"Wrote {upserted_count} documents to vector store"}
             logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
             return result

@@ -27,34 +27,20 @@ def setup_react_agent_rag() -> Agent:
         is_optimized_for_agents=True,
     )
 
-    llm = setup_llm()
+    llm = setup_llm(model_name="gpt-5-mini")
 
     agent = Agent(
         name="React Agent",
         llm=llm,
         tools=[tool_vector_store_writer],
         inference_mode=InferenceMode.XML,
-        role="AI assistant with deep knowledge about various travel destinations. Your goal is to provide well explained answers and, if needed, write them to the vector store",  # noqa: E501
+        role="AI assistant with deep knowledge about various travel destinations. Your goal is to provide well explained answers and write them to the vector store using the Travel Data Vector Store Writer tool",  # noqa: E501
         max_loops=7,
     )
     return agent
 
 
-AGENT_QUERY = """
-What are top 10 best places to visit in Rome, Italy?
-Write the answers to the vector store as a list of dictionaries using the following schema:
-
-{
-    "documents": [
-        {
-            "content": "<the content of the vector store entry>",
-            "metadata": {
-                "<field name>": "<field value>",
-            },
-        },
-    ]
-}
-"""
+AGENT_QUERY = """What are top 10 places to visit in Rome, Italy?"""
 
 
 def run_workflow(agent: Agent = setup_react_agent_rag(), input_prompt: str = AGENT_QUERY) -> tuple[str, dict]:
