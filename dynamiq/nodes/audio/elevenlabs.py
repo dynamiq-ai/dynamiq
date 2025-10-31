@@ -99,7 +99,7 @@ class ElevenLabsTTS(ConnectionNode):
 
     def execute(
         self, input_data: ElevenLabsTTSInputSchema, config: RunnableConfig = None, **kwargs
-    ) -> dict[str, bytes | io.BytesIO]:
+    ) -> dict[str, bytes | list[io.BytesIO]]:
         """Execute the audio generation process.
 
         This method takes input data and returns the result.
@@ -196,7 +196,7 @@ class ElevenLabsSTS(ConnectionNode):
 
     def execute(
         self, input_data: ElevenLabsSTSInputSchema, config: RunnableConfig = None, **kwargs
-    ) -> dict[str, bytes | io.BytesIO]:
+    ) -> dict[str, bytes | list[io.BytesIO]]:
         """Execute the audio generation process.
 
         This method takes input data and returns the result.
