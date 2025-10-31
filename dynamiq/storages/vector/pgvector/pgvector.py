@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import psycopg
 from pgvector.psycopg import register_vector
@@ -19,6 +19,9 @@ from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
 from dynamiq.types import Document
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
+
+if TYPE_CHECKING:
+    from psycopg import Connection as PsycopgConnection
 
 
 class PGVectorVectorFunction(str, Enum):
@@ -77,7 +80,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
     def __init__(
         self,
         connection: PostgreSQL | str | None = None,
-        client: PostgreSQL | None = None,
+        client: Optional["PsycopgConnection"] = None,
         create_extension: bool = True,
         table_name: str = DEFAULT_TABLE_NAME,
         schema_name: str = DEFAULT_SCHEMA_NAME,
@@ -119,7 +122,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         if index_method is not None and index_method not in PGVectorIndexMethod:
             raise ValueError(f"index_method must be one of {list(PGVectorIndexMethod)}")
 
-        if client is None:
+        if client is None or client.closed:
             if isinstance(connection, str):
                 self.connection_string = connection
                 self._conn = psycopg.connect(self.connection_string)

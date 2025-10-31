@@ -94,7 +94,11 @@ class ConnectionManager:
         )
         conn_id = self.get_connection_id(connection, init_type)
         if conn_client := self.connection_clients.get(conn_id):
-            return conn_client
+            if (conn_client_closed := getattr(conn_client, "closed", None)) is None:
+                return conn_client
+
+            if not conn_client_closed:
+                return conn_client
 
         logger.debug(
             f"Init connection client for '{connection.id}-{connection.type}' "
