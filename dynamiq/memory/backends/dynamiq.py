@@ -217,10 +217,7 @@ class Dynamiq(MemoryBackend):
             content = self._extract_content_text(data) or item.get("content", "")
             messages.append(Message(role=role, content=content, metadata=metadata))
 
-        messages.sort(
-            key=lambda msg: (msg.metadata or {}).get("timestamp") or 0,
-            reverse=True,
-        )
+        messages.sort(key=lambda msg: (msg.metadata or {}).get("timestamp") or 0)
         return messages
 
     def _extract_content_text(self, data: dict[str, Any]) -> str:
