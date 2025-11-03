@@ -212,7 +212,7 @@ class VectorStoreWriter(Node):
             upserted_count = document_writer_output.output.get("upserted_count", 0)
             logger.debug(f"Tool {self.name} - {self.id}: wrote {upserted_count} documents to vector store")
 
-            result = {"upserted_count": upserted_count, "content": f"Wrote {upserted_count} documents to vector store"}
+            result = {"upserted_count": upserted_count}
             logger.info(f"Tool {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
             return result
