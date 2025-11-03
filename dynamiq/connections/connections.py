@@ -155,6 +155,35 @@ class HttpApiKey(BaseApiKeyConnection):
         }
 
 
+class Dynamiq(HttpApiKey):
+    """
+    Represents a connection to the Dynamiq service.
+
+    The base URL and API key can be provided explicitly or sourced from the
+    ``DYNAMIQ_URL`` and ``DYNAMIQ_API_KEY`` environment variables.
+    """
+
+    url: str = Field(
+        default_factory=partial(get_env_var, "DYNAMIQ_URL", "https://api.getdynamiq.ai")
+    )
+    api_key: str = Field(default_factory=partial(get_env_var, "DYNAMIQ_API_KEY"))
+    headers: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def setup_headers(self):
+        """Ensure bearer token is included in default headers."""
+        if self.api_key:
+            self.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        return self
+
+    @property
+    def conn_params(self) -> dict:
+        params = super().conn_params.copy()
+        if self.headers:
+            params["headers"] = self.headers.copy()
+        return params
+
+
 class Http(BaseConnection):
     """
     Represents a connection to an API.
