@@ -1546,6 +1546,13 @@ class ConnectionNode(Node, ABC):
         Automatically detects closed connections and reinitializes them.
         """
         if self.is_client_closed():
+            if self.connection is None:
+                logger.debug(
+                    f"Node {self.name} - {self.id}: Client connection is closed but no connection available "
+                    f"for reinitialization."
+                )
+                return
+
             logger.warning(f"Node {self.name} - {self.id}: Client connection is closed. Reinitializing")
             connection_manager = self._connection_manager or ConnectionManager()
 
@@ -1630,6 +1637,13 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
         Automatically detects closed connections and reinitializes them.
         """
         if self.is_client_closed():
+            if self.connection is None:
+                logger.debug(
+                    f"Node {self.name} - {self.id}: Vector store client connection is closed but no connection "
+                    f"available for reinitialization."
+                )
+                return
+
             logger.warning(f"Node {self.name} - {self.id}: Vector store client connection is closed. Reinitializing")
             connection_manager = self._connection_manager or ConnectionManager()
 

@@ -203,6 +203,18 @@ def test_ensure_client_uses_cached_connection_manager(connection_node_instance, 
     )
 
 
+def test_ensure_client_skips_reinitialization_when_no_connection(connection_node_instance, mock_connection_manager):
+    """Test that ensure_client doesn't attempt reinitialization when connection is None."""
+    connection_node_instance.client = MockClosedClient(closed=True)
+    connection_node_instance.connection = None
+
+    # Should not raise an error, just skip reinitialization
+    connection_node_instance.ensure_client()
+
+    # Should not attempt to call connection manager
+    mock_connection_manager.get_connection_client.assert_not_called()
+
+
 # Tests for VectorStoreNode
 @pytest.mark.parametrize(
     "client,expected_result,test_id",
@@ -248,6 +260,20 @@ def test_vector_store_node_ensure_client_reinitializes_both_client_and_vector_st
     # Should have reinitialized vector store
     assert vector_store_node_instance.vector_store is not None
     assert vector_store_node_instance.client == new_client
+
+
+def test_vector_store_node_ensure_client_skips_reinitialization_when_no_connection(
+    vector_store_node_instance, mock_connection_manager
+):
+    """Test that VectorStoreNode ensure_client doesn't attempt reinitialization when connection is None."""
+    vector_store_node_instance.vector_store.client = MockClosedClient(closed=True)
+    vector_store_node_instance.connection = None
+
+    # Should not raise an error, just skip reinitialization
+    vector_store_node_instance.ensure_client()
+
+    # Should not attempt to call connection manager
+    mock_connection_manager.get_connection_client.assert_not_called()
 
 
 def test_execute_with_retry_calls_ensure_client_before_execution(connection_node_instance, mocker, success_result):
