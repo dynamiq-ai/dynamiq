@@ -39,7 +39,9 @@ ALLOWED_MODULES = [
     "uuid",
     "pandas",
     "numpy",
-    "openpyxl"
+    "openpyxl",
+    "matplotlib",
+    "scipy",
 ]
 
 

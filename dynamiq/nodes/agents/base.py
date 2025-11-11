@@ -644,13 +644,20 @@ class Agent(Node):
                 self._prompt_blocks["role"] = f"{{% raw %}}{self.role}{{% endraw %}}"
 
         files = input_data.files
+        uploaded_file_names: set[str] = set()
         if files:
             if not self.file_store_backend:
                 self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
                 self.tools.append(FileReadTool(file_store=self.file_store.backend, llm=self.llm))
                 self.tools.append(FileListTool(file_store=self.file_store.backend))
                 self._init_prompt_blocks()
-            self._ensure_named_files(files)
+            normalized_files = self._ensure_named_files(files)
+            uploaded_file_names = {
+                getattr(f, "name", None)
+                for f in normalized_files
+                if hasattr(f, "name") and getattr(f, "name") is not None
+            }
+            input_message = self._inject_attached_files_into_message(input_message, normalized_files)
 
         if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
@@ -669,11 +676,13 @@ class Agent(Node):
         }
 
         if self.file_store_backend and not self.file_store_backend.is_empty():
-            execution_result["files"] = self.file_store_backend.list_files_bytes()
-            logger.info(
-                f"Agent {self.name} - {self.id}: returning {len(execution_result['files'])}"
-                " accumulated file(s) in FileStore"
-            )
+            stored_files = self.file_store_backend.list_files_bytes()
+            filtered_files = self._filter_generated_files(stored_files, uploaded_file_names)
+            if filtered_files:
+                execution_result["files"] = filtered_files
+                logger.info(
+                    f"Agent {self.name} - {self.id}: returning {len(filtered_files)} generated file(s) in FileStore"
+                )
 
         logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
@@ -1145,6 +1154,51 @@ class Agent(Node):
                         logger.warning(f"Unsupported file type from tool '{tool.name}': {type(file)}")
 
                 logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
+
+    @staticmethod
+    def _filter_generated_files(files: list[io.BytesIO], uploaded_names: set[str]) -> list[io.BytesIO]:
+        if not uploaded_names:
+            return files
+
+        filtered: list[io.BytesIO] = []
+        for file in files:
+            name = getattr(file, "name", None)
+            if name and name in uploaded_names:
+                continue
+            filtered.append(file)
+        return filtered
+
+    def _inject_attached_files_into_message(
+        self, input_message: Message | VisionMessage, files: list[io.BytesIO]
+    ) -> Message | VisionMessage:
+        if not files:
+            return input_message
+
+        if not isinstance(input_message, Message):
+            return input_message
+
+        file_lines = []
+
+        for f in files:
+            name = getattr(f, "name", None) or "unnamed_file"
+            description = getattr(f, "description", "") or ""
+            description = description.strip()
+            if description:
+                file_lines.append(f"- {name}: {description}")
+            else:
+                file_lines.append(f"- {name}")
+
+        if not file_lines:
+            return input_message
+
+        file_section = "\n".join(["\nAttached files available to you:"] + file_lines) + "\n"
+
+        if isinstance(input_message.content, str):
+            input_message.content = f"{input_message.content.rstrip()}{file_section}"
+        else:
+            input_message.content = input_message.content + file_section
+
+        return input_message
 
     @property
     def file_store_backend(self) -> FileStore | None:

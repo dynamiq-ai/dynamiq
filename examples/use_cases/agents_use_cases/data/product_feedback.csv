@@ -1,0 +1,11 @@
+id,channel,feature,feedback,severity
+101,app_store,Mobile App,"The checkout screen freezes when applying promo codes on iOS 18.",high
+102,email,Reporting,"Exported CSV misses the new revenue columns that launched last week.",medium
+103,slack,Search,"Search results ignore filters when both price and category are selected.",high
+104,helpdesk,Performance,"Dataset uploads above 50MB take more than 2 minutes to process.",medium
+105,app_store,Notifications,"Daily digest emails arrive twice some mornings.",low
+106,email,Integrations,"HubSpot sync stopped pushing new leads since Monday.",high
+107,slack,Mobile App,"Dark mode toggles back to light mode after force quitting.",low
+108,helpdesk,Security,"Customers can still access deleted reports if they bookmark the link.",critical
+109,email,Reporting,"Need stacked bar charts for regional comparisons.",medium
+110,slack,Performance,"Metrics dashboard times out during peak traffic.",high

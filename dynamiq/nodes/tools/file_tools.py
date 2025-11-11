@@ -68,6 +68,7 @@ DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP = {
     FileType.PDF: PyPDFConverter,
     FileType.DOCX_DOCUMENT: DOCXFileConverter,
     FileType.PPTX_PRESENTATION: PPTXFileConverter,
+    FileType.SPREADSHEET: TextFileConverter,
     FileType.HTML: HTMLConverter,
     FileType.TEXT: TextFileConverter,
     FileType.MARKDOWN: TextFileConverter,
@@ -92,6 +93,10 @@ class FileWriteInputSchema(BaseModel):
     content: bytes | str = Field(..., description="File content (string, bytes)")
     content_type: str | None = Field(default=None, description="MIME type (auto-detected if not provided)")
     metadata: str | None = Field(default=None, description="Additional metadata for the file")
+    overwrite: bool = Field(
+        default=True,
+        description="Whether to overwrite the file if it already exists. Defaults to True.",
+    )
 
 
 class FileReadTool(Node):
@@ -502,6 +507,8 @@ class FileWriteTool(Node):
                 input_data.file_path,
                 content_str,
                 content_type=content_type,
+                metadata=input_data.metadata,
+                overwrite=input_data.overwrite,
             )
 
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(file_info)[:200]}...")
