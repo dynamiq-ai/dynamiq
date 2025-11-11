@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
 from dynamiq.connections import BaseConnection
-from dynamiq.connections.managers import ConnectionManager
+from dynamiq.connections.managers import ConnectionClientInitType, ConnectionManager, ConnectionManagerException
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.exceptions import (
     NodeConditionFailedException,
@@ -941,9 +941,16 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             self.run_sync, input_data=input_data, config=config, depends_result=depends_result, **kwargs
         )
 
+    def ensure_client(self) -> None:
+        """
+        Ensure the client connection is alive and reconnect if needed.
+        Override in subclasses that manage connections.
+        """
+        pass
+
     def execute_with_retry(self, input_data: dict[str, Any] | BaseModel, config: RunnableConfig = None, **kwargs):
         """
-        Execute the node with retry logic.
+        Execute the node with retry logic and automatic connection management.
 
         Args:
             input_data (dict[str, Any]): Input data for the node.
@@ -969,6 +976,21 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
 
             for attempt in range(n_attempt):
                 merged_kwargs = merge(kwargs, {"execution_run_id": uuid4()})
+
+                try:
+                    self.ensure_client()
+                except Exception as conn_error:
+                    logger.error(f"Node {self.name} - {self.id}: Failed to ensure client connection: {conn_error}")
+                    error = conn_error
+                    if attempt < n_attempt - 1:
+                        time_to_sleep = self.error_handling.retry_interval_seconds * (
+                            self.error_handling.backoff_rate**attempt
+                        )
+                        logger.info(f"Node {self.name} - {self.id}: retrying connection in {time_to_sleep} seconds.")
+                        time.sleep(time_to_sleep)
+                        continue
+                    else:
+                        raise
 
                 self.run_on_node_execute_start(config.callbacks, input_data, **merged_kwargs)
 
@@ -1473,6 +1495,7 @@ class ConnectionNode(Node, ABC):
 
     connection: BaseConnection | None = None
     client: Any | None = None
+    _connection_manager: ConnectionManager | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def validate_connection_client(self):
@@ -1489,11 +1512,49 @@ class ConnectionNode(Node, ABC):
             connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
         """
         connection_manager = connection_manager or ConnectionManager()
+        self._connection_manager = connection_manager
         super().init_components(connection_manager)
         if self.client is None:
             self.client = connection_manager.get_connection_client(
                 connection=self.connection
             )
+
+    def is_client_closed(self) -> bool:
+        """
+        Check if the client connection is closed.
+
+        Returns:
+            bool: True if client is closed, False otherwise
+        """
+        if self.client is None:
+            return False
+
+        if hasattr(self.client, "closed"):
+            return self.client.closed
+
+        if hasattr(self.client, "is_closed") and callable(self.client.is_closed):
+            return self.client.is_closed()
+
+        if hasattr(self.client, "_closed"):
+            return self.client._closed
+
+        return False
+
+    def ensure_client(self) -> None:
+        """
+        Ensure the client is alive and reconnect if needed.
+        Automatically detects closed connections and reinitializes them.
+        """
+        if self.is_client_closed():
+            logger.warning(f"Node {self.name} - {self.id}: Client connection is closed. Reinitializing")
+            connection_manager = self._connection_manager or ConnectionManager()
+
+            try:
+                self.client = connection_manager.get_connection_client(connection=self.connection)
+                logger.info(f"Node {self.name} - {self.id}: Client reinitialized successfully")
+            except Exception as e:
+                logger.error(f"Node {self.name} - {self.id}: Failed to reinitialize client: {e}")
+                raise ConnectionManagerException(f"Failed to reinitialize client for node {self.name}: {e}") from e
 
 
 class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
@@ -1536,6 +1597,8 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
             connection_manager (ConnectionManager, optional): The connection manager. Defaults to ConnectionManager.
         """
         connection_manager = connection_manager or ConnectionManager()
+        self._connection_manager = connection_manager
+
         # Use vector_store client if it is already initialized
         if self.vector_store:
             self.client = self.vector_store.client
@@ -1544,3 +1607,40 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
 
         if self.vector_store is None:
             self.vector_store = self.connect_to_vector_store()
+
+    def is_client_closed(self) -> bool:
+        """
+        Check if the client or vector store connection is closed.
+
+        Returns:
+            bool: True if client/vector_store is closed, False otherwise
+        """
+        if self.vector_store and hasattr(self.vector_store, "client"):
+            vector_store_client = self.vector_store.client
+            if vector_store_client is None:
+                return False
+            if hasattr(vector_store_client, "closed"):
+                return vector_store_client.closed
+
+        return super().is_client_closed()
+
+    def ensure_client(self) -> None:
+        """
+        Ensure the client and vector store are alive and reconnect if needed.
+        Automatically detects closed connections and reinitializes them.
+        """
+        if self.is_client_closed():
+            logger.warning(f"Node {self.name} - {self.id}: Vector store client connection is closed. Reinitializing")
+            connection_manager = self._connection_manager or ConnectionManager()
+
+            try:
+                self.client = connection_manager.get_connection_client(
+                    connection=self.connection, init_type=ConnectionClientInitType.VECTOR_STORE
+                )
+                self.vector_store = self.connect_to_vector_store()
+                logger.info(f"Node {self.name} - {self.id}: Vector store reinitialized successfully")
+            except Exception as e:
+                logger.error(f"Node {self.name} - {self.id}: Failed to reinitialize vector store: {e}")
+                raise ConnectionManagerException(
+                    f"Failed to reinitialize vector store for node {self.name}: {e}"
+                ) from e
