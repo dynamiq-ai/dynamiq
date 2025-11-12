@@ -12,7 +12,13 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.agents.utils import FileMappedInput
 from dynamiq.nodes.node import ensure_config
-from dynamiq.nodes.tools.python import Python, compile_and_execute, get_restricted_globals
+from dynamiq.nodes.tools.python import (
+    Python,
+    compile_and_execute,
+    get_restricted_globals,
+    guarded_write,
+    make_safe_print,
+)
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileInfo, FileStore
 from dynamiq.utils import format_value
@@ -24,24 +30,25 @@ OPTIONAL_PRELOAD_MODULES: tuple[tuple[str, str | None], ...] = (
 )
 
 
-class FileWorkspace:
+class PythonCodeExecutorFileWorkspace(BaseModel):
     """Helper exposing safe file store operations for RestrictedPython code."""
 
-    def __init__(self, file_store: FileStore):
-        self._file_store = file_store
+    file_store: FileStore = Field(..., description="File storage backend shared with the executor.")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def list(self, directory: str = "", recursive: bool = True) -> list[dict[str, Any]]:
         """Return metadata for files located under directory."""
-        files = self._file_store.list_files(directory=directory, recursive=recursive)
+        files = self.file_store.list_files(directory=directory, recursive=recursive)
         return [self._file_info_to_dict(file_info) for file_info in files]
 
     def read_text(self, path: str, encoding: str = "utf-8", errors: str = "ignore") -> str:
         """Read file as text."""
-        return self._file_store.retrieve(path).decode(encoding, errors=errors)
+        return self.file_store.retrieve(path).decode(encoding, errors=errors)
 
     def read_bytes(self, path: str) -> bytes:
         """Read file as bytes."""
-        return self._file_store.retrieve(path)
+        return self.file_store.retrieve(path)
 
     def write_text(
         self,
@@ -93,18 +100,18 @@ class FileWorkspace:
 
     def delete(self, path: str) -> bool:
         """Delete file."""
-        return self._file_store.delete(path)
+        return self.file_store.delete(path)
 
     def exists(self, path: str) -> bool:
         """Check if file exists."""
-        return self._file_store.exists(path)
+        return self.file_store.exists(path)
 
     def describe(self, path: str, preview_bytes: int = 2048) -> dict[str, Any]:
         """Return metadata and short preview."""
         file_info = self._locate_file_info(path)
         preview = b""
         try:
-            preview = self._file_store.retrieve(path)[:preview_bytes]
+            preview = self.file_store.retrieve(path)[:preview_bytes]
         except Exception:
             preview = b""
 
@@ -127,14 +134,14 @@ class FileWorkspace:
         metadata: dict[str, Any] | None = None,
         overwrite: bool = True,
     ) -> dict[str, Any]:
-        file_info = self._file_store.store(
+        file_info = self.file_store.store(
             path, content, content_type=content_type, metadata=metadata, overwrite=overwrite
         )
         return self._file_info_to_dict(file_info)
 
     def _locate_file_info(self, path: str) -> FileInfo | None:
         try:
-            files = self._file_store.list_files(recursive=True)
+            files = self.file_store.list_files(recursive=True)
         except Exception:
             return None
 
@@ -179,13 +186,16 @@ class PythonCodeExecutor(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "PythonCodeExecutor"
-    description: str = """Runs dynamic Python code safely via RestrictedPython. Your snippet must define a `run(...)`
-function that acts as the entrypoint. The tool injects helper functions such as read_file(), write_file(),
-list_files(), and exposes the shared file store so you can read/write artifacts inside the workspace.
-Available libraries include: pandas, numpy, scipy, requests, pdfplumber, PyPDF2/pypdf, docx (python-docx),
-pptx (python-pptx), markdown, openpyxl, matplotlib (with `matplotlib.pyplot`
-preloaded as `plt`), and standard library utilities. Always return structured results from `run` — any `print()`
-output is captured separately in a `stdout` field."""
+    description: str = (
+        "Runs dynamic Python code safely via RestrictedPython. The tool injects helper functions such as read_file(), "
+        "write_file(), and list_files(), exposing the shared file store so you can read/write artifacts inside the "
+        "workspace. Available libraries include: pandas, numpy, scipy, requests, pdfplumber, PyPDF2/pypdf, docx "
+        "(python-docx), pptx (python-pptx), markdown, openpyxl, matplotlib (with `matplotlib.pyplot` preloaded as "
+        "`plt`), and standard library utilities. Always return structured results from `run` — any `print()` output is "
+        "captured separately in a `stdout` field.\n\n"
+        "- Every code snippet you send to the executor MUST define a run(...) function as the entrypoint.\n"
+        "- Use helper functions such as read_file(), write_file(), and list_files() provided by the code executor."
+    )
     file_store: FileStore = Field(..., description="File storage backend shared with the agent.")
     is_files_allowed: bool = True
     input_schema: ClassVar[type[PythonCodeExecutorInputSchema]] = PythonCodeExecutorInputSchema
@@ -206,16 +216,11 @@ output is captured separately in a `stdout` field."""
         if not self.file_store:
             raise ToolExecutionException("PythonCodeExecutor requires a configured file_store.", recoverable=False)
 
-        file_manager = FileWorkspace(self.file_store)
+        file_manager = PythonCodeExecutorFileWorkspace(file_store=self.file_store)
         helpers, helper_aliases = self._build_file_helpers(file_manager)
 
         stdout_collector = PrintCollector()
-
-        def safe_print(*args, **print_kwargs):
-            stdout_collector._call_print(*args, **print_kwargs)
-
-        def guarded_write(obj, value=None):
-            return value if value is not None else obj
+        safe_print = make_safe_print(stdout_collector._call_print)
 
         restricted_globals = get_restricted_globals()
         restricted_globals.update(helper_aliases)
@@ -297,7 +302,7 @@ output is captured separately in a `stdout` field."""
         self,
         files: list[Any],
         mapped_inputs: dict[str, Any],
-        file_manager: FileWorkspace,
+        file_manager: PythonCodeExecutorFileWorkspace,
         stdout: io.StringIO,
         params: dict[str, Any] | None = None,
         helpers: dict[str, Any] | None = None,
@@ -336,7 +341,9 @@ output is captured separately in a `stdout` field."""
                 preloaded.setdefault(root_name, module)
         return preloaded
 
-    def _build_file_helpers(self, file_manager: FileWorkspace | None) -> tuple[dict[str, Any], dict[str, Any]]:
+    def _build_file_helpers(
+        self, file_manager: PythonCodeExecutorFileWorkspace | None
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         if not file_manager:
             return {}, {}
 

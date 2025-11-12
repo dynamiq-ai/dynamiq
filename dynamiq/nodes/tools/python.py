@@ -1,7 +1,7 @@
 import importlib
 import io
 from copy import deepcopy
-from typing import Any, ClassVar, Literal
+from typing import Any, Callable, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
 from RestrictedPython import compile_restricted, safe_builtins, utility_builtins
@@ -48,6 +48,20 @@ ALLOWED_MODULES = [
     "matplotlib",
     "scipy",
 ]
+
+
+def make_safe_print(printer: Callable[..., Any]):
+    """Return a RestrictedPython-compatible print function bound to a printer callback."""
+
+    def safe_print(*args, **print_kwargs):
+        printer(*args, **print_kwargs)
+
+    return safe_print
+
+
+def guarded_write(obj, value=None):
+    """RestrictedPython helper to safely propagate write operations."""
+    return value if value is not None else obj
 
 
 def restricted_import(name: str, globals=None, locals=None, fromlist=(), level=0) -> Any:
@@ -213,12 +227,7 @@ class Python(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         stdout = io.StringIO()
-
-        def safe_print(*args, **kwargs):
-            print(*args, file=stdout, **kwargs)
-
-        def guarded_write(obj, value=None):
-            return value if value is not None else obj
+        safe_print = make_safe_print(lambda *args, **print_kwargs: print(*args, file=stdout, **print_kwargs))
 
         restricted_globals = get_restricted_globals()
         restricted_globals.update(

@@ -1063,7 +1063,7 @@ class Agent(Node):
 
         return tool_result_content_processed, output_files
 
-    def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
+    def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
         """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
         named = []
         for i, f in enumerate(files):
