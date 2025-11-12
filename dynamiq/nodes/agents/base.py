@@ -654,6 +654,7 @@ class Agent(Node):
             if not self.file_store_backend:
                 self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
                 self.tools.append(FileReadTool(file_store=self.file_store.backend, llm=self.llm))
+                self.tools.append(FileSearchTool(file_store=self.file_store.backend))
                 self.tools.append(FileListTool(file_store=self.file_store.backend))
                 self._init_prompt_blocks()
             normalized_files = self._ensure_named_files(files)
