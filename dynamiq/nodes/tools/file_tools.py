@@ -118,7 +118,7 @@ class FileWriteInputSchema(BaseModel):
     file_path: str = Field(..., description="Path where the file should be written")
     content: Any = Field(..., description="File content (string, bytes, or structured data for JSON)")
     content_type: str | None = Field(default=None, description="MIME type (auto-detected if not provided)")
-    metadata: str | None = Field(default=None, description="Additional metadata for the file")
+    metadata: dict[str, Any] | None = Field(default=None, description="Additional metadata for the file")
     overwrite: bool = Field(
         default=True,
         description="Whether to overwrite the file if it already exists. Defaults to True.",
