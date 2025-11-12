@@ -40,6 +40,11 @@ ALLOWED_MODULES = [
     "pandas",
     "numpy",
     "openpyxl",
+    "docx",
+    "pptx",
+    "pdfplumber",
+    "PyPDF2",
+    "pypdf",
     "matplotlib",
     "scipy",
 ]

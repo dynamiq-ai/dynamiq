@@ -1,3 +1,4 @@
+import importlib
 import inspect
 import io
 import json
@@ -16,6 +17,11 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileInfo, FileStore
 from dynamiq.utils import format_value
 from dynamiq.utils.logger import logger
+
+OPTIONAL_PRELOAD_MODULES: tuple[tuple[str, str | None], ...] = (
+    ("matplotlib", None),
+    ("matplotlib.pyplot", "plt"),
+)
 
 
 class FileWorkspace:
@@ -176,7 +182,10 @@ class PythonCodeExecutor(Node):
     description: str = """Runs dynamic Python code safely via RestrictedPython. Your snippet must define a `run(...)`
 function that acts as the entrypoint. The tool injects helper functions such as read_file(), write_file(),
 list_files(), and exposes the shared file store so you can read/write artifacts inside the workspace.
-Always return structured results from `run` — any `print()` output is captured separately in a `stdout` field."""
+Available libraries include: pandas, numpy, scipy, requests, pdfplumber, PyPDF2/pypdf, docx (python-docx),
+pptx (python-pptx), markdown, openpyxl, matplotlib (with `matplotlib.pyplot`
+preloaded as `plt`), and standard library utilities. Always return structured results from `run` — any `print()`
+output is captured separately in a `stdout` field."""
     file_store: FileStore = Field(..., description="File storage backend shared with the agent.")
     is_files_allowed: bool = True
     input_schema: ClassVar[type[PythonCodeExecutorInputSchema]] = PythonCodeExecutorInputSchema
@@ -221,6 +230,7 @@ Always return structured results from `run` — any `print()` output is captured
                 "_print": stdout_collector._call_print,
             }
         )
+        restricted_globals.update(self._preload_optional_modules())
 
         try:
             restricted_globals = compile_and_execute(input_data.code, restricted_globals)
@@ -304,6 +314,27 @@ Always return structured results from `run` — any `print()` output is captured
         available_args = {"context": context_payload}
         available_args.update(context_payload)
         return available_args
+
+    def _preload_optional_modules(self) -> dict[str, Any]:
+        """Expose heavier-but-common modules (e.g., matplotlib.pyplot) inside the restricted globals."""
+        preloaded: dict[str, Any] = {}
+        for module_path, alias in OPTIONAL_PRELOAD_MODULES:
+            try:
+                module = importlib.import_module(module_path)
+            except Exception as exc:  # noqa: BLE001 broad to guard optional deps
+                logger.debug(
+                    "Optional preload module %s unavailable in python executor: %s",
+                    module_path,
+                    exc,
+                )
+                continue
+
+            if alias:
+                preloaded.setdefault(alias, module)
+            else:
+                root_name = module_path.split(".")[0]
+                preloaded.setdefault(root_name, module)
+        return preloaded
 
     def _build_file_helpers(self, file_manager: FileWorkspace | None) -> tuple[dict[str, Any], dict[str, Any]]:
         if not file_manager:

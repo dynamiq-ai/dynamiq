@@ -5,7 +5,7 @@ import re
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
@@ -18,6 +18,7 @@ from dynamiq.nodes.converters import (
     PyPDFConverter,
     TextFileConverter,
 )
+from dynamiq.nodes.converters.pypdf import DocumentCreationMode as PyPDFDocumentCreationMode
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -105,6 +106,10 @@ class FileReadInputSchema(BaseModel):
         default=None,
         description="Optional maximum number of bytes/chars to include when returning summary previews.",
     )
+    document_mode: Literal["file", "page"] = Field(
+        default="file",
+        description="For PDF-like documents, 'page' keeps content separated per page (with metadata).",
+    )
 
 
 class FileWriteInputSchema(BaseModel):
@@ -165,6 +170,7 @@ class FileReadTool(Node):
         Usage Examples:
             - Read text file: {"file_path": "config.txt"}
             - Read PDF: {"file_path": "report.pdf"}
+            - Per-page PDF read for downstream searches: {"file_path": "report.pdf", "document_mode": "page"}
             - Read DOCX: {"file_path": "document.docx"}
             - Read image: {"file_path": "image.png"} (extracts text using LLM)
             - Read large file: {"file_path": "large_data.json"}
@@ -178,6 +184,7 @@ class FileReadTool(Node):
             - mode: "auto" (default), "full", "chunked", or "summary"
             - chunk_size_override: Optional override for chunk sizes in bytes/chars
             - max_preview_bytes: Optional cap for summary previews
+            - document_mode: "file" (default) or "page" for per-page PDF extraction
 
         Notes:
             - Whenever text is extracted from non-text sources (PDF, PPTX, spreadsheets, etc.), it is cached as
@@ -191,6 +198,8 @@ class FileReadTool(Node):
     converter_mapping: dict[FileType, Node] | None = None
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileReadInputSchema]] = FileReadInputSchema
+    _connection_manager: ConnectionManager | None = PrivateAttr(default=None)
+    _page_converter_cache: dict[FileType, Node] = PrivateAttr(default_factory=dict)
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
@@ -201,6 +210,7 @@ class FileReadTool(Node):
                 Defaults to a new ConnectionManager instance.
         """
         connection_manager = connection_manager or ConnectionManager()
+        self._connection_manager = connection_manager
         super().init_components(connection_manager)
 
         self._setup_converters(connection_manager)
@@ -225,6 +235,21 @@ class FileReadTool(Node):
                 initialized_converters.add(id(converter))
                 logger.info(f"Initialized converter: {converter.name}")
 
+    def _get_converter_for_type(self, file_type: FileType, document_mode: str) -> Node | None:
+        """Fetch appropriate converter, supporting per-page PDF extraction."""
+        if document_mode == "page" and file_type == FileType.PDF:
+            cached = self._page_converter_cache.get(file_type)
+            if not cached:
+                page_converter = PyPDFConverter(document_creation_mode=PyPDFDocumentCreationMode.ONE_DOC_PER_PAGE)
+                page_converter.init_components(self._connection_manager or ConnectionManager())
+                self._page_converter_cache[file_type] = page_converter
+                cached = page_converter
+            return cached
+
+        if not self.converter_mapping:
+            return None
+        return self.converter_mapping.get(file_type)
+
     def _detect_file_type(self, file: BytesIO, filename: str, config: RunnableConfig, **kwargs) -> FileType | None:
         """
         Detect the file type using custom detection function.
@@ -247,8 +272,9 @@ class FileReadTool(Node):
         detected_type: FileType,
         config: RunnableConfig,
         instructions: str | None = None,
+        document_mode: str = "file",
         **kwargs,
-    ) -> str | None:
+    ) -> tuple[str | None, list[dict[str, Any]] | None]:
         """
         Process a file using the appropriate converter to extract text content.
 
@@ -261,17 +287,21 @@ class FileReadTool(Node):
             **kwargs: Additional arguments
 
         Returns:
-            str | None: Extracted text content from the file, or None if not available
+            tuple[str | None, list[dict]]: Extracted text content and optional structured page data.
         """
 
         try:
             if detected_type in self.converter_mapping:
 
+                converter = self._get_converter_for_type(detected_type, document_mode)
+                if not converter:
+                    logger.warning(f"No converter available for file type: {detected_type}")
+                    return None, None
+
                 if detected_type == FileType.IMAGE and instructions:
                     converter = LLMImageConverter(llm=self.llm, extraction_instruction=instructions)
                     converter_name = f"{converter.name} (with custom instructions)"
                 else:
-                    converter = self.converter_mapping[detected_type]
                     converter_name = converter.name
 
                 file.seek(0)
@@ -288,9 +318,26 @@ class FileReadTool(Node):
                 if result.status == RunnableStatus.SUCCESS:
                     documents = result.output.get("documents", [])
                     if documents:
-                        text_content = "\n\n".join([doc.content for doc in documents if hasattr(doc, "content")])
                         logger.info(f"Successfully extracted text using {converter_name}")
-                        return text_content
+                        if document_mode == "page":
+                            page_entries = []
+                            segments = []
+                            for idx, doc in enumerate(documents, start=1):
+                                page_num = doc.metadata.get("page_number") if doc.metadata else None
+                                page_num = page_num or idx
+                                content = doc.content
+                                page_entries.append(
+                                    {
+                                        "page": page_num,
+                                        "content": content,
+                                        "metadata": doc.metadata or {},
+                                    }
+                                )
+                                segments.append(f"=== PAGE {page_num} ===\n{content}")
+                            return "\n\n".join(segments), page_entries
+
+                        text_content = "\n\n".join([doc.content for doc in documents if hasattr(doc, "content")])
+                        return text_content, None
                     else:
                         logger.warning(f"No documents extracted by {converter_name}")
                 else:
@@ -301,6 +348,7 @@ class FileReadTool(Node):
 
         except Exception as e:
             logger.warning(f"File processing failed with converter: {str(e)}")
+        return None, None
 
     @property
     def to_dict_exclude_params(self):
@@ -350,7 +398,7 @@ class FileReadTool(Node):
         chunk_size = max(chunk_size, 1)
         preview_limit = input_data.max_preview_bytes or chunk_size
         preview_limit = max(preview_limit, 1)
-        allow_cache = input_data.instructions is None
+        allow_cache = input_data.instructions is None and input_data.document_mode == "file"
 
         try:
             if not self.file_store.exists(input_data.file_path):
@@ -374,7 +422,7 @@ class FileReadTool(Node):
                     preview_limit=preview_limit,
                     file_path=input_data.file_path,
                 )
-                processed = self._append_cache_hint(processed, cached_path)
+                processed = self._append_cache_hint(processed, cached_path, hint_enabled=False)
                 return {"content": processed, "cached_text_path": cached_path}
 
             try:
@@ -384,8 +432,14 @@ class FileReadTool(Node):
                 detected_type = self._detect_file_type(file_io, filename, config, **kwargs)
 
                 if detected_type:
-                    text_content = self._process_file_with_converter(
-                        file_io, filename, detected_type, config, input_data.instructions, **kwargs
+                    text_content, page_entries = self._process_file_with_converter(
+                        file_io,
+                        filename,
+                        detected_type,
+                        config,
+                        input_data.instructions,
+                        input_data.document_mode,
+                        **kwargs,
                     )
 
                     if text_content:
@@ -394,8 +448,10 @@ class FileReadTool(Node):
                         )
 
                         cached_path = None
+                        hint_enabled = False
                         if allow_cache:
                             cached_path = self._persist_extracted_text(input_data.file_path, text_content)
+                            hint_enabled = detected_type not in {FileType.TEXT, FileType.MARKDOWN}
 
                         processed = self._render_text_content(
                             text_content=text_content,
@@ -404,8 +460,10 @@ class FileReadTool(Node):
                             preview_limit=preview_limit,
                             file_path=input_data.file_path,
                         )
-                        processed = self._append_cache_hint(processed, cached_path)
+                        processed = self._append_cache_hint(processed, cached_path, hint_enabled)
                         result_payload = {"content": processed}
+                        if page_entries:
+                            result_payload["pages"] = page_entries
                         if cached_path:
                             result_payload["cached_text_path"] = cached_path
                         return result_payload
@@ -619,8 +677,8 @@ class FileReadTool(Node):
         return f"{original_path}{EXTRACTED_TEXT_SUFFIX}"
 
     @staticmethod
-    def _append_cache_hint(content: str, cache_path: str | None) -> str:
-        if cache_path:
+    def _append_cache_hint(content: str, cache_path: str | None, hint_enabled: bool = True) -> str:
+        if cache_path and hint_enabled:
             hint = (
                 f"\n\n[Extracted text cached at '{cache_path}'. "
                 "Use FileSearchTool to search this processed content without re-reading the original file.]"
@@ -776,6 +834,12 @@ class FileSearchTool(Node):
         Notes:
             - When the FileReadTool has already extracted text (e.g., from PDF/PPTX/XLSX/CSV), this tool automatically
               searches the cached "<original>.extracted.txt" instead of re-reading the binary source.
+            - Start with concrete phrases (e.g., "Global Drug Facility", "KPI tree") and widen or switch to regex
+              only if needed; large, unfocused queries slow the agent down.
+            - When you need page-level attribution, read PDFs with {"document_mode": "page"} so matches reference
+              the same per-page extracts.
+            - `context_chars` controls how much surrounding text is returned; increase it instead of re-running the
+              same search repeatedly.
     """
 
     file_store: FileStore = Field(..., description="File storage to search within.")
