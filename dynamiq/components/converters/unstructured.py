@@ -403,7 +403,11 @@ class UnstructuredFileConverter(BaseConverter):
 
         elif document_creation_mode == DocumentCreationMode.ONE_DOC_PER_ELEMENT:
             for index, el in enumerate(elements):
-                text = str(el.get("text", ""))
+                if self.extract_image_block_types_enabled:
+                    text = self._process_element_with_image_base64(el)
+                else:
+                    text = str(el.get("text", ""))
+
                 metadata = copy.deepcopy(metadata)
                 metadata["file_path"] = str(filepath)
                 metadata["element_index"] = index
@@ -413,6 +417,6 @@ class UnstructuredFileConverter(BaseConverter):
                 element_category = el.get("category")
                 if element_category:
                     metadata["category"] = element_category
-                doc = Document(content=str(el), metadata=metadata)
+                doc = Document(content=text, metadata=metadata)
                 docs.append(doc)
         return docs
