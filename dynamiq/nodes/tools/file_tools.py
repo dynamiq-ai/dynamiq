@@ -1,5 +1,7 @@
+import json
 import logging
 import os
+import re
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
@@ -23,6 +25,8 @@ from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.file_types import EXTENSION_MAP, FileType
 
 logger = logging.getLogger(__name__)
+
+EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
 
 
 def detect_file_type(file: BytesIO, filename: str) -> FileType | None:
@@ -84,18 +88,49 @@ class FileReadInputSchema(BaseModel):
         default=None,
         description="Instructions for the file read. If not provided, the file will be read in its entirety.",
     )
+    mode: Literal["auto", "full", "chunked", "summary"] = Field(
+        default="auto",
+        description=(
+            "Controls how the file content is returned. "
+            "'auto' uses default heuristics, 'full' forces entire content, "
+            "'chunked' always returns segmented chunks, and 'summary' returns a short preview."
+        ),
+    )
+    chunk_size_override: int | None = Field(
+        default=None,
+        description="Optional chunk size override ("
+        "in bytes/chars depending on content type) when returning chunked output.",
+    )
+    max_preview_bytes: int | None = Field(
+        default=None,
+        description="Optional maximum number of bytes/chars to include when returning summary previews.",
+    )
 
 
 class FileWriteInputSchema(BaseModel):
     """Schema for file write input parameters."""
 
     file_path: str = Field(..., description="Path where the file should be written")
-    content: bytes | str = Field(..., description="File content (string, bytes)")
+    content: Any = Field(..., description="File content (string, bytes, or structured data for JSON)")
     content_type: str | None = Field(default=None, description="MIME type (auto-detected if not provided)")
     metadata: str | None = Field(default=None, description="Additional metadata for the file")
     overwrite: bool = Field(
         default=True,
         description="Whether to overwrite the file if it already exists. Defaults to True.",
+    )
+    content_format: Literal["auto", "text", "json", "binary"] = Field(
+        default="auto",
+        description=(
+            "Hints how to encode the provided content. 'auto' infers from the value, "
+            "'text' treats the payload as UTF-8 text, 'json' serializes with json.dumps, "
+            "and 'binary' writes raw bytes."
+        ),
+    )
+    encoding: str = Field(default="utf-8", description="Encoding to use when writing textual content.")
+    append: bool = Field(
+        default=False,
+        description="If True, append to the existing file instead of replacing it. "
+        "Falls back to overwrite when file is missing.",
     )
 
 
@@ -133,11 +168,21 @@ class FileReadTool(Node):
             - Read DOCX: {"file_path": "document.docx"}
             - Read image: {"file_path": "image.png"} (extracts text using LLM)
             - Read large file: {"file_path": "large_data.json"}
+            - Force summary preview: {"file_path": "report.pdf", "mode": "summary", "max_preview_bytes": 800}
+            - Always chunk: {"file_path": "server.log", "mode": "chunked", "chunk_size_override": 4000}
             - Read image with instructions: {"file_path": "image.png", "instructions": "Describe the image in detail"}
 
         Parameters:
             - file_path: Path of the file to read
             - instructions: Optional instructions for LLM processing of images.
+            - mode: "auto" (default), "full", "chunked", or "summary"
+            - chunk_size_override: Optional override for chunk sizes in bytes/chars
+            - max_preview_bytes: Optional cap for summary previews
+
+        Notes:
+            - Whenever text is extracted from non-text sources (PDF, PPTX, spreadsheets, etc.), it is cached as
+              "<original_path>.extracted.txt" inside the same file store so FileSearchTool can reuse it without
+              re-running converters.
     """
     llm: BaseLLM = Field(..., description="LLM that will be used to process files.")
     file_store: FileStore = Field(..., description="File storage to read from.")
@@ -300,6 +345,13 @@ class FileReadTool(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
+        mode = input_data.mode or "auto"
+        chunk_size = input_data.chunk_size_override or self.chunk_size
+        chunk_size = max(chunk_size, 1)
+        preview_limit = input_data.max_preview_bytes or chunk_size
+        preview_limit = max(preview_limit, 1)
+        allow_cache = input_data.instructions is None
+
         try:
             if not self.file_store.exists(input_data.file_path):
                 raise ToolExecutionException(
@@ -309,6 +361,21 @@ class FileReadTool(Node):
 
             content = self.file_store.retrieve(input_data.file_path)
             content_size = len(content)
+
+            cached_text, cached_path = (None, None)
+            if allow_cache:
+                cached_text, cached_path = self._load_cached_text(input_data.file_path)
+
+            if cached_text:
+                processed = self._render_text_content(
+                    text_content=cached_text,
+                    mode=mode,
+                    chunk_size=chunk_size,
+                    preview_limit=preview_limit,
+                    file_path=input_data.file_path,
+                )
+                processed = self._append_cache_hint(processed, cached_path)
+                return {"content": processed, "cached_text_path": cached_path}
 
             try:
                 file_io = BytesIO(content)
@@ -326,18 +393,22 @@ class FileReadTool(Node):
                             f"Tool {self.name} - {self.id}: successfully processed file and extracted text content"
                         )
 
-                        # If the extracted text is large, return chunked content
-                        if len(text_content) > self.max_size:
-                            logger.info(
-                                f"Tool {self.name} - {self.id}: extracted text is large ({len(text_content)} chars),"
-                                " returning chunks"
-                            )
-                            chunked_content = self._create_chunked_text_content(
-                                text_content, self.chunk_size, input_data.file_path
-                            )
-                            return {"content": chunked_content}
-                        else:
-                            return {"content": text_content}
+                        cached_path = None
+                        if allow_cache:
+                            cached_path = self._persist_extracted_text(input_data.file_path, text_content)
+
+                        processed = self._render_text_content(
+                            text_content=text_content,
+                            mode=mode,
+                            chunk_size=chunk_size,
+                            preview_limit=preview_limit,
+                            file_path=input_data.file_path,
+                        )
+                        processed = self._append_cache_hint(processed, cached_path)
+                        result_payload = {"content": processed}
+                        if cached_path:
+                            result_payload["cached_text_path"] = cached_path
+                        return result_payload
                     else:
                         logger.warning(
                             f"Tool {self.name} - {self.id}: no text content extracted from file,"
@@ -353,18 +424,16 @@ class FileReadTool(Node):
                     f"Tool {self.name} - {self.id}: file processing failed: {str(e)}, falling back to raw content"
                 )
 
-            # Fallback to raw content if processing fails or no text extracted
-            # If file is small enough, return full content
-            if content_size <= self.max_size:
-                logger.info(f"Tool {self.name} - {self.id}: returning full content ({content_size} bytes)")
-                return {"content": content}
+            rendered_content = self._render_binary_content(
+                content=content,
+                content_size=content_size,
+                mode=mode,
+                chunk_size=chunk_size,
+                preview_limit=preview_limit,
+                file_path=input_data.file_path,
+            )
 
-            # For large files, return chunked content
-            logger.info(f"Tool {self.name} - {self.id}: file is large ({content_size} bytes), returning chunks")
-
-            chunked_content = self._create_chunked_content(content, self.chunk_size, input_data.file_path)
-
-            return {"content": chunked_content}
+            return {"content": rendered_content}
 
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to read file. Error: {str(e)}")
@@ -452,6 +521,113 @@ class FileReadTool(Node):
 
         return chunked_text
 
+    def _render_text_content(
+        self, text_content: str, mode: str, chunk_size: int, preview_limit: int, file_path: str
+    ) -> str:
+        """Render text output according to the requested mode."""
+        match mode:
+            case "full":
+                return text_content
+            case "chunked":
+                return self._create_chunked_text_content(text_content, chunk_size, file_path)
+            case "summary":
+                return self._create_summary_text_content(text_content, preview_limit, file_path)
+            case _:
+                if len(text_content) > self.max_size:
+                    return self._create_chunked_text_content(text_content, chunk_size, file_path)
+                return text_content
+
+    def _render_binary_content(
+        self, content: bytes, content_size: int, mode: str, chunk_size: int, preview_limit: int, file_path: str
+    ) -> bytes | str:
+        """Render binary output according to the requested mode."""
+        match mode:
+            case "full":
+                return content
+            case "chunked":
+                return self._create_chunked_content(content, chunk_size, file_path)
+            case "summary":
+                return self._create_summary_bytes_content(content, preview_limit, file_path)
+            case _:
+                if content_size <= self.max_size:
+                    return content
+                return self._create_chunked_content(content, chunk_size, file_path)
+
+    def _create_summary_text_content(self, content: str, max_chars: int, file_path: str) -> str:
+        """Return a short preview string for text documents."""
+        preview = content[:max_chars]
+        suffix = "..." if len(content) > len(preview) else ""
+        return (
+            f"Preview of {file_path} (showing {len(preview):,} of {len(content):,} characters):\n" f"{preview}{suffix}"
+        )
+
+    def _create_summary_bytes_content(self, content: bytes, max_bytes: int, file_path: str) -> str:
+        """Return a short preview string for binary files."""
+        preview = content[:max_bytes]
+        try:
+            preview_text = preview.decode("utf-8")
+            descriptor = "text"
+        except UnicodeDecodeError:
+            preview_text = preview.hex()
+            descriptor = "hex"
+        suffix = "..." if len(content) > len(preview) else ""
+        return (
+            f"Preview of {file_path} ({descriptor}, showing {len(preview):,} of {len(content):,} bytes):\n"
+            f"{preview_text}{suffix}"
+        )
+
+    def _persist_extracted_text(self, original_path: str, text_content: str) -> str | None:
+        """Persist extracted text so future reads/searches can reuse it."""
+        if not self.file_store:
+            return None
+
+        cache_path = self._derived_cache_path(original_path)
+        try:
+            self.file_store.store(
+                cache_path,
+                text_content.encode("utf-8"),
+                content_type="text/plain",
+                metadata={
+                    "source": "file_read_tool",
+                    "original_path": original_path,
+                },
+                overwrite=True,
+            )
+            logger.info(f"Tool {self.name} - {self.id}: cached extracted text at {cache_path}")
+            return cache_path
+        except Exception as exc:
+            logger.warning(f"Tool {self.name} - {self.id}: failed to cache extracted text for {original_path}: {exc}")
+            return None
+
+    def _load_cached_text(self, original_path: str) -> tuple[str | None, str | None]:
+        """Load cached extracted text if it exists."""
+        if not self.file_store:
+            return None, None
+
+        cache_path = self._derived_cache_path(original_path)
+        try:
+            if not self.file_store.exists(cache_path):
+                return None, None
+            cached_bytes = self.file_store.retrieve(cache_path)
+            return cached_bytes.decode("utf-8"), cache_path
+        except Exception as exc:
+            logger.warning(f"Tool {self.name} - {self.id}: failed to load cached text for {original_path}: {exc}")
+            return None, None
+
+    @staticmethod
+    def _derived_cache_path(original_path: str) -> str:
+        return f"{original_path}{EXTRACTED_TEXT_SUFFIX}"
+
+    @staticmethod
+    def _append_cache_hint(content: str, cache_path: str | None) -> str:
+        if cache_path:
+            hint = (
+                f"\n\n[Extracted text cached at '{cache_path}'. "
+                "Use FileSearchTool to search this processed content without re-reading the original file.]"
+            )
+            return f"{content}{hint}"
+        return content
+
 
 class FileWriteTool(Node):
     """
@@ -474,7 +650,9 @@ class FileWriteTool(Node):
     Usage Examples:
     - Write text: {"file_path": "readme.txt", "content": "Hello World"}
     - Write JSON: {"file_path": "config.json", "content": {"key": "value"}}
-    - Overwrite file: {"file_path": "existing.txt", "content": "new content"}"""
+    - Overwrite file: {"file_path": "existing.txt", "content": "new content"}
+    - Append: {"file_path": "log.txt", "content": "\\nline", "append": true}
+    - Force JSON encoding: {"file_path": "data.json", "content": {...}, "content_format": "json"}"""
 
     file_store: FileStore = Field(..., description="File storage to write to.")
 
@@ -496,19 +674,20 @@ class FileWriteTool(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         try:
-            content_str = input_data.content
-            if input_data.content_type is None:
-                content_type = "text/plain"
-            else:
-                content_type = input_data.content_type
+            payload, inferred_type = self._prepare_content_payload(input_data)
+            content_type = input_data.content_type or inferred_type
 
-            # Store file
+            overwrite_flag = input_data.overwrite or input_data.append
+            if input_data.append and self.file_store.exists(input_data.file_path):
+                existing = self.file_store.retrieve(input_data.file_path)
+                payload = existing + payload
+
             file_info = self.file_store.store(
                 input_data.file_path,
-                content_str,
+                payload,
                 content_type=content_type,
                 metadata=input_data.metadata,
-                overwrite=input_data.overwrite,
+                overwrite=overwrite_flag,
             )
 
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(file_info)[:200]}...")
@@ -521,6 +700,256 @@ class FileWriteTool(Node):
                 f"Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
+
+    def _prepare_content_payload(self, input_data: FileWriteInputSchema) -> tuple[bytes, str]:
+        """Serialize the incoming payload based on the requested format."""
+        encoding = input_data.encoding or "utf-8"
+        fmt = input_data.content_format
+        value = input_data.content
+
+        if fmt == "auto":
+            if isinstance(value, bytes):
+                fmt = "binary"
+            elif isinstance(value, (dict, list)):
+                fmt = "json"
+            else:
+                fmt = "text"
+
+        if fmt == "json":
+            if isinstance(value, str):
+                try:
+                    json.loads(value)
+                    serialized = value
+                except json.JSONDecodeError:
+                    serialized = json.dumps(value)
+            else:
+                serialized = json.dumps(value)
+            return serialized.encode(encoding), "application/json"
+
+        if fmt == "binary":
+            if isinstance(value, bytes):
+                return value, "application/octet-stream"
+            return str(value).encode(encoding), "application/octet-stream"
+
+        if isinstance(value, bytes):
+            payload = value
+        else:
+            payload = str(value).encode(encoding)
+        return payload, "text/plain"
+
+
+class FileSearchInputSchema(BaseModel):
+    """Schema for file search operations."""
+
+    query: str = Field(..., description="Substring or regex to search for.")
+    file_path: str | list[str] = Field(
+        default="",
+        description="Single path, list of paths, or empty to scan all available files.",
+    )
+    recursive: bool = Field(default=True, description="Whether to recurse when scanning directories.")
+    mode: Literal["substring", "regex"] = Field(
+        default="substring", description="Search mode: plain substring or regular expression."
+    )
+    case_sensitive: bool = Field(default=False, description="Whether the search should be case sensitive.")
+    max_matches_per_file: int = Field(default=5, description="Maximum matches returned per file.")
+    max_files: int = Field(default=20, description="Maximum number of files to scan when file_path is empty.")
+    context_chars: int = Field(default=120, description="Number of characters of context to include around matches.")
+    max_file_bytes: int = Field(
+        default=1_000_000, description="Maximum number of bytes to load from each file while searching."
+    )
+
+
+class FileSearchTool(Node):
+    """
+    A tool for searching across stored files.
+    """
+
+    group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    name: str = "FileSearchTool"
+    description: str = """
+        Searches stored files for substrings or regular expressions and returns contextual matches.
+        Usage Examples:
+            - {"query": "TODO"} (searches all files, case-insensitive substring)
+            - {"query": "class Agent", "file_path": "dynamiq/nodes/agents/base.py"}
+            - {"query": "error.+timeout", "mode": "regex", "case_sensitive": true}
+            - {"query": "select", "context_chars": 300, "max_matches_per_file": 10}
+        Notes:
+            - When the FileReadTool has already extracted text (e.g., from PDF/PPTX/XLSX/CSV), this tool automatically
+              searches the cached "<original>.extracted.txt" instead of re-reading the binary source.
+    """
+
+    file_store: FileStore = Field(..., description="File storage to search within.")
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    input_schema: ClassVar[type[FileSearchInputSchema]] = FileSearchInputSchema
+
+    def execute(
+        self,
+        input_data: FileSearchInputSchema,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
+        logger.info(f"Tool {self.name} - {self.id}: started with input:\n{input_data.model_dump()}")
+
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        try:
+            files_to_scan = self._resolve_files(input_data)
+            matches = []
+            total_scanned = 0
+
+            if input_data.mode == "regex":
+                flags = 0 if input_data.case_sensitive else re.IGNORECASE
+                try:
+                    pattern = re.compile(input_data.query, flags)
+                except re.error as e:
+                    raise ToolExecutionException(
+                        f"Invalid regular expression '{input_data.query}': {e}", recoverable=True
+                    )
+            else:
+                pattern = None
+                query = input_data.query if input_data.case_sensitive else input_data.query.lower()
+
+            for file_path in files_to_scan:
+                total_scanned += 1
+                file_matches = self._search_file(
+                    file_path=file_path,
+                    query=query if pattern is None else None,
+                    pattern=pattern,
+                    case_sensitive=input_data.case_sensitive,
+                    max_matches=input_data.max_matches_per_file,
+                    context_chars=input_data.context_chars,
+                    max_bytes=input_data.max_file_bytes,
+                )
+                if file_matches:
+                    matches.extend(file_matches)
+
+            result = {
+                "content": {
+                    "matches": matches,
+                    "files_scanned": total_scanned,
+                    "total_matches": len(matches),
+                }
+            }
+            logger.info(
+                f"Tool {self.name} - {self.id}: finished searching {total_scanned} files, "
+                f"found {len(matches)} matches."
+            )
+            return result
+
+        except ToolExecutionException:
+            raise
+        except Exception as e:
+            logger.error(f"Tool {self.name} - {self.id}: failed to search files. Error: {str(e)}")
+            raise ToolExecutionException(
+                f"Tool '{self.name}' failed during search. Error: {str(e)}. "
+                f"Please adjust your query or file selection and try again.",
+                recoverable=True,
+            )
+
+    def _resolve_files(self, input_data: FileSearchInputSchema) -> list[str]:
+        """Determine which files should be searched."""
+        if isinstance(input_data.file_path, list) and input_data.file_path:
+            return input_data.file_path[: input_data.max_files]
+        if isinstance(input_data.file_path, str) and input_data.file_path:
+            return [input_data.file_path]
+
+        files = self.file_store.list_files(recursive=input_data.recursive)
+        return [file.path for file in files[: input_data.max_files]]
+
+    def _search_file(
+        self,
+        file_path: str,
+        query: str | None,
+        pattern: re.Pattern | None,
+        case_sensitive: bool,
+        max_matches: int,
+        context_chars: int,
+        max_bytes: int,
+    ) -> list[dict[str, Any]]:
+        """Run the search inside a single file."""
+        text, source_path = self._load_search_text(file_path, max_bytes)
+        if not text:
+            return []
+
+        matches: list[dict[str, Any]] = []
+
+        if pattern:
+            for match in pattern.finditer(text):
+                matches.append(
+                    self._build_match_entry(
+                        file_path=file_path,
+                        source_path=source_path,
+                        text=text,
+                        start=match.start(),
+                        end=match.end(),
+                        context_chars=context_chars,
+                    )
+                )
+                if len(matches) >= max_matches:
+                    break
+        else:
+            haystack = text if case_sensitive else text.lower()
+            start_idx = 0
+            query_len = len(query)
+            while len(matches) < max_matches:
+                idx = haystack.find(query, start_idx)
+                if idx == -1:
+                    break
+                matches.append(
+                    self._build_match_entry(
+                        file_path=file_path,
+                        source_path=source_path,
+                        text=text,
+                        start=idx,
+                        end=idx + query_len,
+                        context_chars=context_chars,
+                    )
+                )
+                start_idx = idx + query_len
+
+        return matches
+
+    def _load_search_text(self, file_path: str, max_bytes: int) -> tuple[str | None, str | None]:
+        """Load search text preferring cached extracted content when available."""
+        if not self.file_store:
+            return None, None
+
+        candidates = [f"{file_path}{EXTRACTED_TEXT_SUFFIX}", file_path]
+        for candidate in candidates:
+            try:
+                if not self.file_store.exists(candidate):
+                    continue
+                raw = self.file_store.retrieve(candidate)[:max_bytes]
+                if not raw:
+                    continue
+                text = raw.decode("utf-8", errors="ignore")
+                if text:
+                    if candidate.endswith(EXTRACTED_TEXT_SUFFIX):
+                        logger.info(
+                            f"Tool {self.name} - {self.id}: using cached extracted text for search: {candidate}"
+                        )
+                    return text, candidate
+            except Exception as exc:
+                logger.warning(f"Tool {self.name} - {self.id}: failed to read {candidate} for search: {exc}")
+        return None, None
+
+    @staticmethod
+    def _build_match_entry(
+        file_path: str, source_path: str | None, text: str, start: int, end: int, context_chars: int
+    ) -> dict[str, Any]:
+        """Build a structured match entry with context and line number."""
+        before = max(0, start - context_chars)
+        after = min(len(text), end + context_chars)
+        context = text[before:after]
+        line = text.count("\n", 0, start) + 1
+        return {
+            "file": file_path,
+            "source_path": source_path or file_path,
+            "line": line,
+            "match": text[start:end],
+            "context": context.strip(),
+        }
 
 
 class FileListInputSchema(BaseModel):

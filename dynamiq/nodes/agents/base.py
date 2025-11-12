@@ -24,7 +24,7 @@ from dynamiq.nodes.agents.utils import (
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools import ContextManagerTool
-from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
+from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
@@ -372,6 +372,10 @@ class Agent(Node):
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
+    file_attachment_preview_bytes: int = Field(
+        default=512,
+        description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
+    )
 
     input_message: Message | VisionMessage | None = None
     role: str | None = Field(
@@ -457,6 +461,7 @@ class Agent(Node):
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
 
             self.tools.append(FileReadTool(file_store=self.file_store_backend, llm=self.llm))
+            self.tools.append(FileSearchTool(file_store=self.file_store_backend))
             self.tools.append(FileListTool(file_store=self.file_store_backend))
 
         self._init_prompt_blocks()
@@ -1192,6 +1197,9 @@ class Agent(Node):
             return input_message
 
         file_section = "\n".join(["\nAttached files available to you:"] + file_lines) + "\n"
+        preview_section = self._build_file_previews_section(files)
+        if preview_section:
+            file_section = f"{file_section}{preview_section}"
 
         if isinstance(input_message.content, str):
             input_message.content = f"{input_message.content.rstrip()}{file_section}"
@@ -1199,6 +1207,66 @@ class Agent(Node):
             input_message.content = input_message.content + file_section
 
         return input_message
+
+    def _build_file_previews_section(self, files: list[io.BytesIO]) -> str:
+        """Build a short, truncated preview section for uploaded files."""
+        if not files or self.file_attachment_preview_bytes <= 0:
+            return ""
+
+        previews: list[str] = []
+        max_bytes = max(1, self.file_attachment_preview_bytes)
+        for file_obj in files:
+            preview = self._extract_file_preview(file_obj, max_bytes)
+            if preview:
+                previews.append(preview)
+
+        if not previews:
+            return ""
+
+        return "\n".join(["File previews (truncated, may be incomplete):", *previews]) + "\n"
+
+    @staticmethod
+    def _extract_file_preview(file_obj: io.BytesIO, max_bytes: int) -> str:
+        """Extract a textual/hex preview from a BytesIO without consuming it."""
+        if not hasattr(file_obj, "read"):
+            return ""
+
+        seekable = hasattr(file_obj, "seek")
+        position = 0
+        if seekable:
+            try:
+                position = file_obj.tell()
+            except Exception:
+                seekable = False
+
+        try:
+            if seekable:
+                file_obj.seek(0)
+            snippet = file_obj.read(max_bytes)
+        except Exception:
+            return ""
+        finally:
+            if seekable:
+                try:
+                    file_obj.seek(position)
+                except Exception as exc:
+                    logger.debug(
+                        "Failed to restore file pointer for preview on %s: %s", getattr(file_obj, "name", ""), exc
+                    )
+
+        if not snippet:
+            return ""
+
+        try:
+            preview_text = snippet.decode("utf-8")
+            descriptor = "text"
+        except UnicodeDecodeError:
+            preview_text = snippet.hex()
+            descriptor = "hex"
+
+        suffix = "..." if len(snippet) >= max_bytes else ""
+        name = getattr(file_obj, "name", "uploaded_file")
+        return f"- {name} ({descriptor} preview): {preview_text}{suffix}"
 
     @property
     def file_store_backend(self) -> FileStore | None:
