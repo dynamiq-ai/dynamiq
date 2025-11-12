@@ -131,9 +131,8 @@ def partition_via_api(
     if response.status_code == 200:
         return response.elements
     else:
-        error_msg = getattr(response.raw_response, "text", str(response.raw_response))
         raise ValueError(
-            f"Receive unexpected status code {response.status_code} from the API. Response: {error_msg}",
+            f"Receive unexpected status code {response.status_code} from the API.",
         )
 
 
