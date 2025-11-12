@@ -1,13 +1,13 @@
+import base64
 import copy
 import enum
-import json
 from collections import defaultdict
 from io import BytesIO
 from pathlib import Path
 from typing import IO, Any
 
 from unstructured_client import UnstructuredClient
-from unstructured_client.models import shared
+from unstructured_client.models import operations, shared
 
 from dynamiq.components.converters.base import BaseConverter
 from dynamiq.components.converters.utils import get_filename_for_bytesio
@@ -21,16 +21,35 @@ class ConvertStrategy(str, enum.Enum):
     FAST = "fast"
     HI_RES = "hi_res"
     OCR_ONLY = "ocr_only"
+    VLM = "vlm"
+
+
+class UnstructuredElementTypes(str, enum.Enum):
+    FORMULA = "Formula"
+    FIGURE_CAPTION = "FigureCaption"
+    NARRATIVE_TEXT = "NarrativeText"
+    LIST_ITEM = "ListItem"
+    TITLE = "Title"
+    ADDRESS = "Address"
+    EMAIL_ADDRESS = "EmailAddress"
+    IMAGE = "Image"
+    PAGE_BREAK = "PageBreak"
+    TABLE = "Table"
+    HEADER = "Header"
+    FOOTER = "Footer"
+    CODE_SNIPPET = "CodeSnippet"
+    PAGE_NUMBER = "PageNumber"
+    UNCATEGORIZED_TEXT = "UncategorizedText"
 
 
 def partition_via_api(
     filename: str | None = None,
-    content_type: str | None = None,
     file: IO[bytes] | None = None,
     file_filename: str | None = None,
     api_url: str = "https://api.unstructured.io/",
     api_key: str = "",
     metadata_filename: str | None = None,
+    extract_image_block_types: list[UnstructuredElementTypes] | None = None,
     **request_kwargs,
 ) -> list[dict]:
     """Partitions a document using the Unstructured REST API. This is equivalent to
@@ -54,9 +73,12 @@ def partition_via_api(
         The URL for the Unstructured API. Defaults to the hosted Unstructured API.
     api_key
         The API key to pass to the Unstructured API.
+    extract_image_block_types
+        List of element types to extract as Base64-encoded representations.
+        Common types include "Image", "Table". Element type names are case-insensitive.
+        When specified, elements of these types will include an "image_base64" field in their metadata.
     request_kwargs
         Additional parameters to pass to the data field of the request to the Unstructured API.
-        For example the `strategy` parameter.
     """
 
     if metadata_filename and file_filename:
@@ -67,15 +89,13 @@ def partition_via_api(
 
     if file_filename is not None:
         metadata_filename = file_filename
-        logger.warn(
+        logger.warning(
             "The file_filename kwarg will be deprecated in a future version of unstructured. "
             "Please use metadata_filename instead.",
         )
 
-    # Note(austin) - the sdk takes the base url, but we have the full api_url
-    # For consistency, just strip off the path when it's given
     base_url = api_url[:-19] if "/general/v0/general" in api_url else api_url
-    sdk = UnstructuredClient(api_key_auth=api_key, server_url=base_url)
+    client = UnstructuredClient(api_key_auth=api_key, server_url=base_url)
 
     files = None
     if filename is not None:
@@ -92,22 +112,28 @@ def partition_via_api(
                 "metadata_filename must be specified as well.",
             )
         files = shared.Files(
-            content=file,
+            content=file.read(),
             file_name=metadata_filename,
         )
 
-    req = shared.PartitionParameters(
-        files=files,
-        **request_kwargs,
+    req_kwargs = request_kwargs.copy()
+    if extract_image_block_types is not None:
+        req_kwargs["extract_image_block_types"] = [element.value for element in extract_image_block_types]
+
+    req = operations.PartitionRequest(
+        partition_parameters=shared.PartitionParameters(
+            files=files,
+            **req_kwargs,
+        )
     )
-    response = sdk.general.partition(req)
+    response = client.general.partition(request=req)
 
     if response.status_code == 200:
-        element_dict = json.loads(response.raw_response.text)
-        return element_dict
+        return response.elements
     else:
+        error_msg = getattr(response.raw_response, "text", str(response.raw_response))
         raise ValueError(
-            f"Receive unexpected status code {response.status_code} from the API.",
+            f"Receive unexpected status code {response.status_code} from the API. Response: {error_msg}",
         )
 
 
@@ -137,6 +163,8 @@ class UnstructuredFileConverter(BaseConverter):
     separator: str = "\n\n"
     strategy: ConvertStrategy = ConvertStrategy.AUTO
     unstructured_kwargs: dict[str, Any] | None = None
+    extract_image_block_types_enabled: bool = False
+    extract_image_block_types: list[UnstructuredElementTypes] | None = None
 
     def __init__(self, *args, **kwargs):
         if kwargs.get("client") is None and kwargs.get("connection") is None:
@@ -165,6 +193,14 @@ class UnstructuredFileConverter(BaseConverter):
         unstructured_kwargs (Optional[dict[str, Any]], optional): Additional parameters to pass to the Unstructured API.
             See [Unstructured API docs](https://unstructured-io.github.io/unstructured/apis/api_parameters.html)
                 for available parameters.
+            Defaults to None.
+        extract_image_block_types_enabled (bool, optional): Whether to extract and embed images/tables in the result.
+            When enabled, Base64-encoded images and tables will be decoded and included in the document content.
+            Defaults to False.
+        extract_image_block_types (Optional[list[UnstructuredElementTypes]], optional): List of element types to extract
+            when extract_image_block_types_enabled is True.
+            If None and extract_image_block_types_enabled is True,
+            defaults to [UnstructuredElementTypes.IMAGE, UnstructuredElementTypes.TABLE].
             Defaults to None.
         progress_bar (bool, optional): Whether to show a progress bar during the conversion process.
             Defaults to True.
@@ -227,11 +263,16 @@ class UnstructuredFileConverter(BaseConverter):
         if filepath.stat().st_size == 0:
             raise ValueError(f"Empty file cannot be processed: {filepath}")
 
+        extract_types = self.extract_image_block_types if self.extract_image_block_types_enabled else None
+        if extract_types is None and self.extract_image_block_types_enabled:
+            extract_types = [UnstructuredElementTypes.IMAGE, UnstructuredElementTypes.TABLE]
+
         return partition_via_api(
             filename=str(filepath),
             api_url=self.connection.url,
             api_key=self.connection.api_key,
             strategy=self.strategy,
+            extract_image_block_types=extract_types,
             **self.unstructured_kwargs or {},
         )
 
@@ -254,6 +295,10 @@ class UnstructuredFileConverter(BaseConverter):
             ValueError: If the file is empty or cannot be processed
             Exception: Any other exception that occurs during processing
         """
+        extract_types = self.extract_image_block_types if self.extract_image_block_types_enabled else None
+        if extract_types is None and self.extract_image_block_types_enabled:
+            extract_types = [UnstructuredElementTypes.IMAGE, UnstructuredElementTypes.TABLE]
+
         return partition_via_api(
             filename=None,
             file=file,
@@ -261,8 +306,46 @@ class UnstructuredFileConverter(BaseConverter):
             api_url=self.connection.url,
             api_key=self.connection.api_key,
             strategy=self.strategy,
+            extract_image_block_types=extract_types,
             **self.unstructured_kwargs or {},
         )
+
+    def _process_element_with_image_base64(self, element: dict) -> str:
+        """
+        Process an element that contains base64-encoded image/table data.
+
+        Args:
+            element (dict): The element dictionary from Unstructured API.
+
+        Returns:
+            str: The processed text content with embedded images/tables.
+        """
+        text = str(element.get("text", ""))
+        metadata = element.get("metadata", {})
+
+        if "image_base64" in metadata:
+            base64_data = metadata["image_base64"]
+            element_type = element.get("type", "").lower()
+
+            try:
+                decoded_sample = base64.b64decode(base64_data[:50])
+                if decoded_sample.startswith(b"\xff\xd8\xff"):
+                    image_format = "jpeg"
+                elif decoded_sample.startswith(b"\x89PNG"):
+                    image_format = "png"
+                elif decoded_sample.startswith(b"GIF8"):
+                    image_format = "gif"
+                elif decoded_sample.startswith(b"RIFF") and decoded_sample[8:12] == b"WEBP":
+                    image_format = "webp"
+                else:
+                    image_format = "png"
+            except Exception:
+                image_format = "png"
+
+            image_markdown = f"\n\n![{element_type}](data:image/{image_format};base64,{base64_data})\n\n"
+            text += image_markdown
+
+        return text
 
     def _create_documents(
         self,
@@ -280,7 +363,11 @@ class UnstructuredFileConverter(BaseConverter):
         if document_creation_mode == DocumentCreationMode.ONE_DOC_PER_FILE:
             element_texts = []
             for el in elements:
-                text = str(el.get("text", ""))
+                if self.extract_image_block_types_enabled:
+                    text = self._process_element_with_image_base64(el)
+                else:
+                    text = str(el.get("text", ""))
+
                 if el.get("category") == "Title":
                     element_texts.append("# " + text)
                 else:
@@ -295,12 +382,16 @@ class UnstructuredFileConverter(BaseConverter):
             texts_per_page: defaultdict[int, str] = defaultdict(str)
             meta_per_page: defaultdict[int, dict] = defaultdict(dict)
             for el in elements:
-                text = str(el.get("text", ""))
+                if self.extract_image_block_types_enabled:
+                    text = self._process_element_with_image_base64(el)
+                else:
+                    text = str(el.get("text", ""))
+
                 metadata = copy.deepcopy(metadata)
                 metadata["file_path"] = str(filepath)
-                element_medata = el.get("metadata")
-                if element_medata:
-                    metadata.update(element_medata)
+                element_metadata = el.get("metadata")
+                if element_metadata:
+                    metadata.update(element_metadata)
                 page_number = int(metadata.get("page_number", 1))
 
                 texts_per_page[page_number] += text + separator
@@ -317,9 +408,9 @@ class UnstructuredFileConverter(BaseConverter):
                 metadata = copy.deepcopy(metadata)
                 metadata["file_path"] = str(filepath)
                 metadata["element_index"] = index
-                element_medata = el.get("metadata")
-                if element_medata:
-                    metadata.update(element_medata)
+                element_metadata = el.get("metadata")
+                if element_metadata:
+                    metadata.update(element_metadata)
                 element_category = el.get("category")
                 if element_category:
                     metadata["category"] = element_category
