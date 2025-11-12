@@ -3,7 +3,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from dynamiq.components.converters.unstructured import ConvertStrategy, DocumentCreationMode
+from dynamiq.components.converters.unstructured import ConvertStrategy, DocumentCreationMode, UnstructuredElementTypes
 from dynamiq.components.converters.unstructured import UnstructuredFileConverter as UnstructuredFileConverterComponent
 from dynamiq.connections import Unstructured
 from dynamiq.connections.managers import ConnectionManager
@@ -48,6 +48,13 @@ class UnstructuredFileConverter(ConnectionNode):
             document processing. Defaults to "auto".
         unstructured_kwargs (Optional[dict[str, Any]], optional): Additional parameters to pass to the
             Unstructured API. See Unstructured API docs for available parameters. Defaults to None.
+        extract_image_block_types_enabled (bool, optional): Whether to extract and embed images/tables in the result.
+            When enabled, Base64-encoded images and tables will be decoded and included in the document content.
+            Defaults to False.
+        extract_image_block_types (Optional[list[UnstructuredElementTypes]], optional): List of element types to extract
+            when `extract_image_block_types_enabled` is True.
+            If None and extract_image_block_types_enabled is True, defaults to [Image, Table]
+            Defaults to None.
     """
 
     group: Literal[NodeGroup.CONVERTERS] = NodeGroup.CONVERTERS
@@ -56,6 +63,8 @@ class UnstructuredFileConverter(ConnectionNode):
     document_creation_mode: DocumentCreationMode = DocumentCreationMode.ONE_DOC_PER_FILE
     strategy: ConvertStrategy = ConvertStrategy.AUTO
     unstructured_kwargs: dict[str, Any] | None = None
+    extract_image_block_types_enabled: bool = False
+    extract_image_block_types: list[UnstructuredElementTypes] | None = None
     file_converter: UnstructuredFileConverterComponent | None = None
     input_schema: ClassVar[type[UnstructuredFileConverterInputSchema]] = UnstructuredFileConverterInputSchema
 
@@ -92,6 +101,8 @@ class UnstructuredFileConverter(ConnectionNode):
                 document_creation_mode=self.document_creation_mode,
                 strategy=self.strategy,
                 unstructured_kwargs=self.unstructured_kwargs,
+                extract_image_block_types_enabled=self.extract_image_block_types_enabled,
+                extract_image_block_types=self.extract_image_block_types,
             )
 
     def execute(
