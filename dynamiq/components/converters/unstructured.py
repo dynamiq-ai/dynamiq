@@ -111,6 +111,7 @@ def partition_via_api(
                 "If file is specified in partition_via_api, "
                 "metadata_filename must be specified as well.",
             )
+        file.seek(0)
         files = shared.Files(
             content=file.read(),
             file_name=metadata_filename,
