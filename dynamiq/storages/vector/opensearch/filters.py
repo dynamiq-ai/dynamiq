@@ -92,7 +92,7 @@ def _parse_logical_condition(condition: dict[str, Any], initial: bool = True) ->
                 raise VectorStoreFilterException(msg)
 
         if not _is_all_comparison(conditions):
-            msg = f"A conditions must be either logical or comparison, not both at the same level: {condition}"
+            msg = f"Conditions must be either logical or comparison, not both at the same level: {condition}"
             raise VectorStoreFilterException(msg)
 
     conditions = [_parse_comparison_condition(c) for c in conditions]
@@ -176,7 +176,7 @@ def _greater_than(field: str, value: Any) -> dict[str, Any]:
 
         Returns:
             dict[str, Any]: A greater than comparison filter.
-    b
+
         Raises:
             VectorStoreFilterException: If the value type is not supported.
     """
