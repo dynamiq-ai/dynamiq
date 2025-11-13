@@ -277,9 +277,9 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
                 "_op_type": "index",
                 "_index": self.index_name,
                 "_id": doc.id,
-                "_source": {content_key: doc.content, "metadata": doc.metadata, embedding_key: doc.embedding},
+                "_source": {content_key: doc.content, "metadata": doc.metadata},
             }
-            # Only include embedding field if present
+            # Only include embedding field if present and not None
             if getattr(doc, "embedding", None) is not None:
                 action["_source"][embedding_key] = doc.embedding
 
@@ -353,7 +353,8 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
         knn_query = {embedding_key: {"vector": query_embedding, "k": top_k}}
 
         if filters:
-            knn_query[embedding_key]["filter"] = {"bool": filters}
+            normalized_filters = _normalize_filters(filters)
+            knn_query[embedding_key]["filter"] = {"bool": normalized_filters}
 
         body = {
             "size": top_k,
