@@ -1,3 +1,4 @@
+import ast
 import importlib
 import io
 from copy import deepcopy
@@ -7,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 from RestrictedPython import compile_restricted, safe_builtins, utility_builtins
 from RestrictedPython.Eval import default_guarded_getattr, default_guarded_getitem, default_guarded_getiter
 from RestrictedPython.Guards import guarded_unpack_sequence
+from RestrictedPython.transformer import INSPECT_ATTRIBUTES, RestrictingNodeTransformer, copy_locations
 
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -48,6 +50,59 @@ ALLOWED_MODULES = [
     "matplotlib",
     "scipy",
 ]
+
+ALLOWED_DUNDER_ATTRIBUTES = {"__class__", "__name__", "__qualname__"}
+
+
+class DynamiqRestrictingNodeTransformer(RestrictingNodeTransformer):
+    """Override attribute checks so a short allow-list of dunders remains accessible."""
+
+    allowed_dunder_attributes = ALLOWED_DUNDER_ATTRIBUTES
+
+    def visit_Attribute(self, node):
+        """Same as upstream implementation but permits whitelisted dunders."""
+        if node.attr.startswith("_") and node.attr != "_" and node.attr not in self.allowed_dunder_attributes:
+            self.error(
+                node,
+                f'"{node.attr}" is an invalid attribute name because it starts with "_".',
+            )
+
+        if node.attr.endswith("__roles__"):
+            self.error(
+                node,
+                f'"{node.attr}" is an invalid attribute name because it ends with "__roles__".',
+            )
+
+        if node.attr in INSPECT_ATTRIBUTES:
+            self.error(
+                node,
+                f'"{node.attr}" is a restricted name, that is forbidden to access in RestrictedPython.',
+            )
+
+        if isinstance(node.ctx, ast.Load):
+            node = self.node_contents_visit(node)
+            new_node = ast.Call(
+                func=ast.Name("_getattr_", ast.Load()),
+                args=[node.value, ast.Constant(node.attr)],
+                keywords=[],
+            )
+
+            copy_locations(new_node, node)
+            return new_node
+
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            node = self.node_contents_visit(node)
+            new_value = ast.Call(
+                func=ast.Name("_write_", ast.Load()),
+                args=[node.value],
+                keywords=[],
+            )
+
+            copy_locations(new_value, node.value)
+            node.value = new_value
+            return node
+
+        raise NotImplementedError(f"Unknown ctx type: {type(node.ctx)}")
 
 
 def make_safe_print(printer: Callable[..., Any]):
@@ -96,6 +151,14 @@ def safe_getattr(obj: Any, name: str, default=None) -> Any:
     """
     Safe version of getattr that uses guarded getattr.
     """
+    if name in ALLOWED_DUNDER_ATTRIBUTES:
+        try:
+            return getattr(obj, name)
+        except AttributeError:
+            if default is not None:
+                return default
+            raise
+
     try:
         return default_guarded_getattr(obj, name)
     except (AttributeError, TypeError):
@@ -177,7 +240,7 @@ def compile_and_execute(code: str, restricted_globals: dict) -> dict:
     Returns the updated restricted_globals.
     """
     try:
-        byte_code = compile_restricted(code, "<inline>", "exec")
+        byte_code = compile_restricted(code, "<inline>", "exec", policy=DynamiqRestrictingNodeTransformer)
         exec(byte_code, restricted_globals)  # nosec
         return restricted_globals
     except Exception as e:

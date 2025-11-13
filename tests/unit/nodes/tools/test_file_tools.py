@@ -1,4 +1,5 @@
 import uuid
+from io import BytesIO
 
 import pytest
 
@@ -170,3 +171,31 @@ def test_file_read_tool_appends_hint_for_non_text(monkeypatch, file_store, llm_m
         "Use FileSearchTool to search this processed content without re-reading the original file.]"
     )
     assert result.output["content"].endswith(expected_hint)
+
+
+def test_file_read_tool_limits_spreadsheet_preview(file_store, llm_model):
+    """Large spreadsheets should be summarized instead of dumping raw XML."""
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    import pandas as pd
+
+    df = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=60, freq="D"),
+            "amount": range(60),
+            "type": ["debit" if i % 2 == 0 else "credit" for i in range(60)],
+        }
+    )
+
+    buffer = BytesIO()
+    df.to_excel(buffer, index=False)
+    buffer.seek(0)
+    file_store.store("data/transactions.xlsx", buffer.getvalue())
+
+    result = tool.run({"file_path": "data/transactions.xlsx"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert "Spreadsheet preview" in content
+    assert "Rows: 60" in content
+    assert "showing up to 5 row(s)" in content

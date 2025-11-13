@@ -196,6 +196,12 @@ class FileReadTool(Node):
     max_size: int = Field(default=10000, description="Maximum size in bytes before chunking (default: 10000)")
     chunk_size: int = Field(default=1000, description="Size of each chunk in bytes (default: 1000)")
     converter_mapping: dict[FileType, Node] | None = None
+    spreadsheet_preview_rows: int = Field(
+        default=5, description="Maximum number of rows to show per sheet when previewing spreadsheets."
+    )
+    spreadsheet_preview_max_chars: int = Field(
+        default=8000, description="Maximum characters to emit per sheet preview to avoid massive outputs."
+    )
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileReadInputSchema]] = FileReadInputSchema
     _connection_manager: ConnectionManager | None = PrivateAttr(default=None)
@@ -291,6 +297,11 @@ class FileReadTool(Node):
         """
 
         try:
+            if detected_type == FileType.SPREADSHEET:
+                spreadsheet_preview = self._render_spreadsheet_preview(file, filename)
+                if spreadsheet_preview:
+                    return spreadsheet_preview, None
+
             if detected_type in self.converter_mapping:
 
                 converter = self._get_converter_for_type(detected_type, document_mode)
@@ -349,6 +360,101 @@ class FileReadTool(Node):
         except Exception as e:
             logger.warning(f"File processing failed with converter: {str(e)}")
         return None, None
+
+    def _render_spreadsheet_preview(self, file: BytesIO, filename: str) -> str | None:
+        """Return a lightweight textual preview for spreadsheets using pandas head() per sheet."""
+        try:
+            import pandas as pd
+        except Exception as exc:  # noqa: BLE001 optional dependency
+            logger.debug("pandas unavailable for spreadsheet preview: %s", exc)
+            return None
+
+        try:
+            file.seek(0)
+            buffer = BytesIO(file.read())
+        except Exception as exc:
+            logger.warning("Failed to buffer spreadsheet %s for preview: %s", filename, exc)
+            return None
+
+        try:
+            buffer.seek(0)
+            with pd.ExcelFile(buffer) as excel_file:
+
+                sheet_dimensions = self._sheet_dimensions_from_workbook(excel_file)
+
+                limit = self.spreadsheet_preview_rows
+                preview_segments: list[str] = [
+                    f"Spreadsheet preview for '{filename}' "
+                    f"({len(excel_file.sheet_names)} sheet{'s' if len(excel_file.sheet_names) != 1 else ''})."
+                ]
+
+                pd_options = pd.option_context("display.width", 120, "display.max_colwidth", 200)
+                with pd_options:
+                    for sheet_name in excel_file.sheet_names:
+                        try:
+                            preview_frame = excel_file.parse(sheet_name=sheet_name, nrows=limit)
+                        except Exception as exc:
+                            logger.warning("Failed to read preview rows for sheet %s: %s", sheet_name, exc)
+                            continue
+
+                        total_rows, total_columns = sheet_dimensions.get(
+                            sheet_name,
+                            (len(preview_frame.index), len(preview_frame.columns)),
+                        )
+
+                        preview_segments.append(
+                            f"=== Sheet '{sheet_name or '(Unnamed Sheet)'}' "
+                            f"— Rows: {total_rows:,}, Columns: {total_columns:,} "
+                            f"(showing up to {limit} row(s)) ==="
+                        )
+
+                        if preview_frame.empty:
+                            preview_segments.append("[Sheet is empty]")
+                            continue
+
+                        markdown = preview_frame.to_markdown(index=False)
+                        truncated = False
+                        max_chars = self.spreadsheet_preview_max_chars
+                        if max_chars and len(markdown) > max_chars:
+                            markdown = f"{markdown[: max_chars - 3]}..."
+                            truncated = True
+
+                        preview_segments.append(markdown)
+                        if truncated:
+                            preview_segments.append(f"[Preview truncated to {max_chars} characters]")
+
+                        if total_rows > limit:
+                            preview_segments.append(f"... showing only the first {limit} row(s).")
+
+                return "\n\n".join(preview_segments) if len(preview_segments) > 1 else None
+
+        except Exception as exc:
+            logger.warning("Failed to open spreadsheet %s for preview: %s", filename, exc)
+            return None
+
+    @staticmethod
+    def _sheet_dimensions_from_workbook(excel_file: Any) -> dict[str, tuple[int, int]]:
+        workbook = getattr(excel_file, "book", None)
+        if workbook is None:
+            return {}
+
+        dimensions: dict[str, tuple[int, int]] = {}
+        for sheet_name in getattr(workbook, "sheetnames", []):
+            worksheet = workbook[sheet_name]
+
+            max_row = getattr(worksheet, "max_row", 0) or 0
+            max_column = getattr(worksheet, "max_column", 0) or 0
+
+            try:
+                header_row = next(worksheet.iter_rows(values_only=True, max_row=1), None)
+            except Exception:
+                header_row = None
+            has_header = bool(header_row and any(value is not None for value in header_row))
+
+            total_rows = max(max_row - (1 if has_header else 0), 0)
+            dimensions[sheet_name] = (total_rows, max_column)
+
+        return dimensions
 
     @property
     def to_dict_exclude_params(self):
@@ -415,6 +521,7 @@ class FileReadTool(Node):
                 cached_text, cached_path = self._load_cached_text(input_data.file_path)
 
             if cached_text:
+                self._log_text_preview(cached_text, "cached extracted text")
                 processed = self._render_text_content(
                     text_content=cached_text,
                     mode=mode,
@@ -446,6 +553,7 @@ class FileReadTool(Node):
                         logger.info(
                             f"Tool {self.name} - {self.id}: successfully processed file and extracted text content"
                         )
+                        self._log_text_preview(text_content, "extracted text")
 
                         cached_path = None
                         hint_enabled = False
@@ -686,6 +794,17 @@ class FileReadTool(Node):
             return f"{content}{hint}"
         return content
 
+    def _log_text_preview(self, text: str, context: str, limit: int = 200) -> None:
+        """Emit a short preview of extracted text so logs show what was parsed."""
+        if not text:
+            return
+        preview = text.strip().replace("\n", " ")
+        preview = preview[:limit]
+        suffix = "..." if len(text.strip()) > limit else ""
+        logger.info(
+            f"Tool {self.name} - {self.id}: {context} preview ({min(len(preview), limit)} chars) => {preview}{suffix}"
+        )
+
 
 class FileWriteTool(Node):
     """
@@ -748,8 +867,19 @@ class FileWriteTool(Node):
                 overwrite=overwrite_flag,
             )
 
+            file_buffer = BytesIO(payload)
+            file_buffer.name = input_data.file_path
+            file_buffer.description = (input_data.metadata or {}).get("description", "FileWriteTool output")
+            file_buffer.content_type = content_type
+            file_buffer.seek(0)
+
+            message = f"File '{input_data.file_path}' written successfully"
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(file_info)[:200]}...")
-            return {"content": f"File '{input_data.file_path}' written successfully"}
+            return {
+                "content": message,
+                "file_info": file_info.model_dump(),
+                "files": [file_buffer],
+            }
 
         except Exception as e:
             logger.error(f"Tool {self.name} - {self.id}: failed to write file. Error: {str(e)}")

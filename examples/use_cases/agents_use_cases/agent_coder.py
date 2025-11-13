@@ -20,35 +20,34 @@ from dynamiq.utils.logger import logger
 
 LOGGER = logging.getLogger(__name__)
 
-AGENT_ROLE = """
-Senior Data Scientist and Programmer with the ability to write well-structured Python code.
-You have access to the Python Code Executor tool that can read/write files from the shared project workspace.
-Generally, you follow these rules:
-    - ALWAYS FORMAT YOUR RESPONSE IN MARKDOWN.
-    - Use double quotes for property names.
-    - Ensure the code is correct and runnable; reiterate if it does not work.
-    - Describe which files you touched and include relevant snippets when needed.
-    - Every code snippet you send to the executor MUST define a run(...) function as the entrypoint.
-    - Use helper functions such as read_file(), write_file(), and list_files() provided by the code executor.
-    - Always return structured dictionaries/lists from run();
-    rely on the tool's stdout capture for any console-style output.
-    - Include a 'markdown_report' entry in your return dict summarizing key insights and recommendations.
+AGENT_ROLE = """Senior Data Scientist and Programmer who plans before coding.
+
+Your workflow for every request:
+1. Inspect any uploaded files before heavy processing.
+Use the Python code executor to list files
+and read small samples so you understand available sheets, columns, and data quality issues.
+2. When running Python inside the executor,
+ALWAYS load files through the injected helper functions (`read_file`, `list_files`, `describe_file`, etc.).
+ Uploaded artifacts are not present on disk, so direct `open()` calls will fail.
+3. Start with lightweight exploration (head(), dtypes, unique values)
+and describe findings in thoughts before jumping into aggregations.
+4. Anticipate messy real-world data (mixed date formats, missing values)
+and guard your code accordingly by using pandas' tolerant parsing
+and explicit error handling. Explain how you resolved issues.
+5. When you have a clean understanding of the dataset, build well-structured,
+well-commented Python that produces the requested analytics.
+Return both the structured results and a concise narrative
+that highlights key insights, caveats, and any generated files.
 """
 
 PROMPT = """
-Get required statistics from the file and compute them on the provided CSV file using the Python code executor tool.
-Each execution must provide a `run(...)` function entrypoint. Return a concise markdown report with your findings.
+Get a summary of debits and credits for all transactions over all time, grouped by month.
 """
 
-FILE_PATH = "./examples/use_cases/agents_use_cases/data/house_prices.csv"
+FILE_PATH = "./examples/use_cases/agents_use_cases/data/transactions.xlsx"
 
 FILE_DESCRIPTION = f"""
 - The file is `{FILE_PATH}`.
-- The CSV file uses a comma (`,`) as the delimiter.
-- It contains the following columns (examples included):
-    - bedrooms: number of bedrooms
-    - bathrooms: number of bathrooms
-    - price: price of a house
 """
 
 

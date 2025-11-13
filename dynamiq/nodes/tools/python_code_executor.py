@@ -2,6 +2,9 @@ import importlib
 import inspect
 import io
 import json
+import os
+import shutil
+import tempfile
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -34,6 +37,30 @@ class PythonCodeExecutorFileWorkspace(BaseModel):
     """Helper exposing safe file store operations for RestrictedPython code."""
 
     file_store: FileStore = Field(..., description="File storage backend shared with the executor.")
+    TEXTUAL_EXTENSIONS: ClassVar[set[str]] = {
+        "txt",
+        "md",
+        "markdown",
+        "json",
+        "yaml",
+        "yml",
+        "csv",
+        "tsv",
+        "toml",
+        "xml",
+        "html",
+        "htm",
+        "css",
+        "js",
+        "py",
+        "java",
+        "ts",
+        "tsx",
+        "c",
+        "cpp",
+        "rs",
+        "go",
+    }
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -49,6 +76,28 @@ class PythonCodeExecutorFileWorkspace(BaseModel):
     def read_bytes(self, path: str) -> bytes:
         """Read file as bytes."""
         return self.file_store.retrieve(path)
+
+    def read(
+        self,
+        path: str,
+        *,
+        encoding: str = "utf-8",
+        errors: str = "ignore",
+        force_text: bool | None = None,
+    ) -> str | bytes:
+        """
+        Read a file, automatically decoding text content while keeping binary files intact.
+        """
+        payload = self.file_store.retrieve(path)
+
+        decode_as_text = force_text if force_text is not None else self._should_decode_as_text(path, payload)
+        if not decode_as_text:
+            return payload
+
+        try:
+            return payload.decode(encoding, errors=errors)
+        except UnicodeDecodeError:
+            return payload
 
     def write_text(
         self,
@@ -126,6 +175,19 @@ class PythonCodeExecutorFileWorkspace(BaseModel):
         info_dict.update({"preview": preview_text, "preview_is_text": preview_is_text})
         return info_dict
 
+    @classmethod
+    def _should_decode_as_text(cls, path: str, payload: bytes) -> bool:
+        extension = os.path.splitext(path)[1].lower().lstrip(".")
+        if extension in cls.TEXTUAL_EXTENSIONS:
+            return True
+        if b"\x00" in payload:
+            return False
+        try:
+            payload.decode("utf-8")
+            return True
+        except UnicodeDecodeError:
+            return False
+
     def _store_file(
         self,
         path: str,
@@ -188,13 +250,22 @@ class PythonCodeExecutor(Node):
     name: str = "PythonCodeExecutor"
     description: str = (
         "Runs dynamic Python code safely via RestrictedPython. The tool injects helper functions such as read_file(), "
-        "write_file(), and list_files(), exposing the shared file store so you can read/write artifacts inside the "
-        "workspace. Available libraries include: pandas, numpy, scipy, requests, pdfplumber, PyPDF2/pypdf, docx "
-        "(python-docx), pptx (python-pptx), markdown, openpyxl, matplotlib (with `matplotlib.pyplot` preloaded as "
-        "`plt`), and standard library utilities. Always return structured results from `run` — any `print()` output is "
-        "captured separately in a `stdout` field.\n\n"
-        "- Every code snippet you send to the executor MUST define a run(...) function as the entrypoint.\n"
-        "- Use helper functions such as read_file(), write_file(), and list_files() provided by the code executor."
+        "write_file(), and list_files(), exposing the shared file store so you can read/write artifacts without having "
+        "to manually copy data into the sandbox. "
+        "Available libraries include: pandas, numpy, scipy, requests, pdfplumber, "
+        "PyPDF2/pypdf, docx (python-docx), pptx (python-pptx), "
+        "markdown, openpyxl, matplotlib (with `matplotlib.pyplot` "
+        "preloaded as `plt`), and standard library utilities. "
+        "Always return structured results from `run` — any `print()` "
+        "output is captured separately in a `stdout` field.\n\n"
+        "- Every code snippet you send to the executor "
+        "MUST define a run(...) function as the entrypoint.\n"
+        "- Use the injected helper functions "
+        "(read_file, write_file, list_files, etc.) to access the shared file store; "
+        "uploaded files are not mirrored into the working directory, "
+        "so direct `open('file.xlsx')` calls will fail. "
+        "The temporary working directory starts empty "
+        "and is only for artifacts you create during execution."
     )
     file_store: FileStore = Field(..., description="File storage backend shared with the agent.")
     is_files_allowed: bool = True
@@ -220,6 +291,12 @@ class PythonCodeExecutor(Node):
         helpers, helper_aliases = self._build_file_helpers(file_manager)
 
         stdout_collector = PrintCollector()
+
+        def _print_factory(getattr_func=None):
+            """RestrictedPython expects _print_ to be a factory; bind it to our collector."""
+            stdout_collector._getattr_ = getattr_func
+            return stdout_collector
+
         safe_print = make_safe_print(stdout_collector._call_print)
 
         restricted_globals = get_restricted_globals()
@@ -231,55 +308,67 @@ class PythonCodeExecutor(Node):
                 "safe_print": safe_print,
                 "print": safe_print,
                 "_write_": guarded_write,
-                "_print_": stdout_collector,
+                "_print_": _print_factory,
                 "_print": stdout_collector._call_print,
             }
         )
         restricted_globals.update(self._preload_optional_modules())
 
-        try:
-            restricted_globals = compile_and_execute(input_data.code, restricted_globals)
-        except Exception as e:  # pragma: no cover - RestrictedPython already sanitizes stack
-            error_msg = f"Code compilation error: {str(e)}"
-            logger.error(error_msg)
-            raise ToolExecutionException(error_msg, recoverable=True)
+        workspace_dir = tempfile.mkdtemp(prefix="dynamiq_executor_")
+        original_cwd = os.getcwd()
 
-        run_callable = restricted_globals.get("run")
-        if not callable(run_callable):
-            raise ToolExecutionException(
-                "The provided code must define a callable function named 'run'.", recoverable=True
+        try:
+            os.chdir(workspace_dir)
+
+            try:
+                restricted_globals = compile_and_execute(input_data.code, restricted_globals)
+            except Exception as e:  # pragma: no cover - RestrictedPython already sanitizes stack
+                error_msg = f"Code compilation error: {str(e)}"
+                logger.error(error_msg)
+                raise ToolExecutionException(error_msg, recoverable=True)
+
+            run_callable = restricted_globals.get("run")
+            if not callable(run_callable):
+                raise ToolExecutionException(
+                    "The provided code must define a callable function named 'run'.", recoverable=True
+                )
+
+            files, mapped_inputs = self._normalize_files(input_data.files)
+            context_args = self._build_context(
+                files=files,
+                mapped_inputs=mapped_inputs,
+                file_manager=file_manager,
+                stdout=stdout_collector,
+                params=input_data.params,
+                helpers=helpers,
             )
+            context_args["local_workspace_dir"] = workspace_dir
 
-        files, mapped_inputs = self._normalize_files(input_data.files)
-        context_args = self._build_context(
-            files=files,
-            mapped_inputs=mapped_inputs,
-            file_manager=file_manager,
-            stdout=stdout_collector,
-            params=input_data.params,
-            helpers=helpers,
-        )
+            args, kwargs = self._prepare_callable_arguments(run_callable, context_args)
 
-        args, kwargs = self._prepare_callable_arguments(run_callable, context_args)
+            try:
+                result = run_callable(*args, **kwargs)
+            except Exception as e:  # pragma: no cover - sanitized error forwarded to the agent
+                error_msg = f"Code execution error: {str(e)}"
+                logger.error(error_msg)
+                raise ToolExecutionException(error_msg, recoverable=True)
 
-        try:
-            result = run_callable(*args, **kwargs)
-        except Exception as e:  # pragma: no cover - sanitized error forwarded to the agent
-            error_msg = f"Code execution error: {str(e)}"
-            logger.error(error_msg)
-            raise ToolExecutionException(error_msg, recoverable=True)
-
-        stdout_value = stdout_collector().strip()
-        content = self._attach_stdout(result, stdout_value)
-        sanitized_content = self._sanitize_output(content)
-        if stdout_value:
-            logger.debug(f"Tool {self.name} - {self.id}: captured stdout ({len(stdout_value)} chars).")
-        keys_repr = list(sanitized_content.keys()) if isinstance(sanitized_content, dict) else type(sanitized_content)
-        logger.info(
-            f"Tool {self.name} - {self.id}: finished execution with keys {keys_repr} "
-            f"preview={self._preview_for_log(sanitized_content)}"
-        )
-        return {"content": sanitized_content}
+            stdout_value = stdout_collector().strip()
+            content = self._attach_stdout(result, stdout_value)
+            sanitized_content = self._sanitize_output(content)
+            if stdout_value:
+                logger.debug(f"Tool {self.name} - {self.id}: captured stdout ({len(stdout_value)} chars).")
+            keys_repr = (
+                list(sanitized_content.keys()) if isinstance(sanitized_content, dict) else type(sanitized_content)
+            )
+            logger.info(
+                f"Tool {self.name} - {self.id}: finished execution with keys {keys_repr} "
+                f"preview={self._preview_for_log(sanitized_content)}"
+            )
+            return {"content": sanitized_content}
+        finally:
+            os.chdir(original_cwd)
+            shutil.rmtree(workspace_dir, ignore_errors=True)
 
     def _normalize_files(self, files: list[Any] | FileMappedInput | None) -> tuple[list[Any], dict[str, Any]]:
         mapped_inputs: dict[str, Any] = {}
@@ -351,6 +440,7 @@ class PythonCodeExecutor(Node):
             "list_files": file_manager.list,
             "read_text_file": file_manager.read_text,
             "read_bytes_file": file_manager.read_bytes,
+            "read_file_auto": file_manager.read,
             "write_text_file": file_manager.write_text,
             "write_bytes_file": file_manager.write_bytes,
             "write_file": file_manager.write,
@@ -361,7 +451,7 @@ class PythonCodeExecutor(Node):
 
         alias_map = {
             "list_files": helper_funcs["list_files"],
-            "read_file": helper_funcs["read_text_file"],
+            "read_file": helper_funcs["read_file_auto"],
             "read_file_text": helper_funcs["read_text_file"],
             "read_file_bytes": helper_funcs["read_bytes_file"],
             "write_file": helper_funcs["write_file"],
