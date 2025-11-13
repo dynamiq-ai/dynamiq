@@ -746,7 +746,7 @@ class Anyscale(BaseApiKeyConnection):
 
 
 class Firecrawl(Http):
-    url: str = Field(default="https://api.firecrawl.dev/v1/")
+    url: str = Field(default="https://api.firecrawl.dev/v2/")
     api_key: str = Field(default_factory=lambda: get_env_var("FIRECRAWL_API_KEY"))
     method: Literal[HTTPMethod.POST] = HTTPMethod.POST
 

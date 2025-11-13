@@ -14,8 +14,8 @@ def mock_firecrawl_response(mocker):
             "markdown": "# Test Page\n\nThis is a test page with some content.",
             "html": "<html><body><h1>Test Page</h1><p>This is a test page with some content.</p></body></html>",
             "links": [
-                {"url": "https://example.com/page1", "text": "Page 1"},
-                {"url": "https://example.com/page2", "text": "Page 2"},
+                "https://example.com/page1",
+                "https://example.com/page2",
             ],
             "metadata": {"title": "Test Page", "description": "Test page description"},
         },
@@ -56,7 +56,7 @@ def test_firecrawl_basic_scrape(mock_firecrawl_requests, mock_firecrawl_response
 
     mock_firecrawl_requests.assert_called_once()
     call_args = mock_firecrawl_requests.call_args
-    assert call_args[1]["url"] == "https://api.firecrawl.dev/v1/scrape"
+    assert call_args[1]["url"] == "https://api.firecrawl.dev/v2/scrape"
 
     request_body = call_args[1]["json"]
     assert request_body["url"] == input_data["url"]
@@ -81,11 +81,11 @@ def test_firecrawl_agent_optimized(mock_firecrawl_requests, mock_firecrawl_respo
     assert result.status == RunnableStatus.SUCCESS
 
     content = result.output["content"]
-    assert "## Source URL" in content
+    assert "## Firecrawl Scrape Result" in content
     assert input_data["url"] in content
-    assert "Markdown Content" in content
+    assert "## Markdown" in content
     assert mock_firecrawl_response["data"]["markdown"] in content
-    assert "HTML" in content
+    assert "## HTML" in content
     assert mock_firecrawl_response["data"]["html"] in content
 
     mock_firecrawl_requests.assert_called_once()

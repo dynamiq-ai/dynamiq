@@ -35,38 +35,30 @@ Examples:
 - {"url": "https://news.com", "remove_selector": ".ads"}
 - {"url": "https://blog.com", "include_images": true}"""
 
-DESCRIPTION_SEARCH = """Searches the web using Jina with geographic targeting and customizable response formats.
+DESCRIPTION_SEARCH = """Searches the web with the Jina Search API and returns LLM-ready SERP data.
 
-Key Capabilities:
-- Geographic targeting for location-based searches
-- Site-specific searches for authoritative sources
-- Customizable result counts (1-100) for analysis scope
-- Flexible response formatting for different use cases
+Highlights:
+- Supports geo/language targeting plus per-domain searches for authoritative sources
+- Controls payload size with `include_full_content`, `X-Respond-With`, and image/links summaries
+- Flexible renderers (markdown/html/text/screenshot/pageshot) and browser engines
+- Complete header access (`X-With-*`, `X-Retain-Images`, `X-No-Cache`, `X-Proxy-Url`, etc.) for advanced use cases
 
-Usage Strategy:
-- Local searches: Use implicit ("near me") or explicit location terms
-- Research: Combine with site parameter for quality sources
-- Analysis: Adjust count based on comprehensiveness needed
+Common Parameters:
+- query (required): What to search for
+- max_results (1-100), page: Tune breadth and pagination
+- country, location, language, locale: Localize SERP responses
+- site: Lock search scope to a domain
+- return_format: markdown, html, text, screenshot, or pageshot
+- include_links / include_images: Summaries (`true`) or exhaustive lists (`all`)
+- include_favicons / include_favicon: Surface favicons per SERP result or per page
+- include_full_content: Pull full article text (switches engine to browser automatically unless overridden)
+- no_cache, timeout, cookies, proxy_url: Reliability controls
+- retain_images, respond_with, engine: Low-level knobs for payload control
 
-Parameter Guide:
-- query: Search query text (e.g., "restaurants near me")
-- max_results: Maximum results (1-100)
-- country: Two-letter country code (e.g., "US", "GB")
-- location: Geographic location for search origin (e.g., "New York")
-- language: Two-letter language code (e.g., "en", "es")
-- return_format: Response format (markdown, html, text, screenshot, pageshot)
-- include_full_content: Include full content of search results
-- site: Limit search to specific domain (e.g., "example.com")
-- include_images: Include images in search results
-- include_links: Include link summaries in results
-- include_favicons: Include SERP favicons
-- include_favicon: Include individual page favicon
-
-
-Examples:
-- {"query": "restaurants near downtown", "site": "yelp.com"}
-- {"query": "ML papers", "site": "arxiv.org", "max_results": 20}
-- {"query": "Tokyo weather", "max_results": 5}"""
+Example Invocations:
+- {"query": "restaurants near downtown", "site": "yelp.com", "include_links": true}
+- {"query": "latest ML papers", "return_format": "markdown", "include_full_content": true, "include_images": "all"}
+- {"query": "Tokyo weather", "country": "JP", "language": "ja", "max_results": 5}"""
 
 
 class JinaScrapeInputSchema(BaseModel):
@@ -263,6 +255,11 @@ class JinaScrapeTool(ConnectionNode):
         return {"content": result}
 
 
+SummaryPreference = bool | Literal["all"]
+EnginePreference = Literal["browser", "direct", "cf-browser-rendering"]
+RetainImagesPreference = Literal["none"]
+
+
 class JinaSearchInputSchema(BaseModel):
     query: str | None = Field(None, description="Search query text")
     max_results: int | None = Field(None, description="Maximum number of search results (1-100)")
@@ -271,12 +268,23 @@ class JinaSearchInputSchema(BaseModel):
     language: str | None = Field(None, description="Two-letter language code for results")
     page: int | None = Field(None, description="Page offset for pagination")
     site: str | None = Field(None, description="Limit search to specific domain")
-    return_format: str | None = Field(None, description="Response format (markdown, html, text, screenshot, pageshot)")
-    include_images: bool | None = Field(None, description="Include images in search results")
-    include_links: bool | None = Field(None, description="Include link summaries in results")
+    return_format: JinaResponseFormat | None = Field(
+        None, description="Response format (markdown, html, text, screenshot, pageshot)"
+    )
+    include_images: SummaryPreference | None = Field(
+        None, description="Include image summaries (True) or 'all' images per SERP entry"
+    )
+    include_links: SummaryPreference | None = Field(
+        None, description="Include link summaries (True) or 'all' links per SERP entry"
+    )
     include_favicons: bool | None = Field(None, description="Include SERP favicons")
     include_favicon: bool | None = Field(None, description="Include individual page favicon")
     include_full_content: bool | None = Field(None, description="Include full content of search results")
+    retain_images: RetainImagesPreference | None = Field(
+        None, description="Controls X-Retain-Images header (e.g., 'none' to strip images)"
+    )
+    respond_with: str | None = Field(None, description="Explicit X-Respond-With value")
+    engine: EnginePreference | None = Field(None, description="Engine override ('browser', 'direct')")
     no_cache: bool | None = Field(None, description="Bypass cache for real-time data")
     generate_alt_text: bool | None = Field(None, description="Generate alt text for images without alt tags")
     timeout: int | None = Field(None, description="Request timeout in seconds")
@@ -305,10 +313,13 @@ class JinaSearchTool(ConnectionNode):
           site (Optional[str]): Domain to limit search to.
           return_format (JinaResponseFormat): Response format preference.
           include_images (bool): Include images in search results.
-          include_links (bool): Include link summaries.
+          include_links (bool | Literal["all"]): Include link summaries or all links.
           include_favicons (bool): Include SERP favicons.
           include_favicon (bool): Include individual page favicon.
           include_full_content (bool): Include full content of search results.
+          retain_images (Literal["none"] | None): Override X-Retain-Images header.
+          respond_with (Optional[str]): Explicit X-Respond-With header (e.g., "no-content").
+          engine (Optional[str]): Override engine ("browser", "direct", or "cf-browser-rendering").
           no_cache (bool): Bypass cache for real-time data.
           generate_alt_text (bool): Generate alt text for images.
           timeout (Optional[int]): Request timeout in seconds.
@@ -335,11 +346,22 @@ class JinaSearchTool(ConnectionNode):
     site: str | None = Field(None, description="Domain to limit search to")
     return_format: JinaResponseFormat = Field(default=JinaResponseFormat.DEFAULT, description="Response format")
 
-    include_images: bool = Field(default=False, description="Include images in search results")
-    include_links: bool = Field(default=False, description="Include link summaries")
+    include_images: SummaryPreference = Field(
+        default=False, description="Include image summaries (True) or 'all' images per SERP entry"
+    )
+    include_links: SummaryPreference = Field(
+        default=False, description="Include link summaries (True) or 'all' links per SERP entry"
+    )
     include_favicons: bool = Field(default=False, description="Include SERP favicons")
     include_favicon: bool = Field(default=False, description="Include individual page favicon")
     include_full_content: bool = Field(default=False, description="Include full content of results")
+    retain_images: RetainImagesPreference | None = Field(
+        default=None, description="Controls X-Retain-Images header (e.g., 'none' to strip images)"
+    )
+    respond_with: str | None = Field(default=None, description="Explicit X-Respond-With header value")
+    engine: EnginePreference | None = Field(
+        default=None, description="Override engine ('browser', 'direct', or 'cf-browser-rendering')"
+    )
 
     no_cache: bool = Field(default=False, description="Bypass cache for real-time data")
     generate_alt_text: bool = Field(default=False, description="Generate alt text for images")
@@ -352,7 +374,21 @@ class JinaSearchTool(ConnectionNode):
 
     input_schema: ClassVar[type[JinaSearchInputSchema]] = JinaSearchInputSchema
 
-    def _build_headers(self, input_data: JinaSearchInputSchema) -> dict[str, str]:
+    @staticmethod
+    def _summary_header_value(value: SummaryPreference | None) -> str | None:
+        """Map boolean or literal summary preferences to header values."""
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized == "all":
+                return "all"
+            if normalized in {"true", "unique"}:
+                return "true"
+            return None
+        if value:
+            return "true"
+        return None
+
+    def _build_headers(self, input_data: JinaSearchInputSchema, include_full: bool) -> dict[str, str]:
         """Build request headers based on configuration and input parameters."""
         headers = {
             **self.connection.headers,
@@ -364,14 +400,22 @@ class JinaSearchTool(ConnectionNode):
         if site:
             headers["X-Site"] = site
 
-        include_links = input_data.include_links if input_data.include_links is not None else self.include_links
-        if include_links:
-            headers["X-With-Links-Summary"] = "true"
+        include_links_value = input_data.include_links if input_data.include_links is not None else self.include_links
+        links_header = self._summary_header_value(include_links_value)
+        if links_header:
+            headers["X-With-Links-Summary"] = links_header
 
-        include_images = input_data.include_images if input_data.include_images is not None else self.include_images
-        if include_images:
-            headers["X-With-Images-Summary"] = "true"
-        else:
+        include_images_value = (
+            input_data.include_images if input_data.include_images is not None else self.include_images
+        )
+        images_header = self._summary_header_value(include_images_value)
+        if images_header:
+            headers["X-With-Images-Summary"] = images_header
+
+        retain_images_value = input_data.retain_images or self.retain_images
+        if retain_images_value:
+            headers["X-Retain-Images"] = retain_images_value
+        elif not images_header:
             headers["X-Retain-Images"] = "none"
 
         no_cache = input_data.no_cache if input_data.no_cache is not None else self.no_cache
@@ -384,12 +428,10 @@ class JinaSearchTool(ConnectionNode):
         if generate_alt:
             headers["X-With-Generated-Alt"] = "true"
 
-        include_full = (
-            input_data.include_full_content
-            if input_data.include_full_content is not None
-            else self.include_full_content
-        )
-        if not include_full:
+        respond_with = input_data.respond_with or self.respond_with
+        if respond_with:
+            headers["X-Respond-With"] = respond_with
+        elif not include_full:
             headers["X-Respond-With"] = "no-content"
 
         include_favicon = input_data.include_favicon if input_data.include_favicon is not None else self.include_favicon
@@ -400,10 +442,11 @@ class JinaSearchTool(ConnectionNode):
         if return_format != JinaResponseFormat.DEFAULT:
             headers["X-Return-Format"] = return_format.value
 
-        if include_full:
-            headers["X-Engine"] = "browser"
+        engine = input_data.engine or self.engine
+        if engine:
+            headers["X-Engine"] = engine
         else:
-            headers["X-Engine"] = "direct"
+            headers["X-Engine"] = "browser" if include_full else "direct"
 
         include_favicons = (
             input_data.include_favicons if input_data.include_favicons is not None else self.include_favicons
@@ -462,23 +505,23 @@ class JinaSearchTool(ConnectionNode):
 
         return body
 
-    def _format_search_results(self, results: dict[str, Any]) -> str:
+    def _format_search_results(self, results: dict[str, Any], include_full: bool) -> str:
         """Format the search results into a readable string format."""
         formatted_results = []
-        for result in results.get("data", []):
-            formatted_results.extend(
-                [
-                    f"Source: {result.get('url')}",
-                    f"Title: {result.get('title')}",
-                    f"Description: {result.get('description')}",
-                    *(
-                        [f"Content: {result.get('content')}"]
-                        if self.include_full_content and result.get("content")
-                        else []
-                    ),
-                    "",
-                ]
-            )
+        data = results.get("data", [])
+        for idx, result in enumerate(data, start=1):
+            title = result.get("title") or result.get("url") or f"Result {idx}"
+            formatted_results.append(f"### Result {idx}: {title}")
+            if result.get("url"):
+                formatted_results.append(f"- URL: {result.get('url')}")
+            if result.get("description"):
+                formatted_results.append(f"- Description: {result.get('description')}")
+            if include_full and result.get("content"):
+                formatted_results.append(f"- Content: {result.get('content')}")
+            if result.get("images"):
+                image_lines = [f"    • {label}: {img_url}" for label, img_url in result["images"].items()]
+                formatted_results.append("- Images:\n" + "\n".join(image_lines))
+            formatted_results.append("")
         return "\n".join(formatted_results).strip()
 
     def execute(self, input_data: JinaSearchInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
@@ -498,7 +541,13 @@ class JinaSearchTool(ConnectionNode):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        headers = self._build_headers(input_data)
+        include_full = (
+            input_data.include_full_content
+            if input_data.include_full_content is not None
+            else self.include_full_content
+        )
+
+        headers = self._build_headers(input_data, include_full)
         request_body = self._build_request_body(input_data)
 
         try:
@@ -518,16 +567,25 @@ class JinaSearchTool(ConnectionNode):
                 recoverable=True,
             )
 
-        formatted_results = self._format_search_results(search_result)
-        sources_with_url = [f"[{result.get('title')}]({result.get('url')})" for result in search_result.get("data", [])]
+        formatted_results = self._format_search_results(search_result, include_full)
+        sources_with_url = [
+            f"[{result.get('title') or result.get('url')}]({result.get('url')})"
+            for result in search_result.get("data", [])
+            if result.get("url")
+        ]
 
         if self.is_optimized_for_agents:
-            result = (
-                "## Sources with URLs\n"
-                + "\n".join(sources_with_url)
-                + f"\n\n## Search results for query '{request_body['q']}'\n"
-                + formatted_results
-            )
+            result_sections = [
+                f"## Jina Search Results for '{request_body['q']}'",
+                "",
+            ]
+            if sources_with_url:
+                result_sections.extend(["### Sources", *sources_with_url, ""])
+            if formatted_results:
+                result_sections.append(formatted_results)
+            else:
+                result_sections.append("No results were returned by Jina Search.")
+            result = "\n".join(result_sections).strip()
         else:
             images = {}
             for d in search_result.get("data", []):
@@ -541,6 +599,7 @@ class JinaSearchTool(ConnectionNode):
                 "query": request_body["q"],
                 "request_body": request_body,
                 "headers_used": {k: v for k, v in headers.items() if k.startswith("X-")},
+                "include_full_content": include_full,
             }
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")

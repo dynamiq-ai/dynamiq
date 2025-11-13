@@ -156,15 +156,15 @@ def test_exa_search_agent_optimized(mock_requests, mock_exa_response):
     assert result.status == RunnableStatus.SUCCESS
 
     content = result.output["content"]
-    assert "## Sources with URLs" in content
+    assert "## Sources" in content
     assert "## Search Results" in content
-    assert all(f"{r['title']}: ({r['url']})" in content for r in mock_exa_response["results"])
 
-    for result in mock_exa_response["results"]:
-        if "highlights" in result:
-            assert any(highlight in content for highlight in result["highlights"])
-        if "summary" in result:
-            assert result["summary"] in content
+    for idx, result_data in enumerate(mock_exa_response["results"], start=1):
+        assert f"- [{result_data['title']}]({result_data['url']})" in content
+        assert f"### Result {idx}: {result_data['title']}" in content
+        assert result_data["summary"] in content
+        for highlight in result_data.get("highlights", []):
+            assert highlight in content
 
 
 def test_exa_with_invalid_input_schema(mock_requests, mock_exa_response):
