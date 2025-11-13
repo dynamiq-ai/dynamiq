@@ -1171,7 +1171,6 @@ class Elasticsearch(BaseConnection):
             elasticsearch.Elasticsearch: An instance of the Elasticsearch client.
 
         Raises:
-            ImportError: If elasticsearch package is not installed
             ConnectionError: If connection fails
             ValueError: If neither API key nor basic auth credentials are provided
         """
@@ -1220,6 +1219,117 @@ class Elasticsearch(BaseConnection):
 
         logger.debug(f"Connected to Elasticsearch at {self.cloud_id or self.url}")
         return es_client
+
+
+class AWSOpenSearch(BaseConnection):
+    """
+    Represents a connection to AWS OpenSearch Service.
+
+    Attributes:
+        host (str): The OpenSearch domain endpoint host.
+        port (int): The port number for the OpenSearch domain. Defaults to 443.
+        region (str): AWS region where the OpenSearch domain is located.
+        access_key_id (str): AWS access key ID for authentication.
+        secret_access_key (str): AWS secret access key for authentication.
+        profile (str): AWS profile name to use for authentication.
+        service (str): AWS service name. Defaults to 'es' for Elasticsearch/OpenSearch.
+        use_ssl (bool): Whether to use SSL for the connection. Defaults to True.
+        verify_certs (bool): Whether to verify SSL certificates. Defaults to True.
+        ca_certs (str): Path to CA certificates for SSL verification.
+    """
+
+    host: str = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_HOST"))
+    port: int = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_PORT", 443))
+    region: str = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_REGION"))
+    access_key_id: str | None = Field(default_factory=partial(get_env_var, "AWS_ACCESS_KEY_ID"))
+    secret_access_key: str | None = Field(default_factory=partial(get_env_var, "AWS_SECRET_ACCESS_KEY"))
+    profile: str | None = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_PROFILE"))
+    service: str = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_SERVICE", "es"))
+    use_ssl: bool = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_USE_SSL", True))
+    verify_certs: bool = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_VERIFY_CERTS", True))
+    ca_certs: str | None = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_CA_CERTS"))
+
+    def connect(self):
+        """
+        Connects to AWS OpenSearch Service.
+
+        This method establishes a connection to AWS OpenSearch Service using AWS authentication.
+        It uses AWS4Auth for request signing and creates an OpenSearch client.
+
+        Returns:
+            opensearchpy.OpenSearch: An instance of the OpenSearch client.
+        """
+        import boto3
+        from opensearchpy import OpenSearch, RequestsHttpConnection
+        from requests_aws4auth import AWS4Auth
+
+        if self.profile:
+            session = boto3.Session(profile_name=self.profile, region_name=self.region)
+        elif self.access_key_id and self.secret_access_key:
+            session = boto3.Session(
+                aws_access_key_id=self.access_key_id,
+                aws_secret_access_key=self.secret_access_key,
+                region_name=self.region,
+            )
+        else:
+            session = boto3.Session(region_name=self.region)
+
+        credentials = session.get_credentials()
+        if not credentials:
+            raise ValueError("Either profile, access_key_id/secret_access_key, or region must be provided")
+
+        awsauth = AWS4Auth(
+            credentials.access_key, credentials.secret_key, self.region, self.service, session_token=credentials.token
+        )
+
+        conn_params = {
+            "hosts": [{"host": self.host, "port": self.port}],
+            "http_auth": awsauth,
+            "use_ssl": self.use_ssl,
+            "verify_certs": self.verify_certs,
+            "connection_class": RequestsHttpConnection,
+        }
+
+        if self.ca_certs:
+            conn_params["ca_certs"] = self.ca_certs
+
+        try:
+            client = OpenSearch(**conn_params)
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to AWS OpenSearch: {str(e)}")
+
+        if not client.ping():
+            raise ConnectionError("Failed to ping AWS OpenSearch cluster")
+
+        logger.debug(f"Connected to AWS OpenSearch at {self.host}:{self.port} in region {self.region}")
+        return client
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Returns the parameters required for connection.
+
+        Returns:
+            dict: A dictionary containing AWS OpenSearch connection parameters.
+        """
+        params = {
+            "hosts": [{"host": self.host, "port": self.port}],
+            "region": self.region,
+            "service": self.service,
+            "use_ssl": self.use_ssl,
+            "verify_certs": self.verify_certs,
+        }
+
+        if self.profile:
+            params["aws_profile_name"] = self.profile
+        elif self.access_key_id and self.secret_access_key:
+            params["aws_access_key_id"] = self.access_key_id
+            params["aws_secret_access_key"] = self.secret_access_key
+
+        if self.ca_certs:
+            params["ca_certs"] = self.ca_certs
+
+        return params
 
 
 class xAI(BaseApiKeyConnection):
