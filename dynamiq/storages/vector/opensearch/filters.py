@@ -168,17 +168,17 @@ def _equal(field: str, value: Any) -> dict[str, Any]:
 
 def _greater_than(field: str, value: Any) -> dict[str, Any]:
     """
-        Creates a greater than comparison filter.
+    Creates a greater than comparison filter.
 
-        Args:
-            field (str): The field to compare.
-            value (Any): The value to compare against.
+    Args:
+        field (str): The field to compare.
+        value (Any): The value to compare against.
 
-        Returns:
-            dict[str, Any]: A greater than comparison filter.
+    Returns:
+        dict[str, Any]: A greater than comparison filter.
 
-        Raises:
-            VectorStoreFilterException: If the value type is not supported.
+    Raises:
+        VectorStoreFilterException: If the value type is not supported.
     """
     supported_types = (int, float)
     if not isinstance(value, supported_types):
