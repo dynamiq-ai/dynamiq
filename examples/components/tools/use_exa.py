@@ -21,8 +21,8 @@ def basic_search_example():
             "limit": 5,
             "query_type": QueryType.neural,
             "use_autoprompt": True,
-            "start_crawl_date": "2024-01-01T00:00:00.000Z",
-            "end_crawl_date": "2024-12-31T00:00:00.000Z",
+            "start_crawl_date": "2025-01-01T00:00:00.000Z",
+            "end_crawl_date": "2025-12-31T00:00:00.000Z",
             "moderation": False,
         }
     )
@@ -48,8 +48,8 @@ def advanced_search_with_contents_example():
             "query_type": QueryType.neural,
             "use_autoprompt": True,
             "category": "research paper",
-            "start_crawl_date": "2023-01-01T00:00:00.000Z",
-            "end_published_date": "2023-12-31T00:00:00.000Z",
+            "start_crawl_date": "2025-01-01T00:00:00.000Z",
+            "end_published_date": "2025-12-31T00:00:00.000Z",
             "include_text": ["large language model"],
             "exclude_text": ["course"],
             "context": {"maxCharacters": 8000},
