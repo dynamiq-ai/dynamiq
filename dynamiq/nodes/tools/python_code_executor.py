@@ -1,3 +1,4 @@
+import errno
 import importlib
 import inspect
 import io
@@ -27,10 +28,9 @@ from dynamiq.storages.file.base import FileInfo, FileStore
 from dynamiq.utils import format_value
 from dynamiq.utils.logger import logger
 
-OPTIONAL_PRELOAD_MODULES: tuple[tuple[str, str | None], ...] = (
-    ("matplotlib", None),
-    ("matplotlib.pyplot", "plt"),
-)
+os.environ.setdefault("MPLBACKEND", "Agg")
+
+OPTIONAL_PRELOAD_MODULES: tuple[tuple[str, str | None], ...] = (("seaborn", "sns"),)
 
 
 class PythonCodeExecutorFileWorkspace(BaseModel):
@@ -249,22 +249,47 @@ class PythonCodeExecutor(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "PythonCodeExecutor"
     description: str = (
-        "Runs dynamic Python code safely via RestrictedPython. The tool injects file helpers so you can operate on the "
-        "shared file store without manually copying artifacts. The helper API you can call directly includes: "
-        "list_files(), read_file(), read_file_text(), read_file_bytes(), write_file(), write_text(), write_bytes(), "
-        "delete_file(), file_exists(), and describe_file(). Always prefer these helpers (e.g., read_file('foo.csv')) "
-        "because the temporary workspace starts empty and direct open('foo.csv') calls cannot see uploaded files. "
-        "Available libraries include: pandas, numpy, requests, pdfplumber, PyPDF2 and pypdf, docx (python-docx), "
-        "pptx (python-pptx), markdown, openpyxl, matplotlib (with `matplotlib.pyplot` preloaded as `plt`), and the "
-        "standard library. Any `print()` output is captured separately in a `stdout` field, so have `run` return "
-        "structured data.\n\n"
-        "- Every snippet you send MUST define a callable run(...) entrypoint.\n"
-        "- `run` can optionally accept params, files, "
-        "file_inputs, helpers, workspace/file_manager, stdout, or a single "
-        "context dict; pass only what you need in the signature and everything else is still accessible via **kwargs.\n"
-        "- Uploaded files are only visible through the helper functions; use write_* helpers to persist new artifacts "
+        "Runs dynamic Python code safely via RestrictedPython. "
+        "The tool injects file helpers so you can operate on the "
+        "shared file store without manually copying artifacts. "
+        "Before your code runs, every uploaded file is mirrored into "
+        "the isolated workspace (so even module-level `pd.read_csv('foo.csv')`,"
+        " `pd.read_excel('bar.xlsx')`, or "
+        "`open('notes.txt')` calls just work). The helpers remain the most "
+        "reliable way to read/write artifacts—especially "
+        "when you need metadata, binary vs text detection, or want a "
+        "consistent API—so prefer read_file()/write_file(), "
+        "list_files(), file_exists(), describe_file(), etc., or"
+        " call them via `helpers['read_file']('foo.csv')`. Matplotlib "
+        "is forced onto the 'Agg' backend so you can always render"
+        " plots headlessly with `plt.savefig(...)` (no GUI popups). "
+        "Available libraries include: pandas, numpy, "
+        "requests, pdfplumber, PyPDF2 and pypdf, docx (python-docx), "
+        "pptx (python-pptx), markdown, openpyxl, "
+        "seaborn (preloaded as `sns` and the default for plotting), and the "
+        "standard library. Default to seaborn for"
+        " charting so plots render consistently without extra setup. Seaborn is "
+        "already injected as `sns`, but explicit "
+        "`import seaborn as sns` or `import matplotlib.pyplot as plt` statements "
+        "are also permitted if you prefer. Write normal Python "
+        "exactly as it would appear in a `.py` file—use literal "
+        "newlines instead of escaping them, "
+        "and avoid JSON-style quoting inside the source. Any "
+        "`print()` output is captured separately "
+        "in a `stdout` field, so have `run` return structured data.\n\n"
+        "- Every snippet you send MUST define "
+        "a callable `run` entrypoint. Prefer explicit parameters such as "
+        "`def run(params=None, helpers=None, files=None, stdout=None, context=None): ...`"
+        "- `run` can optionally accept params, files,"
+        " file_inputs, helpers, workspace/file_manager, stdout, or a single "
+        "context dict; pass only what you need in "
+        "the signature and everything else is still accessible via the `context` "
+        "dictionary if you include it.\n"
+        "- Uploaded files are only visible through the helper "
+        "functions; use write_* helpers to persist new artifacts "
         "back to the shared store.\n"
-        "- RestrictedPython forbids augmented assignment on subscripts/slices (e.g., `counts[key] += 1`); use "
+        "- RestrictedPython forbids augmented assignment "
+        "on subscripts/slices (e.g., `counts[key] += 1`); use "
         "`counts[key] = counts[key] + 1` instead."
     )
     file_store: FileStore = Field(..., description="File storage backend shared with the agent.")
@@ -320,6 +345,10 @@ class PythonCodeExecutor(Node):
         try:
             os.chdir(workspace_dir)
 
+            files, mapped_inputs, workspace_paths = self._normalize_files(input_data.files)
+            self._materialize_inline_files(files, workspace_dir)
+            self._materialize_file_store_contents(workspace_dir, workspace_paths)
+
             try:
                 restricted_globals = compile_and_execute(input_data.code, restricted_globals)
             except Exception as e:  # pragma: no cover - RestrictedPython already sanitizes stack
@@ -332,8 +361,6 @@ class PythonCodeExecutor(Node):
                 raise ToolExecutionException(
                     "The provided code must define a callable function named 'run'.", recoverable=True
                 )
-
-            files, mapped_inputs = self._normalize_files(input_data.files)
             context_args = self._build_context(
                 files=files,
                 mapped_inputs=mapped_inputs,
@@ -349,6 +376,10 @@ class PythonCodeExecutor(Node):
             try:
                 result = run_callable(*args, **kwargs)
             except Exception as e:  # pragma: no cover - sanitized error forwarded to the agent
+                friendly_file_error = self._format_file_access_error(e)
+                if friendly_file_error:
+                    logger.error(friendly_file_error)
+                    raise ToolExecutionException(friendly_file_error, recoverable=True) from e
                 error_msg = f"Code execution error: {e}"
                 logger.error(error_msg)
                 raise ToolExecutionException(error_msg, recoverable=True)
@@ -370,9 +401,12 @@ class PythonCodeExecutor(Node):
             os.chdir(original_cwd)
             shutil.rmtree(workspace_dir, ignore_errors=True)
 
-    def _normalize_files(self, files: list[Any] | FileMappedInput | None) -> tuple[list[Any], dict[str, Any]]:
+    def _normalize_files(
+        self, files: list[Any] | FileMappedInput | None
+    ) -> tuple[list[Any], dict[str, Any], list[str]]:
         mapped_inputs: dict[str, Any] = {}
         provided_files: list[Any] = []
+        workspace_path_set: set[str] = set()
 
         if isinstance(files, FileMappedInput):
             provided_files = list(files.files or [])
@@ -384,8 +418,13 @@ class PythonCodeExecutor(Node):
         else:
             provided_files = [files]
 
-        normalized_files = [self._coerce_file_reference(file_obj) for file_obj in provided_files]
-        return normalized_files, mapped_inputs
+        normalized_files = []
+        for file_obj in provided_files:
+            normalized_files.append(self._coerce_file_reference(file_obj))
+            if isinstance(file_obj, str) and self.file_store and self.file_store.exists(file_obj):
+                workspace_path_set.add(file_obj)
+
+        return normalized_files, mapped_inputs, sorted(workspace_path_set)
 
     def _build_context(
         self,
@@ -409,8 +448,98 @@ class PythonCodeExecutor(Node):
         available_args.update(context_payload)
         return available_args
 
+    def _materialize_inline_files(self, files: list[Any], workspace_dir: str) -> None:
+        """
+        Persist in-memory file-like inputs (e.g., BytesIO objects) into the workspace filesystem.
+        """
+        if not files:
+            return
+
+        for idx, file_obj in enumerate(files):
+            if not hasattr(file_obj, "read"):
+                continue
+
+            file_name = getattr(file_obj, "name", f"inline_file_{idx}")
+            sanitized_name = os.path.normpath(file_name).lstrip(os.sep)
+            if sanitized_name.startswith(".."):
+                sanitized_name = sanitized_name.replace("..", "")
+            sanitized_name = sanitized_name or f"inline_file_{idx}"
+            destination = os.path.join(workspace_dir, sanitized_name)
+            destination_dir = os.path.dirname(destination) or workspace_dir
+            os.makedirs(destination_dir, exist_ok=True)
+
+            try:
+                position = None
+                if hasattr(file_obj, "seek"):
+                    position = file_obj.tell()
+                    file_obj.seek(0)
+                payload = file_obj.read()
+                if isinstance(payload, str):
+                    payload = payload.encode("utf-8")
+                with open(destination, "wb") as handle:
+                    handle.write(payload)
+                logger.debug("Materialized inline file %s into isolated workspace", sanitized_name)
+            except Exception as exc:
+                logger.debug("Failed to materialize inline file %s: %s", sanitized_name, exc)
+            finally:
+                if position is not None:
+                    try:
+                        file_obj.seek(position)
+                    except Exception as exc:
+                        logger.debug("Failed to restore inline file pointer %s: %s", sanitized_name, exc)
+
+    def _materialize_file_store_contents(self, workspace_dir: str, store_paths: list[str] | None = None) -> None:
+        """
+        Mirror shared file-store artifacts into the transient workspace so direct open(...) calls succeed.
+        """
+        if not self.file_store:
+            return
+
+        target_paths: set[str]
+        if store_paths:
+            target_paths = set(store_paths)
+        else:
+            try:
+                file_infos = self.file_store.list_files(recursive=True)
+                target_paths = {info.path for info in file_infos}
+            except Exception as exc:
+                logger.debug("Failed to enumerate file store contents for workspace sync: %s", exc)
+                return
+
+        for relative_path in sorted(target_paths):
+            try:
+                payload = self.file_store.retrieve(relative_path)
+            except Exception as exc:
+                logger.debug("Failed to retrieve %s for workspace materialization: %s", relative_path, exc)
+                continue
+
+            absolute_path = os.path.join(workspace_dir, relative_path)
+            os.makedirs(os.path.dirname(absolute_path) or workspace_dir, exist_ok=True)
+            try:
+                with open(absolute_path, "wb") as file_handle:
+                    file_handle.write(payload)
+                logger.debug("Materialized %s into isolated workspace", relative_path)
+            except Exception as exc:
+                logger.debug("Failed to materialize %s into workspace: %s", relative_path, exc)
+
+    def _format_file_access_error(self, exc: Exception) -> str | None:
+        """
+        Provide a targeted hint when user code tries to open files that only exist in the shared file store.
+        """
+        is_missing_file = isinstance(exc, FileNotFoundError) or getattr(exc, "errno", None) == errno.ENOENT
+        if not is_missing_file:
+            return None
+
+        missing_target = getattr(exc, "filename", None)
+        missing_hint = f" '{missing_target}'" if missing_target else ""
+        return (
+            f"File access error: could not locate{missing_hint} inside the isolated workspace. "
+            "Uploaded files are only available through the injected helpers "
+            "(e.g., call read_file('your_file.csv') or helpers['read_file']('your_file.csv') instead of open())."
+        )
+
     def _preload_optional_modules(self) -> dict[str, Any]:
-        """Expose heavier-but-common modules (e.g., matplotlib.pyplot) inside the restricted globals."""
+        """Expose heavier-but-common modules (e.g., seaborn) inside the restricted globals."""
         preloaded: dict[str, Any] = {}
         for module_path, alias in OPTIONAL_PRELOAD_MODULES:
             try:

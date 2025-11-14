@@ -28,21 +28,12 @@ surface key trends, and propose actionable follow-ups. Always:
 """
 
 PROMPT = """
-You are given product_feedback.csv containing high-level feedback captured during last week's launch.
-Please use Python to:
-  1. Aggregate counts by severity and feature.
-  2. Extract representative quotes for each severity bucket (pick the first example).
-  3. Highlight the top 3 urgent follow-ups across channels.
-Return a markdown summary plus the structured data you produced.
+Plot a chart that describes the data
 """
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 FEEDBACK_PATH = DATA_DIR / "product_feedback.csv"
-FEEDBACK_DESCRIPTION = """
-- CSV exported from the Voice-of-Customer pipeline on Nov 10.
-- Columns: id, channel, feature, feedback text, severity (low/medium/high/critical).
-- There are only ten rows, but treat it like a real dataset when you analyze.
-"""
+FEEDBACK_DESCRIPTION = """Some csv data"""
 
 
 def _read_file_as_bytesio(file_path: Path, description: str, content_type: str = "text/csv") -> io.BytesIO:

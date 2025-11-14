@@ -1,5 +1,5 @@
 import ast
-import importlib
+import builtins
 import io
 from copy import deepcopy
 from typing import Any, Callable, ClassVar, Literal
@@ -48,6 +48,7 @@ ALLOWED_MODULES = [
     "PyPDF2",
     "pypdf",
     "matplotlib",
+    "seaborn",
 ]
 
 ALLOWED_DUNDER_ATTRIBUTES = {"__class__", "__name__", "__qualname__"}
@@ -122,12 +123,20 @@ def restricted_import(name: str, globals=None, locals=None, fromlist=(), level=0
     """
     Restricted import function to allow importing only modules in ALLOWED_MODULES.
     """
+    if not name:
+        raise ImportError("Empty module name")
+
+    if level not in (0,):
+        raise ImportError("Relative imports are not supported in the Python executor")
+
     root_module_name = name.split(".")[0]
     if root_module_name not in ALLOWED_MODULES:
         logger.warning(f"Import of '{root_module_name}' is not allowed")
         raise ImportError(f"Import of '{root_module_name}' is not allowed")
+
+    normalized_fromlist = fromlist or ()
     try:
-        module = importlib.import_module(name)
+        module = builtins.__import__(name, globals, locals, normalized_fromlist, level)
         logger.debug(f"Successfully imported {name}")
         return module
     except ImportError as e:
