@@ -24,7 +24,13 @@ from dynamiq.nodes.agents.utils import (
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools import ContextManagerTool
-from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
+from dynamiq.nodes.tools.file_tools import (
+    EXTRACTED_TEXT_SUFFIX,
+    FileListTool,
+    FileReadTool,
+    FileSearchTool,
+    FileWriteTool,
+)
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
@@ -1161,18 +1167,37 @@ class Agent(Node):
 
                 logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
 
-    @staticmethod
-    def _filter_generated_files(files: list[io.BytesIO], uploaded_names: set[str]) -> list[io.BytesIO]:
-        if not uploaded_names:
-            return files
+    INTERNAL_CACHE_SUFFIXES: ClassVar[tuple[str, ...]] = (EXTRACTED_TEXT_SUFFIX,)
+
+    @classmethod
+    def _filter_generated_files(cls, files: list[io.BytesIO], uploaded_names: set[str]) -> list[io.BytesIO]:
+        if not files:
+            return []
 
         filtered: list[io.BytesIO] = []
         for file in files:
             name = getattr(file, "name", None)
-            if name and name in uploaded_names:
+            if not name:
+                filtered.append(file)
+                continue
+            if name in uploaded_names:
+                continue
+            if cls._is_internal_cache_file(name, uploaded_names):
                 continue
             filtered.append(file)
         return filtered
+
+    @classmethod
+    def _is_internal_cache_file(cls, name: str, uploaded_names: set[str]) -> bool:
+        for suffix in cls.INTERNAL_CACHE_SUFFIXES:
+            if not name.endswith(suffix):
+                continue
+            base_name = name[: -len(suffix)]
+            if not base_name:
+                return True
+            if (not uploaded_names) or (base_name in uploaded_names):
+                return True
+        return False
 
     def _inject_attached_files_into_message(
         self, input_message: Message | VisionMessage, files: list[io.BytesIO]
