@@ -24,7 +24,13 @@ from dynamiq.nodes.agents.utils import (
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.nodes.tools import ContextManagerTool
-from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
+from dynamiq.nodes.tools.file_tools import (
+    EXTRACTED_TEXT_SUFFIX,
+    FileListTool,
+    FileReadTool,
+    FileSearchTool,
+    FileWriteTool,
+)
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
@@ -372,6 +378,10 @@ class Agent(Node):
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
+    file_attachment_preview_bytes: int = Field(
+        default=512,
+        description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
+    )
 
     input_message: Message | VisionMessage | None = None
     role: str | None = Field(
@@ -457,6 +467,7 @@ class Agent(Node):
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
 
             self.tools.append(FileReadTool(file_store=self.file_store_backend, llm=self.llm))
+            self.tools.append(FileSearchTool(file_store=self.file_store_backend))
             self.tools.append(FileListTool(file_store=self.file_store_backend))
 
         self._init_prompt_blocks()
@@ -644,13 +655,21 @@ class Agent(Node):
                 self._prompt_blocks["role"] = f"{{% raw %}}{self.role}{{% endraw %}}"
 
         files = input_data.files
+        uploaded_file_names: set[str] = set()
         if files:
             if not self.file_store_backend:
                 self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
                 self.tools.append(FileReadTool(file_store=self.file_store.backend, llm=self.llm))
+                self.tools.append(FileSearchTool(file_store=self.file_store.backend))
                 self.tools.append(FileListTool(file_store=self.file_store.backend))
                 self._init_prompt_blocks()
-            self._ensure_named_files(files)
+            normalized_files = self._ensure_named_files(files)
+            uploaded_file_names = {
+                getattr(f, "name", None)
+                for f in normalized_files
+                if hasattr(f, "name") and getattr(f, "name") is not None
+            }
+            input_message = self._inject_attached_files_into_message(input_message, normalized_files)
 
         if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
@@ -669,11 +688,13 @@ class Agent(Node):
         }
 
         if self.file_store_backend and not self.file_store_backend.is_empty():
-            execution_result["files"] = self.file_store_backend.list_files_bytes()
-            logger.info(
-                f"Agent {self.name} - {self.id}: returning {len(execution_result['files'])}"
-                " accumulated file(s) in FileStore"
-            )
+            stored_files = self.file_store_backend.list_files_bytes()
+            filtered_files = self._filter_generated_files(stored_files, uploaded_file_names)
+            if filtered_files:
+                execution_result["files"] = filtered_files
+                logger.info(
+                    f"Agent {self.name} - {self.id}: returning {len(filtered_files)} generated file(s) in FileStore"
+                )
 
         logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
@@ -1049,7 +1070,7 @@ class Agent(Node):
 
         return tool_result_content_processed, output_files
 
-    def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> None:
+    def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
         """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
         named = []
         for i, f in enumerate(files):
@@ -1145,6 +1166,133 @@ class Agent(Node):
                         logger.warning(f"Unsupported file type from tool '{tool.name}': {type(file)}")
 
                 logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
+
+    INTERNAL_CACHE_SUFFIXES: ClassVar[tuple[str, ...]] = (EXTRACTED_TEXT_SUFFIX,)
+
+    @classmethod
+    def _filter_generated_files(cls, files: list[io.BytesIO], uploaded_names: set[str]) -> list[io.BytesIO]:
+        if not files:
+            return []
+
+        filtered: list[io.BytesIO] = []
+        for file in files:
+            name = getattr(file, "name", None)
+            if not name:
+                filtered.append(file)
+                continue
+            if name in uploaded_names:
+                continue
+            if cls._is_internal_cache_file(name, uploaded_names):
+                continue
+            filtered.append(file)
+        return filtered
+
+    @classmethod
+    def _is_internal_cache_file(cls, name: str, uploaded_names: set[str]) -> bool:
+        for suffix in cls.INTERNAL_CACHE_SUFFIXES:
+            if not name.endswith(suffix):
+                continue
+            base_name = name[: -len(suffix)]
+            if not base_name:
+                return True
+            if (not uploaded_names) or (base_name in uploaded_names):
+                return True
+        return False
+
+    def _inject_attached_files_into_message(
+        self, input_message: Message | VisionMessage, files: list[io.BytesIO]
+    ) -> Message | VisionMessage:
+        if not files:
+            return input_message
+
+        if not isinstance(input_message, Message):
+            return input_message
+
+        file_lines = []
+
+        for f in files:
+            name = getattr(f, "name", None) or "unnamed_file"
+            description = getattr(f, "description", "") or ""
+            description = description.strip()
+            if description:
+                file_lines.append(f"- {name}: {description}")
+            else:
+                file_lines.append(f"- {name}")
+
+        if not file_lines:
+            return input_message
+
+        file_section = "\n".join(["\nAttached files available to you:"] + file_lines) + "\n"
+        preview_section = self._build_file_previews_section(files)
+        if preview_section:
+            file_section = f"{file_section}{preview_section}"
+
+        if isinstance(input_message.content, str):
+            input_message.content = f"{input_message.content.rstrip()}{file_section}"
+        else:
+            input_message.content = input_message.content + file_section
+
+        return input_message
+
+    def _build_file_previews_section(self, files: list[io.BytesIO]) -> str:
+        """Build a short, truncated preview section for uploaded files."""
+        if not files or self.file_attachment_preview_bytes <= 0:
+            return ""
+
+        previews: list[str] = []
+        max_bytes = max(1, self.file_attachment_preview_bytes)
+        for file_obj in files:
+            preview = self._extract_file_preview(file_obj, max_bytes)
+            if preview:
+                previews.append(preview)
+
+        if not previews:
+            return ""
+
+        return "\n".join(["File previews (truncated, may be incomplete):", *previews]) + "\n"
+
+    @staticmethod
+    def _extract_file_preview(file_obj: io.BytesIO, max_bytes: int) -> str:
+        """Extract a textual/hex preview from a BytesIO without consuming it."""
+        if not hasattr(file_obj, "read"):
+            return ""
+
+        seekable = hasattr(file_obj, "seek")
+        position = 0
+        if seekable:
+            try:
+                position = file_obj.tell()
+            except Exception:
+                seekable = False
+
+        try:
+            if seekable:
+                file_obj.seek(0)
+            snippet = file_obj.read(max_bytes)
+        except Exception:
+            return ""
+        finally:
+            if seekable:
+                try:
+                    file_obj.seek(position)
+                except Exception as exc:
+                    logger.debug(
+                        "Failed to restore file pointer for preview on %s: %s", getattr(file_obj, "name", ""), exc
+                    )
+
+        if not snippet:
+            return ""
+
+        try:
+            preview_text = snippet.decode("utf-8")
+            descriptor = "text"
+        except UnicodeDecodeError:
+            preview_text = snippet.hex()
+            descriptor = "hex"
+
+        suffix = "..." if len(snippet) >= max_bytes else ""
+        name = getattr(file_obj, "name", "uploaded_file")
+        return f"- {name} ({descriptor} preview): {preview_text}{suffix}"
 
     @property
     def file_store_backend(self) -> FileStore | None:
