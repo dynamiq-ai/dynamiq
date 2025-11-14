@@ -7,8 +7,10 @@ from pathlib import Path
 
 from dynamiq import Workflow
 from dynamiq.callbacks import DynamiqTracingCallbackHandler, TracingCallbackHandler
+from dynamiq.connections import TogetherAI as TogetherAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.llms.togetherai import TogetherAI
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
@@ -16,16 +18,12 @@ from dynamiq.storages.file import FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
-from examples.llm_setup import setup_llm
 
 LOGGER = logging.getLogger(__name__)
 
 AGENT_ROLE = """
 You are a Senior Product Analytics Engineer. Use the Python code executor to inspect structured feedback datasets,
 surface key trends, and propose actionable follow-ups. Always:
-- Define a run(...) function in your code.
-- Load files via read_file()/StringIO, never via raw disk paths.
-- Return structured dict/list outputs that the orchestrator can serialize.
 - Summarize the methodology and findings in markdown.
 """
 
@@ -58,7 +56,18 @@ def _read_file_as_bytesio(file_path: Path, description: str, content_type: str =
 
 
 def _create_agent() -> Agent:
-    llm = setup_llm(model_provider="gpt", model_name="o4-mini", temperature=0.2)
+    TOGETHER_API_KEY = os.environ.get(
+        "TOGETHER_API_KEY",
+    )
+
+    model_name = "zai-org/GLM-4.5-Air-FP8"  # "openai/gpt-oss-120b"
+    connection = TogetherAIConnection(api_key=TOGETHER_API_KEY)
+    llm = TogetherAI(
+        model=model_name,
+        connection=connection,
+        max_tokens=4096,
+        temperature=0.1,
+    )
     file_store_backend = InMemoryFileStore()
     file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 

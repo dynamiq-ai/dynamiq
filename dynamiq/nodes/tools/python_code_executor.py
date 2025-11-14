@@ -251,11 +251,12 @@ class PythonCodeExecutor(Node):
     description: str = (
         "Runs dynamic Python code safely via RestrictedPython. The tool injects helper functions such as read_file(), "
         "write_file(), and list_files(), exposing the shared file store so you can read/write artifacts without having "
-        "to manually copy data into the sandbox. "
-        "Available libraries include: pandas, numpy, scipy, requests, pdfplumber, "
-        "PyPDF2/pypdf, docx (python-docx), pptx (python-pptx), "
-        "markdown, openpyxl, matplotlib (with `matplotlib.pyplot` "
-        "preloaded as `plt`), and standard library utilities. "
+        "to manually copy data into the sandbox. Always use these helpers (e.g., read_file('foo.csv')) because files "
+        "are NOT available via direct open() calls in the temporary workspace. "
+        "Available libraries include: pandas, numpy, requests, pdfplumber, "
+        "PyPDF2 and pypdf, docx (python-docx), pptx (python-pptx), "
+        "markdown, openpyxl, matplotlib (with `matplotlib.pyplot` preloaded as `plt`), "
+        "and standard library utilities. "
         "Always return structured results from `run` — any `print()` "
         "output is captured separately in a `stdout` field.\n\n"
         "- Every code snippet you send to the executor "
@@ -265,7 +266,9 @@ class PythonCodeExecutor(Node):
         "uploaded files are not mirrored into the working directory, "
         "so direct `open('file.xlsx')` calls will fail. "
         "The temporary working directory starts empty "
-        "and is only for artifacts you create during execution."
+        "and is only for artifacts you create during execution. "
+        "RestrictedPython also forbids augmented assignment on subscripts/slices "
+        "(e.g., `counts[key] += 1`); use the equivalent `counts[key] = counts[key] + 1` pattern instead."
     )
     file_store: FileStore = Field(..., description="File storage backend shared with the agent.")
     is_files_allowed: bool = True
@@ -323,7 +326,7 @@ class PythonCodeExecutor(Node):
             try:
                 restricted_globals = compile_and_execute(input_data.code, restricted_globals)
             except Exception as e:  # pragma: no cover - RestrictedPython already sanitizes stack
-                error_msg = f"Code compilation error: {str(e)}"
+                error_msg = f"Code compilation error: {e}"
                 logger.error(error_msg)
                 raise ToolExecutionException(error_msg, recoverable=True)
 
@@ -349,7 +352,7 @@ class PythonCodeExecutor(Node):
             try:
                 result = run_callable(*args, **kwargs)
             except Exception as e:  # pragma: no cover - sanitized error forwarded to the agent
-                error_msg = f"Code execution error: {str(e)}"
+                error_msg = f"Code execution error: {e}"
                 logger.error(error_msg)
                 raise ToolExecutionException(error_msg, recoverable=True)
 

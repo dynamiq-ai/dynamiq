@@ -48,7 +48,6 @@ ALLOWED_MODULES = [
     "PyPDF2",
     "pypdf",
     "matplotlib",
-    "scipy",
 ]
 
 ALLOWED_DUNDER_ATTRIBUTES = {"__class__", "__name__", "__qualname__"}
