@@ -104,6 +104,7 @@ def _archive_directory(path: Path) -> str:
 @click.option("--memory-requests", default="256Mi", show_default=True)
 @click.option("--cpu-limits", default="200m", show_default=True)
 @click.option("--memory-limits", default="512Mi", show_default=True)
+@click.option("--resource-profile", default=None, required=False, help="Resource profile ID (optional)")
 @click.option(
     "--env",
     multiple=True,
@@ -124,6 +125,7 @@ def deploy_service(
     memory_requests: str,
     cpu_limits: str,
     memory_limits: str,
+    resource_profile: str | None,
     env: tuple[tuple[str, str], ...],
 ):
     archive_path = ""
@@ -139,15 +141,21 @@ def deploy_service(
         api_endpoint = f"/v1/services/{service_id}/deploy"
 
         data = {
-                "docker": {"file": str(docker_file), "context": str(docker_context)},
-                "resources": {
-                    "requests": {
-                        "cpu": str(cpu_requests),
-                        "memory": str(memory_requests),
-                    },
-                    "limits": {"cpu": str(cpu_limits), "memory": str(memory_limits)},
-                },
-            }
+            "docker": {"file": str(docker_file), "context": str(docker_context)},
+            **(
+                {"resource_profile_id": resource_profile}
+                if resource_profile
+                else {
+                    "resources": {
+                        "requests": {
+                            "cpu": str(cpu_requests),
+                            "memory": str(memory_requests),
+                        },
+                        "limits": {"cpu": str(cpu_limits), "memory": str(memory_limits)},
+                    }
+                }
+            ),
+        }
         if env:
             data["env"] = []
             for i, (name, value) in enumerate(env):
