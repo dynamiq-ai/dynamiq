@@ -138,17 +138,25 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
 
     def _create_index_if_not_exists(self) -> None:
         """Create the index if it doesn't exist."""
+
+        base_settings = {"index": {"knn": True}}
+        settings = base_settings.copy()
+
+        # Add custom index settings if provided
+        if self.index_settings:
+            for key, value in self.index_settings.items():
+                if key in settings and isinstance(settings[key], dict) and isinstance(value, dict):
+                    settings[key].update(value)
+                else:
+                    settings[key] = value
+
         mapping = {
-            "settings": {"index": {"knn": True}},
+            "settings": settings,
             "mappings": {
                 "properties": {
                     self.content_key: {
                         "type": "text",
-                        "fields": {
-                            "keyword": {
-                                "type": "keyword",
-                            }
-                        },
+                        "fields": {"keyword": {"type": "keyword"}},
                     },
                     "metadata": {"type": "object"},
                     self.embedding_key: {
@@ -167,11 +175,7 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
 
         # Add custom mapping settings if provided
         if self.mapping_settings:
-            mapping["mappings"].update(self.mapping_settings)
-
-        # Add index settings if provided
-        if self.index_settings:
-            mapping["settings"] = self.index_settings
+            mapping["mappings"] = mapping["mappings"] | self.mapping_settings
 
         self.client.indices.create(index=self.index_name, body=mapping)
 
