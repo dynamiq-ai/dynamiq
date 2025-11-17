@@ -310,43 +310,95 @@ class UnstructuredFileConverter(BaseConverter):
             **self.unstructured_kwargs or {},
         )
 
-    def _process_element_with_image_base64(self, element: dict) -> str:
+    def _collect_images_and_tables(self, elements: list[dict]) -> tuple[list[dict], list[dict]]:
         """
-        Process an element that contains base64-encoded image/table data.
+        Collect images and tables from elements for separate processing.
+
+        Args:
+            elements (list[dict]): List of element dictionaries from Unstructured API.
+
+        Returns:
+            tuple: (images, tables) where each is a list of dicts with element data and metadata.
+        """
+        images = []
+        tables = []
+
+        for idx, element in enumerate(elements):
+            metadata = element.get("metadata", {})
+
+            if "image_base64" in metadata:
+                base64_data = metadata["image_base64"]
+                try:
+                    decode_chars = max(16, min(50, len(base64_data)))
+                    decoded_sample = base64.b64decode(base64_data[:decode_chars])
+                    if decoded_sample.startswith(b"\xff\xd8\xff"):
+                        image_format = "jpeg"
+                    elif decoded_sample.startswith(b"\x89PNG"):
+                        image_format = "png"
+                    elif decoded_sample.startswith(b"GIF8"):
+                        image_format = "gif"
+                    elif (
+                        len(decoded_sample) >= 12
+                        and decoded_sample.startswith(b"RIFF")
+                        and decoded_sample[8:12] == b"WEBP"
+                    ):
+                        image_format = "webp"
+                    else:
+                        image_format = "png"
+                except Exception:
+                    image_format = "png"
+
+                images.append(
+                    {
+                        "index": idx,
+                        "format": image_format,
+                        "base64_data": base64_data,
+                        "text": str(element.get("text", "")),
+                        "element_metadata": metadata,
+                    }
+                )
+
+            elif "text_as_html" in metadata:
+                tables.append(
+                    {
+                        "index": idx,
+                        "html": metadata["text_as_html"],
+                        "text": str(element.get("text", "")),
+                        "element_metadata": metadata,
+                    }
+                )
+
+        return images, tables
+
+    def _process_element_with_placeholder(
+        self, element: dict, element_index: int, images: list[dict], tables: list[dict]
+    ) -> str:
+        """
+        Process an element with placeholders for images/tables instead of embedded content.
 
         Args:
             element (dict): The element dictionary from Unstructured API.
+            element_index (int): Index of this element in the original elements list.
+            images (list[dict]): List of collected images.
+            tables (list[dict]): List of collected tables.
 
         Returns:
-            str: The processed text content with embedded images/tables.
+            str: The processed text content with placeholders for images/tables.
         """
         text = str(element.get("text", ""))
-        metadata = element.get("metadata", {})
 
-        if "image_base64" in metadata:
-            base64_data = metadata["image_base64"]
-            element_type = element.get("type", "").lower()
-
-            try:
-                decode_chars = max(16, min(50, len(base64_data)))
-                decoded_sample = base64.b64decode(base64_data[:decode_chars])
-                if decoded_sample.startswith(b"\xff\xd8\xff"):
-                    image_format = "jpeg"
-                elif decoded_sample.startswith(b"\x89PNG"):
-                    image_format = "png"
-                elif decoded_sample.startswith(b"GIF8"):
-                    image_format = "gif"
-                elif (
-                    len(decoded_sample) >= 12 and decoded_sample.startswith(b"RIFF") and decoded_sample[8:12] == b"WEBP"
-                ):
-                    image_format = "webp"
+        if "text_as_html" in element.get("metadata", {}):
+            text = element.get("metadata", {}).get("text_as_html", "")
+        elif "image_base64" in element.get("metadata", {}):
+            # Find corresponding image entry
+            image_entry = next((i for i in images if i["index"] == element_index), None)
+            if image_entry:
+                # Use extracted text as placeholder, or generic placeholder
+                placeholder_text = image_entry["text"].strip()
+                if placeholder_text:
+                    text = f"[IMAGE: {placeholder_text}]"
                 else:
-                    image_format = "png"
-            except Exception:
-                image_format = "png"
-
-            image_markdown = f"\n\n![{element_type}](data:image/{image_format};base64,{base64_data})\n\n"
-            text += image_markdown
+                    text = "[IMAGE]"
 
         return text
 
@@ -363,11 +415,14 @@ class UnstructuredFileConverter(BaseConverter):
         """
         separator = self.separator
         docs = []
+
+        images, tables = self._collect_images_and_tables(elements)
+
         if document_creation_mode == DocumentCreationMode.ONE_DOC_PER_FILE:
             element_texts = []
-            for el in elements:
+            for idx, el in enumerate(elements):
                 if self.extract_image_block_types_enabled:
-                    text = self._process_element_with_image_base64(el)
+                    text = self._process_element_with_placeholder(el, idx, images, tables)
                 else:
                     text = str(el.get("text", ""))
 
@@ -377,50 +432,85 @@ class UnstructuredFileConverter(BaseConverter):
                     element_texts.append(text)
 
             text = separator.join(element_texts)
-            metadata = copy.deepcopy(metadata)
-            metadata["file_path"] = str(filepath)
-            docs = [Document(content=text, metadata=metadata)]
+            doc_metadata = copy.deepcopy(metadata)
+            doc_metadata["file_path"] = str(filepath)
+
+            if images:
+                for image in images:
+                    image.pop("element_metadata", None)
+                doc_metadata["images"] = images
+            if tables:
+                for table in tables:
+                    table.pop("element_metadata", None)
+                doc_metadata["tables"] = tables
+
+            docs = [Document(content=text, metadata=doc_metadata)]
 
         elif document_creation_mode == DocumentCreationMode.ONE_DOC_PER_PAGE:
             texts_per_page: defaultdict[int, str] = defaultdict(str)
             meta_per_page: defaultdict[int, dict] = defaultdict(dict)
-            for el in elements:
+            images_per_page: defaultdict[int, list] = defaultdict(list)
+            tables_per_page: defaultdict[int, list] = defaultdict(list)
+
+            for idx, el in enumerate(elements):
                 if self.extract_image_block_types_enabled:
-                    text = self._process_element_with_image_base64(el)
+                    text = self._process_element_with_placeholder(el, idx, images, tables)
                 else:
                     text = str(el.get("text", ""))
 
-                metadata = copy.deepcopy(metadata)
-                metadata["file_path"] = str(filepath)
-                element_metadata = el.get("metadata")
-                if element_metadata:
-                    metadata.update(element_metadata)
-                page_number = int(metadata.get("page_number", 1))
+                doc_metadata = copy.deepcopy(metadata)
+                doc_metadata["file_path"] = str(filepath)
+                page_number = int(doc_metadata.get("page_number", 1))
 
                 texts_per_page[page_number] += text + separator
-                meta_per_page[page_number].update(metadata)
+                meta_per_page[page_number].update(doc_metadata)
 
-            docs = [
-                Document(content=texts_per_page[page], metadata=meta_per_page[page])
-                for page in texts_per_page.keys()
-            ]
+                if self.extract_image_block_types_enabled:
+                    # Find images/tables for this element
+                    element_images = [img for img in images if img["index"] == idx]
+                    element_tables = [tbl for tbl in tables if tbl["index"] == idx]
+                    images_per_page[page_number].extend(element_images)
+                    tables_per_page[page_number].extend(element_tables)
+
+            for page in texts_per_page.keys():
+                page_metadata = meta_per_page[page]
+                if images_per_page[page]:
+                    for image in images_per_page[page]:
+                        image.pop("element_metadata", None)
+                    page_metadata["images"] = images_per_page[page]
+                if tables_per_page[page]:
+                    for table in tables_per_page[page]:
+                        table.pop("element_metadata", None)
+                    page_metadata["tables"] = tables_per_page[page]
+
+                docs.append(Document(content=texts_per_page[page], metadata=page_metadata))
 
         elif document_creation_mode == DocumentCreationMode.ONE_DOC_PER_ELEMENT:
             for index, el in enumerate(elements):
                 if self.extract_image_block_types_enabled:
-                    text = self._process_element_with_image_base64(el)
+                    text = self._process_element_with_placeholder(el, index, images, tables)
                 else:
                     text = str(el.get("text", ""))
 
-                metadata = copy.deepcopy(metadata)
-                metadata["file_path"] = str(filepath)
-                metadata["element_index"] = index
+                doc_metadata = copy.deepcopy(metadata)
+                doc_metadata["file_path"] = str(filepath)
+                doc_metadata["element_index"] = index
                 element_metadata = el.get("metadata")
                 if element_metadata:
-                    metadata.update(element_metadata)
+                    doc_metadata.update(element_metadata)
                 element_category = el.get("category")
                 if element_category:
-                    metadata["category"] = element_category
-                doc = Document(content=text, metadata=metadata)
+                    doc_metadata["category"] = element_category
+
+                # Add images/tables for this specific element
+                if self.extract_image_block_types_enabled:
+                    element_images = [img for img in images if img["index"] == index]
+                    element_tables = [tbl for tbl in tables if tbl["index"] == index]
+                    if element_images:
+                        doc_metadata["images"] = element_images
+                    if element_tables:
+                        doc_metadata["tables"] = element_tables
+
+                doc = Document(content=text, metadata=doc_metadata)
                 docs.append(doc)
         return docs
