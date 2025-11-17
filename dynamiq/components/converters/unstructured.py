@@ -328,14 +328,17 @@ class UnstructuredFileConverter(BaseConverter):
             element_type = element.get("type", "").lower()
 
             try:
-                decoded_sample = base64.b64decode(base64_data[:50])
+                decode_chars = max(16, min(50, len(base64_data)))
+                decoded_sample = base64.b64decode(base64_data[:decode_chars])
                 if decoded_sample.startswith(b"\xff\xd8\xff"):
                     image_format = "jpeg"
                 elif decoded_sample.startswith(b"\x89PNG"):
                     image_format = "png"
                 elif decoded_sample.startswith(b"GIF8"):
                     image_format = "gif"
-                elif decoded_sample.startswith(b"RIFF") and decoded_sample[8:12] == b"WEBP":
+                elif (
+                    len(decoded_sample) >= 12 and decoded_sample.startswith(b"RIFF") and decoded_sample[8:12] == b"WEBP"
+                ):
                     image_format = "webp"
                 else:
                     image_format = "png"
