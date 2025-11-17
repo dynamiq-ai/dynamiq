@@ -42,8 +42,8 @@ def get_watsonx_workflow(
 @pytest.mark.parametrize(
     ("model", "expected_model"),
     [
-        ("watsonx_text/ibm/granite-13b-chat-v2", "watsonx_text/ibm/granite-13b-chat-v2"),
-        ("ibm/granite-13b-chat-v2", "watsonx_text/ibm/granite-13b-chat-v2"),
+        ("watsonx/ibm/granite-13b-chat-v2", "watsonx/ibm/granite-13b-chat-v2"),
+        ("ibm/granite-13b-chat-v2", "watsonx/ibm/granite-13b-chat-v2"),
     ],
 )
 def test_workflow_with_watsonx_ai(mock_llm_response_text, mock_llm_executor, model, expected_model):
