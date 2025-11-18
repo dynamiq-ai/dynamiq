@@ -1,10 +1,11 @@
 import uuid
+from io import BytesIO
 
 import pytest
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileWriteTool
+from dynamiq.nodes.tools.file_tools import EXTRACTED_TEXT_SUFFIX, FileListTool, FileReadTool, FileType, FileWriteTool
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 
@@ -148,3 +149,53 @@ def test_file_tools_integration(file_store, llm_model):
 
     result2 = read_tool2.run(input_data)
     assert result2.output["content"] == "Content from storage 2"
+
+
+def test_file_read_tool_appends_hint_for_non_text(monkeypatch, file_store, llm_model):
+    """Ensure cache hint is shown for non-plain-text conversions."""
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+    file_path = "docs/sample.pdf"
+    cache_path = f"{file_path}{EXTRACTED_TEXT_SUFFIX}"
+    file_store.store(file_path, b"%PDF-FAKE%")
+
+    monkeypatch.setattr(tool, "_detect_file_type", lambda *args, **kwargs: FileType.PDF)
+    monkeypatch.setattr(tool, "_process_file_with_converter", lambda *args, **kwargs: ("Converted PDF text", None))
+    monkeypatch.setattr(tool, "_persist_extracted_text", lambda *args, **kwargs: cache_path)
+
+    result = tool.run({"file_path": file_path})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["cached_text_path"] == cache_path
+    expected_hint = (
+        f"\n\n[Extracted text cached at '{cache_path}'. "
+        "Use FileSearchTool to search this processed content without re-reading the original file.]"
+    )
+    assert result.output["content"].endswith(expected_hint)
+
+
+def test_file_read_tool_limits_spreadsheet_preview(file_store, llm_model):
+    """Large spreadsheets should be summarized instead of dumping raw XML."""
+    tool = FileReadTool(file_store=file_store, llm=llm_model)
+
+    import pandas as pd
+
+    df = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=60, freq="D"),
+            "amount": range(60),
+            "type": ["debit" if i % 2 == 0 else "credit" for i in range(60)],
+        }
+    )
+
+    buffer = BytesIO()
+    df.to_excel(buffer, index=False)
+    buffer.seek(0)
+    file_store.store("data/transactions.xlsx", buffer.getvalue())
+
+    result = tool.run({"file_path": "data/transactions.xlsx"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    content = result.output["content"]
+    assert "Spreadsheet preview" in content
+    assert "Rows: 60" in content
+    assert "showing up to 5 row(s)" in content
