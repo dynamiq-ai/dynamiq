@@ -311,7 +311,8 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
             float: Scaled score between 0 and 1, depending on the similarity metric used.
         """
         if similarity == OpenSearchSimilarityMetric.COSINE:
-            return score
+            # Normalize range [0, 2] to [0, 1]
+            return score / 2
         elif similarity == OpenSearchSimilarityMetric.INNER_PRODUCT:
             # Normalize using sigmoid function as inner product scores can be any range
             return float(1 / (1 + np.exp(-score / 100)))
@@ -601,15 +602,18 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
         def generate_actions(docs):
             actions = []
             for doc in docs:
+                update_doc = {
+                    content_key: doc.content,
+                    "metadata": doc.metadata,
+                }
+                if getattr(doc, "embedding", None) is not None:
+                    update_doc[embedding_key] = doc.embedding
+
                 action = {
                     "_op_type": "update",
                     "_index": self.index_name,
                     "_id": doc.id,
-                    "doc": {
-                        content_key: doc.content,
-                        "metadata": doc.metadata,
-                        embedding_key: doc.embedding,
-                    },
+                    "doc": update_doc,
                 }
                 actions.append(action)
             return actions
