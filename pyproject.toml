@@ -64,6 +64,11 @@ orjson = "3.10.18"
 charset-normalizer = "^3.4.2"
 tenacity = "9.1.2"
 regex = "^2025.9.18"
+openpyxl = "^3.1.5"
+pdfplumber = "^0.11.8"
+pypdf2 = "^3.0.1"
+matplotlib = "^3.10.7"
+seaborn = "^0.13.2"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~78.1.1"
