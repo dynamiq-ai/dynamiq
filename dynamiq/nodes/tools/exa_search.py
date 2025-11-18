@@ -43,6 +43,10 @@ Examples:
 - {"query": "hydrogen fuel startups", "start_published_date": "2024-01-01T00:00:00.000Z", "limit": 5}
 """  # noqa: E501
 
+DEFAULT_RESULT_TITLE = "Untitled result"
+DEFAULT_RESULT_AUTHOR = "Unknown"
+DEFAULT_RESULT_PUBLISHED_DATE = "Unknown"
+
 
 class QueryType(str, Enum):
     keyword = "keyword"
@@ -367,10 +371,10 @@ class ExaTool(ConnectionNode):
 
         formatted_results = []
         for index, result in enumerate(results, start=1):
-            title = result.get("title") or "Untitled result"
+            title = result.get("title") or DEFAULT_RESULT_TITLE
             url = result.get("url")
-            published = result.get("publishedDate") or "Unknown"
-            author = result.get("author") or "Unknown"
+            published = result.get("publishedDate") or DEFAULT_RESULT_PUBLISHED_DATE
+            author = result.get("author") or DEFAULT_RESULT_AUTHOR
             score = result.get("score")
 
             formatted_results.append(f"### Result {index}: {title}")
@@ -411,7 +415,7 @@ class ExaTool(ConnectionNode):
 
         sources = []
         for result in results:
-            title = result.get("title") or "Untitled result"
+            title = result.get("title") or DEFAULT_RESULT_TITLE
             url = result.get("url")
             if url:
                 sources.append(f"- [{title}]({url})")
