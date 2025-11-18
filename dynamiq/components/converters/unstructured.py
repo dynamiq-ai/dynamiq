@@ -460,6 +460,9 @@ class UnstructuredFileConverter(BaseConverter):
 
                 doc_metadata = copy.deepcopy(metadata)
                 doc_metadata["file_path"] = str(filepath)
+                element_metadata = el.get("metadata")
+                if element_metadata:
+                    doc_metadata.update(element_metadata)
                 page_number = int(doc_metadata.get("page_number", 1))
 
                 texts_per_page[page_number] += text + separator
