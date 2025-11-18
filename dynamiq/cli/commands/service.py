@@ -107,6 +107,13 @@ def _archive_directory(path: Path) -> str:
 @click.option("--resource-profile", default=None, required=False, help="Resource profile ID (optional)")
 @click.option("--image", default=None, required=False, help="Image (optional)")
 @click.option(
+    "--env-secret",
+    multiple=True,
+    type=(str, str),
+    metavar="NAME VALUE",
+    help="Environment variables secrets (repeatable)",
+)
+@click.option(
     "--env",
     multiple=True,
     type=(str, str),
@@ -142,6 +149,7 @@ def deploy_service(
     resource_profile: str | None,
     image: str | None,
     env: tuple[tuple[str, str], ...],
+    env_secret: tuple[tuple[str, str], ...],
     command: tuple[str, ...],
     args: tuple[str, ...],
     min_replicas: int,
@@ -188,10 +196,12 @@ def deploy_service(
             },
         }
 
-        if env:
+        if env or env_secret:
             data["env"] = []
-            for i, (name, value) in enumerate(env):
+            for name, value in env:
                 data["env"].append({"name": name, "value": value})
+            for name, value in env_secret:
+                data["env"].append({"name": name, "value": value, "secret": True})
         if command:
             data["command"] = list(command)
         if args:
@@ -199,7 +209,7 @@ def deploy_service(
 
         try:
             if image:
-                response = api.post(api_endpoint, data={"data": json.dumps(data)})
+                response = api.post(api_endpoint, json=data)
                 if response.status_code == 200:
                     click.echo("Deployment successfully started with image.")
                 else:
