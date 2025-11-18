@@ -86,7 +86,31 @@ def _parse_logical_condition(condition: dict[str, Any], initial: bool = True) ->
         if _is_all_logical(conditions):
             if initial:
                 conditions = [_parse_logical_condition(c, initial=False) for c in conditions]
-                return {k: v for d in conditions for k, v in d.items()}
+                # Merge conditions
+                merged = {}
+                for d in conditions:
+                    for k, v in d.items():
+                        if k in merged:
+                            # Combine lists
+                            if isinstance(merged[k], list) and isinstance(v, list):
+                                merged[k].extend(v)
+                            # Merge dicts based on the structure
+                            elif isinstance(merged[k], dict) and isinstance(v, dict):
+                                for sub_k, sub_v in v.items():
+                                    if (
+                                        sub_k in merged[k]
+                                        and isinstance(merged[k][sub_k], list)
+                                        and isinstance(sub_v, list)
+                                    ):
+                                        merged[k][sub_k].extend(sub_v)
+                                    else:
+                                        merged[k][sub_k] = sub_v
+                            else:
+                                # Keep the last value
+                                merged[k] = v
+                        else:
+                            merged[k] = v
+                return merged
             else:
                 msg = f"Logical conditions are only allowed at levels 0 and 1: {condition}"
                 raise VectorStoreFilterException(msg)

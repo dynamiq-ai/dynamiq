@@ -175,7 +175,18 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
 
         # Add custom mapping settings if provided
         if self.mapping_settings:
-            mapping["mappings"] = mapping["mappings"] | self.mapping_settings
+            merged_mappings = mapping["mappings"].copy()
+            for key, value in self.mapping_settings.items():
+                if (
+                    key == "properties"
+                    and key in merged_mappings
+                    and isinstance(merged_mappings[key], dict)
+                    and isinstance(value, dict)
+                ):
+                    merged_mappings[key].update(value)
+                else:
+                    merged_mappings[key] = value
+            mapping["mappings"] = merged_mappings
 
         self.client.indices.create(index=self.index_name, body=mapping)
 
