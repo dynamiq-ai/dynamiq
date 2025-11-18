@@ -225,8 +225,8 @@ def deploy_service(
                     else:
                         click.echo(f"Failed to deploy service. Status: {response.status_code}")
         except Exception as e:
-            logging.error(f"Deployment failed: {str(e)}")
-            return False
+            logging.error(f"Deployment configuration failed: {str(e)}")
+            click.echo(f"Deployment configuration failed: {str(e)}")
 
     except Exception as e:
         logging.error(f"Unexpected error: {str(e)}")

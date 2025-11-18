@@ -20,7 +20,7 @@ profile = click.Group(name="resource-profiles", help="Manage profiles")
     required=False,
     type=click.Choice(["name", "sort_order", "description"], case_sensitive=True),
 )
-@click.option("--page-size", default=100, show_default=True)
+@click.option("--page-size", default=100, show_default=True, type=int)
 @with_api_and_settings
 def list_resource_profiles(*, api: ApiClient, settings: Settings, purpose: str, sort_by: str, page_size: int):
     response = api.get(f"/v1/resource-profiles?purpose={purpose}&page_size={page_size}&sort={sort_by}")
