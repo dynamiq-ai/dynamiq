@@ -14,9 +14,16 @@ profile = click.Group(name="resource-profiles", help="Manage profiles")
     required=False,
     type=click.Choice(["inference", "service", "fine_tuning"], case_sensitive=True),
 )
+@click.option(
+    "--sort-by",
+    default="sort_order",
+    required=False,
+    type=click.Choice(["name", "sort_order", "description"], case_sensitive=True),
+)
+@click.option("--page-size", default=100, show_default=True)
 @with_api_and_settings
-def list_resource_profiles(*, api: ApiClient, settings: Settings, purpose: str):
-    response = api.get(f"/v1/resource-profiles?purpose={purpose}&page_size=100&sort=sort_order")
+def list_resource_profiles(*, api: ApiClient, settings: Settings, purpose: str, sort_by: str, page_size: int):
+    response = api.get(f"/v1/resource-profiles?purpose={purpose}&page_size={page_size}&sort={sort_by}")
     if response.status_code == 200:
         profiles = response.json().get("data", [])
         click.echo(f"{len(profiles)} resource(s) found.")
