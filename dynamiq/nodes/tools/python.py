@@ -1,12 +1,14 @@
-import importlib
+import ast
+import builtins
 import io
 from copy import deepcopy
-from typing import Any, ClassVar, Literal
+from typing import Any, Callable, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
 from RestrictedPython import compile_restricted, safe_builtins, utility_builtins
 from RestrictedPython.Eval import default_guarded_getattr, default_guarded_getitem, default_guarded_getiter
 from RestrictedPython.Guards import guarded_unpack_sequence
+from RestrictedPython.transformer import INSPECT_ATTRIBUTES, RestrictingNodeTransformer, copy_locations
 
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -39,20 +41,102 @@ ALLOWED_MODULES = [
     "uuid",
     "pandas",
     "numpy",
-    "openpyxl"
+    "openpyxl",
+    "docx",
+    "pptx",
+    "pdfplumber",
+    "PyPDF2",
+    "pypdf",
+    "matplotlib",
+    "seaborn",
 ]
+
+ALLOWED_DUNDER_ATTRIBUTES = {"__class__", "__name__", "__qualname__"}
+
+
+class DynamiqRestrictingNodeTransformer(RestrictingNodeTransformer):
+    """Override attribute checks so a short allow-list of dunders remains accessible."""
+
+    allowed_dunder_attributes = ALLOWED_DUNDER_ATTRIBUTES
+
+    def visit_Attribute(self, node):
+        """Same as upstream implementation but permits whitelisted dunders."""
+        if node.attr.startswith("_") and node.attr != "_" and node.attr not in self.allowed_dunder_attributes:
+            self.error(
+                node,
+                f'"{node.attr}" is an invalid attribute name because it starts with "_".',
+            )
+
+        if node.attr.endswith("__roles__"):
+            self.error(
+                node,
+                f'"{node.attr}" is an invalid attribute name because it ends with "__roles__".',
+            )
+
+        if node.attr in INSPECT_ATTRIBUTES:
+            self.error(
+                node,
+                f'"{node.attr}" is a restricted name, that is forbidden to access in RestrictedPython.',
+            )
+
+        if isinstance(node.ctx, ast.Load):
+            node = self.node_contents_visit(node)
+            new_node = ast.Call(
+                func=ast.Name("_getattr_", ast.Load()),
+                args=[node.value, ast.Constant(node.attr)],
+                keywords=[],
+            )
+
+            copy_locations(new_node, node)
+            return new_node
+
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            node = self.node_contents_visit(node)
+            new_value = ast.Call(
+                func=ast.Name("_write_", ast.Load()),
+                args=[node.value],
+                keywords=[],
+            )
+
+            copy_locations(new_value, node.value)
+            node.value = new_value
+            return node
+
+        raise NotImplementedError(f"Unknown ctx type: {type(node.ctx)}")
+
+
+def make_safe_print(printer: Callable[..., Any]):
+    """Return a RestrictedPython-compatible print function bound to a printer callback."""
+
+    def safe_print(*args, **print_kwargs):
+        printer(*args, **print_kwargs)
+
+    return safe_print
+
+
+def guarded_write(obj, value=None):
+    """RestrictedPython helper to safely propagate write operations."""
+    return value if value is not None else obj
 
 
 def restricted_import(name: str, globals=None, locals=None, fromlist=(), level=0) -> Any:
     """
     Restricted import function to allow importing only modules in ALLOWED_MODULES.
     """
+    if not name:
+        raise ImportError("Empty module name")
+
+    if level not in (0,):
+        raise ImportError("Relative imports are not supported in the Python executor")
+
     root_module_name = name.split(".")[0]
     if root_module_name not in ALLOWED_MODULES:
         logger.warning(f"Import of '{root_module_name}' is not allowed")
         raise ImportError(f"Import of '{root_module_name}' is not allowed")
+
+    normalized_fromlist = fromlist or ()
     try:
-        module = importlib.import_module(name)
+        module = builtins.__import__(name, globals, locals, normalized_fromlist, level)
         logger.debug(f"Successfully imported {name}")
         return module
     except ImportError as e:
@@ -75,6 +159,14 @@ def safe_getattr(obj: Any, name: str, default=None) -> Any:
     """
     Safe version of getattr that uses guarded getattr.
     """
+    if name in ALLOWED_DUNDER_ATTRIBUTES:
+        try:
+            return getattr(obj, name)
+        except AttributeError:
+            if default is not None:
+                return default
+            raise
+
     try:
         return default_guarded_getattr(obj, name)
     except (AttributeError, TypeError):
@@ -156,7 +248,7 @@ def compile_and_execute(code: str, restricted_globals: dict) -> dict:
     Returns the updated restricted_globals.
     """
     try:
-        byte_code = compile_restricted(code, "<inline>", "exec")
+        byte_code = compile_restricted(code, "<inline>", "exec", policy=DynamiqRestrictingNodeTransformer)
         exec(byte_code, restricted_globals)  # nosec
         return restricted_globals
     except Exception as e:
@@ -206,12 +298,7 @@ class Python(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
         stdout = io.StringIO()
-
-        def safe_print(*args, **kwargs):
-            print(*args, file=stdout, **kwargs)
-
-        def guarded_write(obj, value=None):
-            return value if value is not None else obj
+        safe_print = make_safe_print(lambda *args, **print_kwargs: print(*args, file=stdout, **print_kwargs))
 
         restricted_globals = get_restricted_globals()
         restricted_globals.update(
