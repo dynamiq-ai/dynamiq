@@ -267,13 +267,16 @@ class UnstructuredFileConverter(BaseConverter):
         if extract_types is None and self.extract_image_block_types_enabled:
             extract_types = [UnstructuredElementTypes.IMAGE, UnstructuredElementTypes.TABLE]
 
+        kwargs = self.unstructured_kwargs or {}
+        if "extract_image_block_types" not in kwargs:
+            kwargs["extract_image_block_types"] = extract_types
+
         return partition_via_api(
             filename=str(filepath),
             api_url=self.connection.url,
             api_key=self.connection.api_key,
             strategy=self.strategy,
-            extract_image_block_types=extract_types,
-            **self.unstructured_kwargs or {},
+            **kwargs,
         )
 
     def _partition_file_into_elements_by_file(
@@ -299,6 +302,10 @@ class UnstructuredFileConverter(BaseConverter):
         if extract_types is None and self.extract_image_block_types_enabled:
             extract_types = [UnstructuredElementTypes.IMAGE, UnstructuredElementTypes.TABLE]
 
+        kwargs = self.unstructured_kwargs or {}
+        if "extract_image_block_types" not in kwargs:
+            kwargs["extract_image_block_types"] = extract_types
+
         return partition_via_api(
             filename=None,
             file=file,
@@ -306,8 +313,7 @@ class UnstructuredFileConverter(BaseConverter):
             api_url=self.connection.url,
             api_key=self.connection.api_key,
             strategy=self.strategy,
-            extract_image_block_types=extract_types,
-            **self.unstructured_kwargs or {},
+            **kwargs,
         )
 
     def _collect_images_and_tables(self, elements: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -510,8 +516,12 @@ class UnstructuredFileConverter(BaseConverter):
                     element_images = [img for img in images if img["index"] == index]
                     element_tables = [tbl for tbl in tables if tbl["index"] == index]
                     if element_images:
+                        for image in element_images:
+                            image.pop("element_metadata", None)
                         doc_metadata["images"] = element_images
                     if element_tables:
+                        for table in element_tables:
+                            table.pop("element_metadata", None)
                         doc_metadata["tables"] = element_tables
 
                 doc = Document(content=text, metadata=doc_metadata)
