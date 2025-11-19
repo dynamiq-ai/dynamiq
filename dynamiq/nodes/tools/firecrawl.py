@@ -11,29 +11,32 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_FIRECRAWL = """Scrapes web content
+DESCRIPTION_FIRECRAWL = """Scrapes web content with fully rendered pages, proxies, and automation.
 
-Key Capabilities:
-- Fully rendered pages with JavaScript support, proxy rotation, and mobile emulation
-- Mix-and-match output formats (markdown, html, rawHtml, links, summary, screenshot, json, changeTracking, branding)
-- Fine control over scraping context: caching, headers, parsers (PDF handling), location, timeouts, and TLS settings
-- Pre-scrape actions (wait, click, scroll, screenshot, custom JS) for complex pages
+Key capabilities:
+- Mix markdown/html/rawHtml/links/summary/screenshot/json/changeTracking/branding outputs in one call
+- Control scraping context: cache age, PDF parsers, TLS, viewport/mobile, headers, proxy tier, and location
+- Program actions (wait/click/write/press/scroll/screenshot/pdf/executeJavascript/scrape) before capture
+- Strip base64 blobs, block ads, or enforce zero-data-retention for sensitive workflows
 
-Usage Strategy:
-- Set `only_main_content` to True for article-style pages; disable when layout context matters
-- Combine multiple `formats` (e.g. `['markdown', {'type': 'json', 'schema': {...}}]`)
-for both readable and structured data
-- Use `max_age` or `store_in_cache=False` depending on freshness vs cost requirements
-- Supply `actions` and `wait_for` when dynamic content needs interaction before scraping
+Usage strategy:
+- Keep `only_main_content=True` for articles/blogs; disable when layout/menus matter
+- Pass `formats` as strings or typed dicts (e.g. `{'type': 'json', 'schema': {...}}`) to shape the response
+- Set `max_age`, `store_in_cache`, or `zero_data_retention` based on freshness vs. compliance needs
+- Combine `actions` with `wait_for` to ensure dynamic content loads before scraping/screenshotting
 
-Parameter Guide:
-- url: target URL (required)
-- formats: list of format strings or objects from Firecrawl's Formats schema
-- actions: ordered list describing automation steps before scraping
-- location/proxy/mobile: control geography, language, and device profile for tougher sites
+Parameter guide (FirecrawlInputSchema):
+- `url` (required): target page.
+- `formats`: output mix, strings or objects from Firecrawl's Formats schema.
+- `only_main_content` / `include_tags` / `exclude_tags`: trim boilerplate or force specific HTML tags.
+- `max_age`, `headers`, `wait_for`, `mobile`, `skip_tls_verification`, `timeout`: control fetch/crawl behavior.
+- `parsers`: `['pdf']` by default; send [] to skip PDF parsing or objects like `{'type': 'pdf','maxPages':5}`.
+- `actions`: ordered automation objects (wait/click/write/press/scroll/screenshot/pdf/executeJavascript/scrape).
+- `location`: emulate country + languages for proxies and Accept-Language headers.
+- `remove_base64_images`, `block_ads`, `proxy`, `store_in_cache`, `zero_data_retention`: caching/compliance knobs.
 
 Example:
-{"url": "https://example.com", "formats": ["markdown", "links"], "only_main_content": True, "proxy": "auto"}"""
+{"url": "https://example.com", "formats": ["markdown", "links"], "only_main_content": true, "proxy": "auto"}"""
 
 
 class LocationSettings(BaseModel):
@@ -71,38 +74,96 @@ class FirecrawlInputSchema(BaseModel):
     url: str = Field(..., description="URL of the page to scrape.")
     formats: list[str | dict[str, Any]] | None = Field(
         default=None,
-        description="Firecrawl formats (e.g. ['markdown', {'type': 'json', 'schema': {...}}]).",
+        description=(
+            "Firecrawl output formats. Accepts plain strings (markdown/html/rawHtml/links/summary/"
+            "screenshot/json/changeTracking/branding) or objects with format-specific options."
+        ),
     )
     only_main_content: bool | None = Field(
         default=None,
         alias="onlyMainContent",
-        description="When True, return only the primary article/content region.",
+        description="True trims boilerplate (nav/footer) for article-style pages; False keeps the full DOM.",
     )
-    include_tags: list[str] | None = Field(default=None, alias="includeTags")
-    exclude_tags: list[str] | None = Field(default=None, alias="excludeTags")
+    include_tags: list[str] | None = Field(
+        default=None,
+        alias="includeTags",
+        description="List of HTML tag names to force-include in the output (e.g. ['table', 'img']).",
+    )
+    exclude_tags: list[str] | None = Field(
+        default=None,
+        alias="excludeTags",
+        description="HTML tag names that should be stripped from the response.",
+    )
     max_age: int | None = Field(
         default=None,
         alias="maxAge",
-        description="Use cached copy if newer than this age in ms.",
+        description="Cache freshness window in ms (Firecrawl default is 172800000 = two days).",
     )
-    headers: dict[str, Any] | None = Field(default=None, description="Custom headers/cookies for the request.")
-    wait_for: int | None = Field(default=None, alias="waitFor", description="Delay (ms) before extracting content.")
-    mobile: bool | None = Field(default=None, description="Emulate mobile device if True.")
-    skip_tls_verification: bool | None = Field(default=None, alias="skipTlsVerification")
-    timeout: int | None = Field(default=None, description="Request timeout in ms.")
+    headers: dict[str, Any] | None = Field(
+        default=None,
+        description="Custom HTTP headers (cookies, user-agent, auth tokens) to forward with the scrape.",
+    )
+    wait_for: int | None = Field(
+        default=None,
+        alias="waitFor",
+        description="Delay in ms before scraping to let dynamic content render (default 0).",
+    )
+    mobile: bool | None = Field(
+        default=None,
+        description="True emulates a mobile device viewport + UA, useful for responsive layouts/screenshots.",
+    )
+    skip_tls_verification: bool | None = Field(
+        default=None,
+        alias="skipTlsVerification",
+        description="True disables TLS verification (Firecrawl default), set False for strict cert checks.",
+    )
+    timeout: int | None = Field(default=None, description="Request timeout in ms for the upstream fetch.")
     parsers: list[str | dict[str, Any]] | None = Field(
         default=None,
-        description="Control how files (e.g., PDFs) are processed. Accepts ['pdf'] or parser objects.",
+        description=(
+            "Controls file parsers. Firecrawl defaults to ['pdf']; pass [] to disable auto PDF parsing or "
+            "objects like {'type': 'pdf', 'maxPages': 5} to limit cost."
+        ),
     )
-    actions: list[Action] | None = Field(default=None, description="Automation steps (wait, click, screenshot, etc.).")
-    location: LocationSettings | None = Field(default=None, description="Location emulation (country + languages).")
-    remove_base64_images: bool | None = Field(default=None, alias="removeBase64Images")
-    block_ads: bool | None = Field(default=None, alias="blockAds")
+    actions: list[Action] | None = Field(
+        default=None,
+        description=(
+            "Optional automation instructions executed before scraping. Supports wait/screenshot/click/write/"
+            "press/scroll/scrape/executeJavascript/pdf actions following Firecrawl's schema."
+        ),
+    )
+    location: LocationSettings | None = Field(
+        default=None,
+        description="Country + preferred languages for proxy/language emulation (defaults to US if omitted).",
+    )
+    remove_base64_images: bool | None = Field(
+        default=None,
+        alias="removeBase64Images",
+        description="True strips giant base64 <img> blobs and replaces them with placeholders (default True).",
+    )
+    block_ads: bool | None = Field(
+        default=None,
+        alias="blockAds",
+        description="Enable ad + cookie popup blocking (default True on Firecrawl).",
+    )
     proxy: Literal["basic", "stealth", "auto"] | None = Field(
-        default=None, description="Proxy mode. Defaults to Firecrawl auto when omitted."
+        default=None,
+        description=(
+            "Proxy tier: 'basic' (fast, low protection), 'stealth' (solves harder anti-bot, higher cost), or "
+            "'auto' (retry with stealth on failure; Firecrawl default)."
+        ),
     )
-    store_in_cache: bool | None = Field(default=None, alias="storeInCache")
-    zero_data_retention: bool | None = Field(default=None, alias="zeroDataRetention")
+    store_in_cache: bool | None = Field(
+        default=None,
+        alias="storeInCache",
+        description="True lets Firecrawl index/cache the page "
+        "(default True, forced False when using sensitive params).",
+    )
+    zero_data_retention: bool | None = Field(
+        default=None,
+        alias="zeroDataRetention",
+        description="Opt-in compliance flag; True enables Firecrawl's zero data retention mode (requires approval).",
+    )
 
 
 class FirecrawlTool(ConnectionNode):
