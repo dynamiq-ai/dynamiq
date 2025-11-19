@@ -97,13 +97,22 @@ def _archive_directory(path: Path) -> str:
 
 @service.command("deploy")
 @click.option("--id", "service_id", prompt=True)
-@click.option("--source", prompt=True)
+@click.option("--source", default="./", show_default=True)
 @click.option("--docker-context", default=".", show_default=True)
 @click.option("--docker-file", default="Dockerfile", show_default=True)
 @click.option("--cpu-requests", default="100m", show_default=True)
 @click.option("--memory-requests", default="256Mi", show_default=True)
 @click.option("--cpu-limits", default="200m", show_default=True)
 @click.option("--memory-limits", default="512Mi", show_default=True)
+@click.option("--resource-profile", default=None, required=False, help="Resource profile ID (optional)")
+@click.option("--image", default=None, required=False, help="Image (optional)")
+@click.option(
+    "--env-secret",
+    multiple=True,
+    type=(str, str),
+    metavar="NAME VALUE",
+    help="Environment variables secrets (repeatable)",
+)
 @click.option(
     "--env",
     multiple=True,
@@ -111,6 +120,19 @@ def _archive_directory(path: Path) -> str:
     metavar="NAME VALUE",
     help="Environment variables (repeatable)",
 )
+@click.option(
+    "--command",
+    multiple=True,
+    help="Command to run in the container (repeatable)",
+)
+@click.option(
+    "--args",
+    multiple=True,
+    help="Arguments for the command (repeatable)",
+)
+@click.option("--min-replicas", default=1, show_default=True, help="Minimum number of replicas")
+@click.option("--max-replicas", default=2, show_default=True, help="Maximum number of replicas")
+@click.option("--target-cpu-utilization", default=80, show_default=True, help="Average utilization")
 @with_api_and_settings
 def deploy_service(
     *,
@@ -124,46 +146,87 @@ def deploy_service(
     memory_requests: str,
     cpu_limits: str,
     memory_limits: str,
+    resource_profile: str | None,
+    image: str | None,
     env: tuple[tuple[str, str], ...],
+    env_secret: tuple[tuple[str, str], ...],
+    command: tuple[str, ...],
+    args: tuple[str, ...],
+    min_replicas: int,
+    max_replicas: int,
+    target_cpu_utilization: int,
 ):
     archive_path = ""
     try:
-        click.echo("• Archiving source directory …")
-        archive_path = _archive_directory(source)
+        click.echo("• Creating deployment …")
         project_id = settings.project_id
         if not project_id:
             click.echo("No project ID found. Please set the current project ID.")
             return False
 
-        service_id = service_id
         api_endpoint = f"/v1/services/{service_id}/deploy"
 
         data = {
-                "docker": {"file": str(docker_file), "context": str(docker_context)},
-                "resources": {
-                    "requests": {
-                        "cpu": str(cpu_requests),
-                        "memory": str(memory_requests),
-                    },
-                    "limits": {"cpu": str(cpu_limits), "memory": str(memory_limits)},
-                },
-            }
-        if env:
+            **({"image": image} if image else {"docker": {"file": str(docker_file), "context": str(docker_context)}}),
+            **(
+                {"resource_profile_id": resource_profile}
+                if resource_profile
+                else {
+                    "resources": {
+                        "requests": {
+                            "cpu": str(cpu_requests),
+                            "memory": str(memory_requests),
+                        },
+                        "limits": {"cpu": str(cpu_limits), "memory": str(memory_limits)},
+                    }
+                }
+            ),
+            "autoscaling": {
+                "min_replicas": min_replicas,
+                "max_replicas": max_replicas,
+                "metrics": [
+                    {
+                        "type": "resource",
+                        "resource": {
+                            "name": "cpu",
+                            "target": {"type": "utilization", "average_utilization": target_cpu_utilization},
+                        },
+                    }
+                ],
+            },
+        }
+
+        if env or env_secret:
             data["env"] = []
-            for i, (name, value) in enumerate(env):
+            for name, value in env:
                 data["env"].append({"name": name, "value": value})
+            for name, value in env_secret:
+                data["env"].append({"name": name, "value": value, "secret": True})
+        if command:
+            data["command"] = list(command)
+        if args:
+            data["args"] = list(args)
 
         try:
-            with open(archive_path, "rb") as archive_file:
-                files = {"source": ("archive.tar.gz", archive_file, "application/x-tar")}
-                response = api.post(api_endpoint, data={"data": json.dumps(data)}, files=files)
+            if image:
+                response = api.post(api_endpoint, json=data)
                 if response.status_code == 200:
-                    click.echo("Deployment successfully started.")
+                    click.echo("Deployment successfully started with image.")
                 else:
-                    click.echo("Failed to deploy service.")
-        except Exception:
-            logging.error("Deployment failed.")
-            return False
+                    click.echo(f"Failed to deploy service. Status: {response.status_code}")
+            else:
+                click.echo("• Archiving source directory …")
+                archive_path = _archive_directory(source)
+                with open(archive_path, "rb") as archive_file:
+                    files = {"source": ("archive.tar.gz", archive_file, "application/x-tar")}
+                    response = api.post(api_endpoint, data={"data": json.dumps(data)}, files=files)
+                    if response.status_code == 200:
+                        click.echo("Deployment successfully started with docker build.")
+                    else:
+                        click.echo(f"Failed to deploy service. Status: {response.status_code}")
+        except Exception as e:
+            logging.error(f"Deployment configuration failed: {str(e)}")
+            click.echo(f"Deployment configuration failed: {str(e)}")
 
     except Exception as e:
         logging.error(f"Unexpected error: {str(e)}")
