@@ -6,6 +6,7 @@ from dynamiq.cli.commands.context import DynamiqCtx, pass_dctx
 from .config import config
 from .org import org
 from .project import project
+from .resource_profiles import profile
 from .service import service
 
 
@@ -23,6 +24,8 @@ cli.add_command(project, name="project")
 cli.add_command(project, name="projects")
 cli.add_command(service, name="service")
 cli.add_command(service, name="services")
+cli.add_command(profile, name="resource-profiles")
+cli.add_command(profile, name="resource-profile")
 cli.add_command(config)
 
 
