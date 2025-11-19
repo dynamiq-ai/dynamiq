@@ -1,3 +1,5 @@
+import json
+from copy import deepcopy
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -9,37 +11,32 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_FIRECRAWL = """Scrapes web content from URLs using Firecrawl
-with high-fidelity extraction and structured output.
+DESCRIPTION_FIRECRAWL = """Scrapes web content with fully rendered pages, proxies, and automation.
 
-Key Capabilities:
-- High-quality content extraction with JavaScript support
-- Multiple output formats (markdown, HTML, screenshots)
-- Custom JSON schemas for structured data extraction
-- Main content filtering and selective tag extraction
+Key capabilities:
+- Mix markdown/html/rawHtml/links/summary/screenshot/json/changeTracking/branding outputs in one call
+- Control scraping context: cache age, PDF parsers, TLS, viewport/mobile, headers, proxy tier, and location
+- Program actions (wait/click/write/press/scroll/screenshot/pdf/executeJavascript/scrape) before capture
+- Strip base64 blobs, block ads, or enforce zero-data-retention for sensitive workflows
 
-Usage Strategy:
-- Use markdown format for clean, readable content
-- Enable only_main_content to filter navigation/ads
-- Use JSON schemas for structured data extraction
-- Combine formats for comprehensive content analysis
+Usage strategy:
+- Keep `only_main_content=True` for articles/blogs; disable when layout/menus matter
+- Pass `formats` as strings or typed dicts (e.g. `{'type': 'json', 'schema': {...}}`) to shape the response
+- Set `max_age`, `store_in_cache`, or `zero_data_retention` based on freshness vs. compliance needs
+- Combine `actions` with `wait_for` to ensure dynamic content loads before scraping/screenshotting
 
-Parameter Guide:
-- url: Target website URL to scrape
-- formats: Output types (["markdown", "html", "screenshot"])
-- only_main_content: Filter to main article content
-- include_tags: Specific HTML elements to extract
+Parameter guide (FirecrawlInputSchema):
+- `url` (required): target page.
+- `formats`: output mix, strings or objects from Firecrawl's Formats schema.
+- `only_main_content` / `include_tags` / `exclude_tags`: trim boilerplate or force specific HTML tags.
+- `max_age`, `headers`, `wait_for`, `mobile`, `skip_tls_verification`, `timeout`: control fetch/crawl behavior.
+- `parsers`: `['pdf']` by default; send [] to skip PDF parsing or objects like `{'type': 'pdf','maxPages':5}`.
+- `actions`: ordered automation objects (wait/click/write/press/scroll/screenshot/pdf/executeJavascript/scrape).
+- `location`: emulate country + languages for proxies and Accept-Language headers.
+- `remove_base64_images`, `block_ads`, `proxy`, `store_in_cache`, `zero_data_retention`: caching/compliance knobs.
 
-Examples:
-- {"url": "https://example.com", "formats": ["markdown"]}"""
-
-
-class JsonOptions(BaseModel):
-    """Options for configuring JSON extraction."""
-
-    json_schema: dict | None = Field(default=None, alias="schema")
-    system_prompt: str | None = Field(None, alias="systemPrompt")
-    prompt: str | None = None
+Example:
+{"url": "https://example.com", "formats": ["markdown", "links"], "only_main_content": true, "proxy": "auto"}"""
 
 
 class LocationSettings(BaseModel):
@@ -55,21 +52,117 @@ class Action(BaseModel):
     type: str
     milliseconds: int | None = None
     selector: str | None = None
+    text: str | None = None
+    key: str | None = None
+    all: bool | None = None
+    full_page: bool | None = Field(default=None, alias="fullPage")
+    quality: int | None = None
+    viewport: dict[str, int] | None = None
+    script: str | None = None
+    format: str | None = None
+    landscape: bool | None = None
+    scale: float | None = None
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
 class FirecrawlInputSchema(BaseModel):
-    url: str = Field(default="", description="Parameter to specify the url of the page to be scraped.")
-    only_main_content: bool = Field(
-        default=True,
-        description="If True, only the main content of the page will be extracted, excluding navigation and ads.",
+    """Schema exposed to agents using the tool."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    url: str = Field(..., description="URL of the page to scrape.")
+    formats: list[str | dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Firecrawl output formats. Accepts plain strings (markdown/html/rawHtml/links/summary/"
+            "screenshot/json/changeTracking/branding) or objects with format-specific options."
+        ),
     )
-    formats: list[str] = Field(
-        default_factory=lambda: ["markdown"],
-        description="List of output formats to return. Supported formats: markdown, html, screenshot.",
+    only_main_content: bool | None = Field(
+        default=None,
+        alias="onlyMainContent",
+        description="True trims boilerplate (nav/footer) for article-style pages; False keeps the full DOM.",
     )
     include_tags: list[str] | None = Field(
         default=None,
-        description="List of HTML tags to include in the extraction. If None, all tags are included.",
+        alias="includeTags",
+        description="List of HTML tag names to force-include in the output (e.g. ['table', 'img']).",
+    )
+    exclude_tags: list[str] | None = Field(
+        default=None,
+        alias="excludeTags",
+        description="HTML tag names that should be stripped from the response.",
+    )
+    max_age: int | None = Field(
+        default=None,
+        alias="maxAge",
+        description="Cache freshness window in ms (Firecrawl default is 172800000 = two days).",
+    )
+    headers: dict[str, Any] | None = Field(
+        default=None,
+        description="Custom HTTP headers (cookies, user-agent, auth tokens) to forward with the scrape.",
+    )
+    wait_for: int | None = Field(
+        default=None,
+        alias="waitFor",
+        description="Delay in ms before scraping to let dynamic content render (default 0).",
+    )
+    mobile: bool | None = Field(
+        default=None,
+        description="True emulates a mobile device viewport + UA, useful for responsive layouts/screenshots.",
+    )
+    skip_tls_verification: bool | None = Field(
+        default=None,
+        alias="skipTlsVerification",
+        description="True disables TLS verification (Firecrawl default), set False for strict cert checks.",
+    )
+    timeout: int | None = Field(default=None, description="Request timeout in ms for the upstream fetch.")
+    parsers: list[str | dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Controls file parsers. Firecrawl defaults to ['pdf']; pass [] to disable auto PDF parsing or "
+            "objects like {'type': 'pdf', 'maxPages': 5} to limit cost."
+        ),
+    )
+    actions: list[Action] | None = Field(
+        default=None,
+        description=(
+            "Optional automation instructions executed before scraping. Supports wait/screenshot/click/write/"
+            "press/scroll/scrape/executeJavascript/pdf actions following Firecrawl's schema."
+        ),
+    )
+    location: LocationSettings | None = Field(
+        default=None,
+        description="Country + preferred languages for proxy/language emulation (defaults to US if omitted).",
+    )
+    remove_base64_images: bool | None = Field(
+        default=None,
+        alias="removeBase64Images",
+        description="True strips giant base64 <img> blobs and replaces them with placeholders (default True).",
+    )
+    block_ads: bool | None = Field(
+        default=None,
+        alias="blockAds",
+        description="Enable ad + cookie popup blocking (default True on Firecrawl).",
+    )
+    proxy: Literal["basic", "stealth", "auto"] | None = Field(
+        default=None,
+        description=(
+            "Proxy tier: 'basic' (fast, low protection), 'stealth' (solves harder anti-bot, higher cost), or "
+            "'auto' (retry with stealth on failure; Firecrawl default)."
+        ),
+    )
+    store_in_cache: bool | None = Field(
+        default=None,
+        alias="storeInCache",
+        description="True lets Firecrawl index/cache the page "
+        "(default True, forced False when using sensitive params).",
+    )
+    zero_data_retention: bool | None = Field(
+        default=None,
+        alias="zeroDataRetention",
+        description="Opt-in compliance flag; True enables Firecrawl's zero data retention mode (requires approval).",
     )
 
 
@@ -82,70 +175,133 @@ class FirecrawlTool(ConnectionNode):
     url: str | None = None
     input_schema: ClassVar[type[FirecrawlInputSchema]] = FirecrawlInputSchema
 
-    formats: list[str] = Field(default_factory=lambda: ["markdown"])
+    formats: list[str | dict[str, Any]] = Field(default_factory=lambda: ["markdown"])
     only_main_content: bool = Field(default=True, alias="onlyMainContent")
     include_tags: list[str] | None = Field(default=None, alias="includeTags")
     exclude_tags: list[str] | None = Field(default=None, alias="excludeTags")
-    headers: dict | None = None
+    max_age: int | None = Field(default=None, alias="maxAge")
+    headers: dict[str, Any] | None = None
     wait_for: int = Field(default=0, alias="waitFor")
     mobile: bool = False
-    skip_tls_verification: bool = Field(default=False, alias="skipTlsVerification")
+    skip_tls_verification: bool = Field(default=True, alias="skipTlsVerification")
     timeout: int = 30000
-    json_options: JsonOptions | None = Field(default=None, alias="jsonOptions")
+    parsers: list[str | dict[str, Any]] | None = None
     actions: list[Action] | None = None
     location: LocationSettings | None = None
-    remove_base64_images: bool = Field(default=False, alias="removeBase64Images")
+    remove_base64_images: bool = Field(default=True, alias="removeBase64Images")
     block_ads: bool = Field(default=True, alias="blockAds")
-    proxy: str | None = None
+    proxy: Literal["basic", "stealth", "auto"] | None = None
+    store_in_cache: bool | None = Field(default=None, alias="storeInCache")
+    zero_data_retention: bool | None = Field(default=None, alias="zeroDataRetention")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
-    def _build_scrape_data(self, url: str) -> dict:
+    def _build_scrape_data(self, url: str, overrides: FirecrawlInputSchema) -> dict:
         """Build the request payload for the Firecrawl API."""
+
+        def resolve(field_name: str) -> Any:
+            if hasattr(overrides, field_name):
+                value = getattr(overrides, field_name)
+                if value is not None:
+                    return value
+            return deepcopy(getattr(self, field_name, None))
+
+        formats = resolve("formats") or ["markdown"]
+        only_main_content = resolve("only_main_content")
+        if only_main_content is None:
+            only_main_content = True
+
         base_data = {
             "url": url,
-            "formats": self.formats,
-            "onlyMainContent": self.only_main_content,
+            "formats": formats,
+            "onlyMainContent": only_main_content,
         }
 
         conditional_fields = {
-            "includeTags": self.include_tags,
-            "excludeTags": self.exclude_tags,
-            "headers": self.headers,
-            "waitFor": self.wait_for if self.wait_for > 0 else None,
-            "mobile": self.mobile if self.mobile else None,
-            "skipTlsVerification": self.skip_tls_verification if self.skip_tls_verification else None,
-            "timeout": self.timeout if self.timeout != 30000 else None,
-            "removeBase64Images": self.remove_base64_images if self.remove_base64_images else None,
-            "proxy": self.proxy,
+            "includeTags": resolve("include_tags"),
+            "excludeTags": resolve("exclude_tags"),
+            "maxAge": resolve("max_age"),
+            "headers": resolve("headers"),
+            "waitFor": resolve("wait_for"),
+            "mobile": resolve("mobile"),
+            "skipTlsVerification": resolve("skip_tls_verification"),
+            "timeout": resolve("timeout"),
+            "parsers": resolve("parsers"),
+            "removeBase64Images": resolve("remove_base64_images"),
+            "blockAds": resolve("block_ads"),
+            "proxy": resolve("proxy"),
+            "storeInCache": resolve("store_in_cache"),
+            "zeroDataRetention": resolve("zero_data_retention"),
         }
 
-        if not self.block_ads:
-            conditional_fields["blockAds"] = False
+        actions = resolve("actions")
+        if actions:
+            conditional_fields["actions"] = [
+                action.model_dump(exclude_none=True, by_alias=True) if isinstance(action, Action) else action
+                for action in actions
+            ]
 
-        if self.json_options:
-            conditional_fields["jsonOptions"] = self.json_options.model_dump(exclude_none=True, by_alias=True)
-        if self.actions:
-            conditional_fields["actions"] = [action.model_dump(exclude_none=True) for action in self.actions]
-        if self.location:
-            conditional_fields["location"] = self.location.model_dump(exclude_none=True)
+        location = resolve("location")
+        if location:
+            conditional_fields["location"] = (
+                location.model_dump(exclude_none=True) if isinstance(location, BaseModel) else location
+            )
 
         # Filter out None values and merge with base data
         filtered_fields = {k: v for k, v in conditional_fields.items() if v is not None}
         return {**base_data, **filtered_fields}
 
-    def _format_agent_response(self, url: str, data: dict) -> str:
+    @staticmethod
+    def _json_section(title: str, payload: Any) -> str:
+        return f"## {title}\n```json\n{json.dumps(payload, indent=2, ensure_ascii=False)}\n```"
+
+    def _format_agent_response(self, url: str, response: dict[str, Any]) -> str:
         """Format the response for agent consumption using Markdown."""
-        sections = [f"## Source URL\n{url}"]
+        data = response.get("data", {}) or {}
+        sections = [
+            "## Firecrawl Scrape Result",
+            f"- URL: {url}",
+            f"- Success: {response.get('success', False)}",
+        ]
 
-        format_mappings = {"content": "Scraped Result", "markdown": "Markdown Content", "html": "HTML", "json": "JSON"}
+        warning = data.get("warning")
+        if warning:
+            sections.append(f"- Warning: {warning}")
 
-        for data_key, section_name in format_mappings.items():
-            if data_key in data:
-                if data_key in ["html", "json"]:
-                    sections.append(f"## {section_name}\n{data_key}\n{data[data_key]}\n")
-                else:
-                    sections.append(f"## {section_name}\n{data[data_key]}")
+        content_fields = [
+            ("markdown", "Markdown"),
+            ("summary", "Summary"),
+            ("html", "HTML"),
+            ("rawHtml", "Raw HTML"),
+        ]
+
+        for key, label in content_fields:
+            value = data.get(key)
+            if value:
+                sections.append(f"## {label}\n{value}")
+
+        if screenshot := data.get("screenshot"):
+            sections.append(f"## Screenshot URL\n{screenshot}")
+
+        if links := data.get("links"):
+            links_section = "\n".join(f"- {link}" for link in links)
+            sections.append(f"## Links\n{links_section}")
+
+        actions = data.get("actions")
+        if actions:
+            sections.append(self._json_section("Action Results", actions))
+
+        metadata = data.get("metadata")
+        if metadata:
+            sections.append(self._json_section("Metadata", metadata))
+
+        change_tracking = data.get("changeTracking")
+        if change_tracking:
+            sections.append(self._json_section("Change Tracking", change_tracking))
+
+        branding = data.get("branding")
+        if branding:
+            sections.append(self._json_section("Branding", branding))
 
         return "\n\n".join(sections)
 
@@ -163,7 +319,7 @@ class FirecrawlTool(ConnectionNode):
             logger.error(f"Tool {self.name} - {self.id}: failed to get input data.")
             raise ValueError("URL is required for scraping")
 
-        scrape_data = self._build_scrape_data(url)
+        scrape_data = self._build_scrape_data(url, input_data)
         connection_url = self.connection.url + "scrape"
 
         try:
@@ -185,12 +341,10 @@ class FirecrawlTool(ConnectionNode):
                 recoverable=True,
             )
 
-        data = scrape_result.get("data", {})
-
         if self.is_optimized_for_agents:
-            result = self._format_agent_response(url, data)
+            result = self._format_agent_response(url, scrape_result)
         else:
-            result = {"success": scrape_result.get("success", False), "url": url, **data}
+            result = {"success": scrape_result.get("success", False), "url": url, **(scrape_result.get("data") or {})}
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
