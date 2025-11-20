@@ -1221,7 +1221,7 @@ class Elasticsearch(BaseConnection):
         return es_client
 
 
-class AWSOpenSearch(BaseConnection):
+class AWSOpenSearch(AWS):
     """
     Represents a connection to AWS OpenSearch Service.
 
@@ -1240,10 +1240,7 @@ class AWSOpenSearch(BaseConnection):
 
     host: str = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_HOST"))
     port: int = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_PORT", 443))
-    region: str = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_REGION"))
-    access_key_id: str | None = Field(default_factory=partial(get_env_var, "AWS_ACCESS_KEY_ID"))
-    secret_access_key: str | None = Field(default_factory=partial(get_env_var, "AWS_SECRET_ACCESS_KEY"))
-    profile: str | None = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_PROFILE"))
+
     service: str = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_SERVICE", "es"))
     use_ssl: bool = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_USE_SSL", True))
     verify_certs: bool = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_VERIFY_CERTS", True))
@@ -1251,35 +1248,23 @@ class AWSOpenSearch(BaseConnection):
 
     def connect(self):
         """
-        Connects to AWS OpenSearch Service.
-
-        This method establishes a connection to AWS OpenSearch Service using AWS authentication.
-        It uses AWS4Auth for request signing and creates an OpenSearch client.
-
-        Returns:
-            opensearchpy.OpenSearch: An instance of the OpenSearch client.
+        Connect to AWS OpenSearch using inherited AWS credentials/session logic.
         """
-        import boto3
         from opensearchpy import OpenSearch, RequestsHttpConnection
         from requests_aws4auth import AWS4Auth
 
-        if self.profile:
-            session = boto3.Session(profile_name=self.profile, region_name=self.region)
-        elif self.access_key_id and self.secret_access_key:
-            session = boto3.Session(
-                aws_access_key_id=self.access_key_id,
-                aws_secret_access_key=self.secret_access_key,
-                region_name=self.region,
-            )
-        else:
-            session = boto3.Session(region_name=self.region)
-
+        session = self.get_boto3_session()
         credentials = session.get_credentials()
+
         if not credentials:
-            raise ValueError("Either profile, access_key_id/secret_access_key, or region must be provided")
+            raise ValueError("Missing AWS credentials: provide profile or access_key_id/secret_access_key")
 
         awsauth = AWS4Auth(
-            credentials.access_key, credentials.secret_key, self.region, self.service, session_token=credentials.token
+            credentials.access_key,
+            credentials.secret_key,
+            self.region,
+            self.service,
+            session_token=credentials.token,
         )
 
         conn_params = {
@@ -1296,35 +1281,31 @@ class AWSOpenSearch(BaseConnection):
         try:
             client = OpenSearch(**conn_params)
         except Exception as e:
-            raise ConnectionError(f"Failed to connect to AWS OpenSearch: {str(e)}")
+            raise ConnectionError(f"Failed to connect to AWS OpenSearch: {e}")
 
         if not client.ping():
-            raise ConnectionError("Failed to ping AWS OpenSearch cluster")
+            raise ConnectionError(f"Failed to ping AWS OpenSearch cluster at {self.host}:{self.port}")
 
-        logger.debug(f"Connected to AWS OpenSearch at {self.host}:{self.port} in region {self.region}")
+        logger.debug(
+            f"Connected to AWS OpenSearch at {self.host}:{self.port} (region={self.region}, profile={self.profile})"
+        )
         return client
 
     @property
     def conn_params(self) -> dict:
         """
-        Returns the parameters required for connection.
-
-        Returns:
-            dict: A dictionary containing AWS OpenSearch connection parameters.
+        Merge inherited AWS params with OpenSearch-specific settings.
         """
-        params = {
-            "hosts": [{"host": self.host, "port": self.port}],
-            "region": self.region,
-            "service": self.service,
-            "use_ssl": self.use_ssl,
-            "verify_certs": self.verify_certs,
-        }
+        params = super().conn_params
 
-        if self.profile:
-            params["aws_profile_name"] = self.profile
-        elif self.access_key_id and self.secret_access_key:
-            params["aws_access_key_id"] = self.access_key_id
-            params["aws_secret_access_key"] = self.secret_access_key
+        params.update(
+            {
+                "hosts": [{"host": self.host, "port": self.port}],
+                "service": self.service,
+                "use_ssl": self.use_ssl,
+                "verify_certs": self.verify_certs,
+            }
+        )
 
         if self.ca_certs:
             params["ca_certs"] = self.ca_certs
