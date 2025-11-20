@@ -1437,6 +1437,16 @@ files = [
 ]
 
 [[package]]
+name = "events"
+version = "0.5"
+description = "Bringing the elegance of C# EventHandler to Python"
+optional = false
+python-versions = "*"
+files = [
+    {file = "Events-0.5-py3-none-any.whl", hash = "sha256:a7286af378ba3e46640ac9825156c93bdba7502174dd696090fdfcd4d80a1abd"},
+]
+
+[[package]]
 name = "exceptiongroup"
 version = "1.2.2"
 description = "Backport of PEP 654 (exception groups)"
@@ -4190,6 +4200,30 @@ files = [
 et-xmlfile = "*"
 
 [[package]]
+name = "opensearch-py"
+version = "3.0.0"
+description = "Python client for OpenSearch"
+optional = false
+python-versions = "<4,>=3.8"
+files = [
+    {file = "opensearch_py-3.0.0-py3-none-any.whl", hash = "sha256:842bf5d56a4a0d8290eda9bb921c50f3080e5dc4e5fefb9c9648289da3f6a8bb"},
+    {file = "opensearch_py-3.0.0.tar.gz", hash = "sha256:ebb38f303f8a3f794db816196315bcddad880be0dc75094e3334bc271db2ed39"},
+]
+
+[package.dependencies]
+certifi = ">=2024.07.04"
+Events = "*"
+python-dateutil = "*"
+requests = ">=2.32.0,<3.0.0"
+urllib3 = {version = ">=1.26.19,<2.2.0 || >2.2.0,<2.2.1 || >2.2.1,<3", markers = "python_version >= \"3.10\""}
+
+[package.extras]
+async = ["aiohttp (>=3.9.4,<4)"]
+develop = ["black (>=24.3.0)", "botocore", "coverage (<8.0.0)", "jinja2", "myst_parser", "pytest (>=3.0.0)", "pytest-cov", "pytest-mock (<4.0.0)", "pytz", "pyyaml", "requests (>=2.0.0,<3.0.0)", "sphinx", "sphinx_copybutton", "sphinx_rtd_theme"]
+docs = ["aiohttp (>=3.9.4,<4)", "myst_parser", "sphinx", "sphinx_copybutton", "sphinx_rtd_theme"]
+kerberos = ["requests_kerberos"]
+
+[[package]]
 name = "opentelemetry-api"
 version = "1.31.1"
 description = "OpenTelemetry Python API"
@@ -6768,24 +6802,41 @@ files = [
 
 [[package]]
 name = "requests"
-version = "2.31.0"
+version = "2.32.5"
 description = "Python HTTP for Humans."
 optional = false
-python-versions = ">=3.7"
+python-versions = ">=3.9"
 files = [
-    {file = "requests-2.31.0-py3-none-any.whl", hash = "sha256:58cd2187c01e70e6e26505bca751777aa9f2ee0b7f4300988b709f44e013003f"},
-    {file = "requests-2.31.0.tar.gz", hash = "sha256:942c5a758f98d790eaed1a29cb6eefc7ffb0d1cf7af05c3d2791656dbd6ad1e1"},
+    {file = "requests-2.32.5-py3-none-any.whl", hash = "sha256:2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6"},
+    {file = "requests-2.32.5.tar.gz", hash = "sha256:dbba0bac56e100853db0ea71b82b4dfd5fe2bf6d3754a8893c3af500cec7d7cf"},
 ]
 
 [package.dependencies]
 certifi = ">=2017.4.17"
-charset-normalizer = ">=2,<4"
+charset_normalizer = ">=2,<4"
 idna = ">=2.5,<4"
 urllib3 = ">=1.21.1,<3"
 
 [package.extras]
 socks = ["PySocks (>=1.5.6,!=1.5.7)"]
 use-chardet-on-py3 = ["chardet (>=3.0.2,<6)"]
+
+[[package]]
+name = "requests-aws4auth"
+version = "1.3.1"
+description = "AWS4 authentication for Requests"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "requests_aws4auth-1.3.1-py3-none-any.whl", hash = "sha256:2969b5379ae6e60ee666638caf6cb94a32d67033f6bfcf0d50c95cd5474f2419"},
+    {file = "requests_aws4auth-1.3.1.tar.gz", hash = "sha256:b6ad4882310e03ba2538ebf94d1f001ca9feabc5c52618539cf1eb6d5af76791"},
+]
+
+[package.dependencies]
+requests = "*"
+
+[package.extras]
+httpx = ["httpx"]
 
 [[package]]
 name = "requests-mock"
@@ -8890,4 +8941,4 @@ test = ["pytest"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "655d8e76955accdebcef67eded07e2fad749f82dc990abfd9ac6cd716734b0d2"
+content-hash = "e73898eab54128ffdfa5c29f8ebfa06ca7c7e4a0f644c6a70bd0500a379795b0"
