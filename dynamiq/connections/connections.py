@@ -1171,7 +1171,6 @@ class Elasticsearch(BaseConnection):
             elasticsearch.Elasticsearch: An instance of the Elasticsearch client.
 
         Raises:
-            ImportError: If elasticsearch package is not installed
             ConnectionError: If connection fails
             ValueError: If neither API key nor basic auth credentials are provided
         """
@@ -1220,6 +1219,98 @@ class Elasticsearch(BaseConnection):
 
         logger.debug(f"Connected to Elasticsearch at {self.cloud_id or self.url}")
         return es_client
+
+
+class AWSOpenSearch(AWS):
+    """
+    Represents a connection to AWS OpenSearch Service.
+
+    Attributes:
+        host (str): The OpenSearch domain endpoint host.
+        port (int): The port number for the OpenSearch domain. Defaults to 443.
+        region (str): AWS region where the OpenSearch domain is located.
+        access_key_id (str): AWS access key ID for authentication.
+        secret_access_key (str): AWS secret access key for authentication.
+        profile (str): AWS profile name to use for authentication.
+        service (str): AWS service name. Defaults to 'es' for Elasticsearch/OpenSearch.
+        use_ssl (bool): Whether to use SSL for the connection. Defaults to True.
+        verify_certs (bool): Whether to verify SSL certificates. Defaults to True.
+        ca_certs (str): Path to CA certificates for SSL verification.
+    """
+
+    host: str = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_HOST"))
+    port: int = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_PORT", 443))
+
+    service: str = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_SERVICE", "es"))
+    use_ssl: bool = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_USE_SSL", True))
+    verify_certs: bool = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_VERIFY_CERTS", True))
+    ca_certs: str | None = Field(default_factory=partial(get_env_var, "AWS_OPENSEARCH_CA_CERTS"))
+
+    def connect(self):
+        """
+        Connect to AWS OpenSearch using inherited AWS credentials/session logic.
+        """
+        from opensearchpy import OpenSearch, RequestsHttpConnection
+        from requests_aws4auth import AWS4Auth
+
+        session = self.get_boto3_session()
+        credentials = session.get_credentials()
+
+        if not credentials:
+            raise ValueError("Missing AWS credentials: provide profile or access_key_id/secret_access_key")
+
+        awsauth = AWS4Auth(
+            credentials.access_key,
+            credentials.secret_key,
+            self.region,
+            self.service,
+            session_token=credentials.token,
+        )
+
+        conn_params = {
+            "hosts": [{"host": self.host, "port": self.port}],
+            "http_auth": awsauth,
+            "use_ssl": self.use_ssl,
+            "verify_certs": self.verify_certs,
+            "connection_class": RequestsHttpConnection,
+        }
+
+        if self.ca_certs:
+            conn_params["ca_certs"] = self.ca_certs
+
+        try:
+            client = OpenSearch(**conn_params)
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to AWS OpenSearch: {e}")
+
+        if not client.ping():
+            raise ConnectionError(f"Failed to ping AWS OpenSearch cluster at {self.host}:{self.port}")
+
+        logger.debug(
+            f"Connected to AWS OpenSearch at {self.host}:{self.port} (region={self.region}, profile={self.profile})"
+        )
+        return client
+
+    @property
+    def conn_params(self) -> dict:
+        """
+        Merge inherited AWS params with OpenSearch-specific settings.
+        """
+        params = super().conn_params
+
+        params.update(
+            {
+                "hosts": [{"host": self.host, "port": self.port}],
+                "service": self.service,
+                "use_ssl": self.use_ssl,
+                "verify_certs": self.verify_certs,
+            }
+        )
+
+        if self.ca_certs:
+            params["ca_certs"] = self.ca_certs
+
+        return params
 
 
 class xAI(BaseApiKeyConnection):
