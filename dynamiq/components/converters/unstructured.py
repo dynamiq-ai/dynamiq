@@ -14,6 +14,7 @@ from dynamiq.components.converters.utils import get_filename_for_bytesio
 from dynamiq.connections import Unstructured as UnstructuredConnection
 from dynamiq.types import Document, DocumentCreationMode
 from dynamiq.utils.logger import logger
+from dynamiq.utils.utils import generate_uuid
 
 
 class ConvertStrategy(str, enum.Enum):
@@ -356,6 +357,7 @@ class UnstructuredFileConverter(BaseConverter):
 
                 images.append(
                     {
+                        "id": generate_uuid(),
                         "index": idx,
                         "format": image_format,
                         "base64_data": base64_data,
@@ -376,9 +378,7 @@ class UnstructuredFileConverter(BaseConverter):
 
         return images, tables
 
-    def _process_element_with_placeholder(
-        self, element: dict, element_index: int, images: list[dict], tables: list[dict]
-    ) -> str:
+    def _process_element_with_placeholder(self, element: dict, element_index: int, images: list[dict]) -> str:
         """
         Process an element with placeholders for images/tables instead of embedded content.
 
@@ -399,12 +399,12 @@ class UnstructuredFileConverter(BaseConverter):
             # Find corresponding image entry
             image_entry = next((i for i in images if i["index"] == element_index), None)
             if image_entry:
-                # Use extracted text as placeholder, or generic placeholder
+                image_id = image_entry["id"]
                 placeholder_text = image_entry["text"].strip()
                 if placeholder_text:
-                    text = f"[IMAGE: {placeholder_text}]"
+                    text = f"[IMAGE:{image_id}:{placeholder_text}]"
                 else:
-                    text = "[IMAGE]"
+                    text = f"[IMAGE:{image_id}]"
 
         return text
 
@@ -428,7 +428,7 @@ class UnstructuredFileConverter(BaseConverter):
             element_texts = []
             for idx, el in enumerate(elements):
                 if self.extract_image_block_types_enabled:
-                    text = self._process_element_with_placeholder(el, idx, images, tables)
+                    text = self._process_element_with_placeholder(el, idx, images)
                 else:
                     text = str(el.get("text", ""))
 
@@ -460,7 +460,7 @@ class UnstructuredFileConverter(BaseConverter):
 
             for idx, el in enumerate(elements):
                 if self.extract_image_block_types_enabled:
-                    text = self._process_element_with_placeholder(el, idx, images, tables)
+                    text = self._process_element_with_placeholder(el, idx, images)
                 else:
                     text = str(el.get("text", ""))
 
@@ -497,25 +497,27 @@ class UnstructuredFileConverter(BaseConverter):
         elif document_creation_mode == DocumentCreationMode.ONE_DOC_PER_ELEMENT:
             for index, el in enumerate(elements):
                 if self.extract_image_block_types_enabled:
-                    text = self._process_element_with_placeholder(el, index, images, tables)
+                    text = self._process_element_with_placeholder(el, index, images)
                 else:
                     text = str(el.get("text", ""))
 
                 doc_metadata = copy.deepcopy(metadata)
                 doc_metadata["file_path"] = str(filepath)
                 doc_metadata["element_index"] = index
-                element_metadata = el.get("metadata")
-                if element_metadata:
-                    doc_metadata.update(element_metadata)
-                element_category = el.get("category")
-                if element_category:
-                    doc_metadata["category"] = element_category
+                element_metadata = el.get("metadata", {})
+                element_metadata = dict(element_metadata)
 
                 # Add images/tables for this specific element
                 if self.extract_image_block_types_enabled:
                     element_images = [img for img in images if img["index"] == index]
                     element_tables = [tbl for tbl in tables if tbl["index"] == index]
                     if element_images:
+                        image_ids = [img["id"] for img in element_images]
+                        if len(image_ids) == 1:
+                            element_metadata["image_id"] = image_ids[0]
+                        else:
+                            element_metadata["image_ids"] = image_ids
+
                         for image in element_images:
                             image.pop("element_metadata", None)
                         doc_metadata["images"] = element_images
@@ -523,6 +525,11 @@ class UnstructuredFileConverter(BaseConverter):
                         for table in element_tables:
                             table.pop("element_metadata", None)
                         doc_metadata["tables"] = element_tables
+
+                doc_metadata.update(element_metadata)
+                element_category = el.get("category")
+                if element_category:
+                    doc_metadata["category"] = element_category
 
                 doc = Document(content=text, metadata=doc_metadata)
                 docs.append(doc)
