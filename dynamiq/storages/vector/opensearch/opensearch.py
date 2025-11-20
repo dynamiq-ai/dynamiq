@@ -221,7 +221,7 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
         Raises:
             VectorStoreException: If duplicates are found and the policy is set to FAIL.
         """
-        if policy == DuplicatePolicy.OVERWRITE or policy == DuplicatePolicy.NONE:
+        if policy == DuplicatePolicy.OVERWRITE:
             return documents
 
         # Get unique documents
@@ -230,6 +230,9 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
             if doc.id in unique_docs:
                 logger.warning(f"Duplicate document ID found: {doc.id}")
             unique_docs[doc.id] = doc
+
+        if policy == DuplicatePolicy.NONE:
+            return list(unique_docs.values())
 
         existing_ids = set()
         for doc_id in unique_docs.keys():
