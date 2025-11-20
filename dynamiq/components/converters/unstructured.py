@@ -265,7 +265,7 @@ class UnstructuredFileConverter(BaseConverter):
             raise ValueError(f"Empty file cannot be processed: {filepath}")
 
         extract_types = self.extract_image_block_types if self.extract_image_block_types_enabled else None
-        if extract_types is None and self.extract_image_block_types_enabled:
+        if not extract_types and self.extract_image_block_types_enabled:
             extract_types = [UnstructuredElementTypes.IMAGE, UnstructuredElementTypes.TABLE]
 
         kwargs = copy.deepcopy(self.unstructured_kwargs) if self.unstructured_kwargs else {}
@@ -300,7 +300,7 @@ class UnstructuredFileConverter(BaseConverter):
             Exception: Any other exception that occurs during processing
         """
         extract_types = self.extract_image_block_types if self.extract_image_block_types_enabled else None
-        if extract_types is None and self.extract_image_block_types_enabled:
+        if not extract_types and self.extract_image_block_types_enabled:
             extract_types = [UnstructuredElementTypes.IMAGE, UnstructuredElementTypes.TABLE]
 
         kwargs = copy.deepcopy(self.unstructured_kwargs) if self.unstructured_kwargs else {}
