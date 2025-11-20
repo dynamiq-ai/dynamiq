@@ -439,19 +439,14 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
             delete_all (bool): Delete all documents. Defaults to False.
         """
         if delete_all:
-            response = self.client.delete_by_query(
-                index=self.index_name, body={"query": {"match_all": {}}}, refresh=True
-            )
-            return response.get("deleted", 0)
+            self.client.delete_by_query(index=self.index_name, body={"query": {"match_all": {}}}, refresh=True)
 
         elif document_ids:
             operations = [{"_op_type": "delete", "_index": self.index_name, "_id": doc_id} for doc_id in document_ids]
-            success_count, _ = bulk(self.client, operations, refresh=True)
-            return success_count
+            bulk(self.client, operations, refresh=True)
 
         else:
             logger.warning("No document IDs provided. No documents will be deleted.")
-            return 0
 
     def delete_documents_by_filters(self, filters: dict[str, Any]) -> None:
         """Delete documents matching filters.
@@ -472,7 +467,6 @@ class OpenSearchVectorStore(BaseVectorStore, DryRunMixin):
 
         deleted_count = response.get("deleted", 0)
         logger.info(f"Deleted {deleted_count} documents matching filters.")
-        return deleted_count
 
     def list_documents(
         self,
