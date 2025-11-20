@@ -268,7 +268,7 @@ class UnstructuredFileConverter(BaseConverter):
         if extract_types is None and self.extract_image_block_types_enabled:
             extract_types = [UnstructuredElementTypes.IMAGE, UnstructuredElementTypes.TABLE]
 
-        kwargs = self.unstructured_kwargs or {}
+        kwargs = copy.deepcopy(self.unstructured_kwargs) if self.unstructured_kwargs else {}
         if "extract_image_block_types" not in kwargs:
             kwargs["extract_image_block_types"] = extract_types
 
@@ -303,7 +303,7 @@ class UnstructuredFileConverter(BaseConverter):
         if extract_types is None and self.extract_image_block_types_enabled:
             extract_types = [UnstructuredElementTypes.IMAGE, UnstructuredElementTypes.TABLE]
 
-        kwargs = self.unstructured_kwargs or {}
+        kwargs = copy.deepcopy(self.unstructured_kwargs) if self.unstructured_kwargs else {}
         if "extract_image_block_types" not in kwargs:
             kwargs["extract_image_block_types"] = extract_types
 
@@ -441,14 +441,15 @@ class UnstructuredFileConverter(BaseConverter):
             doc_metadata = copy.deepcopy(metadata)
             doc_metadata["file_path"] = str(filepath)
 
-            if images:
-                for image in images:
-                    image.pop("element_metadata", None)
-                doc_metadata["images"] = images
-            if tables:
-                for table in tables:
-                    table.pop("element_metadata", None)
-                doc_metadata["tables"] = tables
+            if self.extract_image_block_types_enabled:
+                if images:
+                    for image in images:
+                        image.pop("element_metadata", None)
+                    doc_metadata["images"] = images
+                if tables:
+                    for table in tables:
+                        table.pop("element_metadata", None)
+                    doc_metadata["tables"] = tables
 
             docs = [Document(content=text, metadata=doc_metadata)]
 
