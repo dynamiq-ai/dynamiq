@@ -1343,6 +1343,17 @@ files = [
 ]
 
 [[package]]
+name = "dockerfile-parse"
+version = "2.0.1"
+description = "Python library for Dockerfile manipulation"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "dockerfile-parse-2.0.1.tar.gz", hash = "sha256:3184ccdc513221983e503ac00e1aa504a2aa8f84e5de673c46b0b6eee99ec7bc"},
+    {file = "dockerfile_parse-2.0.1-py2.py3-none-any.whl", hash = "sha256:bdffd126d2eb26acf1066acb54cb2e336682e1d72b974a40894fac76a4df17f6"},
+]
+
+[[package]]
 name = "docstring-parser"
 version = "0.16"
 description = "Parse Python docstrings in reST, Google and Numpydoc format"
@@ -1355,38 +1366,39 @@ files = [
 
 [[package]]
 name = "e2b"
-version = "1.5.0"
+version = "2.2.3"
 description = "E2B SDK that give agents cloud environments"
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "e2b-1.5.0-py3-none-any.whl", hash = "sha256:875a843d1d314a9945e24bfb78c9b1b5cac7e2ecb1e799664d827a26a0b2276a"},
-    {file = "e2b-1.5.0.tar.gz", hash = "sha256:905730eea5c07f271d073d4b5d2a9ef44c8ac04b9b146a99fa0235db77bf6854"},
+    {file = "e2b-2.2.3-py3-none-any.whl", hash = "sha256:c6949b7c17ab66a5c56c187b473a7f5d5f367e22cf2bd8e3c5e376117003dc56"},
+    {file = "e2b-2.2.3.tar.gz", hash = "sha256:6e28655b1dc3753005e48e7268c02b29314d4b7907cf8617ba777a7096b471d9"},
 ]
 
 [package.dependencies]
 attrs = ">=23.2.0"
+dockerfile-parse = ">=2.0.1,<3.0.0"
 httpcore = ">=1.0.5,<2.0.0"
 httpx = ">=0.27.0,<1.0.0"
 packaging = ">=24.1"
-protobuf = ">=5.29.4,<6.0.0"
+protobuf = ">=4.21.0"
 python-dateutil = ">=2.8.2"
 typing-extensions = ">=4.1.0"
 
 [[package]]
 name = "e2b-code-interpreter"
-version = "1.5.0"
+version = "2.0.0"
 description = "E2B Code Interpreter - Stateful code execution"
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "e2b_code_interpreter-1.5.0-py3-none-any.whl", hash = "sha256:299f5641a3754264a07f8edc3cccb744d6b009f10dc9285789a9352e24989a9b"},
-    {file = "e2b_code_interpreter-1.5.0.tar.gz", hash = "sha256:cd6028b6f20c4231e88a002de86484b9d4a99ea588b5be183b9ec7189a0f3cf6"},
+    {file = "e2b_code_interpreter-2.0.0-py3-none-any.whl", hash = "sha256:273642d4dd78f09327fb1553fe4f7ddcf17892b78f98236e038d29985e42dca5"},
+    {file = "e2b_code_interpreter-2.0.0.tar.gz", hash = "sha256:19136916be8de60bfd0a678742501d1d0335442bb6e86405c7dd6f98059b73c4"},
 ]
 
 [package.dependencies]
 attrs = ">=21.3.0"
-e2b = ">=1.4.0,<2.0.0"
+e2b = ">=2.0.0,<3.0.0"
 httpx = ">=0.20.0,<1.0.0"
 
 [[package]]
@@ -8941,4 +8953,4 @@ test = ["pytest"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "f1331f29b574b02b92006d8256a70e92b187bf18feb3fec2c671cad69fe0144e"
+content-hash = "1ca61dc0a096917765932034716dc68b7d09970522b11a949f221b15c84c5bc0"

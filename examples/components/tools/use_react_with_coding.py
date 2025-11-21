@@ -1,6 +1,7 @@
 from dynamiq.connections import E2B
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
+from dynamiq.nodes.types import InferenceMode
 from examples.llm_setup import setup_llm
 
 AGENT_ROLE = """
@@ -13,10 +14,10 @@ if __name__ == "__main__":
         connection=E2B(),
     )
 
-    llm = setup_llm()
+    llm = setup_llm(model_provider="claude", model_name="claude-3-7-sonnet-20250219", temperature=0.1)
 
     # Create the agent with tools and configuration
-    agent = Agent(name="React Agent", llm=llm, tools=[tool], role=AGENT_ROLE)
+    agent = Agent(name="React Agent", inference_mode=InferenceMode.XML, llm=llm, tools=[tool], role=AGENT_ROLE)
 
     result_dice_game = agent.run(
         input_data={
