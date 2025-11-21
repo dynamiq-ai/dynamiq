@@ -14,7 +14,7 @@ if __name__ == "__main__":
         connection=E2B(),
     )
 
-    llm = setup_llm(model_provider="claude", model_name="claude-3-7-sonnet-20250219", temperature=0.1)
+    llm = setup_llm(model_provider="claude", model_name="claude-sonnet-4-5", temperature=0.1)
 
     # Create the agent with tools and configuration
     agent = Agent(name="React Agent", inference_mode=InferenceMode.XML, llm=llm, tools=[tool], role=AGENT_ROLE)
