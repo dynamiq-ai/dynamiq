@@ -1,0 +1,170 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+  exa-conn:
+    type: dynamiq.connections.Exa
+
+nodes:
+  memo-orchestrator:
+    type: dynamiq.nodes.agents.orchestrators.GraphOrchestrator
+    name: Simple Investment Memo Orchestrator
+    description: Research -> Writer -> Validator using Dynamiq graph orchestrator.
+    initial_state: researcher
+    manager:
+      id: graph-manager
+      type: dynamiq.nodes.agents.orchestrators.GraphAgentManager
+      llm:
+        id: manager-llm
+        type: dynamiq.nodes.llms.OpenAI
+        connection: openai-conn
+        model: gpt-4o-mini
+        temperature: 0.1
+    states:
+      - id: researcher
+        type: dynamiq.nodes.agents.orchestrators.GraphState
+        description: >
+          Gather structured company research as JSON. Manager: pass the user company name as plain text input to this agent.
+        manager:
+          id: graph-manager
+          type: dynamiq.nodes.agents.orchestrators.GraphAgentManager
+          llm:
+            id: manager-llm
+            type: dynamiq.nodes.llms.OpenAI
+            connection: openai-conn
+            model: gpt-4o-mini
+            temperature: 0.1
+        tasks:
+          - id: research-agent
+            type: dynamiq.nodes.agents.Agent
+            name: Research Agent
+            role: |
+              You are an investment research specialist returning strictly structured JSON.
+              Output schema:
+              {
+                "company": {"name": "", "stage": "", "hq_location": "", "website": ""},
+                "market": {"tam": "", "sam": "", "som": "", "dynamics": [], "competitors": []},
+                "product": {"description": "", "tech": "", "roadmap": []},
+                "traction": {"revenue": "", "customers": "", "milestones": []},
+                "team": {"founders": [{"name": "", "role": "", "background": ""}], "headcount": ""},
+                "funding": {"total_raised": "", "latest_round": "", "investors": []},
+                "risks": [],
+                "sources": []
+              }
+              Rules:
+              - First, run a web search tool to gather current info (product, market, team, funding, risks).
+              - Use exact numbers/dates when found; if missing, provide clearly marked illustrative but realistic samples.
+              - Do NOT invent sources; list actual URLs/titles from search; if none, say "Data not available".
+              Manager: send ONLY the company name (plain string) as input. Do not pre-fill or estimate the JSON yourself.
+            tools:
+              - id: exa-search
+                type: dynamiq.nodes.tools.exa_search.ExaTool
+                connection: exa-conn
+                top_n: 5
+                search_type: keyword
+                include_domains: []
+                exclude_domains: []
+            llm:
+              id: research-llm
+              type: dynamiq.nodes.llms.OpenAI
+              connection: openai-conn
+              model: gpt-4o-mini
+              temperature: 0.2
+            inference_mode: XML
+        next_states:
+          - writer
+
+      - id: writer
+        type: dynamiq.nodes.agents.orchestrators.GraphState
+        description: >
+          Draft memo markdown from research JSON. Manager: pass the prior research JSON as input; if absent, pass the original user query.
+        manager:
+          id: graph-manager
+          type: dynamiq.nodes.agents.orchestrators.GraphAgentManager
+          llm:
+            id: manager-llm
+            type: dynamiq.nodes.llms.OpenAI
+            connection: openai-conn
+            model: gpt-4o-mini
+            temperature: 0.1
+        tasks:
+          - id: writer-agent
+            type: dynamiq.nodes.agents.Agent
+            name: Writer Agent
+            role: |
+              You are an analytical memo writer. Given research JSON and the memo template, fill all sections concisely.
+              Template:
+              # {company_name} — Investment Memo
+              ## 1. Executive Summary
+              ## 2. Business & Product
+              ## 3. Market
+              ## 4. Traction
+              ## 5. Team
+              ## 6. Funding & Ask
+              ## 7. Risks & Mitigations
+              ## 8. Recommendation
+              Keep headings, be specific, cite numbers inline when provided. Return ONLY the completed markdown memo.
+              Manager: provide the research JSON text as input (string). Do not summarize or alter it; just forward it.
+            llm:
+              id: writer-llm
+              type: dynamiq.nodes.llms.OpenAI
+              connection: openai-conn
+              model: gpt-4o-mini
+              temperature: 0.3
+            inference_mode: XML
+        next_states:
+          - validator
+
+      - id: validator
+        type: dynamiq.nodes.agents.orchestrators.GraphState
+        description: >
+          Score memo with quick rubric and return JSON feedback. Manager: pass the memo markdown string as input; do NOT generate scores yourself.
+        manager:
+          id: graph-manager
+          type: dynamiq.nodes.agents.orchestrators.GraphAgentManager
+          llm:
+            id: manager-llm
+            type: dynamiq.nodes.llms.OpenAI
+            connection: openai-conn
+            model: gpt-4o-mini
+            temperature: 0.1
+        tasks:
+          - id: validator-agent
+            type: dynamiq.nodes.agents.Agent
+            name: Validator Agent
+            role: |
+              You are a memo reviewer. Score the memo against:
+              - structure (0-2) — requested sections & headings
+              - metrics (0-3) — specific numbers/dates, avoids vague claims
+              - risks (0-2) — concrete risks + mitigations
+              - tone (0-2) — analytical, balanced, no hype
+              - sources (0-1) — references when claims are made
+              Return JSON:
+              {
+                "overall_score": 0-10,
+                "category_scores": {...},
+                "issues": [],
+                "suggestions": [],
+                "strengths": []
+              }
+              Be candid; return ONLY JSON.
+              Manager: provide ONLY the memo markdown string as the agent input. Do NOT generate scores in the manager. The validator agent must perform the scoring itself. Input must be a single string, never an object.
+            llm:
+              id: validator-llm
+              type: dynamiq.nodes.llms.OpenAI
+              connection: openai-conn
+              model: gpt-4o-mini
+              temperature: 0.2
+            inference_mode: XML
+        next_states:
+          - "END"
+
+flows:
+  investment-memo-simple-flow:
+    name: Investment Memo Simple Flow
+    nodes:
+      - memo-orchestrator
+
+workflows:
+  investment-memo-simple-wf:
+    flow: investment-memo-simple-flow
+    version: 1
