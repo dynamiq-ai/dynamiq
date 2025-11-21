@@ -1,0 +1,129 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+  exa-conn:
+    type: dynamiq.connections.Exa
+
+nodes:
+  memo-manager:
+    type: dynamiq.nodes.agents.Agent
+    name: Memo Manager Agent
+    description: Orchestrates sub-agents (research, writer, validator) via tools.
+    role: |
+      You are a senior memo manager. Use your agent-tools in sequence:
+      1) Call Research Agent with the company name string to collect structured JSON.
+      2) Call Writer Agent with the research JSON text to draft a memo.
+      3) Call Validator Agent with the memo markdown to score it.
+      Return the final validator JSON and the memo text in your final message.
+      Do NOT generate research/validation yourself; always use the tools.
+    llm:
+      id: manager-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o-mini
+      temperature: 0.1
+    inference_mode: XML
+    tools:
+      - id: research-tool
+        type: dynamiq.nodes.agents.Agent
+        name: Research Agent
+        description: Gathers structured research JSON, starting with web search.
+        role: |
+          You are an investment research specialist returning strictly structured JSON.
+          Output schema:
+          {
+            "company": {"name": "", "stage": "", "hq_location": "", "website": ""},
+            "market": {"tam": "", "sam": "", "som": "", "dynamics": [], "competitors": []},
+            "product": {"description": "", "tech": "", "roadmap": []},
+            "traction": {"revenue": "", "customers": "", "milestones": []},
+            "team": {"founders": [{"name": "", "role": "", "background": ""}], "headcount": ""},
+            "funding": {"total_raised": "", "latest_round": "", "investors": []},
+            "risks": [],
+            "sources": []
+          }
+          Rules:
+          - First, run web search to gather facts.
+          - Use exact numbers/dates when found; if missing, provide clearly marked illustrative samples.
+          - Do NOT invent sources; list actual URLs/titles from search; if none, say "Data not available".
+          Return ONLY JSON.
+        llm:
+          id: research-llm
+          type: dynamiq.nodes.llms.OpenAI
+          connection: openai-conn
+          model: gpt-4o-mini
+          temperature: 0.2
+        tools:
+          - id: exa-search
+            type: dynamiq.nodes.tools.exa_search.ExaTool
+            connection: exa-conn
+            description: Web search via Exa to collect recent facts and URLs.
+            top_n: 5
+            search_type: keyword
+        inference_mode: XML
+        max_loops: 3
+
+      - id: writer-tool
+        type: dynamiq.nodes.agents.Agent
+        name: Writer Agent
+        description: Writes memo markdown from research JSON using the template.
+        role: |
+          You are an analytical memo writer. Given research JSON and the memo template, fill all sections concisely.
+          Template:
+          # {company_name} — Investment Memo
+          ## 1. Executive Summary
+          ## 2. Business & Product
+          ## 3. Market
+          ## 4. Traction
+          ## 5. Team
+          ## 6. Funding & Ask
+          ## 7. Risks & Mitigations
+          ## 8. Recommendation
+          Keep headings, be specific, cite numbers inline when provided. Return ONLY the completed markdown memo.
+        llm:
+          id: writer-llm
+          type: dynamiq.nodes.llms.OpenAI
+          connection: openai-conn
+          model: gpt-4o-mini
+          temperature: 0.3
+        inference_mode: XML
+        max_loops: 3
+
+      - id: validator-tool
+        type: dynamiq.nodes.agents.Agent
+        name: Validator Agent
+        description: Scores memo against structure/metrics/risks/tone/sources rubric, returns JSON.
+        role: |
+          You are a memo reviewer. Score the memo against:
+          - structure (0-2) — requested sections & headings
+          - metrics (0-3) — specific numbers/dates, avoids vague claims
+          - risks (0-2) — concrete risks + mitigations
+          - tone (0-2) — analytical, balanced, no hype
+          - sources (0-1) — references when claims are made
+          Return JSON:
+          {
+            "overall_score": 0-10,
+            "category_scores": {...},
+            "issues": [],
+            "suggestions": [],
+            "strengths": []
+          }
+          Be candid; return ONLY JSON.
+        llm:
+          id: validator-llm
+          type: dynamiq.nodes.llms.OpenAI
+          connection: openai-conn
+          model: gpt-4o-mini
+          temperature: 0.2
+        inference_mode: XML
+        max_loops: 3
+
+flows:
+  investment-memo-manager-flow:
+    name: Investment Memo Manager Flow
+    nodes:
+      - memo-manager
+
+workflows:
+  investment-memo-manager-wf:
+    flow: investment-memo-manager-flow
+    version: 1
