@@ -796,7 +796,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         """
         Approves or disapproves (cancels) Node execution by requesting feedback.
         Updates input data according to the feedback or leaves it the same.
-        Raises NodeException if execution was canceled by feedback.
+        Raises NodeSkippedException if execution was canceled by feedback.
 
         Args:
             input_data(dict[str, Any]): Input data.
@@ -807,13 +807,14 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             dict[str, Any]: Updated input data.
 
         Raises:
-            NodeException: If Node execution was canceled by feedback.
+            NodeSkippedException: If Node execution was canceled by feedback.
         """
         if self.approval.enabled:
             approval_result = self.send_approval_message(self.approval, input_data, config=config, **kwargs)
             if not approval_result.is_approved:
-                raise NodeException(
+                raise NodeSkippedException(
                     message=f"Execution was canceled by human with feedback {approval_result.feedback}",
+                    human_feedback=approval_result.feedback,
                     recoverable=True,
                     failed_depend=NodeDependency(self, option="Execution was canceled."),
                 )
@@ -866,6 +867,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                     callbacks=config.callbacks,
                     skip_data=skip_data,
                     input_data=transformed_input,
+                    human_feedback=getattr(e, "human_feedback", None),
                     **merged_kwargs,
                 )
                 logger.info(f"Node {self.name} - {self.id}: execution skipped.")
@@ -1185,6 +1187,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         callbacks: list[BaseCallbackHandler],
         skip_data: dict[str, Any],
         input_data: dict[str, Any],
+        human_feedback: str | None = None,
         **kwargs,
     ) -> None:
         """
@@ -1202,7 +1205,9 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                 if isinstance(callback, TracingCallbackHandler):
                     dict_kwargs["for_tracing"] = True
                     input_data = input_data.to_dict(for_tracing=True) if hasattr(input_data, "to_dict") else input_data
-                callback.on_node_skip(self.to_dict(**dict_kwargs), skip_data, input_data, **kwargs)
+                callback.on_node_skip(
+                    self.to_dict(**dict_kwargs), skip_data, input_data, human_feedback=human_feedback, **kwargs
+                )
             except Exception as e:
                 logger.error(f"Error running callback {callback.__class__.__name__}: {e}")
 
