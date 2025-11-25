@@ -71,6 +71,7 @@ pdfplumber = "^0.11.8"
 pypdf2 = "^3.0.1"
 matplotlib = "^3.10.7"
 seaborn = "^0.13.2"
+pyyaml = "6.0.1"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~78.1.1"
