@@ -238,8 +238,15 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
         """
         try:
             index_to_delete = index_name or self.index_name
-            if self._namespace_exists():
-                self._index.delete(delete_all=True, namespace=self.namespace)
+
+            if index_name and index_name != self.index_name:
+                target_index = self.client.Index(name=index_name)
+            else:
+                target_index = self._index
+
+            if self._namespace_exists(target_index):
+                target_index.delete(delete_all=True, namespace=self.namespace)
+
             self.client.delete_index(name=index_to_delete)
             logger.info(f"Deleted index '{index_to_delete}'.")
         except Exception as e:
@@ -340,16 +347,20 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
             all_documents.extend(documents)
         return all_documents
 
-    def _namespace_exists(self) -> bool:
+    def _namespace_exists(self, index=None) -> bool:
         """
-        Check if the namespace exists in the index.
+        Check if the namespace exists in an index.
+
+        Args:
+            index: The index to check. If None, uses self._index.
 
         Returns:
             bool: True if the namespace exists, False otherwise.
         """
+        index = index or self._index
         try:
-            namespaces = self._index.describe_index_stats()["namespaces"]
-            return self.namespace in namespaces
+            index_namespaces = index.describe_index_stats()["namespaces"]
+            return self.namespace in index_namespaces
         except KeyError:
             return False
 
