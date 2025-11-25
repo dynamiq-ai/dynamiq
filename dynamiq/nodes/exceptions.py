@@ -8,12 +8,10 @@ class NodeException(Exception):
     """
     Base exception class for node-related errors.
 
-    Args:
+    Attributes:
         failed_depend (NodeDependency, optional): The dependency that caused the exception. Defaults to None.
         message (str, optional): Additional error message. Defaults to None.
-
-    Attributes:
-        failed_depend (NodeDependency): The dependency that caused the exception.
+        recoverable (bool, optional): Whether the exception is recoverable. Defaults to False.
     """
 
     def __init__(
@@ -41,7 +39,19 @@ class NodeSkippedException(NodeException):
     This exception is a subclass of NodeException and inherits its attributes and methods.
     """
 
-    pass
+    def __init__(
+        self,
+        failed_depend: Optional["NodeDependency"] = None,
+        message: str = None,
+        recoverable: bool = False,
+        human_feedback: str = None,
+    ):
+        super().__init__(
+            failed_depend=failed_depend,
+            message=message,
+            recoverable=recoverable,
+        )
+        self.human_feedback = human_feedback
 
 
 class NodeConditionFailedException(NodeException):

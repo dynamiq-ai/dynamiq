@@ -390,6 +390,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         serialized: dict[str, Any],
         skip_data: dict[str, Any],
         input_data: dict[str, Any],
+        human_feedback: str | None = None,
         **kwargs: Any,
     ):
         """Called when the node skips.
@@ -398,6 +399,7 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             serialized (dict[str, Any]): Serialized node data.
             skip_data (dict[str, Any]): Data related to the skip.
             input_data (dict[str, Any]): Input data for the node.
+            human_feedback (str | None): Human feedback.
             **kwargs (Any): Additional arguments.
         """
         run_id = get_run_id(kwargs)
@@ -409,6 +411,8 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run.end_time = run.start_time
         run.status = RunStatus.SKIPPED
         run.metadata["skip"] = format_value(skip_data)
+        if human_feedback:
+            run.metadata["human_feedback"] = human_feedback
 
     def on_node_execute_start(
         self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
