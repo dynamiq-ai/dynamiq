@@ -181,7 +181,7 @@ class Workflow(BaseModel, Runnable):
             logger.info(f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
         else:
             error = result.error.type(result.error.message)
-            failed_nodes: list[RunnableFailedNodeInfo] = result.error.failed_nodes if result.error else []
+            failed_nodes: list[RunnableFailedNodeInfo] = result.error.failed_nodes
             self.run_on_workflow_error(error, config, failed_nodes=failed_nodes, **merged_kwargs)
             logger.error(f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
 
@@ -213,8 +213,12 @@ class Workflow(BaseModel, Runnable):
                 f"Workflow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}."
             )
         else:
-            error = result.error.type(result.error.message)
-            failed_nodes: list[RunnableFailedNodeInfo] = result.error.failed_nodes if result.error else []
+            if result.error:
+                error = result.error.type(result.error.message)
+                failed_nodes: list[RunnableFailedNodeInfo] = result.error.failed_nodes
+            else:
+                error = RuntimeError("Workflow execution failed with unknown error")
+                failed_nodes: list[RunnableFailedNodeInfo] = []
             self.run_on_workflow_error(error, config, failed_nodes=failed_nodes, **merged_kwargs)
             logger.error(
                 f"Workflow {self.id}: execution failed in {format_duration(time_start, datetime.now())}."
