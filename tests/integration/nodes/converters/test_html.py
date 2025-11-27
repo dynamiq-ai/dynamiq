@@ -257,7 +257,7 @@ def test_workflow_with_html_node_failure(request, workflow, html_node, output_no
 
     result = workflow.run(input_data=input_data)
 
-    assert result.status == RunnableStatus.SUCCESS
+    assert result.status == RunnableStatus.FAILURE
 
     html_result = result.output[html_node.id]
     assert html_result["status"] == RunnableStatus.FAILURE.value
@@ -272,7 +272,7 @@ def test_workflow_with_html_node_file_not_found(workflow, html_node, output_node
 
     result = workflow.run(input_data=input_data)
 
-    assert result.status == RunnableStatus.SUCCESS
+    assert result.status == RunnableStatus.FAILURE
 
     html_result = result.output[html_node.id]
     assert html_result["status"] == RunnableStatus.FAILURE.value
@@ -295,7 +295,7 @@ def test_workflow_with_html_node_empty_file(request, workflow, html_node, output
 
     result = workflow.run(input_data=input_data)
 
-    assert result.status == RunnableStatus.SUCCESS
+    assert result.status == RunnableStatus.FAILURE
 
     html_result = result.output[html_node.id]
     assert html_result["status"] == RunnableStatus.FAILURE.value

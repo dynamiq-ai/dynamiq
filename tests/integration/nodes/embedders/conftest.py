@@ -135,7 +135,7 @@ def assert_embedder_success(response, embedder, output_node, expected_embedding_
 
 
 def assert_embedder_failure(response, embedder, output_node, expected_error_type=None, expected_error_message=None):
-    assert response.status == RunnableStatus.SUCCESS
+    assert response.status == RunnableStatus.FAILURE
 
     embedder_result = response.output[embedder.id]
     assert embedder_result["status"] == RunnableStatus.FAILURE.value

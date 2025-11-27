@@ -1,2 +1,2 @@
 from .base import BaseFlow
-from .flow import Flow
+from .flow import Flow, FlowNodeFailureException
