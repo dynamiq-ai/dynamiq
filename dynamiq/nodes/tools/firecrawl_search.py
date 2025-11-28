@@ -11,27 +11,31 @@ from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_FIRECRAWL_SEARCH = """Searches the web with Firecrawl across web, news, and image verticals.
+DESCRIPTION_FIRECRAWL_SEARCH = """Search the web with Firecrawl across web, news, and image verticals.
 
-Key capabilities:
-- Retrieve web/news/image SERP results with geo/time filters and category scoping (github/research/pdf)
-- Control result count, timeouts, and formats in a single API call
+What it does:
+- Returns SERP results with geo/time filters and category biasing (github/research/pdf)
+- Lets you control result count, recency, geo bias, timeout, and URL validation in one call
 
-Usage strategy:
-- Use `sources` to focus on news or images; combine with `tbs` for freshness (qdr:h/d/w/m/y or custom ranges)
-- Use `categories` for GitHub/research/PDF-heavy queries; add `location` to localize rankings
-
-Parameter guide (FirecrawlSearchInput):
+Parameters (FirecrawlSearchInput):
 - `query` (required): search string.
-- `limit`: number of results (cost scales by 2 credits per 10 results).
-- `sources`: objects for `web` (with optional tbs/location), `news`, `images`.
-- `categories`: objects for `github`, `research`, `pdf`.
-- `location`, `country`, `tbs`, `timeout`, `ignoreInvalidURLs`: top-level geo/recency/validation controls.
+- `limit` (1-100): max results to return (default 5).
+- `sources` (list of objects): choose verticals with optional per-source settings:
+  - Web: {"type":"web","tbs":"qdr:d","location":"San Francisco,California,United States"}
+  - News: {"type":"news"}
+  - Images: {"type":"images"}
+- `categories` (list): bias results toward content types, e.g., ["github","research","pdf"].
+- `tbs`: time filter (qdr:h/d/w/m/y or custom ranges like cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY).
+- `location`: city/state/country string for geo bias.
+- `country`: ISO country code for geo targeting (e.g., "US").
+- `timeout`: request timeout in milliseconds (default 60000).
+- `ignoreInvalidURLs`: true to drop invalid links from the response.
 
 Examples:
 {"query": "firecrawl docs", "limit": 5}
-{"query": "openai", "sources": ["news"], "limit": 3}
-{"query": "sunset imagesize:1920x1080", "sources": ["images"], "limit": 5}"""
+{"query": "openai funding", "sources": [{"type": "news"}], "limit": 3}
+{"query": "sunset wallpaper imagesize:1920x1080", "sources": [{"type": "images"}], "limit": 5}
+{"query": "langchain github", "categories": ["github"], "tbs": "qdr:w"}"""
 
 
 class SourceWeb(BaseModel):
