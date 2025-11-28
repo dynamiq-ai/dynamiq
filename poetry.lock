@@ -528,6 +528,17 @@ urllib3 = {version = ">=1.25.4,<2.2.0 || >2.2.0,<3", markers = "python_version >
 crt = ["awscrt (==0.21.2)"]
 
 [[package]]
+name = "bracex"
+version = "2.6"
+description = "Bash style brace expander."
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "bracex-2.6-py3-none-any.whl", hash = "sha256:0b0049264e7340b3ec782b5cb99beb325f36c3782a32e36e876452fd49a09952"},
+    {file = "bracex-2.6.tar.gz", hash = "sha256:98f1347cd77e22ee8d967a30ad4e310b233f7754dbf31ff3fceb76145ba47dc7"},
+]
+
+[[package]]
 name = "brotli"
 version = "1.1.0"
 description = "Python bindings for the Brotli compression library"
@@ -1366,13 +1377,13 @@ files = [
 
 [[package]]
 name = "e2b"
-version = "2.2.3"
+version = "2.8.0"
 description = "E2B SDK that give agents cloud environments"
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "e2b-2.2.3-py3-none-any.whl", hash = "sha256:c6949b7c17ab66a5c56c187b473a7f5d5f367e22cf2bd8e3c5e376117003dc56"},
-    {file = "e2b-2.2.3.tar.gz", hash = "sha256:6e28655b1dc3753005e48e7268c02b29314d4b7907cf8617ba777a7096b471d9"},
+    {file = "e2b-2.8.0-py3-none-any.whl", hash = "sha256:11b408052ee360116828101ee58cc3c858fb8f4465e05e4a452514697988de5d"},
+    {file = "e2b-2.8.0.tar.gz", hash = "sha256:f3107d9a411734f189d6175d78933ef7416467ab9e87988b08f5f166cb2002b5"},
 ]
 
 [package.dependencies]
@@ -1383,7 +1394,9 @@ httpx = ">=0.27.0,<1.0.0"
 packaging = ">=24.1"
 protobuf = ">=4.21.0"
 python-dateutil = ">=2.8.2"
+rich = ">=14.0.0"
 typing-extensions = ">=4.1.0"
+wcmatch = ">=10.1,<11.0"
 
 [[package]]
 name = "e2b-code-interpreter"
@@ -6898,13 +6911,13 @@ test = ["pytest", "pytest-mock"]
 
 [[package]]
 name = "rich"
-version = "13.8.1"
+version = "14.2.0"
 description = "Render rich text, tables, progress bars, syntax highlighting, markdown and more to the terminal"
 optional = false
-python-versions = ">=3.7.0"
+python-versions = ">=3.8.0"
 files = [
-    {file = "rich-13.8.1-py3-none-any.whl", hash = "sha256:1760a3c0848469b97b558fc61c85233e3dafb69c7a071b4d60c38099d3cd4c06"},
-    {file = "rich-13.8.1.tar.gz", hash = "sha256:8260cda28e3db6bf04d2d1ef4dbc03ba80a824c88b0e7668a0f23126a424844a"},
+    {file = "rich-14.2.0-py3-none-any.whl", hash = "sha256:76bc51fe2e57d2b1be1f96c524b890b816e334ab4c1e45888799bfaab0021edd"},
+    {file = "rich-14.2.0.tar.gz", hash = "sha256:73ff50c7c0c1c77c8243079283f4edb376f0f6442433aecb8ce7e6d0b92d1fe4"},
 ]
 
 [package.dependencies]
@@ -8502,6 +8515,20 @@ files = [
 anyio = ">=3.0.0"
 
 [[package]]
+name = "wcmatch"
+version = "10.1"
+description = "Wildcard/glob file name matcher."
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "wcmatch-10.1-py3-none-any.whl", hash = "sha256:5848ace7dbb0476e5e55ab63c6bbd529745089343427caa5537f230cc01beb8a"},
+    {file = "wcmatch-10.1.tar.gz", hash = "sha256:f11f94208c8c8484a16f4f48638a85d771d9513f4ab3f37595978801cb9465af"},
+]
+
+[package.dependencies]
+bracex = ">=2.1.1"
+
+[[package]]
 name = "weasyprint"
 version = "62.3"
 description = "The Awesome Document Factory"
@@ -8953,4 +8980,4 @@ test = ["pytest"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.13"
-content-hash = "beed6bdcb7d3438d0b468dfbdf7d1d240163faa218344af7fee975696ea82a8f"
+content-hash = "2acccf67cb2382ecc1f7f5ecf59e406101dca1a828df1e4bef0a3e18e620a835"
