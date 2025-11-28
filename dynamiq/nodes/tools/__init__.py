@@ -3,6 +3,7 @@ from .e2b_sandbox import E2BInterpreterTool
 from .exa_search import ExaTool
 from .file_tools import FileListTool, FileReadTool, FileWriteTool
 from .firecrawl import FirecrawlTool
+from .firecrawl_search import FirecrawlSearchTool
 from .http_api_call import HttpApiCall, ResponseType
 from .human_feedback import HumanFeedbackTool
 from .jina import JinaResponseFormat, JinaScrapeTool, JinaSearchTool
