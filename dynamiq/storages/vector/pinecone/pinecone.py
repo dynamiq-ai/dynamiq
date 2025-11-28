@@ -238,8 +238,16 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
         """
         try:
             index_to_delete = index_name or self.index_name
-            self._index.delete(delete_all=True, namespace=self.namespace)
-            self.client.delete_index(index_name=index_to_delete)
+
+            if index_name and index_name != self.index_name:
+                target_index = self.client.Index(name=index_name)
+            else:
+                target_index = self._index
+
+            if self._namespace_exists(target_index):
+                target_index.delete(delete_all=True, namespace=self.namespace)
+
+            self.client.delete_index(name=index_to_delete)
             logger.info(f"Deleted index '{index_to_delete}'.")
         except Exception as e:
             logger.error(f"Failed to delete index '{index_to_delete}': {e}")
@@ -268,6 +276,13 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
             document_ids (list[str]): List of document IDs to delete. Defaults to None.
             delete_all (bool): If True, delete all documents. Defaults to False.
         """
+        if not self._namespace_exists():
+            logger.debug(
+                f"Namespace '{self.namespace}' does not exist in index '{self.index_name}'. "
+                "Skipping deletion as there are no documents to delete."
+            )
+            return
+
         if delete_all and self._index is not None:
             self._index.delete(delete_all=True, namespace=self.namespace)
             self._index = self.connect_to_index()
@@ -286,6 +301,13 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
         Args:
             filters (dict[str, Any]): Filters to select documents to delete.
         """
+        if not self._namespace_exists():
+            logger.debug(
+                f"Namespace '{self.namespace}' does not exist in index '{self.index_name}'. "
+                "Skipping deletion as there are no documents to delete."
+            )
+            return
+
         filters = _normalize_filters(filters)
         self._index.delete(filter=filters, namespace=self.namespace)
 
@@ -324,6 +346,23 @@ class PineconeVectorStore(BaseVectorStore, DryRunMixin):
 
             all_documents.extend(documents)
         return all_documents
+
+    def _namespace_exists(self, index=None) -> bool:
+        """
+        Check if the namespace exists in an index.
+
+        Args:
+            index: The index to check. If None, uses self._index.
+
+        Returns:
+            bool: True if the namespace exists, False otherwise.
+        """
+        index = index or self._index
+        try:
+            index_namespaces = index.describe_index_stats()["namespaces"]
+            return self.namespace in index_namespaces
+        except KeyError:
+            return False
 
     def count_documents(self) -> int:
         """

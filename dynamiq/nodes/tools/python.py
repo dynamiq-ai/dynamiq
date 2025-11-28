@@ -49,6 +49,7 @@ ALLOWED_MODULES = [
     "pypdf",
     "matplotlib",
     "seaborn",
+    "yaml",
 ]
 
 ALLOWED_DUNDER_ATTRIBUTES = {"__class__", "__name__", "__qualname__"}
