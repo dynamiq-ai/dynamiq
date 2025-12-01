@@ -181,7 +181,7 @@ def test_exa_with_invalid_input_schema(mock_requests, mock_exa_response):
     )
 
     result_exa = result.output[exa_tool.id]
-    assert result.status == RunnableStatus.SUCCESS
+    assert result.status == RunnableStatus.FAILURE
     assert result.input == input_data
     assert result_exa["status"] == RunnableStatus.FAILURE.value
     assert result_exa["input"] == input_data
@@ -192,17 +192,20 @@ def test_exa_with_invalid_input_schema(mock_requests, mock_exa_response):
     assert len(tracing_runs) == 3
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf.id
-    assert wf_run.output
-    assert wf_run.status == RunStatus.SUCCEEDED
+    assert wf_run.output is None
+    assert wf_run.status == RunStatus.FAILED
+    assert "failed_nodes" in wf_run.metadata
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf.flow.id
     assert flow_run.parent_run_id == wf_run.id
-    assert flow_run.output
-    assert flow_run.status == RunStatus.SUCCEEDED
+    assert flow_run.output is None
+    assert flow_run.status == RunStatus.FAILED
+    assert "failed_nodes" in flow_run.metadata
     exa_tool_run = tracing_runs[2]
     assert exa_tool_run.metadata["node"]["id"] == exa_tool.id
     assert exa_tool_run.parent_run_id == flow_run.id
     assert exa_tool_run.input == input_data
     assert exa_tool_run.output is None
     assert exa_tool_run.error
+    assert exa_tool_run.status == RunStatus.FAILED
     assert json.dumps({"runs": [run.to_dict() for run in tracing.runs.values()]}, cls=JsonWorkflowEncoder)

@@ -15,7 +15,12 @@ logger = logging.getLogger(__name__)
 load_dotenv(find_dotenv())
 
 
-def indexing_flow(yaml_file_path: str, data_folder_path: str, cm: ConnectionManager):
+def indexing_flow(
+    yaml_file_path: str,
+    data_folder_path: str,
+    cm: ConnectionManager,
+    extensions: list[str] | None = None,
+):
     wf_data = WorkflowYAMLLoader.load(
         file_path=yaml_file_path,
         connection_manager=cm,
@@ -24,7 +29,7 @@ def indexing_flow(yaml_file_path: str, data_folder_path: str, cm: ConnectionMana
     tracing_indexing_wf = TracingCallbackHandler()
     indexing_wf = Workflow.from_yaml_file_data(file_data=wf_data, wf_id="indexing-workflow")
 
-    file_paths = list_data_folder_paths(data_folder_path)
+    file_paths = list_data_folder_paths(data_folder_path, extensions=extensions)
     input_data = read_bytes_io_files(file_paths)
 
     result = indexing_wf.run(

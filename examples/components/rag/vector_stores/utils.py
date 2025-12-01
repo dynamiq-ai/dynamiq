@@ -5,8 +5,13 @@ from dynamiq import ROOT_PATH
 from dynamiq.utils import generate_uuid
 
 
-def list_data_folder_paths(folder_path=os.path.join(os.path.dirname(ROOT_PATH), "examples/data/")) -> list[str]:
+def list_data_folder_paths(
+    folder_path: str = os.path.join(os.path.dirname(ROOT_PATH), "examples/data/"),
+    extensions: list[str] | None = None,
+) -> list[str]:
     file_names = os.listdir(folder_path)
+    if extensions:
+        file_names = [f for f in file_names if any(f.endswith(ext) for ext in extensions)]
     file_paths = [os.path.join(folder_path, file_name) for file_name in file_names]
 
     return file_paths

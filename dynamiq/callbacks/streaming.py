@@ -171,6 +171,19 @@ class StreamingQueueCallbackHandler(BaseStreamingCallbackHandler):
             error (BaseException): Error encountered.
             **kwargs (Any): Additional arguments.
         """
+        event = StreamingEventMessage(
+            run_id=str(get_run_id(kwargs)),
+            wf_run_id=kwargs.get("wf_run_id"),
+            entity_id=serialized.get("id"),
+            data={"error": str(error)},
+            event=serialized.get("streaming", {}).get("event"),
+            source=StreamingEntitySource(
+                name=serialized.get("name", None),
+                group=serialized.get("group", None),
+                type=serialized.get("type", None),
+            ),
+        )
+        self.send_to_queue(event)
         self.done_event.set()
 
     def send_to_queue(self, event: StreamingEventMessage):

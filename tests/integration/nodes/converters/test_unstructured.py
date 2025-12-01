@@ -178,7 +178,7 @@ def test_workflow_with_unstructured_node_failure(
 
         result = workflow.run(input_data=input_data)
 
-        assert result.status == RunnableStatus.SUCCESS
+        assert result.status == RunnableStatus.FAILURE
 
         unstructured_result = result.output[unstructured_node.id]
         assert unstructured_result["status"] == RunnableStatus.FAILURE.value
@@ -194,7 +194,7 @@ def test_workflow_with_unstructured_node_file_not_found(workflow, unstructured_n
 
     result = workflow.run(input_data=input_data)
 
-    assert result.status == RunnableStatus.SUCCESS
+    assert result.status == RunnableStatus.FAILURE
 
     unstructured_result = result.output[unstructured_node.id]
     assert unstructured_result["status"] == RunnableStatus.FAILURE.value
@@ -210,7 +210,7 @@ def test_workflow_with_unstructured_node_empty_file_path(
     input_data = {"file_paths": [empty_text_file_path]}
     result = workflow.run(input_data=input_data)
 
-    assert result.status == RunnableStatus.SUCCESS
+    assert result.status == RunnableStatus.FAILURE
     unstructured_result = result.output[unstructured_node.id]
     assert unstructured_result["status"] == RunnableStatus.FAILURE.value
     assert "ValueError" in unstructured_result["error"]["type"]
@@ -227,7 +227,7 @@ def test_workflow_with_unstructured_node_empty_bytesio(workflow, unstructured_no
         input_data = {"files": [empty_text_bytesio]}
         result = workflow.run(input_data=input_data)
 
-        assert result.status == RunnableStatus.SUCCESS
+        assert result.status == RunnableStatus.FAILURE
         unstructured_result = result.output[unstructured_node.id]
         assert unstructured_result["status"] == RunnableStatus.FAILURE.value
         assert "ValueError" in unstructured_result["error"]["type"]
