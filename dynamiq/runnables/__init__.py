@@ -1,1 +1,1 @@
-from .base import Runnable, RunnableConfig, RunnableResult, RunnableStatus
+from .base import Runnable, RunnableConfig, RunnableFailedNodeInfo, RunnableResult, RunnableStatus
