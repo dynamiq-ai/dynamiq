@@ -1,5 +1,6 @@
 import enum
 import json
+import os
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from enum import Enum
@@ -760,7 +761,7 @@ class Firecrawl(Http):
 
 class E2B(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "E2B_API_KEY"))
-    domain: str | None = None
+    domain: str | None = Field(default_factory=partial(os.environ.get, "E2B_DOMAIN"))
 
     def connect(self):
         pass
