@@ -1,9 +1,18 @@
 import copy
 import json
 import warnings
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Union
 
 from litellm import get_max_tokens, supports_vision
+from litellm.exceptions import (
+    APIConnectionError,
+    BudgetExceededError,
+    InternalServerError,
+    RateLimitError,
+    ServiceUnavailableError,
+    Timeout,
+)
 from litellm.utils import supports_pdf_input
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
@@ -13,11 +22,40 @@ from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.prompts import Prompt
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.types.llm_tool import Tool
+from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
     from litellm import CustomStreamWrapper, ModelResponse
+
+
+LLM_RATE_LIMIT_ERROR_INDICATORS = (
+    "rate limit",
+    "429",
+    "quota exceeded",
+    "too many requests",
+    "ratelimit",
+    "throttl",
+    "capacity",
+    "resource_exhausted",
+)
+
+
+class FallbackTrigger(str, Enum):
+    ANY = "any"
+    RATE_LIMIT = "rate_limit"
+    CONNECTION = "connection"
+
+
+class FallbackConfig(BaseModel):
+    """Configuration for LLM fallback behavior."""
+
+    llm: "BaseLLM | None" = None
+    enabled: bool = True
+    trigger: FallbackTrigger = FallbackTrigger.ANY
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class BaseLLMUsageData(BaseModel):
@@ -80,9 +118,11 @@ class BaseLLM(ConnectionNode):
         tool_choice (str | None): Value to control which function is called by the model.
         thinking_enabled (bool): Enables advanced reasoning if set to True.
         budget_tokens (int): Maximum number of tokens allocated for thinking.
-        response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output
-        tools list[Tool]: List of tools that llm can call.
+        response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output.
+        tools (list[Tool]): List of tools that llm can call.
+        fallback (FallbackConfig): Configuration for fallback behavior.
     """
+
     MODEL_PREFIX: ClassVar[str | None] = None
     name: str | None = "LLM"
     model: str
@@ -115,10 +155,16 @@ class BaseLLM(ConnectionNode):
         deprecated="Please use `tools` and `response_format` parameters "
         "for function calling and structured output respectively.",
     )
+    fallback: FallbackConfig | None = Field(
+        default=None,
+        description="Configuration for fallback behavior including the fallback LLM.",
+    )
+
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     _completion: Callable = PrivateAttr()
     _stream_chunk_builder: Callable = PrivateAttr()
+    _is_fallback_run: bool = PrivateAttr(default=False)
     _json_schema_fields: ClassVar[list[str]] = ["model", "temperature", "max_tokens", "prompt"]
 
     @classmethod
@@ -173,6 +219,31 @@ class BaseLLM(ConnectionNode):
         # Avoid the same imports multiple times and for future usage in execute
         self._completion = completion
         self._stream_chunk_builder = stream_chunk_builder
+
+    def init_components(self, connection_manager=None):
+        """Initialize components including fallback LLM if configured.
+
+        Args:
+            connection_manager: The connection manager for initializing connections.
+        """
+        super().init_components(connection_manager)
+        if self.fallback and self.fallback.llm and self.fallback.llm.is_postponed_component_init:
+            self.fallback.llm.init_components(connection_manager)
+
+    @property
+    def to_dict_exclude_params(self) -> dict:
+        """Exclude fallback configuration during serialization."""
+        return super().to_dict_exclude_params | {"fallback": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        """Convert to dictionary representation."""
+        data = super().to_dict(**kwargs)
+        if self.fallback:
+            data["fallback"] = self.fallback.model_dump(exclude={"llm": True})
+            data["fallback"]["llm"] = self.fallback.llm.to_dict(**kwargs) if self.fallback.llm else None
+        if self._is_fallback_run:
+            data["is_fallback"] = True
+        return data
 
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
@@ -450,3 +521,109 @@ class BaseLLM(ConnectionNode):
         return handle_completion(
             response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
         )
+
+    def _should_trigger_fallback(self, exception: Exception) -> bool:
+        """Determine if exception should trigger fallback to secondary LLM.
+
+        Args:
+            exception: The exception that caused the primary LLM to fail.
+
+        Returns:
+            bool: True if fallback should be triggered, False otherwise.
+        """
+        if not self.fallback or not self.fallback.enabled or not self.fallback.llm:
+            return False
+
+        trigger = self.fallback.trigger
+        if trigger == FallbackTrigger.ANY:
+            return True
+
+        if trigger == FallbackTrigger.RATE_LIMIT:
+            if isinstance(exception, (RateLimitError, BudgetExceededError)):
+                return True
+            error_str = str(exception).lower()
+            return any(indicator in error_str for indicator in LLM_RATE_LIMIT_ERROR_INDICATORS)
+
+        if trigger == FallbackTrigger.CONNECTION:
+            if isinstance(exception, (APIConnectionError, Timeout, ServiceUnavailableError, InternalServerError)):
+                return True
+            return isinstance(exception, (ConnectionError, TimeoutError, OSError))
+
+        return False
+
+    def run_sync(
+        self,
+        input_data: dict,
+        config: RunnableConfig = None,
+        depends_result: dict = None,
+        **kwargs,
+    ) -> RunnableResult:
+        """Run the LLM with fallback support.
+
+        If the primary LLM fails and a fallback is configured, the primary failure
+        is traced first, then the fallback LLM is executed separately.
+
+        The fallback receives the same transformed input that the primary received,
+        and the primary's output_transformer is applied to the fallback's output.
+
+        Args:
+            input_data: Input data for the LLM.
+            config: Configuration for the run.
+            depends_result: Results of dependent nodes.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            RunnableResult: Result of the LLM execution.
+        """
+        result = super().run_sync(input_data=input_data, config=config, depends_result=depends_result, **kwargs)
+
+        if result.status != RunnableStatus.FAILURE:
+            return result
+
+        if not self.fallback or not self.fallback.llm:
+            return result
+
+        if not result.error:
+            return result
+
+        try:
+            exception = result.error.type(result.error.message)
+        except Exception:
+            exception = Exception(result.error.message)
+
+        if not self._should_trigger_fallback(exception):
+            return result
+
+        fallback_llm = self.fallback.llm
+        fallback_llm._is_fallback_run = True
+        logger.warning(
+            f"LLM {self.name} - {self.id}: Primary LLM ({self.model}) failed. "
+            f"Error: {result.error.type.__name__}: {result.error.message}. "
+            f"Attempting fallback to {fallback_llm.name} - {fallback_llm.id}"
+        )
+
+        # Use the primary's already transformed input for fallback
+        # This ensures fallback works with the same prepared input as primary
+        fallback_kwargs = {k: v for k, v in kwargs.items() if k != "run_depends"}
+        fallback_kwargs["parent_run_id"] = kwargs.get("parent_run_id")
+
+        fallback_input = result.input.model_dump() if hasattr(result.input, "model_dump") else result.input
+        fallback_result = fallback_llm.run(
+            input_data=fallback_input,
+            config=config,
+            depends_result=None,  # Input is already transformed, no need to merge depends
+            **fallback_kwargs,
+        )
+
+        if fallback_result.status == RunnableStatus.SUCCESS:
+            logger.info(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) succeeded")
+            # Apply primary node's output_transformer to fallback result
+            transformed_output = self.transform_output(fallback_result.output, config=config, **kwargs)
+            return RunnableResult(
+                status=RunnableStatus.SUCCESS,
+                input=result.input,
+                output=transformed_output,
+            )
+
+        logger.error(f"LLM {self.name} - {self.id}: Fallback LLM ({fallback_llm.model}) failed.")
+        return result

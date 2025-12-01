@@ -5,11 +5,13 @@ from unittest import mock
 from unittest.mock import ANY
 
 import pytest
+from litellm.exceptions import RateLimitError
 
 from dynamiq import Workflow, flows
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.callbacks.tracing import RunStatus
 from dynamiq.nodes.exceptions import NodeConditionFailedException, NodeFailedException
+from dynamiq.nodes.llms.base import FallbackConfig, FallbackTrigger
 from dynamiq.nodes.llms.mistral import Mistral, MistralConnection
 from dynamiq.nodes.node import ErrorHandling, InputTransformer, NodeDependency
 from dynamiq.nodes.operators import Choice, ChoiceOption
@@ -1161,3 +1163,66 @@ def run(input_data):
     }
 
     assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
+
+
+def test_workflow_with_llm_fallback_tracing(
+    openai_node,
+    anthropic_node,
+    mock_llm_response_text,
+    mock_llm_executor,
+):
+    openai_node.fallback = FallbackConfig(
+        llm=anthropic_node,
+        enabled=True,
+        trigger=FallbackTrigger.ANY,
+    )
+
+    input_data = {"a": 1}
+    tracing = TracingCallbackHandler()
+    call_count = 0
+
+    def mock_completion(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RateLimitError("Rate limit exceeded", "openai", "gpt-4")
+        from litellm import ModelResponse
+
+        model_r = ModelResponse()
+        model_r["choices"][0]["message"]["content"] = mock_llm_response_text
+        return model_r
+
+    mock_llm_executor.side_effect = mock_completion
+
+    wf = Workflow(
+        id=str(uuid.uuid4()),
+        flow=flows.Flow(nodes=[openai_node]),
+    )
+
+    response = wf.run(
+        input_data=input_data,
+        config=RunnableConfig(callbacks=[tracing]),
+    )
+
+    assert response.status == RunnableStatus.SUCCESS
+
+    tracing_runs = list(tracing.runs.values())
+    assert len(tracing_runs) == 4
+
+    wf_run = tracing_runs[0]
+    assert wf_run.status == RunStatus.SUCCEEDED
+
+    flow_run = tracing_runs[1]
+    assert flow_run.status == RunStatus.SUCCEEDED
+
+    primary_llm_run = tracing_runs[2]
+    assert primary_llm_run.status == RunStatus.FAILED
+    assert primary_llm_run.metadata["node"]["name"] == openai_node.name
+    assert "is_fallback" not in primary_llm_run.metadata["node"]
+
+    fallback_llm_run = tracing_runs[3]
+    assert fallback_llm_run.status == RunStatus.SUCCEEDED
+    assert fallback_llm_run.metadata["node"]["name"] == anthropic_node.name
+    assert fallback_llm_run.metadata["node"].get("is_fallback") is True
+    assert fallback_llm_run.parent_run_id == flow_run.id
+    assert fallback_llm_run.output == {"content": mock_llm_response_text}

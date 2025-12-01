@@ -1,0 +1,61 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+  anthropic-conn:
+    type: dynamiq.connections.Anthropic
+    api_key: ${oc.env:ANTHROPIC_API_KEY}
+
+prompts:
+  user-prompt:
+    messages:
+      - role: user
+        content: "{{query}}"
+
+nodes:
+  # Primary LLM (OpenAI) with inline fallback LLM configured
+  openai-primary:
+    type: dynamiq.nodes.llms.OpenAI
+    name: OpenAI-Primary
+    model: gpt-4o
+    connection: openai-conn
+    prompt: user-prompt
+    error_handling:
+      timeout_seconds: 60
+      retry_interval_seconds: 1
+      max_retries: 1
+    fallback:
+      enabled: true
+      trigger: any  # Options: any, rate_limit, connection
+      llm:
+        id: anthropic-fallback
+        type: dynamiq.nodes.llms.Anthropic
+        name: Anthropic-Fallback
+        model: claude-sonnet-4-20250514
+        connection: anthropic-conn
+        prompt: user-prompt
+        error_handling:
+          timeout_seconds: 60
+          retry_interval_seconds: 1
+          max_retries: 1
+    input_transformer:
+      selector:
+        "query": "$.query"
+    output_transformer:
+      selector:
+        "answer": "$.content"
+    caching:
+      enabled: false
+    streaming:
+      enabled: false
+
+flows:
+  llm-fallback-flow:
+    name: LLM with Fallback Flow
+    nodes:
+      - openai-primary
+
+workflows:
+  llm-fallback-workflow:
+    flow: llm-fallback-flow
