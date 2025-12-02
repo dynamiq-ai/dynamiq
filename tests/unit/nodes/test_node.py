@@ -23,7 +23,7 @@ def node_async_result():
 
 @pytest.fixture
 def openai_node(mocker, node_sync_result, node_async_result):
-    mocker.patch("dynamiq.nodes.node.Node.run_sync", return_value=node_sync_result)
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM.run_sync", return_value=node_sync_result)
     mocker.patch("dynamiq.nodes.node.Node.run_async", return_value=node_async_result)
     yield OpenAI(model="gpt-4", connection=OpenAIConnection(api_key="test_api_key"))
 
