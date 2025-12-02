@@ -1174,7 +1174,7 @@ def test_workflow_with_llm_fallback_tracing(
     openai_node.fallback = FallbackConfig(
         llm=anthropic_node,
         enabled=True,
-        trigger=FallbackTrigger.ANY,
+        triggers=[FallbackTrigger.ANY],
     )
 
     input_data = {"a": 1}

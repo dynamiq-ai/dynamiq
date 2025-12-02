@@ -57,7 +57,7 @@ def run_llm_fallback_programmatic():
         fallback=FallbackConfig(
             llm=fallback_llm,
             enabled=True,
-            trigger=FallbackTrigger.ANY,
+            triggers=[FallbackTrigger.ANY],
         ),
     )
 

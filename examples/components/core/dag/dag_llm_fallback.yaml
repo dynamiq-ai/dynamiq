@@ -27,7 +27,8 @@ nodes:
       max_retries: 1
     fallback:
       enabled: true
-      trigger: any  # Options: any, rate_limit, connection
+      triggers:  # Options: any, rate_limit, connection
+        - any
       llm:
         id: anthropic-fallback
         type: dynamiq.nodes.llms.Anthropic

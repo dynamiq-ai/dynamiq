@@ -14,7 +14,6 @@ from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 
-# Constants
 PRIMARY_MODEL = "gpt-4o"
 FALLBACK_MODEL = "gpt-4o-mini"
 PRIMARY_LLM_NAME = "PrimaryLLM"
@@ -60,7 +59,7 @@ def create_llm_with_fallback(
             fallback=FallbackConfig(
                 llm=fallback_llm,
                 enabled=fallback_config.enabled,
-                trigger=fallback_config.trigger,
+                triggers=fallback_config.triggers,
             ),
         )
 
@@ -74,32 +73,42 @@ def mock_llm_response(content: str) -> ModelResponse:
 
 
 @pytest.mark.parametrize(
-    ("trigger", "exception_type", "exception_message", "should_fallback"),
+    ("triggers", "exception_type", "exception_message", "should_fallback"),
     [
-        (FallbackTrigger.ANY, ValueError, "Some error", True),
-        (FallbackTrigger.ANY, RateLimitError, "Rate limit", True),
-        (FallbackTrigger.ANY, ConnectionError, "Connection failed", True),
-        (FallbackTrigger.RATE_LIMIT, RateLimitError, "Rate limit", True),
-        (FallbackTrigger.RATE_LIMIT, BudgetExceededError, "Budget exceeded", True),
-        (FallbackTrigger.RATE_LIMIT, ValueError, "rate limit exceeded", True),
-        (FallbackTrigger.RATE_LIMIT, ValueError, "Error 429", True),
-        (FallbackTrigger.RATE_LIMIT, ValueError, "quota exceeded", True),
-        (FallbackTrigger.RATE_LIMIT, ConnectionError, "Connection failed", False),
-        (FallbackTrigger.CONNECTION, APIConnectionError, "API connection error", True),
-        (FallbackTrigger.CONNECTION, Timeout, "Timeout error", True),
-        (FallbackTrigger.CONNECTION, ServiceUnavailableError, "Service unavailable", True),
-        (FallbackTrigger.CONNECTION, ConnectionError, "Connection failed", True),
-        (FallbackTrigger.CONNECTION, TimeoutError, "Timeout", True),
-        (FallbackTrigger.CONNECTION, RateLimitError, "Rate limit", False),
-        (FallbackTrigger.CONNECTION, Exception, "Connection reset by peer", True),
-        (FallbackTrigger.CONNECTION, Exception, "Request timed out", True),
-        (FallbackTrigger.CONNECTION, Exception, "Service unavailable (503)", True),
-        (FallbackTrigger.CONNECTION, Exception, "Internal server error", True),
-        (FallbackTrigger.CONNECTION, Exception, "Some random error", False),
+        ([FallbackTrigger.ANY], ValueError, "Some error", True),
+        ([FallbackTrigger.ANY], RateLimitError, "Rate limit", True),
+        ([FallbackTrigger.ANY], ConnectionError, "Connection failed", True),
+        ([FallbackTrigger.RATE_LIMIT], RateLimitError, "Rate limit", True),
+        ([FallbackTrigger.RATE_LIMIT], BudgetExceededError, "Budget exceeded", True),
+        ([FallbackTrigger.RATE_LIMIT], ValueError, "rate limit exceeded", True),
+        ([FallbackTrigger.RATE_LIMIT], ValueError, "Error 429", True),
+        ([FallbackTrigger.RATE_LIMIT], ValueError, "quota exceeded", True),
+        ([FallbackTrigger.RATE_LIMIT], ConnectionError, "Connection failed", False),
+        ([FallbackTrigger.CONNECTION], APIConnectionError, "API connection error", True),
+        ([FallbackTrigger.CONNECTION], Timeout, "Timeout error", True),
+        ([FallbackTrigger.CONNECTION], ServiceUnavailableError, "Service unavailable", True),
+        ([FallbackTrigger.CONNECTION], ConnectionError, "Connection failed", True),
+        ([FallbackTrigger.CONNECTION], TimeoutError, "Timeout", True),
+        ([FallbackTrigger.CONNECTION], RateLimitError, "Rate limit", False),
+        ([FallbackTrigger.CONNECTION], Exception, "Connection reset by peer", True),
+        ([FallbackTrigger.CONNECTION], Exception, "Request timed out", True),
+        ([FallbackTrigger.CONNECTION], Exception, "Service unavailable (503)", True),
+        ([FallbackTrigger.CONNECTION], Exception, "Internal server error", True),
+        ([FallbackTrigger.CONNECTION], Exception, "Some random error", False),
+        ([FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION], RateLimitError, "Rate limit", True),
+        ([FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION], BudgetExceededError, "Budget exceeded", True),
+        ([FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION], APIConnectionError, "API error", True),
+        ([FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION], Timeout, "Timeout", True),
+        ([FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION], ConnectionError, "Connection failed", True),
+        ([FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION], ValueError, "Some random error", False),
+        ([FallbackTrigger.ANY, FallbackTrigger.RATE_LIMIT], ValueError, "Random error", True),
+        ([FallbackTrigger.ANY, FallbackTrigger.CONNECTION], ValueError, "Random error", True),
     ],
 )
-def test_should_trigger_fallback(create_llm_with_fallback, trigger, exception_type, exception_message, should_fallback):
-    llm = create_llm_with_fallback(FallbackConfig(enabled=True, trigger=trigger))
+def test_should_trigger_fallback(
+    create_llm_with_fallback, triggers, exception_type, exception_message, should_fallback
+):
+    llm = create_llm_with_fallback(FallbackConfig(enabled=True, triggers=triggers))
     assert llm._should_trigger_fallback(exception_type, exception_message) == should_fallback
 
 
@@ -124,13 +133,13 @@ def test_should_trigger_fallback_disabled_or_no_llm(
         model=PRIMARY_MODEL,
         connection=primary_connection,
         prompt=prompt,
-        fallback=FallbackConfig(llm=fallback_llm, enabled=enabled, trigger=FallbackTrigger.ANY),
+        fallback=FallbackConfig(llm=fallback_llm, enabled=enabled, triggers=[FallbackTrigger.ANY]),
     )
     assert llm._should_trigger_fallback(ValueError, "Some error") is False
 
 
 def test_fallback_success_when_primary_fails(mocker, create_llm_with_fallback):
-    llm = create_llm_with_fallback(FallbackConfig(enabled=True, trigger=FallbackTrigger.ANY))
+    llm = create_llm_with_fallback(FallbackConfig(enabled=True, triggers=[FallbackTrigger.ANY]))
 
     call_count = 0
 
@@ -152,7 +161,7 @@ def test_fallback_success_when_primary_fails(mocker, create_llm_with_fallback):
 
 
 def test_fallback_not_triggered_when_primary_succeeds(mocker, create_llm_with_fallback):
-    llm = create_llm_with_fallback(FallbackConfig(enabled=True, trigger=FallbackTrigger.ANY))
+    llm = create_llm_with_fallback(FallbackConfig(enabled=True, triggers=[FallbackTrigger.ANY]))
 
     mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", return_value=mock_llm_response(PRIMARY_RESPONSE))
 
@@ -164,7 +173,7 @@ def test_fallback_not_triggered_when_primary_succeeds(mocker, create_llm_with_fa
 
 
 def test_both_llms_fail_raises_primary_error(mocker, create_llm_with_fallback):
-    llm = create_llm_with_fallback(FallbackConfig(enabled=True, trigger=FallbackTrigger.ANY))
+    llm = create_llm_with_fallback(FallbackConfig(enabled=True, triggers=[FallbackTrigger.ANY]))
 
     call_count = 0
 
@@ -212,7 +221,7 @@ def test_fallback_applies_primary_output_transformer(mocker, primary_connection,
         connection=primary_connection,
         prompt=prompt,
         output_transformer=OutputTransformer(selector={"answer": "$.content"}),
-        fallback=FallbackConfig(llm=fallback_llm, enabled=True, trigger=FallbackTrigger.ANY),
+        fallback=FallbackConfig(llm=fallback_llm, enabled=True, triggers=[FallbackTrigger.ANY]),
     )
 
     call_count = 0
@@ -248,7 +257,7 @@ def test_fallback_uses_primary_input_transformer(mocker, primary_connection, fal
         connection=primary_connection,
         prompt=Prompt(messages=[Message(role="user", content="Transformed question: {{transformed_question}}")]),
         input_transformer=InputTransformer(selector={"transformed_question": "$.question"}),
-        fallback=FallbackConfig(llm=fallback_llm, enabled=True, trigger=FallbackTrigger.ANY),
+        fallback=FallbackConfig(llm=fallback_llm, enabled=True, triggers=[FallbackTrigger.ANY]),
     )
 
     call_count = 0
@@ -295,7 +304,7 @@ def test_fallback_not_triggered_on_skip(mocker, primary_connection, fallback_con
         connection=primary_connection,
         prompt=prompt,
         depends=[NodeDependency(node=failing_node)],
-        fallback=FallbackConfig(llm=fallback_llm, enabled=True, trigger=FallbackTrigger.ANY),
+        fallback=FallbackConfig(llm=fallback_llm, enabled=True, triggers=[FallbackTrigger.ANY]),
     )
 
     mock_completion = mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion")
@@ -305,3 +314,70 @@ def test_fallback_not_triggered_on_skip(mocker, primary_connection, fallback_con
 
     assert result.output[llm.id]["status"] == RunnableStatus.SKIP.value
     mock_completion.assert_not_called()
+
+
+def test_fallback_with_multiple_triggers_rate_limit_error(mocker, create_llm_with_fallback):
+    """Test that fallback triggers on rate limit when multiple triggers configured."""
+    llm = create_llm_with_fallback(
+        FallbackConfig(enabled=True, triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
+    )
+
+    call_count = 0
+
+    def mock_completion(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RateLimitError("Rate limit exceeded", LLM_PROVIDER, PRIMARY_MODEL)
+        return mock_llm_response(FALLBACK_RESPONSE)
+
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=mock_completion)
+
+    wf = Workflow(id=str(uuid.uuid4()), flow=Flow(nodes=[llm]))
+    result = wf.run(input_data={}, config=RunnableConfig())
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output[llm.id]["output"]["content"] == FALLBACK_RESPONSE
+    assert call_count == 2
+
+
+def test_fallback_with_multiple_triggers_connection_error(mocker, create_llm_with_fallback):
+    """Test that fallback triggers on connection error when multiple triggers configured."""
+    llm = create_llm_with_fallback(
+        FallbackConfig(enabled=True, triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
+    )
+
+    call_count = 0
+
+    def mock_completion(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise APIConnectionError("API connection failed", LLM_PROVIDER, PRIMARY_MODEL)
+        return mock_llm_response(FALLBACK_RESPONSE)
+
+    mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", side_effect=mock_completion)
+
+    wf = Workflow(id=str(uuid.uuid4()), flow=Flow(nodes=[llm]))
+    result = wf.run(input_data={}, config=RunnableConfig())
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output[llm.id]["output"]["content"] == FALLBACK_RESPONSE
+    assert call_count == 2
+
+
+def test_fallback_with_multiple_triggers_no_match(mocker, create_llm_with_fallback):
+    """Test that fallback does NOT trigger when error doesn't match any configured triggers."""
+    llm = create_llm_with_fallback(
+        FallbackConfig(enabled=True, triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
+    )
+
+    mocker.patch(
+        "dynamiq.nodes.llms.base.BaseLLM._completion",
+        side_effect=ValueError("Some validation error"),
+    )
+
+    wf = Workflow(id=str(uuid.uuid4()), flow=Flow(nodes=[llm]))
+    result = wf.run(input_data={}, config=RunnableConfig())
+
+    assert result.output[llm.id]["status"] == RunnableStatus.FAILURE.value

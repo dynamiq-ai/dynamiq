@@ -68,11 +68,25 @@ class FallbackTrigger(str, Enum):
 
 
 class FallbackConfig(BaseModel):
-    """Configuration for LLM fallback behavior."""
+    """Configuration for LLM fallback behavior.
+
+    Attributes:
+        llm: The fallback LLM to use when the primary LLM fails.
+        enabled: Whether fallback is enabled.
+        triggers: List of trigger conditions that will activate the fallback.
+            Use FallbackTrigger.ANY to trigger on any error.
+
+    Examples:
+        # Single trigger
+        FallbackConfig(triggers=[FallbackTrigger.RATE_LIMIT])
+
+        # Multiple triggers
+        FallbackConfig(triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
+    """
 
     llm: "BaseLLM | None" = None
     enabled: bool = True
-    trigger: FallbackTrigger = FallbackTrigger.ANY
+    triggers: list[FallbackTrigger] = Field(default_factory=lambda: [FallbackTrigger.ANY])
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -263,6 +277,10 @@ class BaseLLM(ConnectionNode):
         if self._is_fallback_run:
             data["is_fallback"] = True
         return data
+
+    def reset_run_state(self):
+        """Reset the run state of the LLM."""
+        self._is_fallback_run = False
 
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
@@ -487,6 +505,7 @@ class BaseLLM(ConnectionNode):
             dict: A dictionary containing the generated content and tool calls.
         """
         config = ensure_config(config)
+        self.reset_run_state()
         prompt = prompt or self.prompt or Prompt(messages=[], tools=None, response_format=None)
         messages = self.get_messages(prompt, input_data)
         self.run_on_node_execute_run(callbacks=config.callbacks, prompt_messages=messages, **kwargs)
@@ -541,6 +560,36 @@ class BaseLLM(ConnectionNode):
             response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
         )
 
+    def _is_rate_limit_error(self, exception_type: type[Exception], error_str: str) -> bool:
+        """Check if the error is a rate limit error.
+
+        Args:
+            exception_type: The type of exception.
+            error_str: Lowercase error message string.
+
+        Returns:
+            bool: True if it's a rate limit error.
+        """
+        if issubclass(exception_type, (RateLimitError, BudgetExceededError)):
+            return True
+        return any(indicator in error_str for indicator in LLM_RATE_LIMIT_ERROR_INDICATORS)
+
+    def _is_connection_error(self, exception_type: type[Exception], error_str: str) -> bool:
+        """Check if the error is a connection error.
+
+        Args:
+            exception_type: The type of exception.
+            error_str: Lowercase error message string.
+
+        Returns:
+            bool: True if it's a connection error.
+        """
+        if issubclass(exception_type, (APIConnectionError, Timeout, ServiceUnavailableError, InternalServerError)):
+            return True
+        if issubclass(exception_type, (ConnectionError, TimeoutError, OSError)):
+            return True
+        return any(indicator in error_str for indicator in LLM_CONNECTION_ERROR_INDICATORS)
+
     def _should_trigger_fallback(self, exception_type: type[Exception], exception_message: str | None = None) -> bool:
         """Determine if exception should trigger fallback to secondary LLM.
 
@@ -554,23 +603,16 @@ class BaseLLM(ConnectionNode):
         if not self.fallback or not self.fallback.enabled or not self.fallback.llm:
             return False
 
-        trigger = self.fallback.trigger
-        if trigger == FallbackTrigger.ANY:
+        triggers = set(self.fallback.triggers)
+        if FallbackTrigger.ANY in triggers:
             return True
 
         error_str = (exception_message or "").lower()
 
-        if trigger == FallbackTrigger.RATE_LIMIT:
-            if issubclass(exception_type, (RateLimitError, BudgetExceededError)):
-                return True
-            return any(indicator in error_str for indicator in LLM_RATE_LIMIT_ERROR_INDICATORS)
-
-        if trigger == FallbackTrigger.CONNECTION:
-            if issubclass(exception_type, (APIConnectionError, Timeout, ServiceUnavailableError, InternalServerError)):
-                return True
-            if issubclass(exception_type, (ConnectionError, TimeoutError, OSError)):
-                return True
-            return any(indicator in error_str for indicator in LLM_CONNECTION_ERROR_INDICATORS)
+        if FallbackTrigger.RATE_LIMIT in triggers and self._is_rate_limit_error(exception_type, error_str):
+            return True
+        if FallbackTrigger.CONNECTION in triggers and self._is_connection_error(exception_type, error_str):
+            return True
 
         return False
 
@@ -626,7 +668,7 @@ class BaseLLM(ConnectionNode):
         fallback_kwargs["parent_run_id"] = kwargs.get("parent_run_id")
 
         fallback_input = result.input.model_dump() if hasattr(result.input, "model_dump") else result.input
-        fallback_result = fallback_llm.run(
+        fallback_result = fallback_llm.run_sync(
             input_data=fallback_input,
             config=config,
             depends_result=None,  # Input is already transformed, no need to merge depends
