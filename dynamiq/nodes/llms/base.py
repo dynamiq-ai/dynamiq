@@ -41,6 +41,25 @@ LLM_RATE_LIMIT_ERROR_INDICATORS = (
     "resource_exhausted",
 )
 
+LLM_CONNECTION_ERROR_INDICATORS = (
+    "connection",
+    "timeout",
+    "timed out",
+    "unreachable",
+    "service unavailable",
+    "503",
+    "502",
+    "504",
+    "gateway",
+    "network",
+    "dns",
+    "refused",
+    "reset",
+    "closed",
+    "internal server error",
+    "500",
+)
+
 
 class FallbackTrigger(str, Enum):
     ANY = "any"
@@ -522,11 +541,12 @@ class BaseLLM(ConnectionNode):
             response=response, messages=messages, config=config, input_data=dict(input_data), **kwargs
         )
 
-    def _should_trigger_fallback(self, exception: Exception) -> bool:
+    def _should_trigger_fallback(self, exception_type: type[Exception], exception_message: str | None = None) -> bool:
         """Determine if exception should trigger fallback to secondary LLM.
 
         Args:
-            exception: The exception that caused the primary LLM to fail.
+            exception_type: The type of exception that caused the primary LLM to fail.
+            exception_message: The exception message string for string-based detection.
 
         Returns:
             bool: True if fallback should be triggered, False otherwise.
@@ -538,16 +558,19 @@ class BaseLLM(ConnectionNode):
         if trigger == FallbackTrigger.ANY:
             return True
 
+        error_str = (exception_message or "").lower()
+
         if trigger == FallbackTrigger.RATE_LIMIT:
-            if isinstance(exception, (RateLimitError, BudgetExceededError)):
+            if issubclass(exception_type, (RateLimitError, BudgetExceededError)):
                 return True
-            error_str = str(exception).lower()
             return any(indicator in error_str for indicator in LLM_RATE_LIMIT_ERROR_INDICATORS)
 
         if trigger == FallbackTrigger.CONNECTION:
-            if isinstance(exception, (APIConnectionError, Timeout, ServiceUnavailableError, InternalServerError)):
+            if issubclass(exception_type, (APIConnectionError, Timeout, ServiceUnavailableError, InternalServerError)):
                 return True
-            return isinstance(exception, (ConnectionError, TimeoutError, OSError))
+            if issubclass(exception_type, (ConnectionError, TimeoutError, OSError)):
+                return True
+            return any(indicator in error_str for indicator in LLM_CONNECTION_ERROR_INDICATORS)
 
         return False
 
@@ -586,12 +609,7 @@ class BaseLLM(ConnectionNode):
         if not result.error:
             return result
 
-        try:
-            exception = result.error.type(result.error.message)
-        except Exception:
-            exception = Exception(result.error.message)
-
-        if not self._should_trigger_fallback(exception):
+        if not self._should_trigger_fallback(result.error.type, result.error.message):
             return result
 
         fallback_llm = self.fallback.llm

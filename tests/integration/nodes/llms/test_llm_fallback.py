@@ -74,28 +74,33 @@ def mock_llm_response(content: str) -> ModelResponse:
 
 
 @pytest.mark.parametrize(
-    ("trigger", "exception", "should_fallback"),
+    ("trigger", "exception_type", "exception_message", "should_fallback"),
     [
-        (FallbackTrigger.ANY, ValueError("Some error"), True),
-        (FallbackTrigger.ANY, RateLimitError("Rate limit", LLM_PROVIDER, PRIMARY_MODEL), True),
-        (FallbackTrigger.ANY, ConnectionError("Connection failed"), True),
-        (FallbackTrigger.RATE_LIMIT, RateLimitError("Rate limit", LLM_PROVIDER, PRIMARY_MODEL), True),
-        (FallbackTrigger.RATE_LIMIT, BudgetExceededError("Budget exceeded", LLM_PROVIDER, PRIMARY_MODEL), True),
-        (FallbackTrigger.RATE_LIMIT, ValueError("rate limit exceeded"), True),
-        (FallbackTrigger.RATE_LIMIT, ValueError("Error 429"), True),
-        (FallbackTrigger.RATE_LIMIT, ValueError("quota exceeded"), True),
-        (FallbackTrigger.RATE_LIMIT, ConnectionError("Connection failed"), False),
-        (FallbackTrigger.CONNECTION, APIConnectionError("API connection error", LLM_PROVIDER, PRIMARY_MODEL), True),
-        (FallbackTrigger.CONNECTION, Timeout("Timeout error", LLM_PROVIDER, PRIMARY_MODEL), True),
-        (FallbackTrigger.CONNECTION, ServiceUnavailableError("Service unavailable", LLM_PROVIDER, PRIMARY_MODEL), True),
-        (FallbackTrigger.CONNECTION, ConnectionError("Connection failed"), True),
-        (FallbackTrigger.CONNECTION, TimeoutError("Timeout"), True),
-        (FallbackTrigger.CONNECTION, RateLimitError("Rate limit", LLM_PROVIDER, PRIMARY_MODEL), False),
+        (FallbackTrigger.ANY, ValueError, "Some error", True),
+        (FallbackTrigger.ANY, RateLimitError, "Rate limit", True),
+        (FallbackTrigger.ANY, ConnectionError, "Connection failed", True),
+        (FallbackTrigger.RATE_LIMIT, RateLimitError, "Rate limit", True),
+        (FallbackTrigger.RATE_LIMIT, BudgetExceededError, "Budget exceeded", True),
+        (FallbackTrigger.RATE_LIMIT, ValueError, "rate limit exceeded", True),
+        (FallbackTrigger.RATE_LIMIT, ValueError, "Error 429", True),
+        (FallbackTrigger.RATE_LIMIT, ValueError, "quota exceeded", True),
+        (FallbackTrigger.RATE_LIMIT, ConnectionError, "Connection failed", False),
+        (FallbackTrigger.CONNECTION, APIConnectionError, "API connection error", True),
+        (FallbackTrigger.CONNECTION, Timeout, "Timeout error", True),
+        (FallbackTrigger.CONNECTION, ServiceUnavailableError, "Service unavailable", True),
+        (FallbackTrigger.CONNECTION, ConnectionError, "Connection failed", True),
+        (FallbackTrigger.CONNECTION, TimeoutError, "Timeout", True),
+        (FallbackTrigger.CONNECTION, RateLimitError, "Rate limit", False),
+        (FallbackTrigger.CONNECTION, Exception, "Connection reset by peer", True),
+        (FallbackTrigger.CONNECTION, Exception, "Request timed out", True),
+        (FallbackTrigger.CONNECTION, Exception, "Service unavailable (503)", True),
+        (FallbackTrigger.CONNECTION, Exception, "Internal server error", True),
+        (FallbackTrigger.CONNECTION, Exception, "Some random error", False),
     ],
 )
-def test_should_trigger_fallback(create_llm_with_fallback, trigger, exception, should_fallback):
+def test_should_trigger_fallback(create_llm_with_fallback, trigger, exception_type, exception_message, should_fallback):
     llm = create_llm_with_fallback(FallbackConfig(enabled=True, trigger=trigger))
-    assert llm._should_trigger_fallback(exception) == should_fallback
+    assert llm._should_trigger_fallback(exception_type, exception_message) == should_fallback
 
 
 @pytest.mark.parametrize(
@@ -121,7 +126,7 @@ def test_should_trigger_fallback_disabled_or_no_llm(
         prompt=prompt,
         fallback=FallbackConfig(llm=fallback_llm, enabled=enabled, trigger=FallbackTrigger.ANY),
     )
-    assert llm._should_trigger_fallback(ValueError("Some error")) is False
+    assert llm._should_trigger_fallback(ValueError, "Some error") is False
 
 
 def test_fallback_success_when_primary_fails(mocker, create_llm_with_fallback):
