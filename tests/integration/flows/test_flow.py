@@ -522,9 +522,13 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     }
     expected_openai_messages = openai_node.prompt.format_messages(**expected_input_openai)
 
-    assert response == RunnableResult(
-        status=RunnableStatus.SUCCESS, input=input_data, output=expected_output
-    )
+    assert response.status == RunnableStatus.FAILURE
+    assert response.input == input_data
+    assert response.output == expected_output
+    assert response.error is not None
+    assert len(response.error.failed_nodes) == 1
+    assert response.error.failed_nodes[0].name == openai_node.name
+
     assert mock_llm_executor.call_count == 1
     assert mock_llm_executor.call_args_list == [
         mock.call(
@@ -553,14 +557,167 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     wf_run = tracing_runs[0]
     assert wf_run.metadata["workflow"]["id"] == wf.id
     assert wf_run.metadata["workflow"]["version"] == wf.version
-    assert wf_run.output == expected_output
-    assert wf_run.status == RunStatus.SUCCEEDED
+    assert wf_run.output is None
+    assert wf_run.status == RunStatus.FAILED
+    assert "failed_nodes" in wf_run.metadata
+    assert len(wf_run.metadata["failed_nodes"]) == 1
     assert wf_run.tags == []
     flow_run = tracing_runs[1]
     assert flow_run.metadata["flow"]["id"] == wf.flow.id
     assert flow_run.parent_run_id == wf_run.id
-    assert flow_run.output == expected_output
-    assert flow_run.status == RunStatus.SUCCEEDED
+    assert flow_run.output is None
+    assert flow_run.status == RunStatus.FAILED
+    assert "failed_nodes" in flow_run.metadata
+    assert len(flow_run.metadata["failed_nodes"]) == 1
+    assert flow_run.tags == []
+    openai_run = tracing_runs[2]
+    openai_node = openai_node.to_dict(for_tracing=True)
+    openai_node["prompt"]["messages"] = expected_openai_messages
+    assert openai_run.metadata["node"] == openai_node
+    assert openai_run.metadata.get("usage") is None
+    assert openai_run.parent_run_id == flow_run.id
+    assert openai_run.input == expected_input_openai
+    assert openai_run.output == expected_output_openai
+    assert openai_run.error == {
+        "message": str(error),
+        "traceback": ANY,
+    }
+    assert openai_run.status == RunStatus.FAILED
+    assert openai_run.tags == []
+    anthropic_run = tracing_runs[3]
+    assert anthropic_run.metadata["node"] == anthropic_node_with_dependency.to_dict(for_tracing=True)
+    assert anthropic_run.metadata.get("usage") is None
+    assert anthropic_run.metadata["skip"] == {
+        "failed_dependency": anthropic_node_with_dependency.depends[0].to_dict(for_tracing=True),
+    }
+    assert anthropic_run.parent_run_id == flow_run.id
+    assert anthropic_run.input == expected_input_anthropic
+    assert anthropic_run.output == expected_output_anthropic
+    assert anthropic_run.status == RunStatus.SKIPPED
+    assert anthropic_run.tags == []
+    output_node_run = tracing_runs[4]
+    assert output_node_run.metadata["node"] == output_node.to_dict(for_tracing=True)
+    assert output_node_run.metadata.get("usage") is None
+    assert output_node_run.metadata["skip"] == {
+        "failed_dependency": output_node.depends[0].to_dict(for_tracing=True),
+    }
+    assert output_node_run.parent_run_id == flow_run.id
+    assert output_node_run.input == expected_input_output_node
+    assert output_node_run.output == expected_output_output_node
+    assert output_node_run.status == RunStatus.SKIPPED
+    assert output_node_run.tags == []
+    assert not output_node_run.executions
+
+
+@pytest.mark.asyncio
+async def test_workflow_with_depend_nodes_and_depend_fail_async(
+    wf,
+    openai_node,
+    anthropic_node_with_dependency,
+    output_node,
+    mock_llm_response_text,
+    mock_llm_executor,
+):
+    input_data = {"a": 1}
+    tracing = TracingCallbackHandler()
+    error = ValueError("Error")
+    mock_llm_executor.side_effect = error
+
+    response = await wf.run(
+        input_data=input_data,
+        config=RunnableConfig(callbacks=[tracing]),
+    )
+    expected_input_openai = input_data
+    expected_output_openai = None
+    expected_result_openai = RunnableResult(
+        status=RunnableStatus.FAILURE,
+        input=expected_input_openai,
+        output=expected_output_openai,
+        error=RunnableResultError(type=type(error), message="Error"),
+    )
+    expected_input_anthropic = input_data | {openai_node.id: expected_result_openai.to_tracing_depend_dict()}
+    expected_output_anthropic = None
+
+    expected_result_anthropic = RunnableResult(
+        status=RunnableStatus.SKIP,
+        input=expected_input_anthropic,
+        output=expected_output_anthropic,
+        error=RunnableResultError(
+            type=NodeFailedException,
+            message=f"Dependency {openai_node.id}: failed",
+        ),
+    )
+
+    expected_input_output_node = expected_input_anthropic | {
+        anthropic_node_with_dependency.id: expected_result_anthropic.to_tracing_depend_dict()
+    }
+    expected_output_output_node = None
+    expected_result_output_node = RunnableResult(
+        status=RunnableStatus.SKIP,
+        input=expected_input_output_node,
+        output=expected_output_output_node,
+        error=RunnableResultError(
+            type=NodeFailedException,
+            message=f"Dependency {openai_node.id}: failed",
+        ),
+    )
+
+    expected_output = {
+        openai_node.id: expected_result_openai.to_dict(skip_format_types={BytesIO}, for_tracing=True),
+        anthropic_node_with_dependency.id: expected_result_anthropic.to_dict(
+            skip_format_types={BytesIO}, for_tracing=True
+        ),
+        output_node.id: expected_result_output_node.to_dict(skip_format_types={BytesIO}, for_tracing=True),
+    }
+    expected_openai_messages = openai_node.prompt.format_messages(**expected_input_openai)
+
+    assert response.status == RunnableStatus.FAILURE
+    assert response.input == input_data
+    assert response.output == expected_output
+    assert response.error is not None
+    assert len(response.error.failed_nodes) == 1
+    assert response.error.failed_nodes[0].name == openai_node.name
+
+    assert mock_llm_executor.call_count == 1
+    assert mock_llm_executor.call_args_list == [
+        mock.call(
+            tools=None,
+            tool_choice=None,
+            model=openai_node.model,
+            messages=expected_openai_messages,
+            stream=False,
+            temperature=openai_node.temperature,
+            api_key=openai_node.connection.api_key,
+            client=ANY,
+            max_tokens=None,
+            stop=None,
+            seed=None,
+            presence_penalty=None,
+            frequency_penalty=None,
+            top_p=None,
+            response_format=None,
+            drop_params=True,
+            api_base="https://api.openai.com/v1",
+        )
+    ]
+
+    tracing_runs = list(tracing.runs.values())
+    assert len(tracing_runs) == 5
+    wf_run = tracing_runs[0]
+    assert wf_run.metadata["workflow"]["id"] == wf.id
+    assert wf_run.metadata["workflow"]["version"] == wf.version
+    assert wf_run.output is None
+    assert wf_run.status == RunStatus.FAILED
+    assert "failed_nodes" in wf_run.metadata
+    assert len(wf_run.metadata["failed_nodes"]) == 1
+    assert wf_run.tags == []
+    flow_run = tracing_runs[1]
+    assert flow_run.metadata["flow"]["id"] == wf.flow.id
+    assert flow_run.parent_run_id == wf_run.id
+    assert flow_run.output is None
+    assert flow_run.status == RunStatus.FAILED
+    assert "failed_nodes" in flow_run.metadata
+    assert len(flow_run.metadata["failed_nodes"]) == 1
     assert flow_run.tags == []
     openai_run = tracing_runs[2]
     openai_node = openai_node.to_dict(for_tracing=True)

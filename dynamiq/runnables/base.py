@@ -53,17 +53,38 @@ class RunnableStatus(str, Enum):
     SKIP = "skip"
 
 
+class RunnableFailedNodeInfo(BaseModel):
+    """Information about a failed node with RAISE error behavior.
+
+    Attributes:
+        id (str): Node ID.
+        name (str | None): Node name.
+        error_message (str | None): Error message from the node.
+    """
+
+    id: str
+    name: str | None = None
+    error_message: str | None = None
+
+    def to_dict(self) -> dict:
+        return self.model_dump()
+
+
 class RunnableResultError(BaseModel):
     type: type[Exception]
     message: str
     recoverable: bool = False
+    failed_nodes: list[RunnableFailedNodeInfo] = []
 
     @classmethod
-    def from_exception(cls, exception: Exception, recoverable: bool = False) -> "RunnableResultError":
+    def from_exception(
+        cls, exception: Exception, recoverable: bool = False, failed_nodes: list[RunnableFailedNodeInfo] | None = None
+    ) -> "RunnableResultError":
         return cls(
             type=type(exception),
             message=str(exception),
             recoverable=recoverable,
+            failed_nodes=failed_nodes or [],
         )
 
     def to_dict(self, **kwargs) -> dict:
@@ -75,6 +96,7 @@ class RunnableResultError(BaseModel):
         """
         data = self.model_dump(**kwargs)
         data["type"] = self.type.__name__
+        data["failed_nodes"] = [node.to_dict() for node in self.failed_nodes]
         return data
 
 

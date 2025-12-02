@@ -261,6 +261,12 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
         run.status = RunStatus.FAILED
+
+        failed_nodes = kwargs.get("failed_nodes", [])
+        failed_nodes_info = [node.to_dict() if hasattr(node, "to_dict") else node for node in failed_nodes]
+        if failed_nodes_info:
+            run.metadata["failed_nodes"] = failed_nodes_info
+
         run.error = {
             "message": str(error),
             "traceback": traceback.format_exc(),
@@ -324,6 +330,12 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run = ensure_run(get_run_id(kwargs), self.runs)
         run.end_time = datetime.now(UTC)
         run.status = RunStatus.FAILED
+
+        failed_nodes = kwargs.get("failed_nodes", [])
+        failed_nodes_info = [node.to_dict() if hasattr(node, "to_dict") else node for node in failed_nodes]
+        if failed_nodes_info:
+            run.metadata["failed_nodes"] = failed_nodes_info
+
         run.error = {
             "message": str(error),
             "traceback": traceback.format_exc(),

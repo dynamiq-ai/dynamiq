@@ -111,7 +111,7 @@ def test_workflow_with_txt_node_file_not_found(workflow, txt_node, output_node, 
 
     result = workflow.run(input_data=input_data)
 
-    assert result.status == RunnableStatus.SUCCESS
+    assert result.status == RunnableStatus.FAILURE
 
     txt_result = result.output[txt_node.id]
     assert txt_result["status"] == RunnableStatus.FAILURE.value
