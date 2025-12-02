@@ -71,24 +71,31 @@ class FallbackConfig(BaseModel):
     """Configuration for LLM fallback behavior.
 
     Attributes:
-        llm: The fallback LLM to use when the primary LLM fails.
-        enabled: Whether fallback is enabled.
+        llm: The fallback LLM to use when the primary LLM fails. Required when enabled=True.
+        enabled: Whether fallback is enabled. Defaults to False.
         triggers: List of trigger conditions that will activate the fallback.
             Use FallbackTrigger.ANY to trigger on any error.
 
     Examples:
         # Single trigger
-        FallbackConfig(triggers=[FallbackTrigger.RATE_LIMIT])
+        FallbackConfig(llm=my_llm, enabled=True, triggers=[FallbackTrigger.RATE_LIMIT])
 
         # Multiple triggers
-        FallbackConfig(triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
+        FallbackConfig(llm=my_llm, enabled=True, triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
     """
 
     llm: "BaseLLM | None" = None
-    enabled: bool = True
+    enabled: bool = False
     triggers: list[FallbackTrigger] = Field(default_factory=lambda: [FallbackTrigger.ANY])
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @model_validator(mode="after")
+    def validate_llm_required_when_enabled(self) -> "FallbackConfig":
+        """Validate that llm is provided when fallback is enabled."""
+        if self.enabled and self.llm is None:
+            raise ValueError("FallbackConfig requires 'llm' when 'enabled' is True")
+        return self
 
 
 class BaseLLMUsageData(BaseModel):

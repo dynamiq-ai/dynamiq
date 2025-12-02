@@ -116,7 +116,6 @@ def test_should_trigger_fallback(
     ("enabled", "has_fallback_llm"),
     [
         (False, True),
-        (True, False),
         (False, False),
     ],
 )
@@ -136,6 +135,12 @@ def test_should_trigger_fallback_disabled_or_no_llm(
         fallback=FallbackConfig(llm=fallback_llm, enabled=enabled, triggers=[FallbackTrigger.ANY]),
     )
     assert llm._should_trigger_fallback(ValueError, "Some error") is False
+
+
+def test_fallback_config_requires_llm_when_enabled():
+    """Test that FallbackConfig raises error when enabled=True but llm is None."""
+    with pytest.raises(ValueError, match="FallbackConfig requires 'llm' when 'enabled' is True"):
+        FallbackConfig(llm=None, enabled=True, triggers=[FallbackTrigger.ANY])
 
 
 def test_fallback_success_when_primary_fails(mocker, create_llm_with_fallback):
