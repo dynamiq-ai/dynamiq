@@ -43,8 +43,10 @@ def create_llm_with_fallback(
     primary_connection: connections.OpenAI,
     fallback_connection: connections.OpenAI,
     prompt: Prompt,
-) -> Callable[[FallbackConfig], OpenAI]:
-    def _create(fallback_config: FallbackConfig) -> OpenAI:
+) -> Callable[[bool, list[FallbackTrigger]], OpenAI]:
+    def _create(enabled: bool = True, triggers: list[FallbackTrigger] | None = None) -> OpenAI:
+        if triggers is None:
+            triggers = [FallbackTrigger.ANY]
         fallback_llm = OpenAI(
             name=FALLBACK_LLM_NAME,
             model=FALLBACK_MODEL,
@@ -58,8 +60,8 @@ def create_llm_with_fallback(
             prompt=prompt,
             fallback=FallbackConfig(
                 llm=fallback_llm,
-                enabled=fallback_config.enabled,
-                triggers=fallback_config.triggers,
+                enabled=enabled,
+                triggers=triggers,
             ),
         )
 
@@ -108,7 +110,7 @@ def mock_llm_response(content: str) -> ModelResponse:
 def test_should_trigger_fallback(
     create_llm_with_fallback, triggers, exception_type, exception_message, should_fallback
 ):
-    llm = create_llm_with_fallback(FallbackConfig(enabled=True, triggers=triggers))
+    llm = create_llm_with_fallback(enabled=True, triggers=triggers)
     assert llm._should_trigger_fallback(exception_type, exception_message) == should_fallback
 
 
@@ -144,7 +146,7 @@ def test_fallback_config_requires_llm_when_enabled():
 
 
 def test_fallback_success_when_primary_fails(mocker, create_llm_with_fallback):
-    llm = create_llm_with_fallback(FallbackConfig(enabled=True, triggers=[FallbackTrigger.ANY]))
+    llm = create_llm_with_fallback()
 
     call_count = 0
 
@@ -166,7 +168,7 @@ def test_fallback_success_when_primary_fails(mocker, create_llm_with_fallback):
 
 
 def test_fallback_not_triggered_when_primary_succeeds(mocker, create_llm_with_fallback):
-    llm = create_llm_with_fallback(FallbackConfig(enabled=True, triggers=[FallbackTrigger.ANY]))
+    llm = create_llm_with_fallback()
 
     mocker.patch("dynamiq.nodes.llms.base.BaseLLM._completion", return_value=mock_llm_response(PRIMARY_RESPONSE))
 
@@ -178,7 +180,7 @@ def test_fallback_not_triggered_when_primary_succeeds(mocker, create_llm_with_fa
 
 
 def test_both_llms_fail_raises_primary_error(mocker, create_llm_with_fallback):
-    llm = create_llm_with_fallback(FallbackConfig(enabled=True, triggers=[FallbackTrigger.ANY]))
+    llm = create_llm_with_fallback()
 
     call_count = 0
 
@@ -323,9 +325,7 @@ def test_fallback_not_triggered_on_skip(mocker, primary_connection, fallback_con
 
 def test_fallback_with_multiple_triggers_rate_limit_error(mocker, create_llm_with_fallback):
     """Test that fallback triggers on rate limit when multiple triggers configured."""
-    llm = create_llm_with_fallback(
-        FallbackConfig(enabled=True, triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
-    )
+    llm = create_llm_with_fallback(triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
 
     call_count = 0
 
@@ -348,9 +348,7 @@ def test_fallback_with_multiple_triggers_rate_limit_error(mocker, create_llm_wit
 
 def test_fallback_with_multiple_triggers_connection_error(mocker, create_llm_with_fallback):
     """Test that fallback triggers on connection error when multiple triggers configured."""
-    llm = create_llm_with_fallback(
-        FallbackConfig(enabled=True, triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
-    )
+    llm = create_llm_with_fallback(triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
 
     call_count = 0
 
@@ -373,9 +371,7 @@ def test_fallback_with_multiple_triggers_connection_error(mocker, create_llm_wit
 
 def test_fallback_with_multiple_triggers_no_match(mocker, create_llm_with_fallback):
     """Test that fallback does NOT trigger when error doesn't match any configured triggers."""
-    llm = create_llm_with_fallback(
-        FallbackConfig(enabled=True, triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
-    )
+    llm = create_llm_with_fallback(triggers=[FallbackTrigger.RATE_LIMIT, FallbackTrigger.CONNECTION])
 
     mocker.patch(
         "dynamiq.nodes.llms.base.BaseLLM._completion",
