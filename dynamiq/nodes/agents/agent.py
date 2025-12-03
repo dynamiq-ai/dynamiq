@@ -11,7 +11,7 @@ from pydantic import Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent as BaseAgent
-from dynamiq.nodes.agents.base import AgentIntermediateStep, AgentIntermediateStepModelObservation, ToolParams
+from dynamiq.nodes.agents.base import AgentIntermediateStep, AgentIntermediateStepModelObservation
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     AgentUnknownToolException,
@@ -736,7 +736,6 @@ class Agent(BaseAgent):
         self,
         tool: Node | None,
         action_input: Any,
-        raw_tool_params: ToolParams | dict | None,  # kept for signature compatibility
     ) -> bool:
         """Only Agent tools with per-call delegate_final flag can delegate."""
         if not isinstance(tool, Agent):
@@ -1453,9 +1452,7 @@ class Agent(BaseAgent):
                                     **kwargs,
                                 )
 
-                                delegate_final = self._should_delegate_final(
-                                    tool, action_input, kwargs.get("tool_params")
-                                )
+                                delegate_final = self._should_delegate_final(tool, action_input)
                                 tool_result, tool_files = self._run_tool(
                                     tool, action_input, config, delegate_final=delegate_final, **kwargs
                                 )
@@ -1500,7 +1497,7 @@ class Agent(BaseAgent):
 
                             tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                             tool_result = self._tool_cache.get(tool_cache_entry, None)
-                            delegate_final = self._should_delegate_final(tool, action_input, kwargs.get("tool_params"))
+                            delegate_final = self._should_delegate_final(tool, action_input)
                             if not tool_result:
                                 tool_result, tool_files = self._run_tool(
                                     tool, action_input, config, delegate_final=delegate_final, **kwargs
@@ -1975,7 +1972,7 @@ class Agent(BaseAgent):
                 "dependency": None,
             }
 
-        delegate_final = self._should_delegate_final(tool, tool_input, kwargs.get("tool_params"))
+        delegate_final = self._should_delegate_final(tool, tool_input)
         if delegate_final and not update_run_depends:
             return {
                 "tool_name": tool.name,
