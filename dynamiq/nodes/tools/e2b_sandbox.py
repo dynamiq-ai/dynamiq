@@ -692,7 +692,7 @@ class E2BInterpreterTool(ConnectionNode):
 
         tool_data = {
             "tool_session_id": sandbox.sandbox_id,
-            "tool_session_host": sandbox.get_host(port=sandbox.envd_port),
+            "tool_session_host": sandbox.get_host(port=sandbox.connection_config.envd_port),
         }
         self.run_on_node_execute_run(
             config.callbacks,
@@ -863,7 +863,11 @@ class E2BInterpreterTool(ConnectionNode):
         )
         def create_sandbox() -> Sandbox:
             try:
-                sandbox = Sandbox.create(api_key=self.connection.api_key, timeout=self.timeout)
+                sandbox = Sandbox.create(
+                    api_key=self.connection.api_key,
+                    timeout=self.timeout,
+                    domain=self.connection.domain,
+                )
                 logger.debug(f"Tool {self.name} - {self.id}: Successfully created sandbox")
                 return sandbox
             except E2BRateLimitException:

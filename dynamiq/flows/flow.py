@@ -14,10 +14,19 @@ from dynamiq.executors.base import BaseExecutor
 from dynamiq.executors.pool import ThreadExecutor
 from dynamiq.flows.base import BaseFlow
 from dynamiq.nodes.node import Node, NodeReadyToRun
+from dynamiq.nodes.types import Behavior
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.runnables.base import RunnableResultError
+from dynamiq.runnables.base import RunnableFailedNodeInfo, RunnableResultError
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.logger import logger
+
+
+class FlowNodeFailureException(Exception):
+    """Exception raised when one or more nodes with RAISE behavior failed during flow execution."""
+
+    def __init__(self, message: str, failed_nodes: list[RunnableFailedNodeInfo] | None = None):
+        super().__init__(message)
+        self.failed_nodes = failed_nodes or []
 
 
 class Flow(BaseFlow):
@@ -164,6 +173,21 @@ class Flow(BaseFlow):
             node_id: result.to_dict(skip_format_types={BytesIO, bytes}) for node_id, result in self._results.items()
         }
 
+    def _get_failed_nodes_with_raise_behavior(self) -> list[RunnableFailedNodeInfo]:
+        """
+        Gets the list of nodes that failed with RAISE error behavior.
+
+        Returns:
+            list[FailedNodeInfo]: List of failed node information.
+        """
+        failed_nodes: list[RunnableFailedNodeInfo] = []
+        for node_id, result in self._results.items():
+            node = self._node_by_id.get(node_id)
+            if node and result.status == RunnableStatus.FAILURE and node.error_handling.behavior == Behavior.RAISE:
+                error_message = result.error.message if result.error else None
+                failed_nodes.append(RunnableFailedNodeInfo(id=node_id, name=node.name, error_message=error_message))
+        return failed_nodes
+
     @staticmethod
     def init_node_topological_sorter(nodes: list[Node]):
         """
@@ -282,6 +306,21 @@ class Flow(BaseFlow):
                 run_executor.shutdown()
 
             output = self._get_output()
+            failed_nodes = self._get_failed_nodes_with_raise_behavior()
+
+            if failed_nodes:
+                failed_names = [node.name or node.id for node in failed_nodes]
+                error_msg = f"Flow execution failed due to node failures: {', '.join(failed_names)}"
+                error = FlowNodeFailureException(error_msg, failed_nodes)
+                self.run_on_flow_error(error, config, failed_nodes=failed_nodes, **merged_kwargs)
+                logger.error(f"Flow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
+                return RunnableResult(
+                    status=RunnableStatus.FAILURE,
+                    input=input_data,
+                    output=output,
+                    error=RunnableResultError.from_exception(error, failed_nodes=failed_nodes),
+                )
+
             self.run_on_flow_end(output, config, **merged_kwargs)
             logger.info(
                 f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}."
@@ -290,12 +329,13 @@ class Flow(BaseFlow):
                 status=RunnableStatus.SUCCESS, input=input_data, output=output
             )
         except Exception as e:
-            self.run_on_flow_error(e, config, **merged_kwargs)
+            failed_nodes = self._get_failed_nodes_with_raise_behavior()
+            self.run_on_flow_error(e, config, failed_nodes=failed_nodes, **merged_kwargs)
             logger.error(f"Flow {self.id}: execution failed in " f"{format_duration(time_start, datetime.now())}.")
             return RunnableResult(
                 status=RunnableStatus.FAILURE,
                 input=input_data,
-                error=RunnableResultError.from_exception(e),
+                error=RunnableResultError.from_exception(e, failed_nodes=failed_nodes),
             )
         finally:
             self._cleanup_dry_run(config)
@@ -351,16 +391,32 @@ class Flow(BaseFlow):
                     await asyncio.sleep(0.003)
 
             output = self._get_output()
+            failed_nodes = self._get_failed_nodes_with_raise_behavior()
+
+            if failed_nodes:
+                failed_names = [node.name or node.id for node in failed_nodes]
+                error_msg = f"Flow execution failed due to node failures: {', '.join(failed_names)}"
+                error = FlowNodeFailureException(error_msg, failed_nodes)
+                self.run_on_flow_error(error, config, failed_nodes=failed_nodes, **merged_kwargs)
+                logger.error(f"Flow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
+                return RunnableResult(
+                    status=RunnableStatus.FAILURE,
+                    input=input_data,
+                    output=output,
+                    error=RunnableResultError.from_exception(error, failed_nodes=failed_nodes),
+                )
+
             self.run_on_flow_end(output, config, **merged_kwargs)
             logger.info(f"Flow {self.id}: execution succeeded in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=output)
         except Exception as e:
-            self.run_on_flow_error(e, config, **merged_kwargs)
+            failed_nodes = self._get_failed_nodes_with_raise_behavior()
+            self.run_on_flow_error(e, config, failed_nodes=failed_nodes, **merged_kwargs)
             logger.error(f"Flow {self.id}: execution failed in {format_duration(time_start, datetime.now())}.")
             return RunnableResult(
                 status=RunnableStatus.FAILURE,
                 input=input_data,
-                error=RunnableResultError.from_exception(e),
+                error=RunnableResultError.from_exception(e, failed_nodes=failed_nodes),
             )
         finally:
             try:

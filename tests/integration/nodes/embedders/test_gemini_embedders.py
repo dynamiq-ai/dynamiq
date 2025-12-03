@@ -218,7 +218,7 @@ def test_text_embedder_api_returns_empty_embedding(
     with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
         mock_embedding.return_value = empty_response
         response = workflow.run(input_data=query_input)
-        assert response.status == RunnableStatus.SUCCESS
+        assert response.status == RunnableStatus.FAILURE
         embedder_result = response.output[embedder.id]
         assert embedder_result["status"] == RunnableStatus.FAILURE.value
         assert "Invalid embedding" in embedder_result["error"]["message"]
@@ -233,7 +233,7 @@ def test_document_embedder_api_returns_empty_embedding(
     with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
         mock_embedding.return_value = empty_response
         response = workflow.run(input_data=document_input)
-        assert response.status == RunnableStatus.SUCCESS
+        assert response.status == RunnableStatus.FAILURE
         embedder_result = response.output[embedder.id]
         assert embedder_result["status"] == RunnableStatus.FAILURE.value
         assert "Embedding is empty" in embedder_result["error"]["message"]
@@ -248,7 +248,7 @@ def test_text_embedder_api_returns_null_embedding(
     with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
         mock_embedding.return_value = null_response
         response = workflow.run(input_data=query_input)
-        assert response.status == RunnableStatus.SUCCESS
+        assert response.status == RunnableStatus.FAILURE
         embedder_result = response.output[embedder.id]
         assert embedder_result["status"] == RunnableStatus.FAILURE.value
         assert "Invalid embedding" in embedder_result["error"]["message"]
@@ -263,7 +263,7 @@ def test_document_embedder_api_returns_null_embedding(
     with patch("dynamiq.components.embedders.base.BaseEmbedder._embedding") as mock_embedding:
         mock_embedding.return_value = null_response
         response = workflow.run(input_data=document_input)
-        assert response.status == RunnableStatus.SUCCESS
+        assert response.status == RunnableStatus.FAILURE
         embedder_result = response.output[embedder.id]
         assert embedder_result["status"] == RunnableStatus.FAILURE.value
         assert "has no embedding" in embedder_result["error"]["message"]

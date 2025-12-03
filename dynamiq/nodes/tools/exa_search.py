@@ -34,7 +34,6 @@ Parameter quick-reference (ExaInputSchema):
 - `start_crawl_date` / `end_crawl_date`: filter by when Exa discovered each link (ISO 8601).
 - `start_published_date` / `end_published_date`: filter by published timestamp.
 - `include_text` / `exclude_text`: require or forbid phrases (<=5 words) within the first ~1000 words.
-- `user_location`: ISO country code for geo-aware ranking; `moderation`: enable unsafe-content filtering.
 - `context`: bool or ContextOptions controlling combined context string length; `include_full_content`: shorthand for default text/highlight/summary payloads.
 - `contents`: advanced retrieval object mirroring Exa's ContentsRequest:
   - `text`: bool or ContentsTextOptions (`max_characters`, `include_html_tags`).

@@ -196,7 +196,7 @@ def test_workflow_with_pptx_converter_parsing_error(
 
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
 
-    assert response.status == RunnableStatus.SUCCESS
+    assert response.status == RunnableStatus.FAILURE
     assert response.output[pptx_converter.id]["status"] == RunnableStatus.FAILURE.value
     assert "error" in response.output[pptx_converter.id]
     assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
@@ -209,7 +209,7 @@ def test_workflow_with_pptx_converter_file_not_found(
 
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
 
-    assert response.status == RunnableStatus.SUCCESS
+    assert response.status == RunnableStatus.FAILURE
     assert response.output[pptx_converter.id]["status"] == RunnableStatus.FAILURE.value
     assert "No files found in the provided paths" in response.output[pptx_converter.id]["error"]["message"]
     assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
@@ -222,7 +222,7 @@ def test_workflow_with_pptx_converter_empty_file(
 
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
 
-    assert response.status == RunnableStatus.SUCCESS
+    assert response.status == RunnableStatus.FAILURE
     assert response.output[pptx_converter.id]["status"] == RunnableStatus.FAILURE.value
     assert "error" in response.output[pptx_converter.id]
     assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
@@ -270,7 +270,7 @@ def test_workflow_with_pptx_converter_unsupported_file(
 
     response = workflow_with_pptx_converter_and_output.run(input_data=input_data)
 
-    assert response.status == RunnableStatus.SUCCESS
+    assert response.status == RunnableStatus.FAILURE
     assert response.output[pptx_converter.id]["status"] == RunnableStatus.FAILURE.value
     assert "error" in response.output[pptx_converter.id]
     assert response.output[output_node.id]["status"] == RunnableStatus.SKIP.value
