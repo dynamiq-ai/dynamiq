@@ -3,7 +3,7 @@ import re
 import types
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
-from typing import Any, Callable, Union, get_args, get_origin
+from typing import Any, Callable, Mapping, Union, get_args, get_origin
 
 import regex
 from litellm import get_supported_openai_params, supports_function_calling
@@ -11,7 +11,7 @@ from pydantic import Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent as BaseAgent
-from dynamiq.nodes.agents.base import AgentIntermediateStep, AgentIntermediateStepModelObservation
+from dynamiq.nodes.agents.base import AgentIntermediateStep, AgentIntermediateStepModelObservation, ToolParams
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     AgentUnknownToolException,
@@ -33,43 +33,6 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
-
-DEFAULT_DIRECT_OUTPUT_CAPABILITIES = """
-ADVANCED FEATURES:
-- Tool outputs are automatically cached and can be referenced directly
-- You can return raw tool observation directly using:
-Thought: [Your reasoning about using direct tool output]
-Answer: <answer type="tool_output" action="tool_name" action_input="tool_input">
-- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
-- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
-- The tool must have been called in a previous step with the exact same action and action_input
-- action_input must match exactly what you used when calling the tool (including JSON key order)
-- This bypasses summarization and returns the complete tool output to the user
-- Use this format only when the raw tool output is exactly what the user needs
-- If the tool hasn't been executed yet, you must call it first in the current step
-"""
-
-XML_DIRECT_OUTPUT_CAPABILITIES = """
-ADVANCED FEATURES:
-- Tool outputs are automatically cached and can be referenced directly
-- You can return raw tool outputs directly using:
-<output>
-    <thought>
-        [Your reasoning about using direct tool output]
-    </thought>
-    <answer>
-        <answer type="tool_output" action="tool_name" action_input="tool_input">
-    </answer>
-</output>
-- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
-- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
-- The tool must have been called in a previous step with the exact same action and action_input
-- action_input must match exactly what you used when calling the tool (including JSON key order)
-- This bypasses summarization and returns the complete tool output to the user
-- Use this format only when the raw tool output is exactly what the user needs
-- If the tool hasn't been executed yet, you must call it first in the current step
-"""
-
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 
@@ -100,6 +63,7 @@ IMPORTANT RULES:
 - Only use tools from the provided list
 - If you can answer directly, use only Thought followed by Answer
 - Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
+- Optional: When you want an agent tool's response returned verbatim as the final output, set "delegate_final": true in its Action Input. Only do this for a single agent tool call and do not write an Answer yourself.
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - Files are automatically collected and will be returned with your final answer
@@ -159,6 +123,7 @@ CRITICAL XML FORMAT RULES:
 - Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
 - You may receive "Observation (shortened)" indicating that tool output was truncated
 - Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {"input": "your subtask"}. Keep only inputs inside <action_input>.
+- Optional: When you want an agent tool's response returned verbatim as the final output, set "delegate_final": true inside the <action_input>. Use this only when calling a single agent tool and do not provide an <answer> yourself; the system will return the agent's result directly.
 
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags
@@ -369,6 +334,7 @@ Answer: [Your direct response]
 - Proper JSON syntax with commas and brackets
 - List each Action and Action Input separately
 - Only use tools from the provided list
+- Optional: If you need an agent tool's response returned verbatim as the final output, set "delegate_final": true in that tool's Action Input. Use this only for a single agent tool call and do not write an Answer yourself; the system will return the agent's result directly.
 
 **FILE HANDLING:**
 - Tools may generate multiple files during execution
@@ -447,6 +413,10 @@ FILE HANDLING WITH MULTIPLE TOOLS:
 - Each tool may generate files independently
 - Files from all tools are automatically aggregated
 - Generated files are returned with the final answer
+
+OPTIONAL AGENT PASSTHROUGH:
+- To return an agent tool's response as the final output, include "delegate_final": true inside that tool's <input>.
+- Use delegate_final only when calling a single agent tool and do not provide an <answer> yourself; the system will return the agent's result directly.
 """  # noqa: E501
 )
 
@@ -543,6 +513,7 @@ IMPORTANT RULES:
 - Do not use markdown code blocks around your JSON
 - Never leave action_input empty
 - Ensure proper JSON syntax with quoted keys and values
+- To return an agent tool's response as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call finish yourself afterward; the system will return the agent's result directly.
 
 FILE HANDLING:
 - Tools may generate files that are automatically collected
@@ -567,6 +538,7 @@ FUNCTION CALLING GUIDELINES:
 - Call functions with properly formatted arguments
 - Handle tool responses appropriately before providing final answer
 - Chain multiple tool calls when necessary for complex tasks
+- If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
 
 FILE HANDLING:
 - Tools may generate files that will be included in the final response
@@ -718,11 +690,6 @@ class Agent(BaseAgent):
         description="Enable multi-tool execution in a single step. "
         "When True, the agent can call multiple tools in parallel.",
     )
-    direct_tool_output_enabled: bool = Field(
-        default=False,
-        description="Allow agent to return raw tool outputs as final answers. "
-        "When True, agent can use special XML format to return tool outputs directly.",
-    )
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
@@ -764,6 +731,21 @@ class Agent(BaseAgent):
             f"Final answer: {final_output}"
             "\n------------------------------------------\n"
         )
+
+    def _should_delegate_final(
+        self,
+        tool: Node | None,
+        action_input: Any,
+        raw_tool_params: ToolParams | dict | None,  # kept for signature compatibility
+    ) -> bool:
+        """Only Agent tools with per-call delegate_final flag can delegate."""
+        if not isinstance(tool, Agent):
+            return False
+
+        if isinstance(action_input, Mapping):
+            return bool(action_input.get("delegate_final"))
+
+        return False
 
     @model_validator(mode="after")
     def validate_inference_mode(self):
@@ -930,50 +912,6 @@ class Agent(BaseAgent):
             return thought, answer
         else:
             return "", ""
-
-    def _process_direct_tool_output_return_xml(self, final_answer: str) -> str:
-        """
-        Process direct tool output return format.
-        Looks for XML format: <answer type="tool_output" action="tool_name" action_input="tool_input">
-
-        Args:
-            final_answer (str): The final answer to process
-
-        Returns:
-            str: Either the raw tool output or the original final answer
-        """
-
-        tool_output_match = re.search(
-            r'<answer\s+type="tool_output"\s+action="([^"]+)"\s+action_input\s*=[\'"](.*?)[\'"]\s*(?:></answer>|>)',
-            final_answer,
-            re.IGNORECASE | re.DOTALL,
-        )
-
-        if tool_output_match:
-            action = tool_output_match.group(1)
-            action_input = tool_output_match.group(2)
-
-            try:
-                parsed_action_input = json.loads(action_input)
-            except json.JSONDecodeError as e:
-                raise RecoverableAgentException(f"Invalid JSON in Action Input for {action}: {str(e)}")
-
-            cache_entry = ToolCacheEntry(action=action, action_input=parsed_action_input)
-            tool_output = self._tool_cache.get(cache_entry)
-
-            if tool_output is not None:
-                logger.info(f"Found tool output for action='{action}' action_input='{action_input}'")
-                return str(tool_output)
-            else:
-                available_tools = [(entry.action, entry.action_input) for entry in self._tool_cache.keys()]
-                logger.warning(
-                    f"Tool output not found for action='{action}' input='{action_input}'. "
-                    f"Available tools: {available_tools}"
-                )
-                logger.debug(f"Cache entry created: {cache_entry}")
-                return final_answer
-
-        return final_answer
 
     def stream_reasoning(self, content: dict[str, Any], config: RunnableConfig, **kwargs) -> None:
         """
@@ -1220,9 +1158,6 @@ class Agent(BaseAgent):
                         if "Answer:" in llm_generated_output:
                             thought, final_answer = self._extract_final_answer(llm_generated_output)
 
-                            if self.direct_tool_output_enabled:
-                                final_answer = self._process_direct_tool_output_return_xml(final_answer)
-
                             self.log_final_output(thought, final_answer, loop_num)
                             self.tracing_final(loop_num, final_answer, config, kwargs)
                             return final_answer
@@ -1326,14 +1261,21 @@ class Agent(BaseAgent):
 
                                 if parsed_result.get("is_final", False):
                                     final_answer = parsed_result.get("answer", "")
-                                    if self.direct_tool_output_enabled:
-                                        final_answer = self._process_direct_tool_output_return_xml(final_answer)
                                     self.log_final_output(thought, final_answer, loop_num)
                                     self.tracing_final(loop_num, final_answer, config, kwargs)
                                     return final_answer
 
                                 tools_data = parsed_result.get("tools", [])
                                 action = tools_data
+
+                                for tool_payload in tools_data:
+                                    if isinstance(tool_payload.get("input"), dict) and tool_payload["input"].get(
+                                        "delegate_final"
+                                    ):
+                                        raise ActionParsingException(
+                                            "delegate_final is only supported for single agent tool calls.",
+                                            recoverable=True,
+                                        )
 
                                 if len(tools_data) == 1:
                                     self.log_reasoning(
@@ -1382,8 +1324,6 @@ class Agent(BaseAgent):
                                 )
                                 thought = parsed_data.get("thought")
                                 final_answer = parsed_data.get("answer")
-                                if self.direct_tool_output_enabled:
-                                    final_answer = self._process_direct_tool_output_return_xml(final_answer)
                                 self.log_final_output(thought, final_answer, loop_num)
                                 self.tracing_final(loop_num, final_answer, config, kwargs)
                                 return final_answer
@@ -1432,6 +1372,7 @@ class Agent(BaseAgent):
                     tool_result = None
                     tool_files: Any = []
                     tool = None
+                    delegate_final = False
 
                     if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled:
                         execution_output = self._execute_tools(tools_data, config, **kwargs)
@@ -1449,6 +1390,14 @@ class Agent(BaseAgent):
                                     raise ActionParsingException(
                                         "Invalid tool call format. "
                                         "Each tool call must have 'tool_name' and 'tool_input'.",
+                                        recoverable=True,
+                                    )
+
+                                if isinstance(tool_call.get("tool_input"), dict) and tool_call["tool_input"].get(
+                                    "delegate_final"
+                                ):
+                                    raise ActionParsingException(
+                                        "delegate_final is only supported for single agent tool calls.",
                                         recoverable=True,
                                     )
 
@@ -1504,7 +1453,25 @@ class Agent(BaseAgent):
                                     **kwargs,
                                 )
 
-                                tool_result, tool_files = self._run_tool(tool, action_input, config, **kwargs)
+                                delegate_final = self._should_delegate_final(
+                                    tool, action_input, kwargs.get("tool_params")
+                                )
+                                tool_result, tool_files = self._run_tool(
+                                    tool, action_input, config, delegate_final=delegate_final, **kwargs
+                                )
+
+                                if delegate_final:
+                                    self.log_final_output(thought, tool_result, loop_num)
+                                    self.tracing_final(loop_num, tool_result, config, kwargs)
+                                    if self.streaming.enabled:
+                                        self.stream_content(
+                                            content=tool_result,
+                                            source=tool.name,
+                                            step="answer",
+                                            config=config,
+                                            **kwargs,
+                                        )
+                                    return tool_result
 
                             except RecoverableAgentException as e:
                                 tool_result = f"{type(e).__name__}: {e}"
@@ -1533,11 +1500,27 @@ class Agent(BaseAgent):
 
                             tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                             tool_result = self._tool_cache.get(tool_cache_entry, None)
+                            delegate_final = self._should_delegate_final(tool, action_input, kwargs.get("tool_params"))
                             if not tool_result:
-                                tool_result, tool_files = self._run_tool(tool, action_input, config, **kwargs)
+                                tool_result, tool_files = self._run_tool(
+                                    tool, action_input, config, delegate_final=delegate_final, **kwargs
+                                )
 
                             else:
                                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
+
+                            if delegate_final:
+                                self.log_final_output(thought, tool_result, loop_num)
+                                self.tracing_final(loop_num, tool_result, config, kwargs)
+                                if self.streaming.enabled:
+                                    self.stream_content(
+                                        content=tool_result,
+                                        source=tool.name,
+                                        step="answer",
+                                        config=config,
+                                        **kwargs,
+                                    )
+                                return tool_result
 
                         except RecoverableAgentException as e:
                             tool_result = f"{type(e).__name__}: {e}"
@@ -1905,10 +1888,6 @@ class Agent(BaseAgent):
             instructions_default = REACT_BLOCK_INSTRUCTIONS_SINGLE
             instructions_xml = REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
 
-        if self.direct_tool_output_enabled:
-            instructions_default += "\n" + DEFAULT_DIRECT_OUTPUT_CAPABILITIES
-            instructions_xml += "\n" + XML_DIRECT_OUTPUT_CAPABILITIES
-
         prompt_blocks = {
             "tools": "" if not self.tools else REACT_BLOCK_TOOLS,
             "instructions": REACT_BLOCK_INSTRUCTIONS_NO_TOOLS if not self.tools else instructions_default,
@@ -1996,6 +1975,17 @@ class Agent(BaseAgent):
                 "dependency": None,
             }
 
+        delegate_final = self._should_delegate_final(tool, tool_input, kwargs.get("tool_params"))
+        if delegate_final and not update_run_depends:
+            return {
+                "tool_name": tool.name,
+                "success": False,
+                "tool_input": tool_input,
+                "result": "delegate_final is only supported for single agent tool calls.",
+                "files": {},
+                "dependency": None,
+            }
+
         try:
             tool_result, tool_files, dependency = self._run_tool(
                 tool,
@@ -2003,6 +1993,7 @@ class Agent(BaseAgent):
                 config,
                 update_run_depends=update_run_depends,
                 collect_dependency=True,
+                delegate_final=delegate_final,
                 **kwargs,
             )
             return {

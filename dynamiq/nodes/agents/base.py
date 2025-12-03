@@ -949,6 +949,7 @@ class Agent(Node):
         config,
         update_run_depends: bool = True,
         collect_dependency: bool = False,
+        delegate_final: bool = False,
         **kwargs,
     ) -> Any:
         """Runs a specific tool with the given input."""
@@ -1031,6 +1032,10 @@ class Agent(Node):
                 if nested_tp:
                     child_kwargs = child_kwargs | {"tool_params": nested_tp}
 
+        effective_delegate_final = delegate_final and is_child_agent
+        if is_child_agent and isinstance(merged_input, dict) and "delegate_final" in merged_input:
+            effective_delegate_final = effective_delegate_final or bool(merged_input.pop("delegate_final"))
+
         tool_to_run = tool
         tool_config = ensure_config(config)
         if getattr(self, "parallel_tool_calls_enabled", False):
@@ -1059,7 +1064,7 @@ class Agent(Node):
         tool_result_content_processed = process_tool_output_for_agent(
             content=tool_result_output_content,
             max_tokens=self.tool_output_max_length,
-            truncate=self.tool_output_truncate_enabled,
+            truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
         )
 
         self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
