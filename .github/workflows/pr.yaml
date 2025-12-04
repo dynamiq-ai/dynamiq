@@ -21,4 +21,4 @@ jobs:
       - uses: deepakputhraya/action-pr-title@v1.0.2
         with:
           prefix_case_sensitive: true
-          max_length: 64
+          max_length: 255
