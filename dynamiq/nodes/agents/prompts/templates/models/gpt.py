@@ -1,5 +1,14 @@
-from dynamiq.nodes.agents.prompts.templates import register_model_prompts
+"""Model-specific prompts for OpenAI GPT models.
 
+GPT-5.1 Optimization Strategy:
+- Parallel tool calling with reasoning calibration
+- Agent personas for balanced warmth/efficiency
+- Named tools for efficient file operations
+- Persistence prompts to prevent premature termination
+- Progress reports during long-running tasks
+"""
+
+# Define prompts optimized for GPT-5.1
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 
 Thought: [Your detailed reasoning about what to do next - provide brief thought summaries for clarity]
@@ -258,24 +267,3 @@ FILE HANDLING WITH MULTIPLE TOOLS:
 - Files from all tools are automatically aggregated
 - Generated files are returned with the final answer
 """  # noqa: E501
-
-
-register_model_prompts(
-    model_name="gpt-5.1",
-    prompts={
-        "REACT_BLOCK_INSTRUCTIONS_SINGLE": REACT_BLOCK_INSTRUCTIONS_SINGLE,
-        "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
-        "REACT_BLOCK_INSTRUCTIONS_MULTI": REACT_BLOCK_INSTRUCTIONS_MULTI,
-        "REACT_BLOCK_XML_INSTRUCTIONS_MULTI": REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
-    },
-)
-
-register_model_prompts(
-    model_name="gpt-5.1-codex",
-    prompts={
-        "REACT_BLOCK_INSTRUCTIONS_SINGLE": REACT_BLOCK_INSTRUCTIONS_SINGLE,
-        "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
-        "REACT_BLOCK_INSTRUCTIONS_MULTI": REACT_BLOCK_INSTRUCTIONS_MULTI,
-        "REACT_BLOCK_XML_INSTRUCTIONS_MULTI": REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
-    },
-)

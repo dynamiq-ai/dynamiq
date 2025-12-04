@@ -484,10 +484,7 @@ class Agent(BaseAgent):
         """
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
-        print("--------------------------------")
-        print("Generated prompt:")
-        print(self.generate_prompt(tools_name=self.tool_names, input_formats=self.generate_input_formats(self.tools)))
-        print("--------------------------------")
+
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(

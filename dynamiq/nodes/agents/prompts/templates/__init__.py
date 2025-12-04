@@ -1,6 +1,5 @@
 """Model-specific prompts for agents using a registry-based approach."""
 
-import importlib
 from typing import Any
 
 from dynamiq.utils.logger import logger
@@ -12,35 +11,19 @@ class ModelPromptsRegistry:
     def __init__(self):
         """Initialize the prompts registry."""
         self._registry: dict[str, dict[str, str]] = {}
-        self._loaded = False
-
-    def _ensure_loaded(self):
-        """Ensure all model-specific prompts are loaded."""
-        if self._loaded:
-            return
-
-        # Import provider modules to trigger registration
-        providers = ["openai", "claude", "gemini", "glm"]
-        for provider in providers:
-            try:
-                importlib.import_module(f"dynamiq.nodes.agents.prompts.{provider}")
-            except ImportError as e:
-                logger.debug(f"Could not load prompts for provider '{provider}': {e}")
-
-        self._loaded = True
 
     def register(self, model_name: str, prompts: dict[str, str]) -> None:
         """
         Register prompts for a specific model.
 
         Args:
-            model_name: The model identifier (e.g., "gpt-5_1", "claude-3-opus")
+            model_name: The model identifier (e.g., "gpt-5.1", "claude-sonnet-4.5")
             prompts: Dictionary of prompt constant names and their values
         """
         if model_name in self._registry:
             logger.warning(f"Overwriting existing prompts for model '{model_name}'")
         self._registry[model_name] = prompts
-        logger.info(f"Registered {len(prompts)} custom prompts for model '{model_name}'")
+        logger.debug(f"Registered {len(prompts)} custom prompts for model '{model_name}'")
 
     def get(self, model_name: str, prompt_name: str, default: Any = None) -> Any:
         """
@@ -54,8 +37,6 @@ class ModelPromptsRegistry:
         Returns:
             The prompt value or default
         """
-        # Ensure all prompts are loaded
-        self._ensure_loaded()
 
         if not model_name:
             return default
@@ -143,3 +124,75 @@ def get_prompt_constant(model_name: str, constant_name: str, default_value: Any)
 def get_registry() -> ModelPromptsRegistry:
     """Get the global prompts registry."""
     return _prompts_registry
+
+
+# ============================================================================
+# Model-Specific Prompt Registrations
+# ============================================================================
+# Import and register all model-specific prompts centrally
+
+# GPT Models (OpenAI)
+try:
+    from dynamiq.nodes.agents.prompts.templates.models.gpt import (
+        REACT_BLOCK_INSTRUCTIONS_MULTI,
+        REACT_BLOCK_INSTRUCTIONS_SINGLE,
+        REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
+        REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
+    )
+
+    register_model_prompts(
+        model_name="gpt-5.1",
+        prompts={
+            "REACT_BLOCK_INSTRUCTIONS_SINGLE": REACT_BLOCK_INSTRUCTIONS_SINGLE,
+            "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
+            "REACT_BLOCK_INSTRUCTIONS_MULTI": REACT_BLOCK_INSTRUCTIONS_MULTI,
+            "REACT_BLOCK_XML_INSTRUCTIONS_MULTI": REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
+        },
+    )
+
+    register_model_prompts(
+        model_name="gpt-5.1-codex",
+        prompts={
+            "REACT_BLOCK_INSTRUCTIONS_SINGLE": REACT_BLOCK_INSTRUCTIONS_SINGLE,
+            "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
+            "REACT_BLOCK_INSTRUCTIONS_MULTI": REACT_BLOCK_INSTRUCTIONS_MULTI,
+            "REACT_BLOCK_XML_INSTRUCTIONS_MULTI": REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
+        },
+    )
+
+    logger.debug("Registered GPT model prompts")
+except ImportError as e:
+    logger.debug(f"Could not load GPT prompts: {e}")
+
+# Gemini Models (Google)
+try:
+    from dynamiq.nodes.agents.prompts.templates.models.gemini import (
+        REACT_BLOCK_INSTRUCTIONS_MULTI,
+        REACT_BLOCK_INSTRUCTIONS_SINGLE,
+        REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
+        REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
+    )
+
+    register_model_prompts(
+        model_name="gemini-pro-3",
+        prompts={
+            "REACT_BLOCK_INSTRUCTIONS_SINGLE": REACT_BLOCK_INSTRUCTIONS_SINGLE,
+            "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
+            "REACT_BLOCK_INSTRUCTIONS_MULTI": REACT_BLOCK_INSTRUCTIONS_MULTI,
+            "REACT_BLOCK_XML_INSTRUCTIONS_MULTI": REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
+        },
+    )
+
+    register_model_prompts(
+        model_name="gemini-2.0-flash-exp",
+        prompts={
+            "REACT_BLOCK_INSTRUCTIONS_SINGLE": REACT_BLOCK_INSTRUCTIONS_SINGLE,
+            "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
+            "REACT_BLOCK_INSTRUCTIONS_MULTI": REACT_BLOCK_INSTRUCTIONS_MULTI,
+            "REACT_BLOCK_XML_INSTRUCTIONS_MULTI": REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
+        },
+    )
+
+    logger.debug("Registered Gemini model prompts")
+except ImportError as e:
+    logger.debug(f"Could not load Gemini prompts: {e}")

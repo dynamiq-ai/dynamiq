@@ -1,5 +1,8 @@
-from dynamiq.nodes.agents.prompts.templates import register_model_prompts
+"""
+Gemini specific prompts
+"""
 
+# Define prompts optimized for Gemini 3 Pro
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 
 Thought: [Your detailed reasoning about what to do next - include explicit planning and risk assessment]
@@ -370,25 +373,3 @@ FILE HANDLING WITH MULTIPLE TOOLS:
 - Files from all tools are automatically aggregated
 - Generated files are returned with the final answer
 """  # noqa: E501
-
-
-register_model_prompts(
-    model_name="gemini-pro-3",
-    prompts={
-        "REACT_BLOCK_INSTRUCTIONS_SINGLE": REACT_BLOCK_INSTRUCTIONS_SINGLE,
-        "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
-        "REACT_BLOCK_INSTRUCTIONS_MULTI": REACT_BLOCK_INSTRUCTIONS_MULTI,
-        "REACT_BLOCK_XML_INSTRUCTIONS_MULTI": REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
-    },
-)
-
-# Also register for common naming variations
-register_model_prompts(
-    model_name="gemini-2.0-flash-exp",
-    prompts={
-        "REACT_BLOCK_INSTRUCTIONS_SINGLE": REACT_BLOCK_INSTRUCTIONS_SINGLE,
-        "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
-        "REACT_BLOCK_INSTRUCTIONS_MULTI": REACT_BLOCK_INSTRUCTIONS_MULTI,
-        "REACT_BLOCK_XML_INSTRUCTIONS_MULTI": REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
-    },
-)
