@@ -112,10 +112,11 @@ beautifulsoup4 = "~4.12.3"
 selenium = "~4.21.0"
 tqdm = "~4.66.4"
 sympy = "~1.13.1"
-pygraphviz = "~1.13"
+pygraphviz = "~1.14"
 agentops = "~0.3.12"
 langfuse = "^2.51.2"
 peft = "^0.13.0"
+pyarrow = "~18.0.0"
 
 [tool.bandit]
 exclude_dirs = ["tests"]
