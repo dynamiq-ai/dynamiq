@@ -1,4 +1,5 @@
-from dynamiq.nodes.agents.prompts.base import PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT, AgentManager
+from dynamiq.nodes.agents.base import AgentManager
+from dynamiq.nodes.agents.prompts.base import PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT
 
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_PLAN = """
 You are an advanced AI planning assistant specializing in breaking down

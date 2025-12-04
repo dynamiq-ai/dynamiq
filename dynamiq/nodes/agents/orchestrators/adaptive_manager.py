@@ -1,4 +1,5 @@
-from dynamiq.nodes.agents.prompts.base import PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT, AgentManager
+from dynamiq.nodes.agents.base import AgentManager
+from dynamiq.nodes.agents.prompts.base import PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.streaming import StreamingMode
