@@ -76,7 +76,7 @@ def test_workflow_with_watsonx_ai(mock_llm_response_text, mock_llm_executor, mod
     mock_llm_executor.assert_called_once_with(
         tools=None,
         tool_choice=None,
-        url=connection.url,
+        api_base=connection.url,
         project_id=connection.project_id,
         model=expected_model,
         messages=wf_watsonx_ai.flow.nodes[0].prompt.format_messages(),
@@ -88,7 +88,7 @@ def test_workflow_with_watsonx_ai(mock_llm_response_text, mock_llm_executor, mod
         frequency_penalty=None,
         presence_penalty=None,
         top_p=None,
-        apikey=connection.api_key,
+        api_key=connection.api_key,
         response_format=None,
         drop_params=True,
     )
