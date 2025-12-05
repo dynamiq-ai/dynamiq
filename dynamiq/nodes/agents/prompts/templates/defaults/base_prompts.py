@@ -615,24 +615,15 @@ Your response should be clear, concise, and professional.
 """  # noqa: E501
 
 HISTORY_SUMMARIZATION_PROMPT = """
-Task: Extract valuable information from tool outputs.
+Task: Extract valuable information from tool outputs and wrap each in numbered tags.
 
-Each tool output that needs to be processed is clearly marked using the following format:
-=== TOOL_OUTPUT [tool_number] ===
+Format:
+Each tool output is marked as: === TOOL_OUTPUT [tool_number] ===
 
 Instructions:
-
-For each marked section, extract the relevant and valuable information.
-Wrap the extracted content in a custom tag that corresponds to the section number.
-Tag Format:
-Use <tool_outputX>, where X is the tool number.
-Example: If the tool output is labeled with the number 4, wrap your extracted content as follows:
-    <tool_output4>...extracted content...</tool_output4>
-
-You may encounter multiple tool outputs within the history.
-Ensure each extracted section is enclosed in its corresponding tag based on its tool number.
-
-Information that will not be included in extracted part will be removed.
+1. Extract relevant information from each marked section
+2. Wrap in tags: <tool_outputX>...content...</tool_outputX> (where X = tool number)
+3. Example: <tool_output4>extracted content</tool_output4>
 
 Guidelines:
 * Always include all required tags for every tool output.

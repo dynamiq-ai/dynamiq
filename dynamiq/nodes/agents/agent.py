@@ -418,7 +418,6 @@ class Agent(BaseAgent):
         ]
 
         summary_tags = [f"tool_output{index}" for index in summary_sections]
-
         for _ in range(self.max_loops):
             llm_result = self._run_llm(
                 messages=summary_messages,
@@ -427,6 +426,7 @@ class Agent(BaseAgent):
             )
 
             output = llm_result.output["content"]
+
             summary_messages.append(Message(content=output, role=MessageRole.ASSISTANT, static=True))
             try:
                 parsed_data = XMLParser.parse(
