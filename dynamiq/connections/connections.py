@@ -796,9 +796,9 @@ class WatsonX(BaseApiKeyConnection):
                 -the url with the key 'url'.
         """
         return {
-            "apikey": self.api_key,
+            "api_key": self.api_key,
             "project_id": self.project_id,
-            "url": self.url,
+            "api_base": self.url,
         }
 
 
