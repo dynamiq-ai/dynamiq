@@ -173,7 +173,7 @@ class GraphAgentManager(AgentManager):
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks with finding next state, actions and final answer prompts."""
         super()._init_prompt_blocks()
-        self._prompt_blocks.update(
+        self.prompt_manager.update_blocks(
             {
                 "plan": self._get_next_state_prompt(),
                 "assign": self._get_actions_prompt(),

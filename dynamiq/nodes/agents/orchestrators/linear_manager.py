@@ -1,4 +1,5 @@
-from dynamiq.nodes.agents.base import PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT, AgentManager
+from dynamiq.nodes.agents.base import AgentManager
+from dynamiq.nodes.agents.prompts.templates.defaults import PROMPT_TEMPLATE_AGENT_MANAGER_HANDLE_INPUT
 
 PROMPT_TEMPLATE_AGENT_MANAGER_LINEAR_PLAN = """
 You are an advanced AI planning assistant specializing in breaking down
@@ -213,7 +214,7 @@ class LinearAgentManager(AgentManager):
         and final answer generation processes.
         """
         super()._init_prompt_blocks()
-        self._prompt_blocks.update(
+        self.prompt_manager.update_blocks(
             {
                 "plan": self._get_linear_plan_prompt(),
                 "assign": self._get_linear_assign_prompt(),
