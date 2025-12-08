@@ -140,7 +140,7 @@ CRITICAL XML FORMAT RULES:
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags
 - Use double quotes for all strings
-- Escape newlines as \\n, quotes as \\" 
+- Escape newlines as \\n, quotes as \\"
 - NO multi-line JSON formatting
 
 FILE HANDLING:
@@ -1098,10 +1098,6 @@ class Agent(BaseAgent):
                 "</output><",
             ])
         self.llm.stop = stop_sequences
-
-        for message in self._prompt.messages:
-            print("MESSAGE", message.content)
-            print("------")
 
         for loop_num in range(1, self.max_loops + 1):
             try:
