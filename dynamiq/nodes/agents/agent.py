@@ -1840,6 +1840,12 @@ class Agent(BaseAgent):
         for tool in self.tools:
             # Agent tools: accept action_input as a JSON string to avoid nested schema issues.
             if isinstance(tool, Agent):
+                agent_action_input_description = "JSON string containing the agent's inputs "
+                if self.allow_delegation:
+                    agent_action_input_description += '(e.g., {"input": "<subtask>", "delegate_final": true}).'
+                else:
+                    agent_action_input_description += '(e.g., {"input": "<subtask>"}).'
+
                 schema = {
                     "type": "function",
                     "function": {
@@ -1854,10 +1860,7 @@ class Agent(BaseAgent):
                                 },
                                 "action_input": {
                                     "type": "string",
-                                    "description": (
-                                        "JSON string containing the agent's inputs "
-                                        '(e.g., {"input": "<subtask>", "delegate_final": true}).'
-                                    ),
+                                    "description": agent_action_input_description,
                                 },
                             },
                             "additionalProperties": False,
