@@ -66,6 +66,7 @@ IMPORTANT RULES:
 - Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
+- Optional: When you want an agent tool's response returned verbatim as the final output, set "delegate_final": true in its Action Input. Only do this for a single agent tool call and do not write an Answer yourself.
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - Files are automatically collected and will be returned with your final answer
@@ -127,6 +128,7 @@ CRITICAL XML FORMAT RULES:
 - Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {"input": "your subtask"}. Keep only inputs inside <action_input>.
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
+- Optional: When you want an agent tool's response returned verbatim as the final output, set "delegate_final": true inside the <action_input>. Use this only when calling a single agent tool and do not provide an <answer> yourself; the system will return the agent's result directly.
 
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags
@@ -337,6 +339,8 @@ Answer: [Your direct response]
 - Proper JSON syntax with commas and brackets
 - List each Action and Action Input separately
 - Only use tools from the provided list
+- Optional: If you need an agent tool's response returned verbatim as the final output, set "delegate_final": true in that tool's Action Input. Use this only for a single agent tool call and do not write an Answer yourself; the system will return the agent's result directly.
+
 
 **FILE HANDLING:**
 - Tools may generate multiple files during execution
@@ -423,6 +427,10 @@ FILE HANDLING WITH MULTIPLE TOOLS:
 ADDITIONAL RULES:
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
+
+OPTIONAL AGENT PASSTHROUGH:
+- To return an agent tool's response as the final output, include "delegate_final": true inside that tool's <input>.
+- Use delegate_final only when calling a single agent tool and do not provide an <answer> yourself; the system will return the agent's result directly.
 """  # noqa: E501
 )
 
@@ -519,6 +527,7 @@ IMPORTANT RULES:
 - Do not use markdown code blocks around your JSON
 - Never leave action_input empty
 - Ensure proper JSON syntax with quoted keys and values
+- To return an agent tool's response as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call finish yourself afterward; the system will return the agent's result directly.
 
 FILE HANDLING:
 - Tools may generate files that are automatically collected
@@ -543,6 +552,7 @@ FUNCTION CALLING GUIDELINES:
 - Call functions with properly formatted arguments
 - Handle tool responses appropriately before providing final answer
 - Chain multiple tool calls when necessary for complex tasks
+- If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
 
 FILE HANDLING:
 - Tools may generate files that will be included in the final response

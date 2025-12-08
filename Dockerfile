@@ -1,4 +1,4 @@
-FROM python:3.12.2-slim AS runtime
+FROM python:3.13.10-slim AS runtime
 
 ENV PYTHONPATH=/app/
 ENV RUNTIME_PACKAGES="git curl make"

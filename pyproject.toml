@@ -20,7 +20,7 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.13"
+python = ">=3.10,<3.14"
 jinja2 = "~3.1.6"
 pydantic = "~2.11.7"
 openai = ">=1.83.0"
@@ -73,6 +73,7 @@ matplotlib = "^3.10.7"
 seaborn = "^0.13.2"
 pyyaml = "6.0.1"
 e2b = "2.8.0"
+tiktoken = "0.12.0"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~78.1.1"
@@ -111,10 +112,11 @@ beautifulsoup4 = "~4.12.3"
 selenium = "~4.21.0"
 tqdm = "~4.66.4"
 sympy = "~1.13.1"
-pygraphviz = "~1.13"
+pygraphviz = "~1.14"
 agentops = "~0.3.12"
 langfuse = "^2.51.2"
 peft = "^0.13.0"
+pyarrow = "~18.0.0"
 
 [tool.bandit]
 exclude_dirs = ["tests"]
