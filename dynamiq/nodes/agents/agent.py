@@ -34,6 +34,18 @@ from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
+DELEGATION_INSTRUCTIONS = (
+    '- Optional: If you want an agent tool\'s response returned verbatim as the final output, '
+    'set "delegate_final": true in that tool\'s input. Use this only for a single agent tool call '
+    "and do not provide your own final answer; the system will return the agent's result directly."
+)
+
+DELEGATION_INSTRUCTIONS_XML = (
+    '- To return an agent tool\'s response as the final output, include "delegate_final": true inside that '
+    "tool's <input> or <action_input>. Use this only for a single agent tool call and do not provide an "
+    "<answer> yourself; the system will return the agent's result directly."
+)
+
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 
 Thought: [Your detailed reasoning about what to do next]
@@ -63,7 +75,7 @@ IMPORTANT RULES:
 - Only use tools from the provided list
 - If you can answer directly, use only Thought followed by Answer
 - Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
-- Optional: When you want an agent tool's response returned verbatim as the final output, set "delegate_final": true in its Action Input. Only do this for a single agent tool call and do not write an Answer yourself.
+{{ delegation_instructions }}
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - Files are automatically collected and will be returned with your final answer
@@ -123,12 +135,12 @@ CRITICAL XML FORMAT RULES:
 - Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
 - You may receive "Observation (shortened)" indicating that tool output was truncated
 - Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {"input": "your subtask"}. Keep only inputs inside <action_input>.
-- Optional: When you want an agent tool's response returned verbatim as the final output, set "delegate_final": true inside the <action_input>. Use this only when calling a single agent tool and do not provide an <answer> yourself; the system will return the agent's result directly.
+{{ delegation_instructions_xml }}
 
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags
 - Use double quotes for all strings
-- Escape newlines as \\n, quotes as \\"
+- Escape newlines as \\n, quotes as \\" 
 - NO multi-line JSON formatting
 
 FILE HANDLING:
@@ -334,7 +346,7 @@ Answer: [Your direct response]
 - Proper JSON syntax with commas and brackets
 - List each Action and Action Input separately
 - Only use tools from the provided list
-- Optional: If you need an agent tool's response returned verbatim as the final output, set "delegate_final": true in that tool's Action Input. Use this only for a single agent tool call and do not write an Answer yourself; the system will return the agent's result directly.
+{{ delegation_instructions }}
 
 **FILE HANDLING:**
 - Tools may generate multiple files during execution
@@ -414,9 +426,10 @@ FILE HANDLING WITH MULTIPLE TOOLS:
 - Files from all tools are automatically aggregated
 - Generated files are returned with the final answer
 
+{% if delegation_instructions_xml %}
 OPTIONAL AGENT PASSTHROUGH:
-- To return an agent tool's response as the final output, include "delegate_final": true inside that tool's <input>.
-- Use delegate_final only when calling a single agent tool and do not provide an <answer> yourself; the system will return the agent's result directly.
+{{ delegation_instructions_xml }}
+{% endif %}
 """  # noqa: E501
 )
 
@@ -513,7 +526,7 @@ IMPORTANT RULES:
 - Do not use markdown code blocks around your JSON
 - Never leave action_input empty
 - Ensure proper JSON syntax with quoted keys and values
-- To return an agent tool's response as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call finish yourself afterward; the system will return the agent's result directly.
+{{ delegation_instructions }}
 
 FILE HANDLING:
 - Tools may generate files that are automatically collected
@@ -538,7 +551,7 @@ FUNCTION CALLING GUIDELINES:
 - Call functions with properly formatted arguments
 - Handle tool responses appropriately before providing final answer
 - Chain multiple tool calls when necessary for complex tasks
-- If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
+{{ delegation_instructions }}
 
 FILE HANDLING:
 - Tools may generate files that will be included in the final response
@@ -738,6 +751,9 @@ class Agent(BaseAgent):
         action_input: Any,
     ) -> bool:
         """Only Agent tools with per-call delegate_final flag can delegate."""
+        if not self.allow_delegation:
+            return False
+
         if not isinstance(tool, Agent):
             return False
 
@@ -1082,6 +1098,10 @@ class Agent(BaseAgent):
                 "</output><",
             ])
         self.llm.stop = stop_sequences
+
+        for message in self._prompt.messages:
+            print("MESSAGE", message.content)
+            print("------")
 
         for loop_num in range(1, self.max_loops + 1):
             try:
@@ -1754,6 +1774,16 @@ class Agent(BaseAgent):
 
         self._response_format = schema
 
+    def _build_delegation_variables(self) -> dict[str, str]:
+        """Provide prompt snippets for delegate_final guidance when enabled."""
+        if not self.allow_delegation:
+            return {"delegation_instructions": "", "delegation_instructions_xml": ""}
+
+        return {
+            "delegation_instructions": DELEGATION_INSTRUCTIONS,
+            "delegation_instructions_xml": DELEGATION_INSTRUCTIONS_XML,
+        }
+
     @staticmethod
     def filter_format_type(param_annotation: Any) -> list[str]:
         """
@@ -1812,6 +1842,38 @@ class Agent(BaseAgent):
         """Generate schemas for function calling."""
         self._tools.append(final_answer_function_schema)
         for tool in self.tools:
+            # Agent tools: accept action_input as a JSON string to avoid nested schema issues.
+            if isinstance(tool, Agent):
+                schema = {
+                    "type": "function",
+                    "function": {
+                        "name": self.sanitize_tool_name(tool.name),
+                        "description": tool.description[:1024],
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "thought": {
+                                    "type": "string",
+                                    "description": "Your reasoning about using this tool.",
+                                },
+                                "action_input": {
+                                    "type": "string",
+                                    "description": (
+                                        "JSON string containing the agent's inputs "
+                                        '(e.g., {"input": "<subtask>", "delegate_final": true}).'
+                                    ),
+                                },
+                            },
+                            "additionalProperties": False,
+                            "required": ["thought", "action_input"],
+                        },
+                        "strict": True,
+                    },
+                }
+
+                self._tools.append(schema)
+                continue
+
             properties = {}
             input_params = tool.input_schema.model_fields.items()
             if list(input_params) and not isinstance(self.llm, Gemini):
@@ -1877,6 +1939,7 @@ class Agent(BaseAgent):
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
+        self._prompt_variables.update(self._build_delegation_variables())
 
         if self.parallel_tool_calls_enabled:
             instructions_default = REACT_BLOCK_INSTRUCTIONS_MULTI
