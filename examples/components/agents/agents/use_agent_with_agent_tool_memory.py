@@ -37,7 +37,6 @@ def make_manager(llm: object, researcher: Agent) -> Agent:
         llm=llm,
         tools=[researcher],
         memory=Memory(backend=InMemory()),
-        enable_subagent_memory_context=True,
         max_loops=3,
     )
 

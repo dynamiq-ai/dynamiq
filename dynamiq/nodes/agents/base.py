@@ -373,10 +373,6 @@ class Agent(Node):
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
-    enable_subagent_memory_context: bool = Field(
-        default=True,
-        description="Whether to forward user_id/session_id/metadata to child agent tools (agents used as tools).",
-    )
     verbose: bool = Field(False, description="Whether to print verbose logs.")
     file_store: FileStoreConfig = Field(
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
@@ -1029,7 +1025,7 @@ class Agent(Node):
         child_kwargs = kwargs | {"recoverable_error": True}
         is_child_agent = isinstance(tool, Agent)
 
-        if is_child_agent and self.enable_subagent_memory_context and self._current_call_context:
+        if is_child_agent and self._current_call_context:
             for ctx_key in ("user_id", "session_id"):
                 if ctx_key not in merged_input and self._current_call_context.get(ctx_key):
                     merged_input[ctx_key] = self._current_call_context.get(ctx_key)
