@@ -17,6 +17,7 @@ Always call the Researcher tool with {"input": "<subtask>"} and then summarize t
 Use clear task descriptions when delegating and return concise, useful summaries.
 """
 
+
 def make_researcher(llm: object) -> Agent:
     return Agent(
         name="Researcher",
