@@ -373,6 +373,10 @@ class Agent(Node):
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
+    propagate_user_context: bool = Field(
+        default=True,
+        description="Whether to pass user_id/session_id/metadata to child agent tools automatically.",
+    )
     verbose: bool = Field(False, description="Whether to print verbose logs.")
     file_store: FileStoreConfig = Field(
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
@@ -399,6 +403,7 @@ class Agent(Node):
     _history_offset: int = PrivateAttr(
         default=2,  # Offset to the first message (default: 2 — system and initial user messages).
     )
+    _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
@@ -616,6 +621,11 @@ class Agent(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         custom_metadata = self._prepare_metadata(dict(input_data))
+        self._current_call_context = {
+            "user_id": dict(input_data).get("user_id"),
+            "session_id": dict(input_data).get("session_id"),
+            "metadata": custom_metadata,
+        }
 
         input_message = input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
         input_message = input_message.format_message(**dict(input_data))
@@ -678,7 +688,10 @@ class Agent(Node):
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
-        result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+        try:
+            result = self._run_agent(input_message, history_messages, config=config, **kwargs)
+        finally:
+            self._current_call_context = None
 
         if use_memory:
             self.memory.add(role=MessageRole.ASSISTANT, content=result, metadata=custom_metadata)
@@ -1015,6 +1028,13 @@ class Agent(Node):
 
         child_kwargs = kwargs | {"recoverable_error": True}
         is_child_agent = isinstance(tool, Agent)
+
+        if is_child_agent and self.propagate_user_context and self._current_call_context:
+            for ctx_key in ("user_id", "session_id"):
+                if ctx_key not in merged_input and self._current_call_context.get(ctx_key):
+                    merged_input[ctx_key] = self._current_call_context.get(ctx_key)
+            if "metadata" not in merged_input and self._current_call_context.get("metadata"):
+                merged_input["metadata"] = self._current_call_context.get("metadata")
 
         if is_child_agent and tool_params:
             nested_any = (
