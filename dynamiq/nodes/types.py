@@ -25,6 +25,7 @@ class NodeGroup(str, Enum):
     AGENTS = "agents"
     AUDIO = "audio"
     VALIDATORS = "validators"
+    IMAGES = "images"
 
 
 class InferenceMode(str, Enum):
