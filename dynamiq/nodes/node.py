@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field, 
 from dynamiq.cache.utils import cache_wf_entity
 from dynamiq.callbacks import BaseCallbackHandler, NodeCallbackHandler, TracingCallbackHandler
 from dynamiq.connections import BaseConnection
-from dynamiq.connections.managers import ConnectionClientInitType, ConnectionManager, ConnectionManagerException
+from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
 from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.nodes.exceptions import (
     NodeConditionFailedException,
@@ -1653,9 +1653,7 @@ class VectorStoreNode(ConnectionNode, BaseVectorStoreParams, ABC):
             connection_manager = self._connection_manager or ConnectionManager()
 
             try:
-                self.client = connection_manager.get_connection_client(
-                    connection=self.connection, init_type=ConnectionClientInitType.VECTOR_STORE
-                )
+                self.client = connection_manager.get_connection_client(connection=self.connection)
                 self.vector_store = self.connect_to_vector_store()
                 logger.info(f"Node {self.name} - {self.id}: Vector store reinitialized successfully")
             except Exception as e:

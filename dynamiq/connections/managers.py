@@ -17,12 +17,10 @@ class ConnectionManagerException(Exception):
 class ConnectionClientInitType(str, enum.Enum):
     """Enumeration of connection client initialization types."""
     DEFAULT = "DEFAULT"
-    VECTOR_STORE = "VECTOR_STORE"
 
 
 CONNECTION_METHOD_BY_INIT_TYPE = {
     ConnectionClientInitType.DEFAULT: "connect",
-    ConnectionClientInitType.VECTOR_STORE: "connect_to_vector_store",
 }
 
 
