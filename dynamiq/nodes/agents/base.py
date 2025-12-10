@@ -1026,11 +1026,12 @@ class Agent(Node):
         is_child_agent = isinstance(tool, Agent)
 
         if is_child_agent and self._current_call_context:
+            child_context = self._build_child_agent_context(tool)
             for ctx_key in ("user_id", "session_id"):
-                if ctx_key not in merged_input and self._current_call_context.get(ctx_key):
-                    merged_input[ctx_key] = self._current_call_context.get(ctx_key)
-            if "metadata" not in merged_input and self._current_call_context.get("metadata"):
-                merged_input["metadata"] = self._current_call_context.get("metadata")
+                if ctx_key not in merged_input and child_context.get(ctx_key):
+                    merged_input[ctx_key] = child_context[ctx_key]
+            if "metadata" not in merged_input and child_context.get("metadata"):
+                merged_input["metadata"] = child_context["metadata"]
 
         if is_child_agent and tool_params:
             nested_any = (
@@ -1369,6 +1370,25 @@ class Agent(Node):
     def _clean_prompt(self, prompt_text):
         cleaned = re.sub(r"\n{3,}", "\n\n", prompt_text)
         return cleaned.strip()
+
+    def _build_child_agent_context(self, child_agent: "Agent") -> dict[str, Any]:
+        """Return context for child agents with per-agent ids to isolate their memory."""
+        if not self._current_call_context:
+            return {}
+
+        suffix_raw = getattr(child_agent, "name", None) or getattr(child_agent, "id", None) or "subagent"
+        suffix_clean = self.sanitize_tool_name(str(suffix_raw)) or "subagent"
+        child_context: dict[str, Any] = {}
+
+        for ctx_key in ("user_id", "session_id"):
+            base_val = self._current_call_context.get(ctx_key)
+            if base_val:
+                child_context[ctx_key] = f"{base_val}:{suffix_clean}"
+
+        if metadata := self._current_call_context.get("metadata"):
+            child_context["metadata"] = metadata
+
+        return child_context
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         base = super().get_clone_attr_initializers()
