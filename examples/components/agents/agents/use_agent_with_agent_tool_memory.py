@@ -37,7 +37,7 @@ def make_manager(llm: object, researcher: Agent) -> Agent:
         llm=llm,
         tools=[researcher],
         memory=Memory(backend=InMemory()),
-        propagate_user_context=True,  # defaults to True; shown here for clarity
+        enable_subagent_memory_context=True,
         max_loops=3,
     )
 
