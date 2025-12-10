@@ -89,6 +89,8 @@ class ImageVariation(ConnectionNode):
                 else self.response_format
             )
             params["response_format"] = response_format_value
+        if self.n is not None:
+            params["n"] = self.n
 
         if hasattr(self, "__pydantic_extra__") and self.__pydantic_extra__:
             import copy
@@ -98,19 +100,15 @@ class ImageVariation(ConnectionNode):
 
         return params
 
-    def _prepare_image(self, image: list[io.BytesIO] | io.BytesIO | bytes | None) -> io.BufferedReader | io.BytesIO:
+    def _prepare_image(self, image: list[io.BytesIO] | io.BytesIO | bytes | None) -> io.BytesIO:
         """Prepare the image for the API call.
 
         Args:
             image: Image as list of BytesIO (from FileStore), single BytesIO, or bytes.
 
         Returns:
-            File-like object for API submission.
+            BytesIO file-like object for API submission.
         """
-        import tempfile
-
-        from PIL import Image
-
         if image is None:
             raise ValueError("No image provided. Please upload an image file.")
 
@@ -125,16 +123,15 @@ class ImageVariation(ConnectionNode):
         else:
             raise ValueError(f"Unsupported image type: {type(image)}")
 
-        img = Image.open(io.BytesIO(image_bytes))
-        if img.mode not in ("RGBA", "LA", "L"):
-            img = img.convert("RGBA")
+        from PIL import Image
 
-        temp_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-        img.save(temp_file, format="PNG")
-        temp_file.flush()
-        temp_file.close()
+        img_obj = Image.open(io.BytesIO(image_bytes))
+        original_format = img_obj.format or "PNG"
 
-        return open(temp_file.name, "rb")
+        output_bytes = io.BytesIO()
+        img_obj.save(output_bytes, format=original_format)
+        output_bytes.seek(0)
+        return output_bytes
 
     def execute(self, input_data: ImageVariationInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """Execute the image variation generation.
@@ -167,7 +164,6 @@ class ImageVariation(ConnectionNode):
         api_params = {
             "model": self.model,
             "image": image,
-            "n": self.n,
             "size": size,
             "drop_params": True,
             **self.variation_params,

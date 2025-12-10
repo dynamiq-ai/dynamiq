@@ -4,9 +4,7 @@ from typing import Any, Callable, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
-from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
-from dynamiq.connections import VertexAI as VertexAIConnection
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
@@ -53,7 +51,7 @@ class ImageEdit(ConnectionNode):
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Edit"
     model: str = "dall-e-2"
-    connection: OpenAIConnection | GeminiConnection | VertexAIConnection | None = None
+    connection: OpenAIConnection | None = None
     n: int | None = None
     size: ImageSize | str = ImageSize.SIZE_1024x1024
     response_format: ImageResponseFormat | str | None = Field(
@@ -109,23 +107,19 @@ class ImageEdit(ConnectionNode):
 
     def _prepare_image(
         self, image: list[io.BytesIO] | list[bytes] | io.BytesIO | bytes | None
-    ) -> list[io.BufferedReader] | io.BufferedReader:
+    ) -> list[io.BytesIO] | io.BytesIO:
         """Prepare the image(s) for the API call.
 
         Args:
             image: Image as list of BytesIO/bytes (from FileStore), single BytesIO, or bytes.
 
         Returns:
-            List of file-like objects for API submission, or single file-like object.
+            List of BytesIO file-like objects for API submission, or single BytesIO object.
         """
-        import tempfile
-
-        from PIL import Image
-
         if image is None:
             raise ValueError("No image provided. Please upload an image file.")
 
-        def prepare_single_image(img) -> io.BufferedReader:
+        def prepare_single_image(img) -> io.BytesIO:
             if isinstance(img, bytes):
                 image_bytes = img
             elif isinstance(img, io.BytesIO):
@@ -137,16 +131,17 @@ class ImageEdit(ConnectionNode):
             else:
                 raise ValueError(f"Unsupported image type: {type(img)}")
 
+            from PIL import Image
+
             img_obj = Image.open(io.BytesIO(image_bytes))
+            original_format = img_obj.format or "PNG"
             if img_obj.mode not in ("RGBA", "LA", "L"):
                 img_obj = img_obj.convert("RGBA")
 
-            temp_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-            img_obj.save(temp_file, format="PNG")
-            temp_file.flush()
-            temp_file.close()
-
-            return open(temp_file.name, "rb")
+            output_bytes = io.BytesIO()
+            img_obj.save(output_bytes, format=original_format)
+            output_bytes.seek(0)
+            return output_bytes
 
         if isinstance(image, list):
             if not image:
