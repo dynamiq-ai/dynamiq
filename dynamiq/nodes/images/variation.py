@@ -162,9 +162,7 @@ class ImageVariation(ConnectionNode):
             if not raw_image:
                 raise ValueError("No image provided. List is empty.")
             if len(raw_image) > 1:
-                logger.warning(
-                    f"Multiple images provided, using first image for variation. {len(raw_image)} images ignored."
-                )
+                logger.warning("Multiple images provided, using first image for variation.")
             raw_image = raw_image[0]
         original_filename = None
         if hasattr(raw_image, "name") and raw_image.name:

@@ -41,7 +41,7 @@ class ImageEdit(ConnectionNode):
     Attributes:
         name (str): The name of the node.
         model (str): The model to use for image editing (e.g., 'dall-e-2', 'gpt-image-1').
-        connection (BaseConnection): The connection to the API.
+        connection (OpenAIConnection): The connection to the API.
         n (int): Number of edited images to generate.
         size (ImageSize | str): Size of the output images.
         response_format (ImageResponseFormat | str | None): Response format (e.g., 'url', 'b64_json'). Only supported

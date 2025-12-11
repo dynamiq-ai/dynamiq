@@ -105,7 +105,8 @@ class ImageGeneration(ConnectionNode):
         name (str): The name of the node.
         model (str): The model to use for image generation (e.g., 'dall-e-3', 'gpt-image-1',
             'bedrock/stability.stable-diffusion-xl-v0').
-        connection (BaseConnection): The connection to the API.
+        connection (OpenAIConnection | GeminiConnection | VertexAIConnection | AWSConnection | AzureAIConnection):
+        The connection to the API.
         n (int): Number of images to generate.
         size (ImageSize | str): Size of the generated images.
         quality (str | None): Quality of the generated images (e.g., 'standard', 'hd'). Only supported by some models.
