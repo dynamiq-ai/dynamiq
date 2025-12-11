@@ -66,9 +66,9 @@ def test_workflow_with_watsonx_text_embedder(
     mock_embedding_executor.assert_called_once_with(
         input=[query_input["query"]],
         model=watsonx_model,
-        apikey=watsonx_connection.api_key,
+        api_key=watsonx_connection.api_key,
         project_id=watsonx_connection.project_id,
-        url=watsonx_connection.url,
+        api_base=watsonx_connection.url,
     )
 
 
@@ -86,9 +86,9 @@ def test_workflow_with_watsonx_document_embedder(
     mock_embedding_executor.assert_called_once_with(
         input=[document_input["documents"][0].content],
         model=watsonx_model,
-        apikey=watsonx_connection.api_key,
+        api_key=watsonx_connection.api_key,
         project_id=watsonx_connection.project_id,
-        url=watsonx_connection.url,
+        api_base=watsonx_connection.url,
     )
 
 
@@ -124,9 +124,9 @@ def test_text_embedder_api_errors(watsonx_text_embedder_workflow, error_class, e
         mock_embedding.assert_called_once_with(
             input=["Test query"],
             model=embedder.model,
-            apikey=embedder.connection.api_key,
+            api_key=embedder.connection.api_key,
             project_id=embedder.connection.project_id,
-            url=embedder.connection.url,
+            api_base=embedder.connection.url,
         )
 
 
@@ -173,9 +173,9 @@ def test_document_embedder_api_errors(
         mock_embedding.assert_called_once_with(
             input=[document_input["documents"][0].content],
             model=embedder.model,
-            apikey=embedder.connection.api_key,
+            api_key=embedder.connection.api_key,
             project_id=embedder.connection.project_id,
-            url=embedder.connection.url,
+            api_base=embedder.connection.url,
         )
 
 
