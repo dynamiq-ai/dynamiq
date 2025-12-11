@@ -153,6 +153,7 @@ def test_workflow_with_depend_nodes_with_tracing(
     output_node,
     mock_llm_response_text,
     mock_llm_executor,
+    mock_tracing_client_with_flush,
 ):
     file_name = "file.txt"
     bytes_content = b"file content"
@@ -165,7 +166,7 @@ def test_workflow_with_depend_nodes_with_tracing(
 
     tags = ["test1", "test2"]
     metadata = {"app_id": "0.0.1", "runtime_id": "0.0.1"}
-    tracing = TracingCallbackHandler(tags=tags, metadata=metadata)
+    tracing = TracingCallbackHandler(client=mock_tracing_client_with_flush, tags=tags, metadata=metadata)
 
     response = wf.run(
         input_data=input_data,
@@ -302,6 +303,10 @@ def test_workflow_with_depend_nodes_with_tracing(
     assert output_node_run.executions
     assert metadata.items() <= output_node_run.metadata.items()
 
+    assert mock_tracing_client_with_flush.trace.call_count == 1
+    flushed_runs = mock_tracing_client_with_flush.trace.call_args[0][0]
+    assert len(flushed_runs) == 5
+
 
 @pytest.mark.asyncio
 async def test_workflow_with_depend_nodes_with_tracing_async(
@@ -311,6 +316,7 @@ async def test_workflow_with_depend_nodes_with_tracing_async(
     output_node,
     mock_llm_response_text,
     mock_llm_executor,
+    mock_tracing_client_with_flush,
 ):
     file_name = "file.txt"
     bytes_content = b"file content"
@@ -323,7 +329,7 @@ async def test_workflow_with_depend_nodes_with_tracing_async(
 
     tags = ["test1", "test2"]
     metadata = {"app_id": "0.0.1", "runtime_id": "0.0.1"}
-    tracing = TracingCallbackHandler(tags=tags, metadata=metadata)
+    tracing = TracingCallbackHandler(client=mock_tracing_client_with_flush, tags=tags, metadata=metadata)
 
     response = await wf.run(
         input_data=input_data,
@@ -462,6 +468,10 @@ async def test_workflow_with_depend_nodes_with_tracing_async(
     assert output_node_run.executions
     assert metadata.items() <= output_node_run.metadata.items()
 
+    assert mock_tracing_client_with_flush.trace.call_count == 1
+    flushed_runs = mock_tracing_client_with_flush.trace.call_args[0][0]
+    assert len(flushed_runs) == 5
+
 
 def test_workflow_with_depend_nodes_and_depend_fail(
     wf,
@@ -470,9 +480,12 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     output_node,
     mock_llm_response_text,
     mock_llm_executor,
+    mock_tracing_client_with_flush,
 ):
     input_data = {"a": 1}
-    tracing = TracingCallbackHandler()
+
+    tracing = TracingCallbackHandler(client=mock_tracing_client_with_flush)
+
     error = ValueError("Error")
     mock_llm_executor.side_effect = error
 
@@ -610,6 +623,10 @@ def test_workflow_with_depend_nodes_and_depend_fail(
     assert output_node_run.tags == []
     assert not output_node_run.executions
 
+    assert mock_tracing_client_with_flush.trace.call_count == 1
+    flushed_runs = mock_tracing_client_with_flush.trace.call_args[0][0]
+    assert len(flushed_runs) == 5
+
 
 @pytest.mark.asyncio
 async def test_workflow_with_depend_nodes_and_depend_fail_async(
@@ -619,9 +636,12 @@ async def test_workflow_with_depend_nodes_and_depend_fail_async(
     output_node,
     mock_llm_response_text,
     mock_llm_executor,
+    mock_tracing_client_with_flush,
 ):
     input_data = {"a": 1}
-    tracing = TracingCallbackHandler()
+
+    tracing = TracingCallbackHandler(client=mock_tracing_client_with_flush)
+
     error = ValueError("Error")
     mock_llm_executor.side_effect = error
 
@@ -759,16 +779,22 @@ async def test_workflow_with_depend_nodes_and_depend_fail_async(
     assert output_node_run.tags == []
     assert not output_node_run.executions
 
+    assert mock_tracing_client_with_flush.trace.call_count == 1
+    flushed_runs = mock_tracing_client_with_flush.trace.call_args[0][0]
+    assert len(flushed_runs) == 5
+
 
 def test_workflow_with_failed_flow(
     openai_node,
     mock_llm_response_text,
     mock_llm_executor,
     mocker,
+    mock_tracing_client_with_flush,
 ):
     wf = Workflow(flow=flows.Flow(nodes=[openai_node]))
     input_data = {"a": 1, "b": 2}
-    tracing = TracingCallbackHandler()
+
+    tracing = TracingCallbackHandler(client=mock_tracing_client_with_flush)
 
     error = ValueError("Error")
     mocker.patch("dynamiq.flows.flow.Flow._get_nodes_ready_to_run", side_effect=error)
@@ -785,6 +811,9 @@ def test_workflow_with_failed_flow(
             message=str(error),
         ),
     )
+
+    assert mock_tracing_client_with_flush.trace.call_count == 1
+
     tracing_runs = list(tracing.runs.values())
     assert len(tracing_runs) == 2
     wf_run = tracing_runs[0]
@@ -804,6 +833,7 @@ def test_workflow_with_input_mappings(
     openai_node,
     mock_llm_response_text,
     mock_llm_executor,
+    mock_tracing_client_with_flush,
 ):
     def get_multiplied_value_a(inputs, outputs):
         return inputs["a"] * 10
@@ -820,7 +850,7 @@ def test_workflow_with_input_mappings(
     )
     wf = Workflow(flow=flows.Flow(nodes=[openai_node, output_node]))
     input_data = {"a": 1, "b": 2}
-    tracing = TracingCallbackHandler()
+    tracing = TracingCallbackHandler(client=mock_tracing_client_with_flush)
 
     response = wf.run(
         input_data=input_data,
@@ -854,6 +884,10 @@ def test_workflow_with_input_mappings(
     assert response == RunnableResult(status=RunnableStatus.SUCCESS, input=input_data, output=expected_output)
     assert json.dumps({"runs": [run.to_dict() for run in tracing.runs.values()]}, cls=JsonWorkflowEncoder)
 
+    assert mock_tracing_client_with_flush.trace.call_count == 1
+    flushed_runs = mock_tracing_client_with_flush.trace.call_args[0][0]
+    assert len(flushed_runs) == 4
+
 
 @pytest.mark.asyncio
 async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
@@ -864,6 +898,7 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
     output_node_with_conditional_dependencies,
     mock_llm_response_text,
     mock_llm_executor,
+    mock_tracing_client_with_flush,
 ):
     file_name = "file.txt"
     bytes_content = b"file content"
@@ -876,7 +911,7 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
 
     tags = ["test1", "test2"]
     metadata = {"app_id": "0.0.1", "runtime_id": "0.0.1"}
-    tracing = TracingCallbackHandler(tags=tags, metadata=metadata)
+    tracing = TracingCallbackHandler(client=mock_tracing_client_with_flush, tags=tags, metadata=metadata)
 
     response = await wf_with_conditional_depend.run(
         input_data=input_data,
@@ -1058,6 +1093,10 @@ async def test_workflow_with_conditional_depend_nodes_with_tracing_async(
     assert output_node_run.executions
     assert metadata.items() <= output_node_run.metadata.items()
 
+    assert mock_tracing_client_with_flush.trace.call_count == 1
+    flushed_runs = mock_tracing_client_with_flush.trace.call_args[0][0]
+    assert len(flushed_runs) == 6
+
 
 @pytest.mark.asyncio
 async def test_workflow_with_conditional_depend_nodes_with_return_behavior_and_depend_fail_async(
@@ -1170,6 +1209,7 @@ def test_workflow_with_llm_fallback_tracing(
     anthropic_node,
     mock_llm_response_text,
     mock_llm_executor,
+    mock_tracing_client_with_flush,
 ):
     openai_node.fallback = FallbackConfig(
         llm=anthropic_node,
@@ -1178,7 +1218,7 @@ def test_workflow_with_llm_fallback_tracing(
     )
 
     input_data = {"a": 1}
-    tracing = TracingCallbackHandler()
+    tracing = TracingCallbackHandler(client=mock_tracing_client_with_flush)
     call_count = 0
 
     def mock_completion(*args, **kwargs):
@@ -1226,3 +1266,7 @@ def test_workflow_with_llm_fallback_tracing(
     assert fallback_llm_run.metadata["node"].get("is_fallback") is True
     assert fallback_llm_run.parent_run_id == flow_run.id
     assert fallback_llm_run.output == {"content": mock_llm_response_text}
+
+    assert mock_tracing_client_with_flush.trace.call_count == 1
+    flushed_runs = mock_tracing_client_with_flush.trace.call_args[0][0]
+    assert len(flushed_runs) == 4
