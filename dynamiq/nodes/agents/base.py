@@ -961,14 +961,22 @@ class Agent(Node):
         """Runs a specific tool with the given input."""
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
-        if delegate_final and not self.delegation_allowed:
-            if self.verbose:
+        if not self.delegation_allowed:
+            if delegate_final and self.verbose:
                 logger.debug(
                     "Agent %s - %s: delegate_final ignored because delegation_allowed is False",
                     self.name,
                     self.id,
                 )
             delegate_final = False
+            if isinstance(merged_input, dict) and "delegate_final" in merged_input:
+                if self.verbose:
+                    logger.debug(
+                        "Agent %s - %s: delegate_final removed from tool input because delegation_allowed is False",
+                        self.name,
+                        self.id,
+                    )
+                merged_input.pop("delegate_final", None)
 
         if isinstance(tool, ContextManagerTool):
             merged_input["history"] = self._prompt.messages[self._history_offset :]
