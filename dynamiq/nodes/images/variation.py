@@ -16,7 +16,7 @@ from .generation import ImageResponseFormat, ImageSize, create_image_file, downl
 class ImageVariationInputSchema(BaseModel):
     """Input schema for image variation."""
 
-    image: io.BytesIO | bytes | None = Field(
+    image: list[io.BytesIO | bytes] | io.BytesIO | bytes | None = Field(
         default=None,
         description="The image to create variations of. Auto-injected from agent's file store.",
         json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
@@ -128,6 +128,12 @@ class ImageVariation(ConnectionNode):
         img_obj = Image.open(io.BytesIO(image_bytes))
         original_format = img_obj.format or "PNG"
 
+        if original_format in ("JPEG", "JPG"):
+            if img_obj.mode not in ("RGB", "L"):
+                img_obj = img_obj.convert("RGB")
+        elif img_obj.mode not in ("RGB", "RGBA", "LA", "L"):
+            img_obj = img_obj.convert("RGB")
+
         output_bytes = io.BytesIO()
         img_obj.save(output_bytes, format=original_format)
         output_bytes.seek(0)
@@ -151,15 +157,22 @@ class ImageVariation(ConnectionNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         size = self.size.value if isinstance(self.size, ImageSize) else self.size
-
-        original_filename = None
         raw_image = input_data.image
+        if isinstance(raw_image, list):
+            if not raw_image:
+                raise ValueError("No image provided. List is empty.")
+            if len(raw_image) > 1:
+                logger.warning(
+                    f"Multiple images provided, using first image for variation. {len(raw_image)} images ignored."
+                )
+            raw_image = raw_image[0]
+        original_filename = None
         if hasattr(raw_image, "name") and raw_image.name:
             original_filename = raw_image.name
         elif isinstance(raw_image, io.BytesIO) and hasattr(raw_image, "name") and raw_image.name:
             original_filename = raw_image.name
 
-        image = self._prepare_image(input_data.image)
+        image = self._prepare_image(raw_image)
 
         api_params = {
             "model": self.model,

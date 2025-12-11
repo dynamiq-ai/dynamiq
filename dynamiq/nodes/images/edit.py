@@ -135,8 +135,13 @@ class ImageEdit(ConnectionNode):
 
             img_obj = Image.open(io.BytesIO(image_bytes))
             original_format = img_obj.format or "PNG"
-            if img_obj.mode not in ("RGBA", "LA", "L"):
-                img_obj = img_obj.convert("RGBA")
+
+            if original_format in ("JPEG", "JPG"):
+                if img_obj.mode not in ("RGB", "L"):
+                    img_obj = img_obj.convert("RGB")
+            else:
+                if img_obj.mode not in ("RGBA", "LA", "L"):
+                    img_obj = img_obj.convert("RGBA")
 
             output_bytes = io.BytesIO()
             img_obj.save(output_bytes, format=original_format)

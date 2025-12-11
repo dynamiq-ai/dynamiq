@@ -49,16 +49,28 @@ def create_image_file(image_bytes: bytes, index: int = 0, original_name: str | N
     """
     image_file = io.BytesIO(image_bytes)
 
+    extension_to_mime = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+        ".tiff": "image/tiff",
+        ".tif": "image/tiff",
+    }
+
     if original_name:
         from pathlib import Path
 
         base_name = Path(original_name).stem
         ext = Path(original_name).suffix or ".png"
         image_file.name = f"{base_name}_{index}{ext}"
+        image_file.content_type = extension_to_mime.get(ext.lower(), "image/png")
     else:
         image_file.name = f"image_{index}.png"
+        image_file.content_type = "image/png"
 
-    image_file.content_type = "image/png"
     return image_file
 
 
