@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from dynamiq.connections import PostgreSQL
-from dynamiq.connections.managers import ConnectionClientInitType, ConnectionManager, ConnectionManagerException
+from dynamiq.connections.managers import ConnectionManager, ConnectionManagerException
 from dynamiq.nodes import ErrorHandling
 from dynamiq.nodes.node import ConnectionNode, VectorStoreNode
 from dynamiq.runnables import RunnableConfig
@@ -208,14 +208,11 @@ def test_ensure_client_skips_reinitialization_when_no_connection(connection_node
     connection_node_instance.client = MockClosedClient(closed=True)
     connection_node_instance.connection = None
 
-    # Should not raise an error, just skip reinitialization
     connection_node_instance.ensure_client()
 
-    # Should not attempt to call connection manager
     mock_connection_manager.get_connection_client.assert_not_called()
 
 
-# Tests for VectorStoreNode
 @pytest.mark.parametrize(
     "client,expected_result,test_id",
     [
@@ -252,12 +249,9 @@ def test_vector_store_node_ensure_client_reinitializes_both_client_and_vector_st
 
     vector_store_node_instance.ensure_client()
 
-    # Should reinitialize client
     mock_connection_manager.get_connection_client.assert_called_once_with(
         connection=vector_store_node_instance.connection,
-        init_type=ConnectionClientInitType.VECTOR_STORE,
     )
-    # Should have reinitialized vector store
     assert vector_store_node_instance.vector_store is not None
     assert vector_store_node_instance.client == new_client
 
@@ -269,10 +263,8 @@ def test_vector_store_node_ensure_client_skips_reinitialization_when_no_connecti
     vector_store_node_instance.vector_store.client = MockClosedClient(closed=True)
     vector_store_node_instance.connection = None
 
-    # Should not raise an error, just skip reinitialization
     vector_store_node_instance.ensure_client()
 
-    # Should not attempt to call connection manager
     mock_connection_manager.get_connection_client.assert_not_called()
 
 
@@ -305,7 +297,6 @@ def test_execute_with_retry_reinitializes_on_connection_error(
             # Second call: should succeed after reinitialization
             return success_result
 
-    # Patch execute method on the class
     mocker.patch.object(type(connection_node_instance), "execute", execute_side_effect)
     new_client = MockClosedClient(closed=False)
     mock_connection_manager.get_connection_client.return_value = new_client
@@ -357,10 +348,8 @@ def test_execute_with_retry_succeeds_after_reconnection(
             # Third attempt: should work after reinitialization
             return success_result
 
-    # Patch execute method
     mocker.patch.object(type(connection_node_instance), "execute", execute_side_effect)
 
-    # Set up mock to return new client
     new_client = MockClosedClient(closed=False)
     mock_connection_manager.get_connection_client.return_value = new_client
 
@@ -382,11 +371,9 @@ def test_connection_manager_caching_in_init_components(
         def execute(self, input_data, config=None, **kwargs):
             return success_result
 
-    # Provide client to avoid actual connection
     node = TestConnectionNode(id="test-node", name="TestNode", connection=mock_connection, client=mock_open_client)
     node.init_components(connection_manager=mock_connection_manager)
 
-    # Should cache the connection manager
     assert node._connection_manager == mock_connection_manager
 
 
