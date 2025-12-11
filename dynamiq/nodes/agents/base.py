@@ -370,7 +370,7 @@ class Agent(Node):
     max_loops: int = 1
     tool_output_max_length: int = TOOL_MAX_TOKENS
     tool_output_truncate_enabled: bool = True
-    allow_delegation: bool = Field(
+    delegation_allowed: bool = Field(
         default=False,
         description="Allow returning a child agent tool's output directly via delegate_final flag.",
     )
@@ -961,10 +961,10 @@ class Agent(Node):
         """Runs a specific tool with the given input."""
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
 
-        if delegate_final and not self.allow_delegation:
+        if delegate_final and not self.delegation_allowed:
             if self.verbose:
                 logger.debug(
-                    "Agent %s - %s: delegate_final ignored because allow_delegation is False",
+                    "Agent %s - %s: delegate_final ignored because delegation_allowed is False",
                     self.name,
                     self.id,
                 )

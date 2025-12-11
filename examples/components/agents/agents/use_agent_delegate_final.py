@@ -57,7 +57,7 @@ def make_manager_agent(llm, researcher):
         llm=llm,
         tools=[researcher],
         max_loops=3,
-        allow_delegation=True,
+        delegation_allowed=True,
         inference_mode=InferenceMode.XML,
     )
 

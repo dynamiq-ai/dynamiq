@@ -751,7 +751,7 @@ class Agent(BaseAgent):
         action_input: Any,
     ) -> bool:
         """Only Agent tools with per-call delegate_final flag can delegate."""
-        if not self.allow_delegation:
+        if not self.delegation_allowed:
             return False
 
         if not isinstance(tool, Agent):
@@ -1772,7 +1772,7 @@ class Agent(BaseAgent):
 
     def _build_delegation_variables(self) -> dict[str, str]:
         """Provide prompt snippets for delegate_final guidance when enabled."""
-        if not self.allow_delegation:
+        if not self.delegation_allowed:
             return {"delegation_instructions": "", "delegation_instructions_xml": ""}
 
         return {
@@ -1841,7 +1841,7 @@ class Agent(BaseAgent):
             # Agent tools: accept action_input as a JSON string to avoid nested schema issues.
             if isinstance(tool, Agent):
                 agent_action_input_description = "JSON string containing the agent's inputs "
-                if self.allow_delegation:
+                if self.delegation_allowed:
                     agent_action_input_description += '(e.g., {"input": "<subtask>", "delegate_final": true}).'
                 else:
                     agent_action_input_description += '(e.g., {"input": "<subtask>"}).'
