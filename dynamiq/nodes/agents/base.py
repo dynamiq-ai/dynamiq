@@ -603,7 +603,8 @@ class Agent(Node):
         """
         Executes the agent with the given input data.
         """
-        log_data = dict(input_data).copy()
+        input_dict = dict(input_data)
+        log_data = input_dict.copy()
 
         if log_data.get("images"):
             log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
@@ -616,20 +617,20 @@ class Agent(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        custom_metadata = self._prepare_metadata(dict(input_data))
+        custom_metadata = self._prepare_metadata(input_dict)
         self._current_call_context = {
-            "user_id": dict(input_data).get("user_id"),
-            "session_id": dict(input_data).get("session_id"),
+            "user_id": input_dict.get("user_id"),
+            "session_id": input_dict.get("session_id"),
             "metadata": custom_metadata,
         }
 
         input_message = input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
-        input_message = input_message.format_message(**dict(input_data))
+        input_message = input_message.format_message(**input_dict)
 
-        use_memory = self.memory and (dict(input_data).get("user_id") or dict(input_data).get("session_id"))
+        use_memory = self.memory and (input_dict.get("user_id") or input_dict.get("session_id"))
 
         if use_memory:
-            history_messages = self._retrieve_memory(dict(input_data))
+            history_messages = self._retrieve_memory(input_dict)
             if len(history_messages) > 0:
                 history_messages.insert(
                     0,
@@ -680,7 +681,7 @@ class Agent(Node):
         if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
 
-        self._prompt_variables.update(dict(input_data))
+        self._prompt_variables.update(input_dict)
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
