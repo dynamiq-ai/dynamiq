@@ -1,5 +1,5 @@
 from dynamiq.connections import Firecrawl
-from dynamiq.nodes.tools.firecrawl_search import FirecrawlSearchTool, SourceNews, SourceWeb
+from dynamiq.nodes.tools.firecrawl_search import FirecrawlSearchTool
 
 
 def basic_search_example():
@@ -27,7 +27,7 @@ def search_with_scrape_example():
         connection=firecrawl_connection,
         is_optimized_for_agents=True,
         limit=3,
-        sources=[SourceWeb(tbs="qdr:w"), SourceNews()],
+        sources=[{"type": "web"}],
         categories=["github"],
         country="US",
     )

@@ -38,27 +38,6 @@ Examples:
 {"query": "langchain github", "categories": ["github"], "tbs": "qdr:w"}"""
 
 
-class SourceWeb(BaseModel):
-    type: Literal["web"] = Field(default="web", description="Web search results.")
-    tbs: str | None = Field(
-        default=None,
-        description="Time-based search filter (qdr:h/d/w/m/y or "
-        "custom ranges like cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY).",
-    )
-    location: str | None = Field(default=None, description="Location bias for this web source.")
-
-
-class SourceImages(BaseModel):
-    type: Literal["images"] = Field(default="images", description="Image search results.")
-
-
-class SourceNews(BaseModel):
-    type: Literal["news"] = Field(default="news", description="News search results.")
-
-
-SourceType = SourceWeb | SourceImages | SourceNews
-
-
 CategoryType = Literal["github", "research", "pdf"]
 
 
@@ -69,8 +48,9 @@ class FirecrawlSearchInput(BaseModel):
 
     query: str = Field(..., description="Search query to execute on Firecrawl.")
     limit: int | None = Field(default=None, ge=1, le=100, description="Maximum number of search results to return.")
-    sources: list[SourceType] | None = Field(
-        default=None, description="Result types to fetch: web/news/images with optional per-source options."
+    sources: list[str | dict[str, Any]] | None = Field(
+        default=None,
+        description="Result types to fetch: list of strings (e.g., 'web') or dicts like {'type': 'web', ...}.",
     )
     categories: list[CategoryType] | None = Field(
         default=None,
@@ -104,7 +84,9 @@ class FirecrawlSearchTool(ConnectionNode):
     query: str | None = None
 
     limit: int = Field(default=5, ge=1, le=100, description="Number of results to request.")
-    sources: list[SourceType] = Field(default_factory=lambda: [SourceWeb()], description="Result verticals to include.")
+    sources: list[str | dict[str, Any]] = Field(
+        default_factory=lambda: ["web"], description="Result verticals to include (strings or dicts)."
+    )
     categories: list[CategoryType] = Field(default_factory=list, description="Optional category filters.")
     tbs: str | None = Field(default=None, description="Time-based search filter passed to Firecrawl.")
     location: str | None = Field(default=None, description="Geographic bias for the search query.")
@@ -120,6 +102,8 @@ class FirecrawlSearchTool(ConnectionNode):
 
     MAX_DESCRIPTION_CHARS: ClassVar[int] = 300
     MAX_CONTENT_CHARS: ClassVar[int] = 800
+
+    ALLOWED_SOURCE_TYPES: ClassVar[set[str]] = {"web", "news", "images"}
 
     @staticmethod
     def _truncate(text: str | None, limit: int) -> str:
@@ -141,15 +125,12 @@ class FirecrawlSearchTool(ConnectionNode):
             return deepcopy(getattr(self, field_name, None))
 
         limit = resolve("limit") or 5
-        sources = resolve("sources") or [SourceWeb()]
+        sources = self._normalize_sources(resolve("sources") or [{"type": "web"}])
 
         payload = {
             "query": query,
             "limit": limit,
-            "sources": [
-                source.model_dump(exclude_none=True, by_alias=True) if isinstance(source, BaseModel) else source
-                for source in sources
-            ],
+            "sources": sources,
             "categories": resolve("categories"),
             "location": resolve("location"),
             "tbs": resolve("tbs"),
@@ -159,6 +140,25 @@ class FirecrawlSearchTool(ConnectionNode):
         }
 
         return {k: v for k, v in payload.items() if v is not None}
+
+    def _normalize_sources(self, sources: list[Any]) -> list[dict[str, Any]]:
+        """Ensure sources are simple dicts with an allowed type."""
+        normalized: list[dict[str, Any]] = []
+        for item in sources:
+            if isinstance(item, BaseModel):
+                item = item.model_dump(exclude_none=True, by_alias=True)
+            if isinstance(item, str):
+                item = {"type": item}
+
+            if not (isinstance(item, dict) and isinstance(item.get("type"), str)):
+                raise ValueError("Each source must be a dict with a 'type' string.")
+
+            source_type = item["type"]
+            if source_type not in self.ALLOWED_SOURCE_TYPES:
+                raise ValueError(f"Invalid source type '{source_type}'. Allowed: {sorted(self.ALLOWED_SOURCE_TYPES)}")
+
+            normalized.append({k: v for k, v in item.items() if v is not None})
+        return normalized
 
     def _format_scraped_results(self, query: str, results: list[dict[str, Any]]) -> str:
         if not results:
