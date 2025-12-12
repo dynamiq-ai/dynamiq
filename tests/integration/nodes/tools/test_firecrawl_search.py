@@ -1,7 +1,7 @@
 import pytest
 
 from dynamiq.connections import Firecrawl
-from dynamiq.nodes.tools.firecrawl_search import FirecrawlSearchTool, SourceImages, SourceNews, SourceWeb
+from dynamiq.nodes.tools.firecrawl_search import FirecrawlSearchTool
 from dynamiq.runnables import RunnableResult, RunnableStatus
 
 
@@ -106,7 +106,11 @@ def test_firecrawl_search_with_overrides(mock_firecrawl_search_requests_scrape, 
     input_data = {
         "query": "firecrawl web scraping",
         "limit": 3,
-        "sources": [SourceWeb(tbs="qdr:w"), SourceNews(), SourceImages()],
+        "sources": [
+            {"type": "web", "tbs": "qdr:w"},
+            {"type": "news"},
+            {"type": "images"},
+        ],
         "categories": ["github"],
         "location": "Germany",
         "tbs": "qdr:d",
@@ -154,3 +158,15 @@ def test_firecrawl_search_agent_output(mock_firecrawl_search_requests, mock_fire
     assert "https://www.firecrawl.dev/" in content
     assert "News Results" in content
     assert "Image Results" in content
+
+
+def test_firecrawl_sources_as_strings(mock_firecrawl_search_requests):
+    connection = Firecrawl(api_key="test_key")
+    tool = FirecrawlSearchTool(connection=connection)
+
+    input_data = {"query": "firecrawl", "sources": ["web", "news"]}
+    result = tool.run(input_data, None)
+
+    assert result.status == RunnableStatus.SUCCESS
+    payload = mock_firecrawl_search_requests.call_args[1]["json"]
+    assert payload["sources"] == [{"type": "web"}, {"type": "news"}]
