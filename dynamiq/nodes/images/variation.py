@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes import ErrorHandling
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -27,7 +28,7 @@ class ImageVariationInputSchema(BaseModel):
 
 class ImageVariation(ConnectionNode):
     """
-    Node for creating variations of images using AI models via LiteLLM.
+    Node for creating variations of images using AI models.
 
     Takes an existing image and generates variations of it.
 
@@ -43,7 +44,7 @@ class ImageVariation(ConnectionNode):
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Variation"
-    model: str = "dall-e-2"
+    model: str = "gpt-image-1"
     connection: OpenAIConnection | None = None
     n: int | None = None
     size: ImageSize | str = ImageSize.SIZE_1024x1024
@@ -180,7 +181,15 @@ class ImageVariation(ConnectionNode):
             **self.variation_params,
         }
 
-        response = self._image_variation(**api_params)
+        try:
+            response = self._image_variation(**api_params)
+        except Exception as e:
+            logger.error(f"Node {self.name} - {self.id}: unexpected error occurred. Error: {str(e)}")
+            raise ToolExecutionException(
+                f"Node '{self.name}' encountered an unexpected error during image variation generation. "
+                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
 
         content = []
         files = []

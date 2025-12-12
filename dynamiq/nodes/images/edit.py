@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes import ErrorHandling
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -33,7 +34,7 @@ class ImageEditInputSchema(BaseModel):
 
 class ImageEdit(ConnectionNode):
     """
-    Node for editing images using AI models via LiteLLM.
+    Node for editing images using AI models.
 
     Takes an existing image and a text prompt to generate edited versions.
     Optionally accepts a mask to specify which areas to modify.
@@ -50,7 +51,7 @@ class ImageEdit(ConnectionNode):
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Edit"
-    model: str = "dall-e-2"
+    model: str = "gpt-image-1"
     connection: OpenAIConnection | None = None
     n: int | None = None
     size: ImageSize | str = ImageSize.SIZE_1024x1024
@@ -204,7 +205,16 @@ class ImageEdit(ConnectionNode):
         mask = self._prepare_image(input_data.mask) if input_data.mask else None
         if mask:
             edit_kwargs["mask"] = mask
-        response = self._image_edit(**edit_kwargs)
+
+        try:
+            response = self._image_edit(**edit_kwargs)
+        except Exception as e:
+            logger.error(f"Node {self.name} - {self.id}: unexpected error occurred. Error: {str(e)}")
+            raise ToolExecutionException(
+                f"Node '{self.name}' encountered an unexpected error during image editing. "
+                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
 
         content = []
         files = []

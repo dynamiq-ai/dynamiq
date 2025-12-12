@@ -12,6 +12,7 @@ from dynamiq.connections import Gemini as GeminiConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.connections import VertexAI as VertexAIConnection
 from dynamiq.nodes import ErrorHandling
+from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -96,10 +97,10 @@ class ImageGenerationInputSchema(BaseModel):
 
 class ImageGeneration(ConnectionNode):
     """
-    Node for generating images using various AI models via LiteLLM.
+    Node for generating images using various AI models.
 
     Supports multiple providers including OpenAI (DALL-E), Azure, Bedrock (Stability AI),
-    Vertex AI, and more through LiteLLM's unified interface.
+    Vertex AI, and more through a unified interface.
 
     Attributes:
         name (str): The name of the node.
@@ -116,7 +117,7 @@ class ImageGeneration(ConnectionNode):
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Generation"
-    model: str = "dall-e-3"
+    model: str = "gpt-image-1"
     connection: OpenAIConnection | GeminiConnection | VertexAIConnection | AWSConnection | AzureAIConnection | None = (
         None
     )
@@ -210,7 +211,15 @@ class ImageGeneration(ConnectionNode):
             **self.generation_params,
         }
 
-        response = self._image_generation(**api_params)
+        try:
+            response = self._image_generation(**api_params)
+        except Exception as e:
+            logger.error(f"Node {self.name} - {self.id}: unexpected error occurred. Error: {str(e)}")
+            raise ToolExecutionException(
+                f"Node '{self.name}' encountered an unexpected error during image generation. "
+                f"Error: {str(e)}. Please analyze the error and take appropriate action.",
+                recoverable=True,
+            )
 
         content = []
         files = []
