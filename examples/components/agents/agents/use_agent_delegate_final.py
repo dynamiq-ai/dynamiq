@@ -31,7 +31,6 @@ Do not summarize or rewrite its output yourself.
 
 
 def make_researcher_agent(llm):
-    secondary_llm = setup_llm()
     tavily_connection = TavilyConnection()
     search_tool = TavilyTool(
         name="Tavily Search",
@@ -43,7 +42,7 @@ def make_researcher_agent(llm):
         name="Researcher Agent",
         description='Call with {"input": "<topic to research>"}',
         role=RESEARCHER_ROLE,
-        llm=secondary_llm,
+        llm=llm,
         tools=[search_tool],
         max_loops=2,
         inference_mode=InferenceMode.XML,
@@ -58,6 +57,7 @@ def make_manager_agent(llm, researcher):
         llm=llm,
         tools=[researcher],
         max_loops=3,
+        delegation_allowed=True,
         inference_mode=InferenceMode.XML,
     )
 
