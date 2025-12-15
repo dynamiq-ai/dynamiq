@@ -370,6 +370,10 @@ class Agent(Node):
     max_loops: int = 1
     tool_output_max_length: int = TOOL_MAX_TOKENS
     tool_output_truncate_enabled: bool = True
+    delegation_allowed: bool = Field(
+        default=False,
+        description="Allow returning a child agent tool's output directly via delegate_final flag.",
+    )
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
@@ -551,6 +555,8 @@ class Agent(Node):
         self._prompt_variables = {
             "tool_description": self.tool_description,
             "date": datetime.now().strftime("%d %B %Y"),
+            "delegation_instructions": "",
+            "delegation_instructions_xml": "",
         }
 
     def set_block(self, block_name: str, content: str):
@@ -954,6 +960,23 @@ class Agent(Node):
     ) -> Any:
         """Runs a specific tool with the given input."""
         merged_input = tool_input.copy() if isinstance(tool_input, dict) else {"input": tool_input}
+
+        if not self.delegation_allowed:
+            if delegate_final and self.verbose:
+                logger.debug(
+                    "Agent %s - %s: delegate_final ignored because delegation_allowed is False",
+                    self.name,
+                    self.id,
+                )
+            delegate_final = False
+            if isinstance(merged_input, dict) and "delegate_final" in merged_input:
+                if self.verbose:
+                    logger.debug(
+                        "Agent %s - %s: delegate_final removed from tool input because delegation_allowed is False",
+                        self.name,
+                        self.id,
+                    )
+                merged_input.pop("delegate_final", None)
 
         if isinstance(tool, ContextManagerTool):
             merged_input["history"] = self._prompt.messages[self._history_offset :]
