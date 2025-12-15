@@ -23,6 +23,22 @@ class WorkflowYAMLLoaderException(Exception):
 class WorkflowYAMLLoader:
     """Loader class for parsing YAML files and creating workflow components."""
 
+    @staticmethod
+    def is_node_type(type_value: str | None) -> bool:
+        """
+        Check if the type value represents a node type (dotted path like 'module.ClassName').
+
+        Node types use dotted path format (e.g., 'dynamiq.nodes.agents.ReActAgent'),
+        while other types (e.g., JSON schema types like 'string', 'object') don't contain dots.
+
+        Args:
+            type_value: The type string to check.
+
+        Returns:
+            True if the type value is a node type (contains a dot), False otherwise.
+        """
+        return bool(type_value and "." in type_value)
+
     @classmethod
     def get_entity_by_type(cls, entity_type: str, entity_registry: dict[str, Any] | None = None) -> Any:
         """
@@ -361,7 +377,7 @@ class WorkflowYAMLLoader:
                     else:
                         updated_param_data[param_name_inner] = param_data_inner
 
-                if "type" in updated_param_data:
+                if cls.is_node_type(updated_param_data.get("type")):
                     param_id = updated_param_data.get("id")
                     updated_param_data = cls.get_nodes_without_depends({param_id: updated_param_data}, **kwargs)[
                         param_id
