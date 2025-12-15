@@ -10,6 +10,8 @@ from jinja2 import Template
 from dynamiq.nodes.agents.prompts.templates import get_prompt_constant
 from dynamiq.nodes.agents.prompts.templates.defaults.base_prompts import (
     DEFAULT_DIRECT_OUTPUT_CAPABILITIES,
+    DELEGATION_INSTRUCTIONS,
+    DELEGATION_INSTRUCTIONS_XML,
     HISTORY_SUMMARIZATION_PROMPT,
     REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING,
     REACT_BLOCK_INSTRUCTIONS_MULTI,
@@ -237,6 +239,24 @@ class AgentPromptManager:
 
         if manager_specific_prompt:
             logger.info(f"Applied {manager_type} manager-specific prompts for model '{self.model_name}'")
+
+    def build_delegation_variables(self, delegation_allowed: bool = False) -> dict[str, str]:
+        """
+        Provide prompt snippets for delegate_final guidance when enabled.
+
+        Args:
+            delegation_allowed: Whether delegation is allowed for the agent
+
+        Returns:
+            Dictionary containing delegation instructions for both standard and XML formats
+        """
+        if not delegation_allowed:
+            return {"delegation_instructions": "", "delegation_instructions_xml": ""}
+
+        return {
+            "delegation_instructions": DELEGATION_INSTRUCTIONS,
+            "delegation_instructions_xml": DELEGATION_INSTRUCTIONS_XML,
+        }
 
 
 def get_model_specific_prompts(

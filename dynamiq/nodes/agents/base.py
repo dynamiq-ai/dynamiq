@@ -211,6 +211,10 @@ class Agent(Node):
         default=False,
         description="Allow returning a child agent tool's output directly via delegate_final flag.",
     )
+    delegation_allowed: bool = Field(
+        default=False,
+        description="Allow returning a child agent tool's output directly via delegate_final flag.",
+    )
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL

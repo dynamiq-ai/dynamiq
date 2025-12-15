@@ -129,8 +129,17 @@ class Agent(BaseAgent):
         action_input: Any,
     ) -> bool:
         """Only Agent tools with per-call delegate_final flag can delegate."""
+        if not self.delegation_allowed:
+            return False
+
         if not isinstance(tool, Agent):
             return False
+
+        if isinstance(action_input, str):
+            try:
+                action_input = json.loads(action_input)
+            except json.JSONDecodeError:
+                return False
 
         if isinstance(action_input, Mapping):
             return bool(action_input.get("delegate_final"))
@@ -455,7 +464,7 @@ class Agent(BaseAgent):
             content=self.generate_prompt(
                 tools_name=self.tool_names,
                 input_formats=self.generate_input_formats(self.tools),
-                **self._build_delegation_variables(),
+                **self.prompt_manager.build_delegation_variables(self.delegation_allowed),
             ),
             static=True,
         )
@@ -663,14 +672,15 @@ class Agent(BaseAgent):
                                 tools_data = parsed_result.get("tools", [])
                                 action = tools_data
 
-                                for tool_payload in tools_data:
-                                    if isinstance(tool_payload.get("input"), dict) and tool_payload["input"].get(
-                                        "delegate_final"
-                                    ):
-                                        raise ActionParsingException(
-                                            "delegate_final is only supported for single agent tool calls.",
-                                            recoverable=True,
-                                        )
+                                if len(tools_data) > 1:
+                                    for tool_payload in tools_data:
+                                        if isinstance(tool_payload.get("input"), dict) and tool_payload["input"].get(
+                                            "delegate_final"
+                                        ):
+                                            raise ActionParsingException(
+                                                "delegate_final is only supported for single agent tool calls.",
+                                                recoverable=True,
+                                            )
 
                                 if len(tools_data) == 1:
                                     self.log_reasoning(
@@ -1211,6 +1221,41 @@ class Agent(BaseAgent):
         """Generate schemas for function calling."""
         self._tools.append(final_answer_function_schema)
         for tool in self.tools:
+            # Agent tools: accept action_input as a JSON string to avoid nested schema issues.
+            if isinstance(tool, Agent):
+                agent_action_input_description = "JSON string containing the agent's inputs "
+                if self.delegation_allowed:
+                    agent_action_input_description += '(e.g., {"input": "<subtask>", "delegate_final": true}).'
+                else:
+                    agent_action_input_description += '(e.g., {"input": "<subtask>"}).'
+
+                schema = {
+                    "type": "function",
+                    "function": {
+                        "name": self.sanitize_tool_name(tool.name),
+                        "description": tool.description[:1024],
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "thought": {
+                                    "type": "string",
+                                    "description": "Your reasoning about using this tool.",
+                                },
+                                "action_input": {
+                                    "type": "string",
+                                    "description": agent_action_input_description,
+                                },
+                            },
+                            "additionalProperties": False,
+                            "required": ["thought", "action_input"],
+                        },
+                        "strict": True,
+                    },
+                }
+
+                self._tools.append(schema)
+                continue
+
             properties = {}
             input_params = tool.input_schema.model_fields.items()
             if list(input_params) and not isinstance(self.llm, Gemini):
@@ -1277,7 +1322,7 @@ class Agent(BaseAgent):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
         # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
-        self.prompt_manager.update_variables(self._build_delegation_variables())
+        self.prompt_manager.update_variables(self.prompt_manager.build_delegation_variables(self.delegation_allowed))
 
         # Handle function calling schema generation first
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
