@@ -760,7 +760,7 @@ class Agent(BaseAgent):
         if isinstance(action_input, str):
             try:
                 action_input = json.loads(action_input)
-            except Exception:
+            except json.JSONDecodeError:
                 return False
 
         if isinstance(action_input, Mapping):
