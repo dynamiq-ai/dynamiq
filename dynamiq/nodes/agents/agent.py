@@ -757,6 +757,12 @@ class Agent(BaseAgent):
         if not isinstance(tool, Agent):
             return False
 
+        if isinstance(action_input, str):
+            try:
+                action_input = json.loads(action_input)
+            except Exception:
+                return False
+
         if isinstance(action_input, Mapping):
             return bool(action_input.get("delegate_final"))
 
@@ -1283,14 +1289,15 @@ class Agent(BaseAgent):
                                 tools_data = parsed_result.get("tools", [])
                                 action = tools_data
 
-                                for tool_payload in tools_data:
-                                    if isinstance(tool_payload.get("input"), dict) and tool_payload["input"].get(
-                                        "delegate_final"
-                                    ):
-                                        raise ActionParsingException(
-                                            "delegate_final is only supported for single agent tool calls.",
-                                            recoverable=True,
-                                        )
+                                if len(tools_data) > 1:
+                                    for tool_payload in tools_data:
+                                        if isinstance(tool_payload.get("input"), dict) and tool_payload["input"].get(
+                                            "delegate_final"
+                                        ):
+                                            raise ActionParsingException(
+                                                "delegate_final is only supported for single agent tool calls.",
+                                                recoverable=True,
+                                            )
 
                                 if len(tools_data) == 1:
                                     self.log_reasoning(
