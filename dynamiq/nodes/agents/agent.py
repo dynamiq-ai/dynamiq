@@ -453,7 +453,9 @@ class Agent(BaseAgent):
         system_message = Message(
             role=MessageRole.SYSTEM,
             content=self.generate_prompt(
-                tools_name=self.tool_names, input_formats=self.generate_input_formats(self.tools)
+                tools_name=self.tool_names,
+                input_formats=self.generate_input_formats(self.tools),
+                **self._build_delegation_variables(),
             ),
             static=True,
         )
@@ -1274,6 +1276,8 @@ class Agent(BaseAgent):
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
+        # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
+        self.prompt_manager.update_variables(self._build_delegation_variables())
 
         # Handle function calling schema generation first
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:

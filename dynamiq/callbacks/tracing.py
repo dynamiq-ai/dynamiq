@@ -272,6 +272,8 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             "traceback": traceback.format_exc(),
         }
 
+        self.flush()
+
     def on_flow_start(
         self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
     ):
@@ -341,6 +343,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             "traceback": traceback.format_exc(),
         }
 
+        # If parent_run_id is None, the run is the highest in the execution tree
+        if run.parent_run_id is None:
+            self.flush()
+
     def on_node_start(
         self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any
     ):
@@ -397,6 +403,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
             "traceback": traceback.format_exc(),
         }
 
+        # If parent_run_id is None, the run is the highest in the execution tree
+        if run.parent_run_id is None:
+            self.flush()
+
     def on_node_skip(
         self,
         serialized: dict[str, Any],
@@ -425,6 +435,10 @@ class TracingCallbackHandler(BaseModel, BaseCallbackHandler):
         run.metadata["skip"] = format_value(skip_data)
         if human_feedback:
             run.metadata["human_feedback"] = human_feedback
+
+        # If parent_run_id is None, the run is the highest in the execution tree
+        if run.parent_run_id is None:
+            self.flush()
 
     def on_node_execute_start(
         self, serialized: dict[str, Any], input_data: dict[str, Any], **kwargs: Any

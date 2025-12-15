@@ -1,3 +1,15 @@
+DELEGATION_INSTRUCTIONS = (
+    "- Optional: If you want an agent tool's response returned verbatim as the final output, "
+    'set "delegate_final": true in that tool\'s input. Use this only for a single agent tool call '
+    "and do not provide your own final answer; the system will return the agent's result directly."
+)
+
+DELEGATION_INSTRUCTIONS_XML = (
+    '- To return an agent tool\'s response as the final output, include "delegate_final": true inside that '
+    "tool's <input> or <action_input>. Use this only for a single agent tool call and do not provide an "
+    "<answer> yourself; the system will return the agent's result directly."
+)
+
 DEFAULT_DIRECT_OUTPUT_CAPABILITIES = """
 ADVANCED FEATURES:
 - Tool outputs are automatically cached and can be referenced directly
@@ -67,6 +79,8 @@ IMPORTANT RULES:
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Optional: When you want an agent tool's response returned verbatim as the final output, set "delegate_final": true in its Action Input. Only do this for a single agent tool call and do not write an Answer yourself.
+{{ delegation_instructions }}
+
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - Files are automatically collected and will be returned with your final answer
@@ -129,6 +143,8 @@ CRITICAL XML FORMAT RULES:
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Optional: When you want an agent tool's response returned verbatim as the final output, set "delegate_final": true inside the <action_input>. Use this only when calling a single agent tool and do not provide an <answer> yourself; the system will return the agent's result directly.
+
+{{ delegation_instructions_xml }}
 
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags
@@ -341,6 +357,7 @@ Answer: [Your direct response]
 - Only use tools from the provided list
 - Optional: If you need an agent tool's response returned verbatim as the final output, set "delegate_final": true in that tool's Action Input. Use this only for a single agent tool call and do not write an Answer yourself; the system will return the agent's result directly.
 
+{{ delegation_instructions_xml }}
 
 **FILE HANDLING:**
 - Tools may generate multiple files during execution
@@ -431,6 +448,11 @@ ADDITIONAL RULES:
 OPTIONAL AGENT PASSTHROUGH:
 - To return an agent tool's response as the final output, include "delegate_final": true inside that tool's <input>.
 - Use delegate_final only when calling a single agent tool and do not provide an <answer> yourself; the system will return the agent's result directly.
+
+{% if delegation_instructions_xml %}
+OPTIONAL AGENT PASSTHROUGH:
+{{ delegation_instructions_xml }}
+{% endif %}
 """  # noqa: E501
 )
 
@@ -529,6 +551,8 @@ IMPORTANT RULES:
 - Ensure proper JSON syntax with quoted keys and values
 - To return an agent tool's response as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call finish yourself afterward; the system will return the agent's result directly.
 
+{{ delegation_instructions }}
+
 FILE HANDLING:
 - Tools may generate files that are automatically collected
 - Generated files will be included in the final response
@@ -553,6 +577,8 @@ FUNCTION CALLING GUIDELINES:
 - Handle tool responses appropriately before providing final answer
 - Chain multiple tool calls when necessary for complex tasks
 - If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
+
+{{ delegation_instructions }}
 
 FILE HANDLING:
 - Tools may generate files that will be included in the final response

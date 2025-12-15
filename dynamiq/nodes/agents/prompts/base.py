@@ -85,9 +85,18 @@ class AgentPromptManager:
         """Sets or updates a specific prompt variable."""
         self._prompt_variables[var_name] = value
 
-    def update_variables(self, variables: dict[str, Any]):
-        """Updates multiple prompt variables at once."""
-        self._prompt_variables.update(variables)
+    def update_variables(self, variables: dict[str, Any], merge: bool = True):
+        """
+        Updates multiple prompt variables at once.
+
+        Args:
+            variables: Dictionary of variables to update
+            merge: If True, merge with existing variables. If False, replace existing variables.
+        """
+        if merge:
+            self._prompt_variables.update(variables)
+        else:
+            self._prompt_variables = variables.copy()
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """
