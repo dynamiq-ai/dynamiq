@@ -51,6 +51,34 @@ class ImageEdit(ConnectionNode):
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Edit"
+    description: str = """Edit and modify existing images using AI with text prompts and optional masking.
+
+Key Capabilities:
+- AI-powered image editing with natural language prompts
+- Selective area editing using optional mask images
+- Multiple variations generation (set n parameter)
+- Configurable output sizes (256x256 to 1792x1024)
+- URL or base64 JSON response formats
+- Preserves original filenames in outputs
+
+Usage Strategy:
+- Provide clear, descriptive prompts for desired edits
+- Use masks to target specific areas for modification
+- Generate multiple variations to explore different results
+- Integrate seamlessly with agent workflows via file storage
+
+Parameter Guide:
+- prompt: Text description of desired edits (required)
+- image: Image file to edit, auto-injected from agent's file store
+- mask: Optional mask image to specify areas to edit
+- n: Number of edited versions to generate
+- size: Output dimensions (e.g., '1024x1024', '1792x1024')
+- response_format: 'url' or 'b64_json' output format
+
+Examples:
+- {"prompt": "Add a sunset background behind the subject", "image": <source_image>}
+- {"prompt": "Change the shirt color to blue", "image": <source_image>, "mask": <mask_image>}
+- {"prompt": "Make the image more vibrant and colorful", "n": 3, "image": <source_image>}"""
     model: str = "gpt-image-1"
     connection: OpenAIConnection | None = None
     n: int | None = None
@@ -196,11 +224,13 @@ class ImageEdit(ConnectionNode):
             "model": self.model,
             "image": image,
             "prompt": input_data.prompt,
-            "n": self.n,
             "size": size,
             "drop_params": True,
             **self.edit_params,
         }
+
+        if self.n is not None:
+            edit_kwargs["n"] = self.n
 
         mask = self._prepare_image(input_data.mask) if input_data.mask else None
         if mask:

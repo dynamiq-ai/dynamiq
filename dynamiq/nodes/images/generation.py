@@ -117,6 +117,35 @@ class ImageGeneration(ConnectionNode):
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Generation"
+    description: str = """Generate images from text prompts using AI models across multiple providers.
+
+Key Capabilities:
+- Text-to-image generation with natural language prompts
+- Multi-provider support (OpenAI, Azure, AWS Bedrock, Vertex AI, Gemini)
+- Multiple image generation (set n parameter)
+- Configurable sizes (256x256 to 1792x1024)
+- Quality control (standard/hd for supported models)
+- URL or base64 JSON response formats
+- Agent-optimized formatted outputs
+
+Usage Strategy:
+- Write detailed, descriptive prompts for best results
+- Specify artistic style, composition, and key elements clearly
+- Generate multiple variations to explore creative options
+- Use quality='hd' for high-detail requirements
+- Integrate with agent workflows for dynamic image creation
+
+Parameter Guide:
+- prompt: Detailed text description of the image to generate (required)
+- n: Number of images to create (default: 1)
+- size: Output dimensions (e.g., '1024x1024', '1024x1792', '1792x1024')
+- quality: 'standard' or 'hd' (model-dependent)
+- response_format: 'url' or 'b64_json' output format
+
+Examples:
+- {"prompt": "A serene mountain landscape at sunset, photorealistic"}
+- {"prompt": "Modern minimalist logo for tech startup, blue and white", "n": 3}
+- {"prompt": "Abstract art with vibrant colors", "size": "1792x1024", "quality": "hd"}"""
     model: str = "gpt-image-1"
     connection: OpenAIConnection | GeminiConnection | VertexAIConnection | AWSConnection | AzureAIConnection | None = (
         None
@@ -205,11 +234,13 @@ class ImageGeneration(ConnectionNode):
         api_params = {
             "model": self.model,
             "prompt": input_data.prompt,
-            "n": self.n,
             "size": size,
             "drop_params": True,
             **self.generation_params,
         }
+
+        if self.n is not None:
+            api_params["n"] = self.n
 
         try:
             response = self._image_generation(**api_params)

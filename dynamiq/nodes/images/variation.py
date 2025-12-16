@@ -44,6 +44,33 @@ class ImageVariation(ConnectionNode):
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Variation"
+    description: str = """Create AI-generated variations of existing images while preserving core composition.
+
+Key Capabilities:
+- Generate creative variations from source images
+- Maintain overall composition and subject matter
+- Multiple variation generation (set n parameter)
+- Configurable output sizes (256x256 to 1024x1024)
+- URL or base64 JSON response formats
+- Auto-injection from agent's file store
+- Preserves original filenames in outputs
+
+Usage Strategy:
+- Provide a clear, high-quality source image
+- Generate multiple variations to explore creative alternatives
+- Use for style exploration, A/B testing, or creative ideation
+- Integrate with agents for dynamic image transformation workflows
+
+Parameter Guide:
+- image: Source image file, auto-injected from agent's file store (required)
+- n: Number of variations to generate (default: 1)
+- size: Output dimensions (e.g., '1024x1024', '512x512')
+- response_format: 'url' or 'b64_json' output format
+
+Examples:
+- {"image": <source_image>} - Single variation of uploaded image
+- {"image": <source_image>, "n": 5} - Generate 5 different variations
+- {"image": <source_image>, "size": "512x512"} - Smaller output size"""
     model: str = "gpt-image-1"
     connection: OpenAIConnection | None = None
     n: int | None = None
