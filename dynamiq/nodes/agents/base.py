@@ -211,10 +211,6 @@ class Agent(Node):
         default=False,
         description="Allow returning a child agent tool's output directly via delegate_final flag.",
     )
-    delegation_allowed: bool = Field(
-        default=False,
-        description="Allow returning a child agent tool's output directly via delegate_final flag.",
-    )
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
@@ -242,7 +238,7 @@ class Agent(Node):
     _history_offset: int = PrivateAttr(
         default=2,  # Offset to the first message (default: 2 — system and initial user messages).
     )
-    prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
+    system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -390,18 +386,18 @@ class Agent(Node):
         # Initialize prompt manager for this agent
         model_name = getattr(self.llm, "model", None)
 
-        self.prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
-        self.prompt_manager.setup_for_base_agent()
+        self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
+        self.system_prompt_manager.setup_for_base_agent()
         # Defaults; overwritten by ReAct agent / per-call logic when delegation is enabled.
-        self.prompt_manager.update_variables({"delegation_instructions": "", "delegation_instructions_xml": ""})
+        self.system_prompt_manager.update_variables({"delegation_instructions": "", "delegation_instructions_xml": ""})
 
     def set_block(self, block_name: str, content: str):
         """Adds or updates a prompt block."""
-        self.prompt_manager.set_block(block_name, content)
+        self.system_prompt_manager.set_block(block_name, content)
 
     def set_prompt_variable(self, variable_name: str, value: Any):
         """Sets or updates a prompt variable."""
-        self.prompt_manager.set_variable(variable_name, value)
+        self.system_prompt_manager.set_variable(variable_name, value)
 
     def _prepare_metadata(self, input_data: dict) -> dict:
         """
@@ -498,9 +494,9 @@ class Agent(Node):
             # literal sections (via raw) with Jinja variables like {{ input }}
             # without creating nested raw blocks.
             if ("{% raw %}" in self.role) or ("{% endraw %}" in self.role):
-                self.prompt_manager.set_block("role", self.role)
+                self.system_prompt_manager.set_block("role", self.role)
             else:
-                self.prompt_manager.set_block("role", f"{{% raw %}}{self.role}{{% endraw %}}")
+                self.system_prompt_manager.set_block("role", f"{{% raw %}}{self.role}{{% endraw %}}")
 
         files = input_data.files
         uploaded_file_names: set[str] = set()
@@ -522,7 +518,7 @@ class Agent(Node):
         if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
 
-        self.prompt_manager.update_variables(dict(input_data))
+        self.system_prompt_manager.update_variables(dict(input_data))
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
 
@@ -1209,10 +1205,11 @@ class Agent(Node):
         self._intermediate_steps = {}
         self._run_depends = []
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
+        self.system_prompt_manager.reset()
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """Generates the prompt using specified blocks and variables."""
-        return self.prompt_manager.generate_prompt(block_names=block_names, **kwargs)
+        return self.system_prompt_manager.generate_prompt(block_names=block_names, **kwargs)
 
     def _build_child_agent_context(self, child_agent: "Agent") -> dict[str, Any]:
         """Return context for child agents with per-agent ids to isolate their memory."""
@@ -1274,7 +1271,7 @@ class AgentManager(Agent):
         self._init_actions()
 
         # Setup manager-specific prompts
-        self.prompt_manager.setup_for_agent_manager(manager_type="default")
+        self.system_prompt_manager.setup_for_agent_manager(manager_type="default")
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
@@ -1321,7 +1318,7 @@ class AgentManager(Agent):
 
         action = input_data.action
 
-        self.prompt_manager.update_variables(dict(input_data))
+        self.system_prompt_manager.update_variables(dict(input_data))
 
         kwargs = kwargs | {"parent_run_id": kwargs.get("run_id")}
         kwargs.pop("run_depends", None)
@@ -1337,21 +1334,21 @@ class AgentManager(Agent):
 
     def _plan(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'plan' action."""
-        prompt = self.prompt_manager.render_block("plan", **kwargs)
+        prompt = self.system_prompt_manager.render_block("plan", **kwargs)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
 
         return llm_result
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'assign' action."""
-        prompt = self.prompt_manager.render_block("assign", **kwargs)
+        prompt = self.system_prompt_manager.render_block("assign", **kwargs)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
 
         return llm_result
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'final' action."""
-        prompt = self.prompt_manager.render_block("final", **kwargs)
+        prompt = self.system_prompt_manager.render_block("final", **kwargs)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled:
             return self.stream_content(
@@ -1368,6 +1365,6 @@ class AgentManager(Agent):
         Executes the single 'handle_input' action to either respond or plan
         based on user request complexity.
         """
-        prompt = self.prompt_manager.render_block("handle_input", **kwargs)
+        prompt = self.system_prompt_manager.render_block("handle_input", **kwargs)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         return llm_result

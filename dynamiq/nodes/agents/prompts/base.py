@@ -70,10 +70,13 @@ class AgentPromptManager:
             "instructions": "",
             "context": "{{ context }}",
         }
-        self._prompt_variables: dict[str, Any] = {
+
+        # Store initial variables for reset
+        self._initial_variables: dict[str, Any] = {
             "tool_description": tool_description,
             "date": datetime.now().strftime("%d %B %Y"),
         }
+        self._prompt_variables: dict[str, Any] = self._initial_variables.copy()
 
     def set_block(self, block_name: str, content: str):
         """Sets or updates a specific prompt block."""
@@ -99,6 +102,16 @@ class AgentPromptManager:
             self._prompt_variables.update(variables)
         else:
             self._prompt_variables = variables.copy()
+
+    def reset_variables(self):
+        """
+        Resets prompt variables to their initial state.
+
+        This should be called between runs to prevent variable accumulation.
+        The date is refreshed on each reset to ensure it's always current.
+        """
+        self._prompt_variables = self._initial_variables.copy()
+        self._prompt_variables["date"] = datetime.now().strftime("%d %B %Y")
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:
         """
