@@ -10,6 +10,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.images import ImageEdit, ImageResponseFormat, ImageSize
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from tests.integration.nodes.images.conftest import CREATION_TIMESTAMP
 
 
 @pytest.fixture
@@ -68,7 +69,7 @@ def test_image_edit_response_formats(
     assert "files" in node_output["output"]
     assert len(node_output["output"]["files"]) == 1
     assert isinstance(node_output["output"]["files"][0], io.BytesIO)
-    assert node_output["output"]["created"] == 1234567890
+    assert node_output["output"]["created"] == CREATION_TIMESTAMP
 
     mock_image_edit_executor.assert_called_once()
     call_kwargs = mock_image_edit_executor.call_args[1]
@@ -79,7 +80,7 @@ def test_image_edit_response_formats(
         mock_httpx_get.assert_called_once_with(mock_image_url, timeout=60.0)
     else:
         assert "test_image_0.png created" in node_output["output"]["content"][0]
-        assert call_kwargs["response_format"] == "b64_json"
+        assert call_kwargs["response_format"] == ImageResponseFormat.B64_JSON
 
 
 def test_image_edit_with_mask(

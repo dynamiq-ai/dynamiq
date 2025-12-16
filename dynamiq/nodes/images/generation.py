@@ -1,6 +1,7 @@
 import base64
 import io
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, ClassVar, Literal
 
 import httpx
@@ -16,6 +17,17 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
+
+EXTENSIONS_TO_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+}
 
 
 class ImageSize(str, Enum):
@@ -50,24 +62,11 @@ def create_image_file(image_bytes: bytes, index: int = 0, original_name: str | N
     """
     image_file = io.BytesIO(image_bytes)
 
-    extension_to_mime = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-        ".bmp": "image/bmp",
-        ".tiff": "image/tiff",
-        ".tif": "image/tiff",
-    }
-
     if original_name:
-        from pathlib import Path
-
         base_name = Path(original_name).stem
         ext = Path(original_name).suffix or ".png"
         image_file.name = f"{base_name}_{index}{ext}"
-        image_file.content_type = extension_to_mime.get(ext.lower(), "image/png")
+        image_file.content_type = EXTENSIONS_TO_MIME.get(ext.lower(), "image/png")
     else:
         image_file.name = f"image_{index}.png"
         image_file.content_type = "image/png"
@@ -93,6 +92,7 @@ class ImageGenerationInputSchema(BaseModel):
     """Input schema for image generation."""
 
     prompt: str = Field(..., description="Text prompt describing the image to generate.")
+    n: int | None = None
 
 
 class ImageGeneration(ConnectionNode):
@@ -239,8 +239,9 @@ Examples:
             **self.generation_params,
         }
 
-        if self.n is not None:
-            api_params["n"] = self.n
+        n = input_data.n or self.n
+        if n:
+            api_params["n"] = n
 
         try:
             response = self._image_generation(**api_params)
@@ -256,14 +257,14 @@ Examples:
         files = []
 
         for idx, img_data in enumerate(response.data):
-            if hasattr(img_data, "url") and img_data.url:
-                content.append(img_data.url)
-                image_bytes = download_image_from_url(img_data.url)
+            if img_url := getattr(img_data, ImageResponseFormat.URL, None):
+                content.append(img_url)
+                image_bytes = download_image_from_url(img_url)
                 file = create_image_file(image_bytes, idx)
                 files.append(file)
 
-            elif hasattr(img_data, "b64_json") and img_data.b64_json:
-                image_bytes = base64.b64decode(img_data.b64_json)
+            elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON, None):
+                image_bytes = base64.b64decode(img_b64)
                 file = create_image_file(image_bytes, idx)
                 content.append(f"{file.name} created")
                 files.append(file)

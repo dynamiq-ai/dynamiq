@@ -88,7 +88,7 @@ def test_image_generation_with_b64_response(
 
     mock_image_generation_executor.assert_called_once()
     call_kwargs = mock_image_generation_executor.call_args[1]
-    assert call_kwargs["response_format"] == "b64_json"
+    assert call_kwargs["response_format"] == ImageResponseFormat.B64_JSON
 
 
 def test_image_generation_multiple_images(

@@ -11,17 +11,19 @@ from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
+from .edit import prepare_single_image
 from .generation import ImageResponseFormat, ImageSize, create_image_file, download_image_from_url
 
 
 class ImageVariationInputSchema(BaseModel):
     """Input schema for image variation."""
 
-    image: list[io.BytesIO | bytes] | io.BytesIO | bytes | None = Field(
-        default=None,
+    image: list[io.BytesIO | bytes] | io.BytesIO | bytes = Field(
+        ...,
         description="The image to create variations of. Auto-injected from agent's file store.",
         json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
     )
+    n: int | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -117,8 +119,6 @@ Examples:
                 else self.response_format
             )
             params["response_format"] = response_format_value
-        if self.n is not None:
-            params["n"] = self.n
 
         if hasattr(self, "__pydantic_extra__") and self.__pydantic_extra__:
             import copy
@@ -127,45 +127,6 @@ Examples:
             params.update(extra)
 
         return params
-
-    def _prepare_image(self, image: list[io.BytesIO] | io.BytesIO | bytes | None) -> io.BytesIO:
-        """Prepare the image for the API call.
-
-        Args:
-            image: Image as list of BytesIO (from FileStore), single BytesIO, or bytes.
-
-        Returns:
-            BytesIO file-like object for API submission.
-        """
-        if image is None:
-            raise ValueError("No image provided. Please upload an image file.")
-
-        if isinstance(image, bytes):
-            image_bytes = image
-        elif isinstance(image, io.BytesIO):
-            image.seek(0)
-            image_bytes = image.read()
-        elif hasattr(image, "read"):
-            image.seek(0)
-            image_bytes = image.read()
-        else:
-            raise ValueError(f"Unsupported image type: {type(image)}")
-
-        from PIL import Image
-
-        img_obj = Image.open(io.BytesIO(image_bytes))
-        original_format = img_obj.format or "PNG"
-
-        if original_format in ("JPEG", "JPG"):
-            if img_obj.mode not in ("RGB", "L"):
-                img_obj = img_obj.convert("RGB")
-        elif img_obj.mode not in ("RGB", "RGBA", "LA", "L"):
-            img_obj = img_obj.convert("RGB")
-
-        output_bytes = io.BytesIO()
-        img_obj.save(output_bytes, format=original_format)
-        output_bytes.seek(0)
-        return output_bytes
 
     def execute(self, input_data: ImageVariationInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         """Execute the image variation generation.
@@ -198,7 +159,7 @@ Examples:
         elif isinstance(raw_image, io.BytesIO) and hasattr(raw_image, "name") and raw_image.name:
             original_filename = raw_image.name
 
-        image = self._prepare_image(raw_image)
+        image = prepare_single_image(raw_image)
 
         api_params = {
             "model": self.model,
@@ -208,6 +169,9 @@ Examples:
             **self.variation_params,
         }
 
+        n = input_data.n or self.n
+        if n:
+            api_params["n"] = n
         try:
             response = self._image_variation(**api_params)
         except Exception as e:
@@ -222,14 +186,14 @@ Examples:
         files = []
 
         for idx, img_data in enumerate(response.data):
-            if hasattr(img_data, "url") and img_data.url:
-                content.append(img_data.url)
-                image_bytes = download_image_from_url(img_data.url)
+            if img_url := getattr(img_data, ImageResponseFormat.URL, None):
+                content.append(img_url)
+                image_bytes = download_image_from_url(img_url)
                 file = create_image_file(image_bytes, idx, original_name=original_filename)
                 files.append(file)
 
-            elif hasattr(img_data, "b64_json") and img_data.b64_json:
-                image_bytes = base64.b64decode(img_data.b64_json)
+            elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON, None):
+                image_bytes = base64.b64decode(img_b64)
                 file = create_image_file(image_bytes, idx, original_name=original_filename)
                 content.append(f"{file.name} created")
                 files.append(file)

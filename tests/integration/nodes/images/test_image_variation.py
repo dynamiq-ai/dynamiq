@@ -8,6 +8,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.images import ImageResponseFormat, ImageSize, ImageVariation
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from tests.integration.nodes.images.conftest import CREATION_TIMESTAMP
 
 
 def test_image_variation_with_url_response(
@@ -20,7 +21,7 @@ def test_image_variation_with_url_response(
     openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
 
     image_node = ImageVariation(
-        name="Image Variator",
+        name="Image Variation",
         model="gpt-image-1",
         connection=openai_connection,
         size=ImageSize.SIZE_1024x1024,
@@ -43,7 +44,7 @@ def test_image_variation_with_url_response(
     assert node_output["output"]["content"] == [mock_image_url]
     assert len(node_output["output"]["files"]) == 1
     assert isinstance(node_output["output"]["files"][0], io.BytesIO)
-    assert node_output["output"]["created"] == 1234567890
+    assert node_output["output"]["created"] == CREATION_TIMESTAMP
 
     mock_image_variation_executor.assert_called_once()
     call_kwargs = mock_image_variation_executor.call_args[1]
@@ -88,7 +89,7 @@ def test_image_variation_with_b64_response(
 
     mock_image_variation_executor.assert_called_once()
     call_kwargs = mock_image_variation_executor.call_args[1]
-    assert call_kwargs["response_format"] == "b64_json"
+    assert call_kwargs["response_format"] == ImageResponseFormat.B64_JSON
 
 
 def test_image_variation_with_list_of_images_uses_first(

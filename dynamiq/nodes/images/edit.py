@@ -2,6 +2,8 @@ import base64
 import io
 from typing import Any, Callable, ClassVar, Literal
 
+import filetype
+from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -14,12 +16,60 @@ from dynamiq.utils.logger import logger
 from .generation import ImageResponseFormat, ImageSize, create_image_file, download_image_from_url
 
 
+def prepare_single_image(img) -> io.BytesIO:
+    """Prepare the image for the API call.
+
+    Args:
+        img: Image to prepare.
+
+    Returns:
+        BytesIO file-like object for API submission.
+    """
+    if isinstance(img, bytes):
+        image_bytes = img
+    elif isinstance(img, io.BytesIO):
+        img.seek(0)
+        image_bytes = img.read()
+    elif hasattr(img, "read"):
+        img.seek(0)
+        image_bytes = img.read()
+    else:
+        raise ValueError(f"Unsupported image type: {type(img)}")
+
+    try:
+        img_obj = Image.open(io.BytesIO(image_bytes))
+        img_obj.load()
+    except Exception as e:
+        raise ValueError("Invalid image data") from e
+
+    original_format = img_obj.format
+
+    if not original_format:
+        kind = filetype.guess(image_bytes)
+        if not kind:
+            raise ValueError("Unable to detect image format")
+
+        original_format = kind.extension.upper()
+
+    if original_format in ("JPEG", "JPG"):
+        if img_obj.mode not in ("RGB", "L"):
+            img_obj = img_obj.convert("RGB")
+    else:
+        if img_obj.mode not in ("RGBA", "LA", "L"):
+            img_obj = img_obj.convert("RGBA")
+
+    output_bytes = io.BytesIO()
+    img_obj.save(output_bytes, format=original_format)
+    output_bytes.seek(0)
+    return output_bytes
+
+
 class ImageEditInputSchema(BaseModel):
     """Input schema for image editing."""
 
     prompt: str = Field(..., description="Text prompt describing the desired edits.")
-    image: list[io.BytesIO | bytes] | list[bytes] | io.BytesIO | bytes | None = Field(
-        default=None,
+    image: list[io.BytesIO | bytes] | list[bytes] | io.BytesIO | bytes = Field(
+        ...,
         description="The image(s) to edit. Can be a single image or a list of images. Auto-injected from agent's "
         "file store.",
         json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
@@ -28,6 +78,7 @@ class ImageEditInputSchema(BaseModel):
         default=None,
         description="Optional mask image indicating areas to edit.",
     )
+    n: int | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -148,35 +199,6 @@ Examples:
         if image is None:
             raise ValueError("No image provided. Please upload an image file.")
 
-        def prepare_single_image(img) -> io.BytesIO:
-            if isinstance(img, bytes):
-                image_bytes = img
-            elif isinstance(img, io.BytesIO):
-                img.seek(0)
-                image_bytes = img.read()
-            elif hasattr(img, "read"):
-                img.seek(0)
-                image_bytes = img.read()
-            else:
-                raise ValueError(f"Unsupported image type: {type(img)}")
-
-            from PIL import Image
-
-            img_obj = Image.open(io.BytesIO(image_bytes))
-            original_format = img_obj.format or "PNG"
-
-            if original_format in ("JPEG", "JPG"):
-                if img_obj.mode not in ("RGB", "L"):
-                    img_obj = img_obj.convert("RGB")
-            else:
-                if img_obj.mode not in ("RGBA", "LA", "L"):
-                    img_obj = img_obj.convert("RGBA")
-
-            output_bytes = io.BytesIO()
-            img_obj.save(output_bytes, format=original_format)
-            output_bytes.seek(0)
-            return output_bytes
-
         if isinstance(image, list):
             if not image:
                 raise ValueError("No image files found in storage.")
@@ -229,11 +251,12 @@ Examples:
             **self.edit_params,
         }
 
-        if self.n is not None:
-            edit_kwargs["n"] = self.n
+        n = input_data.n or self.n
+        if n:
+            edit_kwargs["n"] = n
 
-        mask = self._prepare_image(input_data.mask) if input_data.mask else None
-        if mask:
+        if input_data.mask:
+            mask = self._prepare_image(input_data.mask)
             edit_kwargs["mask"] = mask
 
         try:
@@ -253,15 +276,15 @@ Examples:
         for idx, img_data in enumerate(response.data):
             original_name = original_filenames[file_idx % len(original_filenames)] if original_filenames else None
 
-            if hasattr(img_data, "url") and img_data.url:
-                content.append(img_data.url)
-                image_bytes = download_image_from_url(img_data.url)
+            if img_url := getattr(img_data, ImageResponseFormat.URL, None):
+                content.append(img_url)
+                image_bytes = download_image_from_url(img_url)
                 file = create_image_file(image_bytes, file_idx, original_name=original_name)
                 files.append(file)
                 file_idx += 1
 
-            elif hasattr(img_data, "b64_json") and img_data.b64_json:
-                image_bytes = base64.b64decode(img_data.b64_json)
+            elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON, None):
+                image_bytes = base64.b64decode(img_b64)
                 file = create_image_file(image_bytes, file_idx, original_name=original_name)
                 content.append(f"{file.name} created")
                 files.append(file)
