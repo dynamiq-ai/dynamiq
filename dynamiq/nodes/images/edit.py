@@ -50,6 +50,7 @@ def prepare_single_image(img) -> io.BytesIO:
             raise ValueError("Unable to detect image format")
 
         original_format = kind.extension.upper()
+        original_format = "JPEG" if original_format == "JPG" else original_format
 
     if original_format in ("JPEG", "JPG"):
         if img_obj.mode not in ("RGB", "L"):
