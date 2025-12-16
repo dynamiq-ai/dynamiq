@@ -141,6 +141,70 @@ If new classes don't follow the standard organization:
 
 ## Code Style & Naming
 
+### Follow existing codebase patterns
+
+If a PR adds new nodes, connections, or components that don't follow existing patterns:
+- Add a blocking Bug titled "Follow existing codebase patterns"
+- Body: "New code must follow existing naming conventions and architectural patterns:
+
+  **Node naming**: Use descriptive names matching existing nodes (e.g., `OpenAI`, `Pinecone`, `ScaleSerp`)
+
+  **File structure**: Follow `dynamiq/nodes/{category}/{provider}.py` pattern
+
+  **Class structure**: Match existing node patterns:
+  ```python
+  class MyNode(ConnectionNode):  # or Node, VectorStoreNode
+      group: NodeGroup = NodeGroup.{CATEGORY}
+      name: str = 'Human Readable Name'
+      description: str = 'Clear description of what node does'
+
+      connection: MyConnection | None = None
+      client: Any | None = None
+
+      # Fields with Field() for descriptions
+      some_feature_enabled: bool = Field(default=False, description='Enable some feature')
+
+      def init_components(self, connection_manager: ConnectionManager | None = None):
+          ...
+
+      def execute(self, input_data: InputSchema, config: RunnableConfig = None, **kwargs):
+          ...
+  ```
+
+  **Connection naming**: Match `{Provider}Connection` pattern in `dynamiq/connections/`
+
+  Review similar existing implementations before adding new components."
+
+### Use enums, constants, and class variables instead of hardcoded strings
+
+If a PR uses hardcoded strings for statuses, types, or repeated values:
+- Add a Bug titled "Use enums/constants instead of hardcoded strings"
+- Body: "Avoid hardcoded strings. Use enums, class variables, and constants:
+  ```python
+  # Bad - hardcoded strings
+  if status == 'success':
+      format_type = 'json'
+
+  # Good - use enums
+  class OutputFormat(str, Enum):
+      JSON = 'json'
+      YAML = 'yaml'
+      XML = 'xml'
+
+  if status == RunnableStatus.SUCCESS:
+      format_type = OutputFormat.JSON
+
+  # Good - ClassVar for numeric constants
+  DEFAULT_TIMEOUT: ClassVar[int] = 3600
+  MAX_RETRIES: ClassVar[int] = 3
+  ```
+
+  Common enums in the project:
+  - `RunnableStatus` for execution status
+  - `NodeGroup` for node categorization
+  - `MessageRole` for prompt messages
+  - `InferenceMode` for agent modes"
+
 ### Require type annotations
 
 If any new Python function or method lacks type annotations for parameters or return type:
@@ -155,7 +219,7 @@ If any changed Python file contains lines exceeding 120 characters (excluding UR
 
 ### Use descriptive names
 
-If a PR uses single-letter variables or unclear names:
+If a PR uses single-letter variables, unclear names, or incorrect field naming patterns:
 - Add a Bug titled "Use descriptive names"
 - Body: "Names should reveal intent. Apply these patterns:
 
@@ -178,6 +242,21 @@ If a PR uses single-letter variables or unclear names:
   - `is_*`, `has_*`, `can_*` - boolean checks
   - `process_*`, `handle_*` - transform data
   - `validate_*`, `check_*` - verification
+
+  **Field naming** - use suffix patterns for booleans and states:
+  - Boolean flags: `*_enabled`, `*_allowed`, `*_required` (not `enable_*`, `allow_*`)
+  - State checks: `is_*`, `has_*`, `can_*`
+  - Examples: `streaming_enabled`, `delegation_allowed`, `is_postponed_component_init`
+  ```python
+  # Bad
+  enable_streaming: bool = False
+  allow_delegation: bool = False
+
+  # Good
+  streaming_enabled: bool = False
+  delegation_allowed: bool = False
+  is_initialized: bool = False
+  ```
 
   **Exceptions for short names:**
   - Loop indices: `i`, `j`, `k` (only for simple numeric loops)
