@@ -354,7 +354,7 @@ Answer: [Your direct response]
 - List each Action and Action Input separately
 - Only use tools from the provided list
 
-{{ delegation_instructions_xml }}
+{{ delegation_instructions }}
 
 **FILE HANDLING:**
 - Tools may generate multiple files during execution

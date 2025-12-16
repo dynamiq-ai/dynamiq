@@ -1,11 +1,15 @@
 """Prompt management system for agents.
 
 This package provides:
-- Default prompts and templates in `templates/defaults/`
-- Model-specific prompt overrides in `templates/models/`
-- Registry for managing model-specific prompts
-- AgentPromptManager for centralized prompt setup
+- AgentPromptManager for centralized prompt management
+- Registry for model-specific prompt overrides
+- Default prompts and templates
+- Model-specific overrides in `overrides/`
 """
 
-from dynamiq.nodes.agents.prompts.base import AgentPromptManager
-from dynamiq.nodes.agents.prompts.templates import get_prompt_constant, get_registry, register_model_prompts
+# Import overrides to trigger auto-registration
+from dynamiq.nodes.agents.prompts import overrides  # noqa: F401
+from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
+from dynamiq.nodes.agents.prompts.registry import get_prompt_constant, get_registry, register_model_prompts
+
+__all__ = ["AgentPromptManager", "get_prompt_constant", "get_registry", "register_model_prompts"]

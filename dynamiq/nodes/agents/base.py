@@ -11,8 +11,8 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import AgentUnknownToolException, InvalidActionException, ToolExecutionException
-from dynamiq.nodes.agents.prompts.base import AgentPromptManager
-from dynamiq.nodes.agents.prompts.templates.defaults.templates import AGENT_PROMPT_TEMPLATE
+from dynamiq.nodes.agents.prompts.agent_templates import AGENT_PROMPT_TEMPLATE
+from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
     FileMappedInput,

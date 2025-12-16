@@ -7,8 +7,7 @@ from typing import Any
 
 from jinja2 import Template
 
-from dynamiq.nodes.agents.prompts.templates import get_prompt_constant
-from dynamiq.nodes.agents.prompts.templates.defaults.base_prompts import (
+from dynamiq.nodes.agents.prompts.react import (
     DEFAULT_DIRECT_OUTPUT_CAPABILITIES,
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
@@ -27,7 +26,8 @@ from dynamiq.nodes.agents.prompts.templates.defaults.base_prompts import (
     REACT_MAX_LOOPS_PROMPT,
     XML_DIRECT_OUTPUT_CAPABILITIES,
 )
-from dynamiq.nodes.agents.prompts.templates.defaults.templates import AGENT_PROMPT_TEMPLATE
+from dynamiq.nodes.agents.prompts.registry import get_prompt_constant
+from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
 
