@@ -142,6 +142,13 @@ def mock_tracing_client(mocker):
 
 
 @pytest.fixture
+def mock_tracing_client_with_flush(mocker):
+    mock_client = mocker.Mock(spec=BaseTracingClient)
+    mock_client.trace = mocker.Mock()
+    return mock_client
+
+
+@pytest.fixture
 def mock_redis_backend(mocker, mock_redis):
     yield mocker.patch(
         "dynamiq.cache.backends.RedisCache.from_config",
