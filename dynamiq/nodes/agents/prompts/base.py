@@ -103,9 +103,9 @@ class AgentPromptManager:
         else:
             self._prompt_variables = variables.copy()
 
-    def reset_variables(self):
+    def reset(self):
         """
-        Resets prompt variables to their initial state.
+        Resets prompt manager to its initial state.
 
         This should be called between runs to prevent variable accumulation.
         The date is refreshed on each reset to ensure it's always current.

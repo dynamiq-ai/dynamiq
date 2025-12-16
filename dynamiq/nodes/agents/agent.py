@@ -383,7 +383,7 @@ class Agent(BaseAgent):
         )
 
         # Use model-specific history summarization prompt from prompt manager
-        history_prompt = self.prompt_manager.history_prompt
+        history_prompt = self.system_prompt_manager.history_prompt
 
         summary_messages = [
             Message(content=history_prompt, role=MessageRole.SYSTEM, static=True),
@@ -464,7 +464,7 @@ class Agent(BaseAgent):
             content=self.generate_prompt(
                 tools_name=self.tool_names,
                 input_formats=self.generate_input_formats(self.tools),
-                **self.prompt_manager.build_delegation_variables(self.delegation_allowed),
+                **self.system_prompt_manager.build_delegation_variables(self.delegation_allowed),
             ),
             static=True,
         )
@@ -1080,7 +1080,7 @@ class Agent(BaseAgent):
             str: Final answer provided by the agent.
         """
         # Use model-specific max loops prompt from prompt manager
-        max_loops_prompt = self.prompt_manager.max_loops_prompt
+        max_loops_prompt = self.system_prompt_manager.max_loops_prompt
 
         system_message = Message(content=max_loops_prompt, role=MessageRole.SYSTEM, static=True)
         conversation_history = Message(
@@ -1322,7 +1322,9 @@ class Agent(BaseAgent):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
         # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
-        self.prompt_manager.update_variables(self.prompt_manager.build_delegation_variables(self.delegation_allowed))
+        self.system_prompt_manager.update_variables(
+            self.system_prompt_manager.build_delegation_variables(self.delegation_allowed)
+        )
 
         # Handle function calling schema generation first
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
@@ -1331,7 +1333,7 @@ class Agent(BaseAgent):
             self.generate_structured_output_schemas()
 
         # Setup ReAct-specific prompts via prompt manager
-        self.prompt_manager.setup_for_react_agent(
+        self.system_prompt_manager.setup_for_react_agent(
             inference_mode=self.inference_mode,
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             direct_tool_output_enabled=self.direct_tool_output_enabled,

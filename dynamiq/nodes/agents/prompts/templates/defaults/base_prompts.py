@@ -78,7 +78,6 @@ IMPORTANT RULES:
 - Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
-- Optional: When you want an agent tool's response returned verbatim as the final output, set "delegate_final": true in its Action Input. Only do this for a single agent tool call and do not write an Answer yourself.
 {{ delegation_instructions }}
 
 FILE HANDLING:
@@ -142,7 +141,6 @@ CRITICAL XML FORMAT RULES:
 - Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {"input": "your subtask"}. Keep only inputs inside <action_input>.
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
-- Optional: When you want an agent tool's response returned verbatim as the final output, set "delegate_final": true inside the <action_input>. Use this only when calling a single agent tool and do not provide an <answer> yourself; the system will return the agent's result directly.
 
 {{ delegation_instructions_xml }}
 
@@ -355,7 +353,6 @@ Answer: [Your direct response]
 - Proper JSON syntax with commas and brackets
 - List each Action and Action Input separately
 - Only use tools from the provided list
-- Optional: If you need an agent tool's response returned verbatim as the final output, set "delegate_final": true in that tool's Action Input. Use this only for a single agent tool call and do not write an Answer yourself; the system will return the agent's result directly.
 
 {{ delegation_instructions_xml }}
 
@@ -445,10 +442,6 @@ ADDITIONAL RULES:
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 
-OPTIONAL AGENT PASSTHROUGH:
-- To return an agent tool's response as the final output, include "delegate_final": true inside that tool's <input>.
-- Use delegate_final only when calling a single agent tool and do not provide an <answer> yourself; the system will return the agent's result directly.
-
 {% if delegation_instructions_xml %}
 OPTIONAL AGENT PASSTHROUGH:
 {{ delegation_instructions_xml }}
@@ -499,28 +492,6 @@ REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
 - Clearly mention any files that were generated during the process.
 - Provide file names and brief descriptions of their contents.
 """
-
-REACT_MAX_LOOPS_PROMPT = """
-You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
-Your goal is to analyze the given context and formulate a clear, concise response.
-First, carefully review the history, which contains thoughts and information gathered during the process.
-
-Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
-Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
-1. Fully supported by the information found in the context
-2. Clear and concise
-3. Directly addressing the original question or task, if possible
-If you cannot provide a full answer based on the given context, explain that due to limitations in the number of steps or potential issues with the tools used, you are unable to fully answer the question. In this case, suggest one or more of the following:
-1. Increasing the maximum number of loops for the agent setup
-2. Reviewing the tools settings
-3. Revising the input task description
-Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
-Provide your final answer or explanation within <answer> tags.
-Your response should be clear, concise, and professional.
-<answer>
-[Your final answer or explanation goes here]
-</answer>
-"""  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
 
@@ -626,7 +597,6 @@ IMPORTANT RULES:
 REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
 - Avoid phrases like 'based on the information gathered or provided.'
 """
-
 
 REACT_MAX_LOOPS_PROMPT = """
 You are tasked with providing a final answer for initial user question based on information gathered during a process that has reached its maximum number of loops.
