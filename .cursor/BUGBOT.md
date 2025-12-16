@@ -55,11 +55,35 @@ api_key = get_env_var("API_KEY")
 def connect(self, api_key: str) -> Client:
 ```
 
-### Validate user input in tools
+### Use input_schema for node input validation
 
-If a PR modifies files in `dynamiq/nodes/tools/**` and accepts user input without validation:
-- Add a Bug titled "Missing input validation"
-- Body: "Tool nodes should validate user inputs using Pydantic Field validators or explicit checks before processing."
+If a PR adds or modifies nodes without defining an `input_schema` for input validation:
+- Add a Bug titled "Consider adding input_schema"
+- Body: "Nodes should define `input_schema` as a Pydantic model to validate input data. This provides:
+  - Automatic validation in `validate_input_schema()`
+  - Clear documentation of expected inputs
+  - Type safety and IDE support
+  - Better error messages for invalid inputs
+
+  Example:
+  ```python
+  from pydantic import BaseModel, Field
+
+  class MyNodeInputSchema(BaseModel):
+      query: str = Field(..., description='Search query')
+      max_results: int = Field(default=10, ge=1, le=100)
+      filters: dict[str, Any] | None = None
+
+  class MyNode(Node):
+      input_schema: type[BaseModel] = MyNodeInputSchema
+
+      def execute(self, input_data: MyNodeInputSchema, config: RunnableConfig = None, **kwargs):
+          # input_data is already validated as MyNodeInputSchema
+          query = input_data.query
+          ...
+  ```
+
+  For nodes accepting user input, validation is especially critical for security."
 
 ---
 
