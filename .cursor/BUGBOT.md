@@ -18,9 +18,42 @@ If any changed file contains `eval(`, `exec(`, or `compile(` outside of the `dyn
 
 ### Flag hardcoded secrets
 
-If any changed file contains patterns like `/(?:api[_-]?key|secret|password|token)\s*[=:]\s*["'][^"']+["']/i`:
+If any changed file contains actual hardcoded credential values (not parameter/field definitions):
 - Add a blocking Bug titled "Potential hardcoded secret"
 - Body: "Hardcoded credential detected. Use environment variables or the connection management system instead."
+
+**What to flag** (actual secrets assigned directly):
+```python
+# BAD - hardcoded secret value
+api_key = "sk-abc123..."
+client = OpenAI(api_key="sk-abc123...")
+headers = {"Authorization": "Bearer sk-abc123..."}
+```
+
+**What NOT to flag** (these are legitimate patterns):
+```python
+# OK - Connection class field definitions with env var defaults
+api_key: str = Field(default_factory=partial(get_env_var, "OPENAI_API_KEY"))
+
+# OK - Type annotations in class definitions
+api_key: str
+password: str | None = None
+
+# OK - Node input parameters
+def execute(self, input_data: dict) -> dict:
+    api_key = input_data.get("api_key")
+
+# OK - Accessing from connection/config
+api_key = self.connection.api_key
+api_key = config.api_key
+
+# OK - Environment variable access
+api_key = os.environ.get("API_KEY")
+api_key = get_env_var("API_KEY")
+
+# OK - Parameter names in function signatures
+def connect(self, api_key: str) -> Client:
+```
 
 ### Validate user input in tools
 
