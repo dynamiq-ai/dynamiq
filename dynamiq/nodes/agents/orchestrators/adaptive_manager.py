@@ -373,7 +373,7 @@ class AdaptiveAgentManager(AgentManager):
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks with adaptive plan and final prompts."""
         super()._init_prompt_blocks()
-        self.prompt_manager.update_blocks(
+        self.system_prompt_manager.update_blocks(
             {
                 "plan": self._get_adaptive_plan_prompt(),
                 "final": self._get_adaptive_final_prompt(),
@@ -410,7 +410,7 @@ class AdaptiveAgentManager(AgentManager):
 
     def _reflect(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'reflect' action."""
-        prompt = self.prompt_manager.render_block("reflect", **kwargs)
+        prompt = self.system_prompt_manager.render_block("reflect", **kwargs)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(
@@ -424,7 +424,7 @@ class AdaptiveAgentManager(AgentManager):
 
     def _respond(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'respond' action."""
-        prompt = self.prompt_manager.render_block("respond", **kwargs)
+        prompt = self.system_prompt_manager.render_block("respond", **kwargs)
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             return self.stream_content(

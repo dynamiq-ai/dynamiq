@@ -214,7 +214,7 @@ class LinearAgentManager(AgentManager):
         and final answer generation processes.
         """
         super()._init_prompt_blocks()
-        self.prompt_manager.update_blocks(
+        self.system_prompt_manager.update_blocks(
             {
                 "plan": self._get_linear_plan_prompt(),
                 "assign": self._get_linear_assign_prompt(),
