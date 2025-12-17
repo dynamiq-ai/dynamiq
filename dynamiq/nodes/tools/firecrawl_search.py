@@ -12,30 +12,22 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_FIRECRAWL_SEARCH = """Search the web with Firecrawl across web, news, and image verticals.
-
 What it does:
 - Returns SERP results with geo/time filters and category biasing (github/research/pdf)
 - Lets you control result count, recency, geo bias, timeout, and URL validation in one call
-
 Parameters (FirecrawlSearchInput):
 - `query` (required): search string.
 - `limit` (1-100): max results to return (default 5).
-- `sources` (list of objects): choose verticals with optional per-source settings:
-  - Web: {"type":"web","tbs":"qdr:d","location":"San Francisco,California,United States"}
-  - News: {"type":"news"}
-  - Images: {"type":"images"}
 - `categories` (list): bias results toward content types, e.g., ["github","research","pdf"].
 - `tbs`: time filter (qdr:h/d/w/m/y or custom ranges like cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY).
 - `location`: city/state/country string for geo bias.
 - `country`: ISO country code for geo targeting (e.g., "US").
 - `timeout`: request timeout in milliseconds (default 60000).
 - `ignoreInvalidURLs`: true to drop invalid links from the response.
-
 Examples:
 {"query": "firecrawl docs", "limit": 5}
-{"query": "openai funding", "sources": [{"type": "news"}], "limit": 3}
-{"query": "sunset wallpaper imagesize:1920x1080", "sources": [{"type": "images"}], "limit": 5}
-{"query": "langchain github", "categories": ["github"], "tbs": "qdr:w"}"""
+{"query": "openai funding",  "limit": 3}
+{"query": "dynamiq github", "categories": ["github"], "tbs": "qdr:w"}"""
 
 
 class SourceWeb(BaseModel):
@@ -70,7 +62,9 @@ class FirecrawlSearchInput(BaseModel):
     query: str = Field(..., description="Search query to execute on Firecrawl.")
     limit: int | None = Field(default=None, ge=1, le=100, description="Maximum number of search results to return.")
     sources: list[SourceType] | None = Field(
-        default=None, description="Result types to fetch: web/news/images with optional per-source options."
+        default=None,
+        description="Result types to fetch: web/news/images with optional per-source options.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     categories: list[CategoryType] | None = Field(
         default=None,

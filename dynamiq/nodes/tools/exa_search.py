@@ -231,8 +231,7 @@ class ExaInputSchema(BaseModel):
     include_full_content: bool | None = Field(
         default=None,
         description=(
-            "Shortcut flag: True requests default text/highlight/summary payloads for each result "
-            "(equivalent to ContentsRequest with simple booleans)."
+            "Shortcut flag: True requests default text/highlight/summary payloads for each result"
         ),
     )
     use_autoprompt: bool | None = Field(
@@ -297,6 +296,7 @@ class ExaInputSchema(BaseModel):
             "Return all page contents concatenated into a single context string. True uses defaults; provide "
             "ContextOptions to set a maxCharacters budget (Exa recommends >=10000)."
         ),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     moderation: bool | None = Field(
         default=None,
@@ -308,6 +308,7 @@ class ExaInputSchema(BaseModel):
             "Full customization of Exa's contents payload (text/highlights/summary/livecrawl/subpages/extras/context). "
             "Use this when include_full_content is insufficient."
         ),
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
 
