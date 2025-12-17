@@ -277,14 +277,14 @@ Examples:
         for idx, img_data in enumerate(response.data):
             original_name = original_filenames[file_idx % len(original_filenames)] if original_filenames else None
 
-            if img_url := getattr(img_data, ImageResponseFormat.URL, None):
+            if img_url := getattr(img_data, ImageResponseFormat.URL.value, None):
                 content.append(img_url)
                 image_bytes = download_image_from_url(img_url)
                 file = create_image_file(image_bytes, file_idx, original_name=original_name)
                 files.append(file)
                 file_idx += 1
 
-            elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON, None):
+            elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON.value, None):
                 image_bytes = base64.b64decode(img_b64)
                 file = create_image_file(image_bytes, file_idx, original_name=original_name)
                 content.append(f"{file.name} created")
