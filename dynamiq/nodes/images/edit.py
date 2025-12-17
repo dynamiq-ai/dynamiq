@@ -1,4 +1,5 @@
 import base64
+import copy
 import io
 from typing import Any, Callable, ClassVar, Literal
 
@@ -69,7 +70,7 @@ class ImageEditInputSchema(BaseModel):
     """Input schema for image editing."""
 
     prompt: str = Field(..., description="Text prompt describing the desired edits.")
-    image: list[io.BytesIO | bytes] | list[bytes] | io.BytesIO | bytes = Field(
+    files: list[io.BytesIO | bytes] | io.BytesIO | bytes = Field(
         ...,
         description="The image(s) to edit. Can be a single image or a list of images. Auto-injected from agent's "
         "file store.",
@@ -121,16 +122,16 @@ Usage Strategy:
 
 Parameter Guide:
 - prompt: Text description of desired edits (required)
-- image: Image file to edit, auto-injected from agent's file store
+- files: Image file/files to edit, auto-injected from agent's file store
 - mask: Optional mask image to specify areas to edit
 - n: Number of edited versions to generate
 - size: Output dimensions (e.g., '1024x1024', '1792x1024')
 - response_format: 'url' or 'b64_json' output format
 
 Examples:
-- {"prompt": "Add a sunset background behind the subject", "image": <source_image>}
-- {"prompt": "Change the shirt color to blue", "image": <source_image>, "mask": <mask_image>}
-- {"prompt": "Make the image more vibrant and colorful", "n": 3, "image": <source_image>}"""
+- {"prompt": "Add a sunset background behind the subject", "files": <source_image>}
+- {"prompt": "Change the shirt color to blue", "files": <source_image>, "mask": <mask_image>}
+- {"prompt": "Make the image more vibrant and colorful", "n": 3, "files": <source_image>}"""
     model: str = "gpt-image-1"
     connection: OpenAIConnection | None = None
     n: int | None = None
@@ -178,16 +179,14 @@ Examples:
             )
             params["response_format"] = response_format_value
 
-        if hasattr(self, "__pydantic_extra__") and self.__pydantic_extra__:
-            import copy
-
-            extra = copy.deepcopy(self.__pydantic_extra__)
+        if model_extra := getattr(self, "model_extra", None):
+            extra = copy.deepcopy(model_extra)
             params.update(extra)
 
         return params
 
     def _prepare_image(
-        self, image: list[io.BytesIO] | list[bytes] | io.BytesIO | bytes | None
+        self, image: list[io.BytesIO | bytes] | io.BytesIO | bytes | None
     ) -> list[io.BytesIO] | io.BytesIO:
         """Prepare the image(s) for the API call.
 
@@ -228,20 +227,13 @@ Examples:
         size = self.size.value if isinstance(self.size, ImageSize) else self.size
 
         original_filenames = []
-        raw_image = input_data.image
-        if isinstance(raw_image, list):
-            for img in raw_image:
-                if hasattr(img, "name") and img.name:
-                    original_filenames.append(img.name)
-                elif isinstance(img, io.BytesIO) and hasattr(img, "name") and img.name:
-                    original_filenames.append(img.name)
-        else:
-            if hasattr(raw_image, "name") and raw_image.name:
-                original_filenames.append(raw_image.name)
-            elif isinstance(raw_image, io.BytesIO) and hasattr(raw_image, "name") and raw_image.name:
-                original_filenames.append(raw_image.name)
+        raw_image = input_data.files
+        images = raw_image if isinstance(raw_image, list) else [raw_image]
+        for img in images:
+            if img_name := getattr(img, "name", None):
+                original_filenames.append(img_name)
 
-        image = self._prepare_image(input_data.image)
+        image = self._prepare_image(input_data.files)
 
         edit_kwargs = {
             "model": self.model,

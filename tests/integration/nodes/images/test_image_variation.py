@@ -32,7 +32,7 @@ def test_image_variation_with_url_response(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"image": mock_image_file}
+    input_data = {"files": mock_image_file}
 
     response = wf.run(
         input_data=input_data,
@@ -74,7 +74,7 @@ def test_image_variation_with_b64_response(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"image": mock_image_file}
+    input_data = {"files": mock_image_file}
 
     response = wf.run(
         input_data=input_data,
@@ -117,7 +117,7 @@ def test_image_variation_with_list_of_images_uses_first(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"image": [image1, image2]}
+    input_data = {"files": [image1, image2]}
 
     response = wf.run(
         input_data=input_data,
@@ -154,7 +154,7 @@ def test_image_variation_with_tracing(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"image": mock_image_file}
+    input_data = {"files": mock_image_file}
 
     response = wf.run(
         input_data=input_data,
@@ -195,7 +195,7 @@ def test_image_variation_optimized_for_agents_with_tracing(
         flow=Flow(nodes=[image_tool]),
     )
 
-    input_data = {"image": mock_image_file}
+    input_data = {"files": mock_image_file}
 
     response = wf.run(
         input_data=input_data,
@@ -231,7 +231,7 @@ def test_image_variation_without_image_raises_error(
         flow=Flow(nodes=[image_node]),
     )
 
-    input_data = {"image": None}
+    input_data = {"files": None}
 
     response = wf.run(
         input_data=input_data,

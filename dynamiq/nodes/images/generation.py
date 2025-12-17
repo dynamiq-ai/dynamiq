@@ -1,9 +1,11 @@
 import base64
+import copy
 import io
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Literal
 
+import filetype
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -17,17 +19,6 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, NodeGroup, ensure_config
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-
-EXTENSIONS_TO_MIME = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".bmp": "image/bmp",
-    ".tiff": "image/tiff",
-    ".tif": "image/tiff",
-}
 
 
 class ImageSize(str, Enum):
@@ -62,15 +53,15 @@ def create_image_file(image_bytes: bytes, index: int = 0, original_name: str | N
     """
     image_file = io.BytesIO(image_bytes)
 
+    kind = filetype.guess(image_bytes)
+    ext = f".{kind.extension}" if kind else ".png"
     if original_name:
         base_name = Path(original_name).stem
-        ext = Path(original_name).suffix or ".png"
         image_file.name = f"{base_name}_{index}{ext}"
-        image_file.content_type = EXTENSIONS_TO_MIME.get(ext.lower(), "image/png")
     else:
-        image_file.name = f"image_{index}.png"
-        image_file.content_type = "image/png"
+        image_file.name = f"image_{index}{ext}"
 
+    image_file.content_type = kind.mime if kind else "image/png"
     return image_file
 
 
@@ -201,10 +192,8 @@ Examples:
             )
             params["response_format"] = response_format_value
 
-        if hasattr(self, "__pydantic_extra__") and self.__pydantic_extra__:
-            import copy
-
-            extra = copy.deepcopy(self.__pydantic_extra__)
+        if model_extra := getattr(self, "model_extra", None):
+            extra = copy.deepcopy(model_extra)
             params.update(extra)
 
         return params

@@ -1,4 +1,5 @@
 import base64
+import copy
 import io
 from typing import Any, Callable, ClassVar, Literal
 
@@ -18,7 +19,7 @@ from .generation import ImageResponseFormat, ImageSize, create_image_file, downl
 class ImageVariationInputSchema(BaseModel):
     """Input schema for image variation."""
 
-    image: list[io.BytesIO | bytes] | io.BytesIO | bytes = Field(
+    files: list[io.BytesIO | bytes] | io.BytesIO | bytes = Field(
         ...,
         description="The image to create variations of. Auto-injected from agent's file store.",
         json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
@@ -64,15 +65,15 @@ Usage Strategy:
 - Integrate with agents for dynamic image transformation workflows
 
 Parameter Guide:
-- image: Source image file, auto-injected from agent's file store (required)
+- files: Source image file, auto-injected from agent's file store (required)
 - n: Number of variations to generate (default: 1)
 - size: Output dimensions (e.g., '1024x1024', '512x512')
 - response_format: 'url' or 'b64_json' output format
 
 Examples:
-- {"image": <source_image>} - Single variation of uploaded image
-- {"image": <source_image>, "n": 5} - Generate 5 different variations
-- {"image": <source_image>, "size": "512x512"} - Smaller output size"""
+- {"files": <source_image>} - Single variation of uploaded image
+- {"files": <source_image>, "n": 5} - Generate 5 different variations
+- {"files": <source_image>, "size": "512x512"} - Smaller output size"""
     model: str = "gpt-image-1"
     connection: OpenAIConnection | None = None
     n: int | None = None
@@ -120,10 +121,8 @@ Examples:
             )
             params["response_format"] = response_format_value
 
-        if hasattr(self, "__pydantic_extra__") and self.__pydantic_extra__:
-            import copy
-
-            extra = copy.deepcopy(self.__pydantic_extra__)
+        if model_extra := getattr(self, "model_extra", None):
+            extra = copy.deepcopy(model_extra)
             params.update(extra)
 
         return params
@@ -146,7 +145,7 @@ Examples:
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         size = self.size.value if isinstance(self.size, ImageSize) else self.size
-        raw_image = input_data.image
+        raw_image = input_data.files
         if isinstance(raw_image, list):
             if not raw_image:
                 raise ValueError("No image provided. List is empty.")
@@ -154,10 +153,8 @@ Examples:
                 logger.warning("Multiple images provided, using first image for variation.")
             raw_image = raw_image[0]
         original_filename = None
-        if hasattr(raw_image, "name") and raw_image.name:
-            original_filename = raw_image.name
-        elif isinstance(raw_image, io.BytesIO) and hasattr(raw_image, "name") and raw_image.name:
-            original_filename = raw_image.name
+        if img_name := getattr(raw_image, "name", None):
+            original_filename = img_name
 
         image = prepare_single_image(raw_image)
 

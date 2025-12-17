@@ -55,7 +55,7 @@ def test_image_edit_response_formats(
 
     input_data = {
         "prompt": "Add a sunset background",
-        "image": mock_image_file,
+        "files": mock_image_file,
     }
 
     response = wf.run(
@@ -105,7 +105,7 @@ def test_image_edit_with_mask(
 
     input_data = {
         "prompt": "Change the masked area to blue",
-        "image": mock_image_file,
+        "files": mock_image_file,
         "mask": mock_mask_file,
     }
 
@@ -145,7 +145,7 @@ def test_image_edit_multiple_outputs(
 
     input_data = {
         "prompt": f"{n_images} different edits",
-        "image": mock_image_file,
+        "files": mock_image_file,
     }
 
     response = wf.run(
@@ -217,7 +217,7 @@ def test_image_edit_input_types(
 
     input_data = {
         "prompt": "Edit image",
-        "image": image_data,
+        "files": image_data,
     }
 
     response = wf.run(
@@ -257,7 +257,7 @@ def test_image_edit_with_tracing(
     tracing = TracingCallbackHandler()
     input_data = {
         "prompt": "Add dramatic lighting",
-        "image": mock_image_file,
+        "files": mock_image_file,
     }
 
     response = wf.run(
@@ -303,7 +303,7 @@ def test_image_edit_optimized_for_agents_with_tracing(
 
     input_data = {
         "prompt": "Add sunset background",
-        "image": mock_image_file,
+        "files": mock_image_file,
     }
 
     response = wf.run(
@@ -345,7 +345,7 @@ def test_image_edit_preserves_original_filename(
 
     input_data = {
         "prompt": "Brighten the image",
-        "image": mock_image_file,
+        "files": mock_image_file,
     }
 
     response = wf.run(
