@@ -96,10 +96,7 @@ class Neo4jCypherExecutor(ConnectionNode):
             )
 
             if input_data.return_graph:
-                result_payload["graph"] = {
-                    "nodes": list(records.nodes),
-                    "relationships": list(records.relationships),
-                }
+                result_payload["graph"] = self._serialize_graph(records)
                 result_payload["keys"] = []
             else:
                 result_payload["records"] = Neo4jGraphStore.format_records(records)
@@ -107,7 +104,7 @@ class Neo4jCypherExecutor(ConnectionNode):
 
             result_payload["summary"] = {
                 "query": summary.query,
-                "counters": summary.counters,
+                "counters": self._serialize_counters(summary.counters),
                 "result_available_after": summary.result_available_after,
             }
             result_payload["query"] = input_data.query
@@ -143,3 +140,63 @@ class Neo4jCypherExecutor(ConnectionNode):
             f"Returned {len(records)} records. Preview: {preview}. "
             f"Counters: {counters_text}."
         )
+
+    @staticmethod
+    def _serialize_graph(graph) -> dict[str, Any]:
+        """Convert Neo4j Graph result into JSON-serializable structures."""
+        if graph is None:
+            return {"nodes": [], "relationships": []}
+
+        def _node_to_dict(node):
+            return {
+                "id": getattr(node, "id", None),
+                "element_id": getattr(node, "element_id", None),
+                "labels": list(getattr(node, "labels", [])),
+                "properties": dict(node),
+            }
+
+        def _relationship_to_dict(rel):
+            return {
+                "id": getattr(rel, "id", None),
+                "element_id": getattr(rel, "element_id", None),
+                "type": getattr(rel, "type", None),
+                "start_node_id": getattr(rel, "start_node_id", None),
+                "end_node_id": getattr(rel, "end_node_id", None),
+                "start_node_element_id": getattr(rel, "start_node_element_id", None),
+                "end_node_element_id": getattr(rel, "end_node_element_id", None),
+                "properties": dict(rel),
+            }
+
+        nodes = [_node_to_dict(node) for node in getattr(graph, "nodes", [])]
+        relationships = [_relationship_to_dict(rel) for rel in getattr(graph, "relationships", [])]
+
+        return {"nodes": nodes, "relationships": relationships}
+
+    @staticmethod
+    def _serialize_counters(counters) -> dict[str, Any]:
+        """Convert Neo4j SummaryCounters to a JSON-serializable dict."""
+        if counters is None:
+            return {}
+
+        counter_fields = [
+            "nodes_created",
+            "nodes_deleted",
+            "relationships_created",
+            "relationships_deleted",
+            "properties_set",
+            "labels_added",
+            "labels_removed",
+            "indexes_added",
+            "indexes_removed",
+            "constraints_added",
+            "constraints_removed",
+            "system_updates",
+        ]
+
+        counters_dict = {field: getattr(counters, field, 0) for field in counter_fields}
+        if hasattr(counters, "contains_updates"):
+            counters_dict["contains_updates"] = counters.contains_updates()
+        if hasattr(counters, "contains_system_updates"):
+            counters_dict["contains_system_updates"] = counters.contains_system_updates()
+
+        return counters_dict

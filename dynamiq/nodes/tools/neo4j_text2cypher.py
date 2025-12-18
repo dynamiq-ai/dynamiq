@@ -171,5 +171,5 @@ class Neo4jText2Cypher(Node):
 
     @staticmethod
     def _contains_write(cypher: str) -> bool:
-        pattern = re.compile(r"\b(CREATE|MERGE|DELETE|DETACH|SET|DROP)\b", re.IGNORECASE)
+        pattern = re.compile(r"\b(CREATE|MERGE|DELETE|DETACH|SET|DROP|REMOVE)\b", re.IGNORECASE)
         return bool(pattern.search(cypher or ""))

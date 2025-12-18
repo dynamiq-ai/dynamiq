@@ -113,10 +113,11 @@ class Neo4jSchemaIntrospector(ConnectionNode):
         node_props = payload.get("node_properties") or []
         rel_props = payload.get("relationship_properties") or []
         node_samples = [
-            f"{p.get('nodeLabels', ['?'])[0]}.{p.get('propertyName')}:{p.get('propertyTypes')}" for p in node_props[:5]
+            f"{(p.get('nodeLabels') or ['?'])[0]}.{p.get('propertyName')}:{p.get('propertyTypes')}"
+            for p in node_props[:5]
         ]
         rel_samples = [
-            f"{p.get('relType', '?')}.{p.get('propertyName')}:{p.get('propertyTypes')}" for p in rel_props[:5]
+            f"{(p.get('relType') or '?')}.{p.get('propertyName')}:{p.get('propertyTypes')}" for p in rel_props[:5]
         ]
         return (
             f"Labels: {labels}. "
