@@ -521,6 +521,33 @@ class Qdrant(BaseApiKeyConnection):
         return qdrant_client
 
 
+class Neo4j(BaseConnection):
+    """
+    Represents a connection to a Neo4j database.
+
+    Attributes:
+        uri (str): The Neo4j connection URI, e.g. neo4j://localhost or neo4j+s://xxx.databases.neo4j.io.
+        username (str): Username for authentication.
+        password (str): Password for authentication.
+        database (str | None): Optional database name; if omitted, Neo4j uses the user's home database.
+        verify_connectivity (bool): Whether to call driver.verify_connectivity() after creating the driver.
+    """
+
+    uri: str = Field(default_factory=partial(get_env_var, "NEO4J_URI"))
+    username: str = Field(default_factory=partial(get_env_var, "NEO4J_USERNAME"))
+    password: str = Field(default_factory=partial(get_env_var, "NEO4J_PASSWORD"))
+    database: str | None = Field(default_factory=partial(get_env_var, "NEO4J_DATABASE", None))
+    verify_connectivity: bool = True
+
+    def connect(self):
+        from neo4j import GraphDatabase
+
+        driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password))
+        if self.verify_connectivity:
+            driver.verify_connectivity()
+        return driver
+
+
 class WeaviateDeploymentType(str, enum.Enum):
     """
     Defines various deployment types for different Weaviate deployments.
