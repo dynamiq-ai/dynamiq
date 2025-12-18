@@ -82,7 +82,7 @@ def test_image_generation_with_b64_response(
 
     assert response.status == RunnableStatus.SUCCESS
     node_output = response.output[image_node.id]
-    assert node_output["output"]["content"] == ["image_0.png created"]
+    assert node_output["output"]["content"] == ["generated_image_0.png created"]
     assert len(node_output["output"]["files"]) == 1
     assert isinstance(node_output["output"]["files"][0], io.BytesIO)
 

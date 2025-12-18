@@ -21,7 +21,7 @@ class ImageVariationInputSchema(BaseModel):
 
     files: list[io.BytesIO | bytes] | io.BytesIO | bytes = Field(
         ...,
-        description="The image to create variations of. Auto-injected from agent's file store.",
+        description="The image to create variations of.",
         json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
     )
     n: int | None = None
@@ -36,6 +36,7 @@ class ImageVariation(ConnectionNode):
     Takes an existing image and generates variations of it.
 
     Attributes:
+        FILE_PREFIX (str): Prefix for new file names. Default to "variation".
         name (str): The name of the node.
         model (str): The model to use for image variation (e.g., 'dall-e-2').
         connection (OpenAIConnection): The connection to the API.
@@ -44,6 +45,8 @@ class ImageVariation(ConnectionNode):
         response_format (ImageResponseFormat | str | None): Response format (e.g., 'url', 'b64_json'). Only supported
         by some models.
     """
+
+    FILE_PREFIX: ClassVar[str] = "variation"
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Variation"
@@ -183,12 +186,12 @@ Examples:
             if img_url := getattr(img_data, ImageResponseFormat.URL.value, None):
                 content.append(img_url)
                 image_bytes = download_image_from_url(img_url)
-                file = create_image_file(image_bytes, idx, original_name=original_filename)
+                file = create_image_file(image_bytes, idx, original_name=original_filename, prefix=self.FILE_PREFIX)
                 files.append(file)
 
             elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON.value, None):
                 image_bytes = base64.b64decode(img_b64)
-                file = create_image_file(image_bytes, idx, original_name=original_filename)
+                file = create_image_file(image_bytes, idx, original_name=original_filename, prefix=self.FILE_PREFIX)
                 content.append(f"{file.name} created")
                 files.append(file)
 

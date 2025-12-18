@@ -80,60 +80,48 @@ def main():
 
     logger.info("Image AI Assistant - Type 'quit' to exit\n")
 
-    while True:
-        try:
-            file_path_input = input("File path (press Enter to skip): ").strip()
+    try:
+        file_path_input = input("File path (press Enter to skip): ").strip()
 
-            if file_path_input.lower() in ("quit", "exit", "q"):
-                break
+        files = []
+        if file_path_input:
+            for path in file_path_input.split(","):
+                path = path.strip()
+                if path:
+                    try:
+                        file = load_image_file(path)
+                        files.append(file)
+                    except Exception as e:
+                        logger.error(f"Error loading {path}: {e}")
 
-            files = []
-            if file_path_input:
-                for path in file_path_input.split(","):
-                    path = path.strip()
-                    if path:
-                        try:
-                            file = load_image_file(path)
-                            files.append(file)
-                        except Exception as e:
-                            logger.error(f"Error loading {path}: {e}")
+        task_input = input("Task: ").strip()
 
-            task_input = input("Task: ").strip()
+        input_data = {"input": task_input}
+        if files:
+            for f in files:
+                f.seek(0)
+            input_data["files"] = files
 
-            if task_input.lower() in ("quit", "exit", "q"):
-                break
+        tracer = TracingCallbackHandler()
+        result = workflow.run(
+            input_data=input_data,
+            config=runnables.RunnableConfig(callbacks=[tracer]),
+        )
 
-            if not task_input:
-                continue
+        if result.status == runnables.RunnableStatus.SUCCESS:
+            agent_output = result.output.get(agent.id, {}).get("output", {})
+            content = agent_output.get("content", "")
+            output_files = agent_output.get("files", [])
 
-            input_data = {"input": task_input}
-            if files:
-                for f in files:
-                    f.seek(0)
-                input_data["files"] = files
+            logger.info(f"{content}\n")
 
-            tracer = TracingCallbackHandler()
-            result = workflow.run(
-                input_data=input_data,
-                config=runnables.RunnableConfig(callbacks=[tracer]),
-            )
+            if output_files:
+                save_image_files(output_files, output_dir)
+        else:
+            logger.error(f"Error: {result.error}\n")
 
-            if result.status == runnables.RunnableStatus.SUCCESS:
-                agent_output = result.output.get(agent.id, {}).get("output", {})
-                content = agent_output.get("content", "")
-                output_files = agent_output.get("files", [])
-
-                logger.info(f"{content}\n")
-
-                if output_files:
-                    save_image_files(output_files, output_dir)
-            else:
-                logger.error(f"Error: {result.error}\n")
-
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            logger.error(f"Error: {e}\n")
+    except Exception as e:
+        logger.error(f"Error: {e}\n")
 
 
 if __name__ == "__main__":

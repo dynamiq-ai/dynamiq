@@ -38,7 +38,9 @@ class ImageResponseFormat(str, Enum):
     B64_JSON = "b64_json"
 
 
-def create_image_file(image_bytes: bytes, index: int = 0, original_name: str | None = None) -> io.BytesIO:
+def create_image_file(
+    image_bytes: bytes, index: int = 0, original_name: str | None = None, prefix: str | None = None
+) -> io.BytesIO:
     """Create a properly configured BytesIO file from image bytes.
 
     Args:
@@ -46,7 +48,8 @@ def create_image_file(image_bytes: bytes, index: int = 0, original_name: str | N
         index: Index for naming multiple images.
         original_name: Optional original filename to base the new name on.
                        If provided, will create names like "original_0.png", "original_1.png".
-                       If None, will use generic names like "image_0.png".
+                       If None, will use generic names like "generated_image_0.png" or "image_0.png" if prefix is None.
+        prefix: Optional prefix for the filename (e.g., "generated", "edited", "variation").
 
     Returns:
         BytesIO object with name and content_type attributes.
@@ -55,11 +58,12 @@ def create_image_file(image_bytes: bytes, index: int = 0, original_name: str | N
 
     kind = filetype.guess(image_bytes)
     ext = f".{kind.extension}" if kind else ".png"
+    prefix_str = f"{prefix}_" if prefix else ""
     if original_name:
         base_name = Path(original_name).stem
-        image_file.name = f"{base_name}_{index}{ext}"
+        image_file.name = f"{prefix_str}{base_name}_{index}{ext}"
     else:
-        image_file.name = f"image_{index}{ext}"
+        image_file.name = f"{prefix_str}image_{index}{ext}"
 
     image_file.content_type = kind.mime if kind else "image/png"
     return image_file
@@ -94,6 +98,7 @@ class ImageGeneration(ConnectionNode):
     Vertex AI, and more through a unified interface.
 
     Attributes:
+        FILE_PREFIX (str): Prefix for new file names. Default to "generated".
         name (str): The name of the node.
         model (str): The model to use for image generation (e.g., 'dall-e-3', 'gpt-image-1',
             'bedrock/stability.stable-diffusion-xl-v0').
@@ -105,6 +110,8 @@ class ImageGeneration(ConnectionNode):
         response_format (ImageResponseFormat | str | None): Response format (e.g., 'url', 'b64_json').
         Only supported by some models.
     """
+
+    FILE_PREFIX: ClassVar[str] = "generated"
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Generation"
@@ -247,12 +254,12 @@ Examples:
             if img_url := getattr(img_data, ImageResponseFormat.URL.value, None):
                 content.append(img_url)
                 image_bytes = download_image_from_url(img_url)
-                file = create_image_file(image_bytes, idx)
+                file = create_image_file(image_bytes, idx, prefix=self.FILE_PREFIX)
                 files.append(file)
 
             elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON.value, None):
                 image_bytes = base64.b64decode(img_b64)
-                file = create_image_file(image_bytes, idx)
+                file = create_image_file(image_bytes, idx, prefix=self.FILE_PREFIX)
                 content.append(f"{file.name} created")
                 files.append(file)
 

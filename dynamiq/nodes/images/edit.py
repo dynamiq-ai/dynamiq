@@ -72,8 +72,7 @@ class ImageEditInputSchema(BaseModel):
     prompt: str = Field(..., description="Text prompt describing the desired edits.")
     files: list[io.BytesIO | bytes] | io.BytesIO | bytes = Field(
         ...,
-        description="The image(s) to edit. Can be a single image or a list of images. Auto-injected from agent's "
-        "file store.",
+        description="The image(s) to edit. Can be a single image or a list of images.",
         json_schema_extra={"map_from_storage": True, "is_accessible_to_agent": False},
     )
     mask: io.BytesIO | bytes | None = Field(
@@ -93,6 +92,7 @@ class ImageEdit(ConnectionNode):
     Optionally accepts a mask to specify which areas to modify.
 
     Attributes:
+        FILE_PREFIX (str): Prefix for new file names. Default to "edited".
         name (str): The name of the node.
         model (str): The model to use for image editing (e.g., 'dall-e-2', 'gpt-image-1').
         connection (OpenAIConnection): The connection to the API.
@@ -101,6 +101,8 @@ class ImageEdit(ConnectionNode):
         response_format (ImageResponseFormat | str | None): Response format (e.g., 'url', 'b64_json'). Only supported
         by some models.
     """
+
+    FILE_PREFIX: ClassVar[str] = "edited"
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Edit"
@@ -270,13 +272,13 @@ Examples:
             if img_url := getattr(img_data, ImageResponseFormat.URL.value, None):
                 content.append(img_url)
                 image_bytes = download_image_from_url(img_url)
-                file = create_image_file(image_bytes, file_idx, original_name=original_name)
+                file = create_image_file(image_bytes, file_idx, original_name=original_name, prefix=self.FILE_PREFIX)
                 files.append(file)
                 file_idx += 1
 
             elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON.value, None):
                 image_bytes = base64.b64decode(img_b64)
-                file = create_image_file(image_bytes, file_idx, original_name=original_name)
+                file = create_image_file(image_bytes, file_idx, original_name=original_name, prefix=self.FILE_PREFIX)
                 content.append(f"{file.name} created")
                 files.append(file)
                 file_idx += 1
