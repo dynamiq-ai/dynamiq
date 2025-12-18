@@ -104,21 +104,19 @@ class ImageEdit(ConnectionNode):
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Edit"
-    description: str = """Edit and modify existing images using AI with text prompts and optional masking.
+    description: str = """Edit and modify existing images with text prompt and optional masking.
 
 Key Capabilities:
-- AI-powered image editing with natural language prompts
+- Image editing with natural language prompts
 - Selective area editing using optional mask images
 - Multiple variations generation (set n parameter)
 - Configurable output sizes (256x256 to 1792x1024)
 - URL or base64 JSON response formats
-- Preserves original filenames in outputs
 
 Usage Strategy:
 - Provide clear, descriptive prompts for desired edits
 - Use masks to target specific areas for modification
 - Generate multiple variations to explore different results
-- Integrate seamlessly with agent workflows via file storage
 
 Parameter Guide:
 - prompt: Text description of desired edits (required)

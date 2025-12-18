@@ -55,14 +55,11 @@ Key Capabilities:
 - Multiple variation generation (set n parameter)
 - Configurable output sizes (256x256 to 1024x1024)
 - URL or base64 JSON response formats
-- Auto-injection from agent's file store
-- Preserves original filenames in outputs
 
 Usage Strategy:
 - Provide a clear, high-quality source image
 - Generate multiple variations to explore creative alternatives
-- Use for style exploration, A/B testing, or creative ideation
-- Integrate with agents for dynamic image transformation workflows
+- Use for style exploration or creative ideation
 
 Parameter Guide:
 - files: Source image file, auto-injected from agent's file store (required)

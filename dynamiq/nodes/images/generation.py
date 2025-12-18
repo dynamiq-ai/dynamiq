@@ -108,7 +108,7 @@ class ImageGeneration(ConnectionNode):
 
     group: Literal[NodeGroup.IMAGES] = NodeGroup.IMAGES
     name: str = "Image Generation"
-    description: str = """Generate images from text prompts using AI models across multiple providers.
+    description: str = """Generate images from text prompt using image generation models.
 
 Key Capabilities:
 - Text-to-image generation with natural language prompts
@@ -117,14 +117,12 @@ Key Capabilities:
 - Configurable sizes (256x256 to 1792x1024)
 - Quality control (standard/hd for supported models)
 - URL or base64 JSON response formats
-- Agent-optimized formatted outputs
 
 Usage Strategy:
 - Write detailed, descriptive prompts for best results
 - Specify artistic style, composition, and key elements clearly
 - Generate multiple variations to explore creative options
 - Use quality='hd' for high-detail requirements
-- Integrate with agent workflows for dynamic image creation
 
 Parameter Guide:
 - prompt: Detailed text description of the image to generate (required)
