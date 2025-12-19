@@ -549,8 +549,6 @@ class Neo4j(BaseConnection):
         return driver
 
 
-
-
 class WeaviateDeploymentType(str, enum.Enum):
     """
     Defines various deployment types for different Weaviate deployments.

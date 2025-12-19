@@ -5,7 +5,9 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
+from dynamiq import Workflow
 from dynamiq.connections import Neo4j as Neo4jConnection
+from dynamiq.flows import Flow
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.tools.neo4j_cypher_executor import Neo4jCypherExecutor, Neo4jCypherInputSchema
 from dynamiq.runnables import RunnableConfig
@@ -269,3 +271,34 @@ def test_cypher_executor_rejects_mismatched_batch_parameters():
 def test_cypher_executor_rejects_list_parameters_for_single_query():
     with pytest.raises(ValidationError):
         Neo4jCypherInputSchema(query="MATCH (n) RETURN n", parameters=[{"name": "Ada"}])
+
+
+def test_cypher_executor_yaml_roundtrip(tmp_path, monkeypatch):
+    driver = MagicMock()
+    monkeypatch.setattr(Neo4jConnection, "connect", lambda self: driver)
+
+    connection = Neo4jConnection(
+        id="neo4j-conn",
+        uri="bolt://localhost:7687",
+        username="user",
+        password="pass",
+        verify_connectivity=False,
+    )
+    node = Neo4jCypherExecutor(id="neo4j-node", connection=connection, database="neo4j")
+    workflow = Workflow(id="neo4j-workflow", flow=Flow(id="neo4j-flow", nodes=[node]))
+
+    yaml_path = tmp_path / "neo4j_workflow.yaml"
+    workflow.to_yaml_file(yaml_path)
+
+    loaded = Workflow.from_yaml_file(str(yaml_path), init_components=True)
+    assert isinstance(loaded.flow.nodes[0], Neo4jCypherExecutor)
+    assert loaded.flow.nodes[0]._graph_store is not None
+
+    roundtrip_path = tmp_path / "neo4j_workflow_roundtrip.yaml"
+    loaded.to_yaml_file(roundtrip_path)
+    roundtrip = Workflow.from_yaml_file(str(roundtrip_path), init_components=True)
+
+    roundtrip_node = roundtrip.flow.nodes[0]
+    assert roundtrip_node.database == "neo4j"
+    assert roundtrip_node.connection.id == "neo4j-conn"
+    assert roundtrip_node.connection.uri == "bolt://localhost:7687"
