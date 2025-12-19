@@ -14,7 +14,7 @@ DESCRIPTION_NEO4J_CYPHER = """Executes parameterized Cypher against Neo4j
 
 Inputs:
 - query: Cypher text
-- parameters: dict for $params (additionalProperties disabled)
+- parameters: dict for $params (additionalProperties allowed)
 - database: optional override
 - routing: 'r' for read / 'w' for write (clusters)
 - return_graph: if true, return nodes/relationships instead of rows
@@ -39,7 +39,7 @@ class Neo4jCypherInputSchema(BaseModel):
     parameters: dict[str, Any] = Field(
         default_factory=dict,
         description="Parameters for the Cypher query (use $param syntax in query).",
-        json_schema_extra={"type": "object", "properties": {}, "additionalProperties": False},
+        json_schema_extra={"type": "object", "properties": {}, "additionalProperties": True},
     )
     database: str | None = Field(default=None, description="Optional database name override.")
     routing: str | None = Field(default=None, description="Routing preference ('r' for read, 'w' for write).")

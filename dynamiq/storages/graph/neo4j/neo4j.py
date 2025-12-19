@@ -7,6 +7,7 @@ from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.utils.logger import logger
 
 LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+PROPERTY_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class Neo4jGraphStore:
@@ -104,18 +105,19 @@ class Neo4jGraphStore:
             node_params: dict[str, Any] = {}
             for idx, node in enumerate(nodes):
                 labels = node.get("labels") or []
-                identity_key = node.get("identity_key") or "id"
+                identity_key = self._format_property_key(node.get("identity_key") or "id")
                 properties = node.get("properties") or {}
                 if identity_key not in properties:
                     raise ValueError(f"Node {idx} is missing identity key '{identity_key}' in properties.")
 
                 label_string = self._format_labels(labels)
-                param_name = f"node_{idx}_props"
-                node_params[param_name] = properties
+                param_props = f"node_{idx}_props"
+                param_id = f"node_{idx}_id"
+                node_params[param_props] = properties
+                node_params[param_id] = properties[identity_key]
 
                 node_lines.append(
-                    f"MERGE (n{idx}{label_string} {{{identity_key}: ${param_name}.{identity_key}}})\n"
-                    f"SET n{idx} += ${param_name}"
+                    f"MERGE (n{idx}{label_string} {{{identity_key}: ${param_id}}})\n" f"SET n{idx} += ${param_props}"
                 )
 
             node_query = "\n".join(node_lines)
@@ -132,8 +134,8 @@ class Neo4jGraphStore:
                 rel_type = self._format_relationship_type(rel.get("type") or "")
                 start_label = self._format_single_label(rel.get("start_label") or "")
                 end_label = self._format_single_label(rel.get("end_label") or "")
-                start_identity_key = rel.get("start_identity_key") or "id"
-                end_identity_key = rel.get("end_identity_key") or "id"
+                start_identity_key = self._format_property_key(rel.get("start_identity_key") or "id")
+                end_identity_key = self._format_property_key(rel.get("end_identity_key") or "id")
                 start_identity = rel.get("start_identity")
                 end_identity = rel.get("end_identity")
                 properties = rel.get("properties") or {}
@@ -184,6 +186,12 @@ class Neo4jGraphStore:
         if not LABEL_PATTERN.match(rel_type):
             raise ValueError(f"Invalid Neo4j relationship type: '{rel_type}'")
         return rel_type
+
+    @staticmethod
+    def _format_property_key(key: str) -> str:
+        if not PROPERTY_KEY_PATTERN.match(key):
+            raise ValueError(f"Invalid Neo4j property key: '{key}'")
+        return key
 
     def close(self):
         if self.client:

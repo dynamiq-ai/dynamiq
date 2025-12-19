@@ -151,12 +151,18 @@ class Neo4jText2Cypher(Node):
                 cleaned = cleaned.strip("`").strip()
                 if cleaned.startswith("json"):
                     cleaned = cleaned[len("json") :].strip()
-            return json.loads(cleaned)
+            parsed = json.loads(cleaned)
+            if not isinstance(parsed, dict):
+                raise ToolExecutionException("LLM output JSON must be an object.", recoverable=True)
+            return parsed
         except Exception as exc:  # noqa: BLE001
             try:
                 match = re.search(r"\{.*\}", text, flags=re.DOTALL)
                 if match:
-                    return json.loads(match.group(0))
+                    parsed = json.loads(match.group(0))
+                    if not isinstance(parsed, dict):
+                        raise ToolExecutionException("LLM output JSON must be an object.", recoverable=True)
+                    return parsed
             except Exception as fallback_exc:  # noqa: BLE001
                 logger.debug(
                     "Failed to parse JSON from LLM output; primary error=%s, fallback error=%s, text=%s",

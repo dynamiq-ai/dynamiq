@@ -108,16 +108,21 @@ class Neo4jSchemaIntrospector(ConnectionNode):
 
     @staticmethod
     def _build_content(payload: dict[str, Any]) -> str:
+        def _first_label(value: Any) -> str:
+            if isinstance(value, list):
+                return value[0] if value else "?"
+            return value or "?"
+
         labels = payload.get("labels") or []
         rels = payload.get("relationship_types") or []
         node_props = payload.get("node_properties") or []
         rel_props = payload.get("relationship_properties") or []
         node_samples = [
-            f"{(p.get('nodeLabels') or ['?'])[0]}.{p.get('propertyName')}:{p.get('propertyTypes')}"
+            f"{_first_label(p.get('nodeLabels'))}.{p.get('propertyName')}:{p.get('propertyTypes')}"
             for p in node_props[:5]
         ]
         rel_samples = [
-            f"{(p.get('relType') or '?')}.{p.get('propertyName')}:{p.get('propertyTypes')}" for p in rel_props[:5]
+            f"{_first_label(p.get('relType'))}.{p.get('propertyName')}:{p.get('propertyTypes')}" for p in rel_props[:5]
         ]
         return (
             f"Labels: {labels}. "
