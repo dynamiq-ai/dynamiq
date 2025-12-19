@@ -1,0 +1,42 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+nodes:
+  python-code-agent:
+    type: dynamiq.nodes.agents.Agent
+    name: Python Code Agent
+    llm:
+      id: agent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+    tools:
+      - id: python-code-executor
+        type: dynamiq.nodes.tools.python_code_executor.PythonCodeExecutor
+        name: code-executor
+        file_store:
+          type: dynamiq.storages.file.InMemoryFileStore
+    role: |
+      You are a data analyst who uses the Python code executor to inspect files and compute summaries.
+      Always use the provided file helpers (read_file, list_files, describe_file, write_file) when possible.
+      If you create new files, store them via write_file so they are returned to the user.
+    file_store:
+      enabled: true
+      backend:
+        type: dynamiq.storages.file.InMemoryFileStore
+      agent_file_write_enabled: true
+    max_loops: 8
+    inference_mode: XML
+
+flows:
+  python-code-flow:
+    name: Python Code Flow
+    nodes:
+      - python-code-agent
+
+workflows:
+  python-code-workflow:
+    flow: python-code-flow
+    version: 1
