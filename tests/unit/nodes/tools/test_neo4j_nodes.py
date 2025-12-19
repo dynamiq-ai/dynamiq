@@ -257,3 +257,8 @@ def test_cypher_executor_handles_batch_queries(cypher_executor_factory, runnable
 def test_cypher_executor_rejects_mismatched_batch_parameters():
     with pytest.raises(ValidationError):
         Neo4jCypherInputSchema(query=["MATCH (n) RETURN n"], parameters=[{}, {}])
+
+
+def test_cypher_executor_rejects_list_parameters_for_single_query():
+    with pytest.raises(ValidationError):
+        Neo4jCypherInputSchema(query="MATCH (n) RETURN n", parameters=[{"name": "Ada"}])

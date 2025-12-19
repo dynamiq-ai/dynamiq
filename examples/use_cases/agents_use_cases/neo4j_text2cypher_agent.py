@@ -94,6 +94,7 @@ def seed_sample_graph(connection: Neo4jConnection) -> dict:
         Dynamiq BUILDS Dynamiq Platform
     """
     executor = Neo4jCypherExecutor(connection=connection, name="cypher_executor_seed")
+    executor.init_components()
     query = """
     MERGE (c:Company {id: $company_id})
     SET c.name = $company_name

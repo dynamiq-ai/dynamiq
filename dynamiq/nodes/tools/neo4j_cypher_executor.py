@@ -88,9 +88,12 @@ class Neo4jCypherInputSchema(BaseModel):
                 raise ValueError("query is not supported in introspect mode.")
             if self.parameters:
                 raise ValueError("parameters are not supported in introspect mode.")
-        if isinstance(self.query, list) and isinstance(self.parameters, list):
-            if len(self.query) != len(self.parameters):
-                raise ValueError("parameters list must match query list length.")
+        if isinstance(self.query, list):
+            if isinstance(self.parameters, list):
+                if len(self.query) != len(self.parameters):
+                    raise ValueError("parameters list must match query list length.")
+        elif isinstance(self.parameters, list):
+            raise ValueError("parameters list is only supported when query is a list.")
         return self
 
     model_config = ConfigDict(extra="forbid")
