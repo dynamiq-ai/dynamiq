@@ -250,18 +250,25 @@ Examples:
         content = []
         files = []
 
-        for idx, img_data in enumerate(response.data):
-            if img_url := getattr(img_data, ImageResponseFormat.URL.value, None):
-                content.append(img_url)
-                image_bytes = download_image_from_url(img_url)
-                file = create_image_file(image_bytes, idx, prefix=self.FILE_PREFIX)
-                files.append(file)
+        try:
+            for idx, img_data in enumerate(response.data):
+                if img_url := getattr(img_data, ImageResponseFormat.URL.value, None):
+                    content.append(img_url)
+                    image_bytes = download_image_from_url(img_url)
+                    file = create_image_file(image_bytes, idx, prefix=self.FILE_PREFIX)
+                    files.append(file)
 
-            elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON.value, None):
-                image_bytes = base64.b64decode(img_b64)
-                file = create_image_file(image_bytes, idx, prefix=self.FILE_PREFIX)
-                content.append(f"{file.name} created")
-                files.append(file)
+                elif img_b64 := getattr(img_data, ImageResponseFormat.B64_JSON.value, None):
+                    image_bytes = base64.b64decode(img_b64)
+                    file = create_image_file(image_bytes, idx, prefix=self.FILE_PREFIX)
+                    content.append(f"{file.name} created")
+                    files.append(file)
+        except Exception as e:
+            logger.error(f"Node {self.name} - {self.id}: failed to process response. Error: {str(e)}")
+            raise ToolExecutionException(
+                f"Node '{self.name}' failed to process generated image. " f"Error: {str(e)}. Please retry the request.",
+                recoverable=True,
+            )
 
         logger.debug(f"{self.name} generated {len(content)} image(s)")
 
