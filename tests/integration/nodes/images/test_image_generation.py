@@ -12,7 +12,7 @@ from dynamiq.runnables import RunnableConfig, RunnableStatus
 
 def test_image_generation_with_url_response(
     mock_image_generation_executor,
-    mock_httpx_get,
+    mock_requests_get,
     mock_image_url,
 ):
     """Test basic image generation with URL response format."""
@@ -50,7 +50,7 @@ def test_image_generation_with_url_response(
     assert call_kwargs["prompt"] == "A beautiful sunset over mountains"
     assert call_kwargs["size"] == "1024x1024"
 
-    mock_httpx_get.assert_called_once_with(mock_image_url, timeout=60.0)
+    mock_requests_get.assert_called_once_with(mock_image_url, timeout=60.0)
 
 
 def test_image_generation_with_b64_response(
@@ -93,7 +93,7 @@ def test_image_generation_with_b64_response(
 
 def test_image_generation_multiple_images(
     mock_image_generation_executor,
-    mock_httpx_get,
+    mock_requests_get,
     mock_image_url,
 ):
     """Test generating multiple images in one call."""
@@ -130,7 +130,7 @@ def test_image_generation_multiple_images(
 
 def test_image_generation_with_tracing(
     mock_image_generation_executor,
-    mock_httpx_get,
+    mock_requests_get,
 ):
     """Test image generation with tracing callback handler."""
     openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
@@ -172,7 +172,7 @@ def test_image_generation_with_tracing(
 
 def test_image_generation_optimized_for_agents_with_tracing(
     mock_image_generation_executor,
-    mock_httpx_get,
+    mock_requests_get,
 ):
     """Test image generation tool optimized for agents with tracing."""
     openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")

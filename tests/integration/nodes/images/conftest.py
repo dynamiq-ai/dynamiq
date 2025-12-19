@@ -112,8 +112,8 @@ def mock_image_variation_executor(mocker, mock_image_url, mock_image_b64):
 
 
 @pytest.fixture
-def mock_httpx_get(mocker, mock_image_bytes):
-    """Mock httpx.get for downloading images from URLs."""
+def mock_requests_get(mocker, mock_image_bytes):
+    """Mock requests.get for downloading images from URLs."""
     from types import SimpleNamespace
 
     def response(*args, **kwargs):
@@ -122,7 +122,7 @@ def mock_httpx_get(mocker, mock_image_bytes):
             raise_for_status=lambda: None,
         )
 
-    mock_get = mocker.patch("httpx.get", side_effect=response)
+    mock_get = mocker.patch("requests.get", side_effect=response)
     yield mock_get
 
 

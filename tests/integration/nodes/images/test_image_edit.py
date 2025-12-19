@@ -32,7 +32,7 @@ def mock_mask_file(mock_image_bytes):
 def test_image_edit_response_formats(
     mock_image_file,
     mock_image_edit_executor,
-    mock_httpx_get,
+    mock_requests_get,
     mock_image_url,
     response_format,
     expected_content_type,
@@ -77,7 +77,7 @@ def test_image_edit_response_formats(
     if expected_content_type == "url":
         assert node_output["output"]["content"] == [mock_image_url]
         assert "response_format" not in call_kwargs or call_kwargs.get("response_format") is None
-        mock_httpx_get.assert_called_once_with(mock_image_url, timeout=60.0)
+        mock_requests_get.assert_called_once_with(mock_image_url, timeout=60.0)
     else:
         assert "test_image_0.png created" in node_output["output"]["content"][0]
         assert call_kwargs["response_format"] == ImageResponseFormat.B64_JSON
@@ -87,7 +87,7 @@ def test_image_edit_with_mask(
     mock_image_file,
     mock_mask_file,
     mock_image_edit_executor,
-    mock_httpx_get,
+    mock_requests_get,
 ):
     """Test image editing with a mask."""
     openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
@@ -125,7 +125,7 @@ def test_image_edit_with_mask(
 def test_image_edit_multiple_outputs(
     mock_image_file,
     mock_image_edit_executor,
-    mock_httpx_get,
+    mock_requests_get,
     n_images,
 ):
     """Test editing to generate multiple variations."""
@@ -176,7 +176,7 @@ def test_image_edit_multiple_outputs(
 def test_image_edit_input_types(
     mock_image_bytes,
     mock_image_edit_executor,
-    mock_httpx_get,
+    mock_requests_get,
     image_input,
     expected_type,
 ):
@@ -238,7 +238,7 @@ def test_image_edit_input_types(
 def test_image_edit_with_tracing(
     mock_image_file,
     mock_image_edit_executor,
-    mock_httpx_get,
+    mock_requests_get,
 ):
     """Test image editing with tracing callback handler."""
     openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
@@ -283,7 +283,7 @@ def test_image_edit_with_tracing(
 def test_image_edit_optimized_for_agents_with_tracing(
     mock_image_file,
     mock_image_edit_executor,
-    mock_httpx_get,
+    mock_requests_get,
 ):
     """Test image edit tool optimized for agents with tracing."""
     openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
@@ -325,7 +325,7 @@ def test_image_edit_optimized_for_agents_with_tracing(
 def test_image_edit_preserves_original_filename(
     mock_image_file,
     mock_image_edit_executor,
-    mock_httpx_get,
+    mock_requests_get,
 ):
     """Test that edited images preserve original filename in output."""
     openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")

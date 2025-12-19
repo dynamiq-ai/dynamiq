@@ -14,7 +14,7 @@ from tests.integration.nodes.images.conftest import CREATION_TIMESTAMP
 def test_image_variation_with_url_response(
     mock_image_file,
     mock_image_variation_executor,
-    mock_httpx_get,
+    mock_requests_get,
     mock_image_url,
 ):
     """Test basic image variation with URL response format."""
@@ -51,7 +51,7 @@ def test_image_variation_with_url_response(
     assert call_kwargs["model"] == "gpt-image-1"
     assert call_kwargs["size"] == "1024x1024"
     assert "image" in call_kwargs
-    mock_httpx_get.assert_called_once_with(mock_image_url, timeout=60.0)
+    mock_requests_get.assert_called_once_with(mock_image_url, timeout=60.0)
 
 
 def test_image_variation_with_b64_response(
@@ -95,7 +95,7 @@ def test_image_variation_with_b64_response(
 def test_image_variation_with_list_of_images_uses_first(
     mock_image_bytes,
     mock_image_variation_executor,
-    mock_httpx_get,
+    mock_requests_get,
 ):
     """Test variation with a list of images (should use first one)."""
     openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
@@ -136,7 +136,7 @@ def test_image_variation_with_list_of_images_uses_first(
 def test_image_variation_with_tracing(
     mock_image_file,
     mock_image_variation_executor,
-    mock_httpx_get,
+    mock_requests_get,
 ):
     """Test image variation with tracing callback handler."""
     openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")
@@ -177,7 +177,7 @@ def test_image_variation_with_tracing(
 def test_image_variation_optimized_for_agents_with_tracing(
     mock_image_file,
     mock_image_variation_executor,
-    mock_httpx_get,
+    mock_requests_get,
 ):
     """Test image variation tool optimized for agents with tracing."""
     openai_connection = connections.OpenAI(id=str(uuid.uuid4()), api_key="test-api-key")

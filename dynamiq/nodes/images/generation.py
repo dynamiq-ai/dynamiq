@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, ClassVar, Literal
 
 import filetype
-import httpx
+import requests
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections import AWS as AWSConnection
@@ -78,7 +78,7 @@ def download_image_from_url(url: str) -> bytes:
     Returns:
         Image bytes.
     """
-    response = httpx.get(url, timeout=60.0)
+    response = requests.get(url, timeout=60.0)
     response.raise_for_status()
     return response.content
 

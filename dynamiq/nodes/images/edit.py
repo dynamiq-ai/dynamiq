@@ -17,11 +17,11 @@ from dynamiq.utils.logger import logger
 from .generation import ImageResponseFormat, ImageSize, create_image_file, download_image_from_url
 
 
-def prepare_single_image(img) -> io.BytesIO:
+def prepare_single_image(img: bytes | io.BytesIO) -> io.BytesIO:
     """Prepare the image for the API call.
 
     Args:
-        img: Image to prepare.
+        img: Image to prepare (bytes, BytesIO).
 
     Returns:
         BytesIO file-like object for API submission.
@@ -29,9 +29,6 @@ def prepare_single_image(img) -> io.BytesIO:
     if isinstance(img, bytes):
         image_bytes = img
     elif isinstance(img, io.BytesIO):
-        img.seek(0)
-        image_bytes = img.read()
-    elif hasattr(img, "read"):
         img.seek(0)
         image_bytes = img.read()
     else:
@@ -185,9 +182,7 @@ Examples:
 
         return params
 
-    def _prepare_image(
-        self, image: list[io.BytesIO | bytes] | io.BytesIO | bytes | None
-    ) -> list[io.BytesIO] | io.BytesIO:
+    def _prepare_image(self, image: list[io.BytesIO | bytes] | io.BytesIO | bytes) -> list[io.BytesIO] | io.BytesIO:
         """Prepare the image(s) for the API call.
 
         Args:
