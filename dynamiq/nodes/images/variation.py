@@ -65,15 +65,12 @@ Usage Strategy:
 - Use for style exploration or creative ideation
 
 Parameter Guide:
-- files: Source image file, auto-injected from agent's file store (required)
 - n: Number of variations to generate (default: 1)
 - size: Output dimensions (e.g., '1024x1024', '512x512')
 - response_format: 'url' or 'b64_json' output format
 
 Examples:
-- {"files": <source_image>} - Single variation of uploaded image
-- {"files": <source_image>, "n": 5} - Generate 5 different variations
-- {"files": <source_image>, "size": "512x512"} - Smaller output size"""
+- {"n": 5} - Generate 5 different variations"""
     model: str = "gpt-image-1"
     connection: OpenAIConnection | None = None
     n: int | None = None
