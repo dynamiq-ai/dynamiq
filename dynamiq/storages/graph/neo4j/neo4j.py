@@ -1,6 +1,7 @@
 import re
 from typing import Any, Iterable
 
+from neo4j import RoutingControl
 from neo4j.exceptions import Neo4jError
 
 from dynamiq.connections import Neo4j as Neo4jConnection
@@ -35,7 +36,7 @@ class Neo4jGraphStore:
         query: str,
         parameters: dict[str, Any] | None = None,
         database: str | None = None,
-        routing: str | None = None,
+        routing: str | RoutingControl | None = None,
         result_transformer: Any | None = None,
     ):
         """
@@ -54,7 +55,7 @@ class Neo4jGraphStore:
         if target_db:
             execute_kwargs["database_"] = target_db
         if routing:
-            execute_kwargs["routing_"] = routing
+            execute_kwargs["routing_"] = self._normalize_routing(routing)
         if result_transformer:
             execute_kwargs["result_transformer_"] = result_transformer
 
@@ -196,3 +197,14 @@ class Neo4jGraphStore:
     def close(self):
         if self.client:
             self.client.close()
+
+    @staticmethod
+    def _normalize_routing(routing: str | RoutingControl) -> RoutingControl:
+        if isinstance(routing, RoutingControl):
+            return routing
+        routing_value = routing.strip().lower()
+        if routing_value in {"r", "read"}:
+            return RoutingControl.READ
+        if routing_value in {"w", "write"}:
+            return RoutingControl.WRITE
+        raise ValueError("routing must be 'r'/'read' or 'w'/'write' when provided.")
