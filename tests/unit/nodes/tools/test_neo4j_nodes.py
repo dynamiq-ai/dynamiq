@@ -77,7 +77,8 @@ class FakeLLM(Node):
         return {"content": self.response_text}
 
 
-def make_dummy_connection() -> Neo4jConnection:
+@pytest.fixture
+def dummy_connection() -> Neo4jConnection:
     return Neo4jConnection(
         uri="bolt://localhost:7687",
         username="user",
@@ -86,18 +87,60 @@ def make_dummy_connection() -> Neo4jConnection:
     )
 
 
-def test_cypher_executor_returns_records():
+@pytest.fixture
+def runnable_config() -> RunnableConfig:
+    return RunnableConfig(callbacks=[])
+
+
+@pytest.fixture
+def llm_factory():
+    def _make(response_text: str) -> FakeLLM:
+        return FakeLLM(response_text=response_text)
+
+    return _make
+
+
+@pytest.fixture
+def cypher_executor_factory(dummy_connection):
+    def _make(store: MagicMock) -> Neo4jCypherExecutor:
+        executor = Neo4jCypherExecutor(client=MagicMock(), connection=dummy_connection)
+        executor._graph_store = store
+        return executor
+
+    return _make
+
+
+@pytest.fixture
+def graph_writer_factory(dummy_connection):
+    def _make(store: MagicMock) -> Neo4jGraphWriter:
+        writer = Neo4jGraphWriter(client=MagicMock(), connection=dummy_connection)
+        writer._graph_store = store
+        return writer
+
+    return _make
+
+
+@pytest.fixture
+def schema_introspector_factory(dummy_connection):
+    def _make(store: MagicMock) -> Neo4jSchemaIntrospector:
+        introspector = Neo4jSchemaIntrospector(client=MagicMock(), connection=dummy_connection)
+        introspector._graph_store = store
+        return introspector
+
+    return _make
+
+
+def test_cypher_executor_returns_records(cypher_executor_factory, runnable_config):
     mock_store = MagicMock()
     records = [FakeRecord({"name": "Ada"}), FakeRecord({"name": "Bob"})]
     counters = FakeCounters(nodes_created=0, relationships_created=0, properties_set=0)
     summary = SimpleNamespace(query="MATCH (n) RETURN n", counters=counters, result_available_after=12)
     mock_store.run_cypher.return_value = (records, summary, ["name"])
 
-    executor = Neo4jCypherExecutor(client=MagicMock(), connection=make_dummy_connection())
-    executor._graph_store = mock_store
+    executor = cypher_executor_factory(mock_store)
 
     input_data = Neo4jCypherInputSchema(query="MATCH (n) RETURN n", parameters={"name": "Ada"})
-    result = executor.execute(input_data, RunnableConfig(callbacks=[]))
+    result = executor.execute(input_data, runnable_config)
 
     assert result["records"] == [{"name": "Ada"}, {"name": "Bob"}]
     assert result["keys"] == ["name"]
@@ -106,7 +149,7 @@ def test_cypher_executor_returns_records():
     assert "Params: {'name': 'Ada'}" in result["content"]
 
 
-def test_cypher_executor_returns_graph(monkeypatch):
+def test_cypher_executor_returns_graph(monkeypatch, cypher_executor_factory, runnable_config):
     fake_module = SimpleNamespace(Result=SimpleNamespace(graph="graph_transformer"))
     monkeypatch.setitem(sys.modules, "neo4j", fake_module)
 
@@ -131,11 +174,10 @@ def test_cypher_executor_returns_graph(monkeypatch):
     mock_store = MagicMock()
     mock_store.run_cypher.return_value = (graph, summary, ["n", "r", "m"])
 
-    executor = Neo4jCypherExecutor(client=MagicMock(), connection=make_dummy_connection())
-    executor._graph_store = mock_store
+    executor = cypher_executor_factory(mock_store)
 
     input_data = Neo4jCypherInputSchema(query="MATCH (n)-[r]->(m) RETURN n,r,m", return_graph=True)
-    result = executor.execute(input_data, RunnableConfig(callbacks=[]))
+    result = executor.execute(input_data, runnable_config)
 
     assert result["graph"]["nodes"][0]["labels"] == ["Person"]
     assert result["graph"]["relationships"][0]["type"] == "KNOWS"
@@ -150,7 +192,7 @@ def test_cypher_executor_returns_graph(monkeypatch):
     )
 
 
-def test_graph_writer_executes_write_graph():
+def test_graph_writer_executes_write_graph(graph_writer_factory, runnable_config):
     mock_store = MagicMock()
     mock_store.write_graph.return_value = {
         "nodes_created": 1,
@@ -160,8 +202,7 @@ def test_graph_writer_executes_write_graph():
         "keys": [],
     }
 
-    writer = Neo4jGraphWriter(client=MagicMock(), connection=make_dummy_connection())
-    writer._graph_store = mock_store
+    writer = graph_writer_factory(mock_store)
 
     input_data = Neo4jGraphWriterInputSchema(
         nodes=[
@@ -181,7 +222,7 @@ def test_graph_writer_executes_write_graph():
         ],
     )
 
-    result = writer.execute(input_data, RunnableConfig(callbacks=[]))
+    result = writer.execute(input_data, runnable_config)
 
     mock_store.write_graph.assert_called_once()
     assert result["input_preview"]["nodes"][0]["properties"]["name"] == "Ada"
@@ -195,7 +236,7 @@ def test_graph_writer_validates_identity_key():
         )
 
 
-def test_schema_introspector_returns_schema():
+def test_schema_introspector_returns_schema(schema_introspector_factory, runnable_config):
     mock_store = MagicMock()
     mock_store.run_cypher.side_effect = [
         ([{"label": "Person"}], None, None),
@@ -208,11 +249,10 @@ def test_schema_introspector_returns_schema():
         ),
     ]
 
-    introspector = Neo4jSchemaIntrospector(client=MagicMock(), connection=make_dummy_connection())
-    introspector._graph_store = mock_store
+    introspector = schema_introspector_factory(mock_store)
 
     input_data = Neo4jSchemaInputSchema(include_properties=True)
-    result = introspector.execute(input_data, RunnableConfig(callbacks=[]))
+    result = introspector.execute(input_data, runnable_config)
 
     assert result["labels"] == ["Person"]
     assert result["relationship_types"] == ["KNOWS"]
@@ -221,53 +261,50 @@ def test_schema_introspector_returns_schema():
     assert "Labels: ['Person']" in result["content"]
 
 
-def test_schema_introspector_skips_properties_when_disabled():
+def test_schema_introspector_skips_properties_when_disabled(schema_introspector_factory, runnable_config):
     mock_store = MagicMock()
     mock_store.run_cypher.side_effect = [
         ([{"label": "Person"}], None, None),
         ([{"relationshipType": "KNOWS"}], None, None),
     ]
 
-    introspector = Neo4jSchemaIntrospector(client=MagicMock(), connection=make_dummy_connection())
-    introspector._graph_store = mock_store
+    introspector = schema_introspector_factory(mock_store)
 
     input_data = Neo4jSchemaInputSchema(include_properties=False)
-    result = introspector.execute(input_data, RunnableConfig(callbacks=[]))
+    result = introspector.execute(input_data, runnable_config)
 
     assert result["node_properties"] == []
     assert result["relationship_properties"] == []
     assert mock_store.run_cypher.call_count == 2
 
 
-def test_text2cypher_parses_llm_output():
-    llm = FakeLLM(
-        response_text='```json {"cypher": "MATCH (n) RETURN n LIMIT 1", "params": {}, "reasoning": "ok"} ```'
-    )  # noqa: E501
+def test_text2cypher_parses_llm_output(llm_factory, runnable_config):
+    llm = llm_factory('```json {"cypher": "MATCH (n) RETURN n LIMIT 1", "params": {}, "reasoning": "ok"} ```')
     tool = Neo4jText2Cypher(llm=llm)
 
     input_data = Neo4jText2CypherInputSchema(question="List nodes", allow_writes=False)
-    result = tool.execute(input_data, RunnableConfig(callbacks=[]))
+    result = tool.execute(input_data, runnable_config)
 
     assert result["cypher"] == "MATCH (n) RETURN n LIMIT 1"
     assert "Cypher: MATCH (n) RETURN n LIMIT 1" in result["content"]
     assert len(tool._run_depends) == 1
 
 
-def test_text2cypher_blocks_writes_when_disabled():
-    llm = FakeLLM(response_text='{"cypher": "CREATE (n:Person)", "params": {}, "reasoning": "no"}')
+def test_text2cypher_blocks_writes_when_disabled(llm_factory, runnable_config):
+    llm = llm_factory('{"cypher": "CREATE (n:Person)", "params": {}, "reasoning": "no"}')
     tool = Neo4jText2Cypher(llm=llm)
 
     input_data = Neo4jText2CypherInputSchema(question="Create a person", allow_writes=False)
 
     with pytest.raises(ToolExecutionException):
-        tool.execute(input_data, RunnableConfig(callbacks=[]))
+        tool.execute(input_data, runnable_config)
 
 
-def test_text2cypher_rejects_empty_cypher():
-    llm = FakeLLM(response_text='{"cypher": "", "params": {}, "reasoning": "empty"}')
+def test_text2cypher_rejects_empty_cypher(llm_factory, runnable_config):
+    llm = llm_factory('{"cypher": "", "params": {}, "reasoning": "empty"}')
     tool = Neo4jText2Cypher(llm=llm)
 
     input_data = Neo4jText2CypherInputSchema(question="Nothing", allow_writes=True)
 
     with pytest.raises(ToolExecutionException):
-        tool.execute(input_data, RunnableConfig(callbacks=[]))
+        tool.execute(input_data, runnable_config)
