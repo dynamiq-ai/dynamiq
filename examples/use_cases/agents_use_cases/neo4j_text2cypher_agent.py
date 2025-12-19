@@ -1,7 +1,7 @@
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools import Neo4jCypherExecutor, Neo4jGraphWriter, Neo4jSchemaIntrospector, Neo4jText2Cypher
+from dynamiq.nodes.tools import Neo4jCypherExecutor
 from dynamiq.nodes.types import InferenceMode
 
 
@@ -20,63 +20,62 @@ def build_connection() -> Neo4jConnection:
 
 def build_readonly_agent() -> Agent:
     """
-    Flow 1: assumes graph is already populated. Tools: Text2Cypher (read-only) + CypherExecutor.
+    Flow 1: assumes graph is already populated. Tool: CypherExecutor.
     """
     llm = build_llm()
     connection = build_connection()
 
-    text2cypher = Neo4jText2Cypher(llm=llm, name="text2cypher")
     cypher_executor = Neo4jCypherExecutor(connection=connection, name="cypher_executor")
-    schema = Neo4jSchemaIntrospector(connection=connection, name="schema_introspector")
 
     return Agent(
         name="neo4j_reader",
         llm=llm,
-        tools=[schema, text2cypher, cypher_executor],
+        tools=[cypher_executor],
         role=(
             "You answer questions against Neo4j. "
-            "If schema is unknown, first call schema_introspector to fetch labels and properties. "
-            "Then call text2cypher to get a parameterized query (allow_writes should remain false), "
-            "then execute it with cypher_executor. "
-            "Use the XML protocol exactly with <action>schema_introspector</action>, "
-            "<action>text2cypher</action>, or <action>cypher_executor</action>."
+            "If schema is unknown, call cypher_executor with mode=introspect to fetch labels and properties. "
+            "Then execute a parameterized read query with cypher_executor (allow_writes=false). "
+            "Use only mode=execute or mode=introspect; do not use mode=r/w. "
+            "Use routing='r' for read queries when supported. "
+            "Avoid comma-separated MATCH patterns that create cartesian products; prefer chained MATCH clauses "
+            "or explicit relationship patterns. "
+            "Use the XML protocol exactly with <action>cypher_executor</action> and <action_input> JSON. "
+            "Do not use self-closing tool tags like <cypher_executor/>."
         ),
         inference_mode=InferenceMode.XML,
-        max_loops=6,
+        max_loops=10,
     )
 
 
 def build_ingest_agent() -> Agent:
     """
-    Flow 2: can ingest facts then query. Tools: GraphWriter + Text2Cypher (writes allowed) + CypherExecutor.
+    Flow 2: can ingest facts then query. Tool: CypherExecutor with allow_writes=true for write queries.
     """
     llm = build_llm()
     connection = build_connection()
 
-    text2cypher = Neo4jText2Cypher(llm=llm, name="text2cypher_with_writes")
     cypher_executor = Neo4jCypherExecutor(connection=connection, name="cypher_executor")
-    graph_writer = Neo4jGraphWriter(connection=connection, name="graph_writer")
-    schema = Neo4jSchemaIntrospector(connection=connection, name="schema_introspector")
 
     return Agent(
         name="neo4j_ingest_reader",
         llm=llm,
-        tools=[schema, graph_writer, text2cypher, cypher_executor],
+        tools=[cypher_executor],
         role=(
-            "You can ingest data into Neo4j (graph_writer) and then answer questions. "
-            "Use the XML protocol exactly: <action>schema_introspector</action>, "
-            "<action>graph_writer</action>, <action>text2cypher_with_writes</action>, or "
-            "<action>cypher_executor</action> with matching <action_input> JSON. "
-            "For new raw text, extract key entities/relations, write them with graph_writer using:\n"
-            '  {"nodes": [{"labels": ["Label"], "identity_key": "id", "properties": {"id": "x", "name": "..."}}],\n'
-            '   "relationships": [{"type": "REL", "start_label": "A", '
-            '"start_identity_key": "id", "start_identity": "x", '
-            '"end_label": "B", "end_identity_key": "id", "end_identity": "y", "properties": {}}]}\n'
-            "Then generate Cypher via text2cypher with allow_writes=True"
-            " when writes are intended, and execute with cypher_executor."
+            "You can ingest data into Neo4j and then answer questions. "
+            "Use the XML protocol exactly: <action>cypher_executor</action> with matching <action_input> JSON. "
+            "Do not use self-closing tool tags like <cypher_executor/>. "
+            "If schema is unknown, call cypher_executor with mode=introspect. "
+            "For new raw text, extract key entities/relations, write them via cypher_executor with allow_writes=true, "
+            "then query with allow_writes=false and provide the final answer. "
+            "Use only mode=execute or mode=introspect; do not use mode=r/w. "
+            "Use routing='r' for read queries when supported. "
+            "Avoid comma-separated MATCH patterns (cartesian products). Prefer MATCH ... WITH ... MATCH or "
+            "single MATCH with relationship patterns, and use MERGE on the relationship pattern directly. "
+            "If duplicates exist, prefer matching by stable ids if available and avoid creating new nodes by name. "
+            "For write-then-read flows, you may send a list of queries in one call."
         ),
         inference_mode=InferenceMode.XML,
-        max_loops=8,
+        max_loops=10,
     )
 
 
@@ -94,52 +93,34 @@ def seed_sample_graph(connection: Neo4jConnection) -> dict:
         Bob WORKS_AT Dynamiq
         Dynamiq BUILDS Dynamiq Platform
     """
-    writer = Neo4jGraphWriter(connection=connection, name="graph_writer_seed")
-    nodes = [
-        {"labels": ["Company"], "identity_key": "id", "properties": {"id": "dynamiq", "name": "Dynamiq"}},
-        {
-            "labels": ["Product"],
-            "identity_key": "id",
-            "properties": {"id": "dynamiq-platform", "name": "Dynamiq Platform"},
-        },
-        {"labels": ["Person"], "identity_key": "id", "properties": {"id": "alice", "name": "Alice"}},
-        {"labels": ["Person"], "identity_key": "id", "properties": {"id": "bob", "name": "Bob"}},
-    ]
-    relationships = [
-        {
-            "type": "WORKS_AT",
-            "start_label": "Person",
-            "start_identity_key": "id",
-            "start_identity": "alice",
-            "end_label": "Company",
-            "end_identity_key": "id",
-            "end_identity": "dynamiq",
-            "properties": {},
-        },
-        {
-            "type": "WORKS_AT",
-            "start_label": "Person",
-            "start_identity_key": "id",
-            "start_identity": "bob",
-            "end_label": "Company",
-            "end_identity_key": "id",
-            "end_identity": "dynamiq",
-            "properties": {},
-        },
-        {
-            "type": "BUILDS",
-            "start_label": "Company",
-            "start_identity_key": "id",
-            "start_identity": "dynamiq",
-            "end_label": "Product",
-            "end_identity_key": "id",
-            "end_identity": "dynamiq-platform",
-            "properties": {"since": 2024},
-        },
-    ]
+    executor = Neo4jCypherExecutor(connection=connection, name="cypher_executor_seed")
+    query = """
+    MERGE (c:Company {id: $company_id})
+    SET c.name = $company_name
+    MERGE (p:Product {id: $product_id})
+    SET p.name = $product_name
+    MERGE (a:Person {id: $alice_id})
+    SET a.name = $alice_name
+    MERGE (b:Person {id: $bob_id})
+    SET b.name = $bob_name
+    MERGE (a)-[:WORKS_AT]->(c)
+    MERGE (b)-[:WORKS_AT]->(c)
+    MERGE (c)-[:BUILDS {since: $since}]->(p)
+    """
+    params = {
+        "company_id": "dynamiq",
+        "company_name": "Dynamiq",
+        "product_id": "dynamiq-platform",
+        "product_name": "Dynamiq Platform",
+        "alice_id": "alice",
+        "alice_name": "Alice",
+        "bob_id": "bob",
+        "bob_name": "Bob",
+        "since": 2024,
+    }
 
-    result = writer.run(
-        input_data={"nodes": nodes, "relationships": relationships},
+    result = executor.run(
+        input_data={"query": query, "parameters": params, "allow_writes": True},
         config=None,
     )
     return result.output

@@ -23,28 +23,18 @@ nodes:
       temperature: 0
       max_tokens: 2048
     tools:
-      - id: schema-introspector
-        type: dynamiq.nodes.tools.neo4j_schema_introspector.Neo4jSchemaIntrospector
-        name: schema_introspector
-        connection: neo4j-conn
-      - id: text2cypher-read
-        type: dynamiq.nodes.tools.neo4j_text2cypher.Neo4jText2Cypher
-        name: text2cypher
-        llm:
-          id: text2cypher-llm
-          type: dynamiq.nodes.llms.OpenAI
-          connection: openai-conn
-          model: gpt-4o-mini
-          temperature: 0
-          max_tokens: 2048
       - id: cypher-executor
         type: dynamiq.nodes.tools.neo4j_cypher_executor.Neo4jCypherExecutor
         name: cypher_executor
         connection: neo4j-conn
     role: >
-      You answer questions against Neo4j. If schema is unknown, first call schema_introspector to fetch labels and properties.
-      Then call text2cypher (allow_writes must remain false) to get a parameterized query, then execute it with cypher_executor.
-      Use the XML protocol exactly with <action>schema_introspector</action>, <action>text2cypher</action>, or <action>cypher_executor</action>.
+      You answer questions against Neo4j. If schema is unknown, call cypher_executor with mode=introspect.
+      Then execute a parameterized read query with cypher_executor (allow_writes=false).
+      Use only mode=execute or mode=introspect; do not use mode=r/w.
+      Use routing='r' for read queries when supported.
+      Avoid comma-separated MATCH patterns that create cartesian products; prefer chained MATCH clauses
+      or explicit relationship patterns.
+      Use the XML protocol exactly with <action>cypher_executor</action>.
       action_input MUST be valid JSON using double quotes only (never single quotes or Python dict syntax).
     inference_mode: XML
     max_loops: 8
@@ -61,41 +51,20 @@ nodes:
       temperature: 0
       max_tokens: 2048
     tools:
-      - id: schema-introspector-ingest
-        type: dynamiq.nodes.tools.neo4j_schema_introspector.Neo4jSchemaIntrospector
-        name: schema_introspector
-        connection: neo4j-conn
-      - id: graph-writer
-        type: dynamiq.nodes.tools.neo4j_graph_writer.Neo4jGraphWriter
-        name: graph_writer
-        connection: neo4j-conn
-        database: ${oc.env:NEO4J_DATABASE}
-      - id: text2cypher-write
-        type: dynamiq.nodes.tools.neo4j_text2cypher.Neo4jText2Cypher
-        name: text2cypher_with_writes
-        llm:
-          id: text2cypher-write-llm
-          type: dynamiq.nodes.llms.OpenAI
-          connection: openai-conn
-          model: gpt-4o-mini
-          temperature: 0
-          max_tokens: 2048
-        default_limit: 100
       - id: cypher-executor-ingest
         type: dynamiq.nodes.tools.neo4j_cypher_executor.Neo4jCypherExecutor
         name: cypher_executor
         connection: neo4j-conn
     role: >
-      You can ingest data into Neo4j (graph_writer) and then answer questions.
-      Always use XML actions: <action>schema_introspector</action>, <action>graph_writer</action>,
-      <action>text2cypher_with_writes</action>, or <action>cypher_executor</action> with matching JSON in <action_input>.
+      You can ingest data into Neo4j and then answer questions.
+      Always use XML actions: <action>cypher_executor</action> with matching JSON in <action_input>.
       action_input MUST be valid JSON using double quotes only (never single quotes or Python dict syntax).
-      For new raw text, extract key entities/relations, write them with graph_writer using
-      {"nodes": [{"labels": ["Label"], "identity_key": "id", "properties": {"id": "x", "name": "..."}},
-      {"labels": ["LabelB"], "identity_key": "id", "properties": {"id": "y", "name": "..."}}],
-      "relationships": [{"type": "REL", "start_label": "Label", "start_identity_key": "id", "start_identity": "x",
-      "end_label": "LabelB", "end_identity_key": "id", "end_identity": "y", "properties": {}}]}.
-      Then generate Cypher via text2cypher_with_writes (allow_writes=true) and execute with cypher_executor.
+      For new raw text, extract entities/relations, write them via cypher_executor with allow_writes=true,
+      then query with allow_writes=false and provide the final answer.
+      Use only mode=execute or mode=introspect; do not use mode=r/w.
+      Use routing='r' for read queries when supported.
+      Avoid comma-separated MATCH patterns (cartesian products).
+      Prefer MATCH ... WITH ... MATCH or single MATCH with relationship patterns.
     inference_mode: XML
     max_loops: 8
 
