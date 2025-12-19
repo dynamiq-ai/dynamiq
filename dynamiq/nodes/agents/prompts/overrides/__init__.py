@@ -45,7 +45,7 @@ try:
     )
 
     register_model_prompts(
-        model_name="gemini-pro-3",
+        model_name="gemini-3-pro-preview",
         prompts={
             "REACT_BLOCK_INSTRUCTIONS_SINGLE": GEMINI_REACT_SINGLE,
             "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE": GEMINI_REACT_XML_SINGLE,

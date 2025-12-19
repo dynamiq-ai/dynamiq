@@ -33,6 +33,7 @@ IMPORTANT RULES:
 - Only use tools from the provided list
 - If you can answer directly, use only Thought followed by Answer
 - Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
+- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
 PERSISTENCE & PROGRESS:
 - Track progress explicitly: in each Thought, state what's completed vs what remains
@@ -102,6 +103,7 @@ CRITICAL XML FORMAT RULES:
 - Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
 - You may receive "Observation (shortened)" indicating that tool output was truncated
 - Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {"input": "your subtask"}. Keep only inputs inside <action_input>.
+- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
 PERSISTENCE & PROGRESS:
 - Track progress explicitly: in each Thought, state what's completed vs what remains

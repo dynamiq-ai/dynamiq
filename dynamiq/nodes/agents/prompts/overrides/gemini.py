@@ -25,7 +25,7 @@ Before acting, reason through:
 2. Risk: Assess consequences; prefer action over asking user for exploratory tasks
 3. Root cause: Test hypotheses systematically; look beyond obvious causes
 4. Adapt: Adjust plan based on observations
-5. Completeness: Check ALL sources, requirements, constraints before concluding
+5. Completeness: Check ALL sources, requirements, constraints before concluding.
 6. Persistence: Retry transient errors; change strategy for other errors; never repeat failed calls
 
 
@@ -43,6 +43,8 @@ IMPORTANT RULES:
 - Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
+- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
+
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - Files are automatically collected and will be returned with your final answer
@@ -91,7 +93,7 @@ Before acting, reason through:
 2. Risk: Assess consequences; prefer action over asking user for exploratory tasks
 3. Root cause: Test hypotheses systematically; look beyond obvious causes
 4. Adapt: Adjust plan based on observations
-5. Completeness: Check ALL sources, requirements, constraints before concluding
+5. Completeness: Check ALL sources, requirements, constraints before concluding.
 6. Persistence: Retry transient errors; change strategy for other errors; never repeat failed calls
 
 CRITICAL XML FORMAT RULES:
@@ -113,6 +115,7 @@ CRITICAL XML FORMAT RULES:
 - Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {"input": "your subtask"}. Keep only inputs inside <action_input>.
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
+- Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags

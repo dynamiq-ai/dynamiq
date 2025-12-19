@@ -294,6 +294,9 @@ def get_model_specific_prompts(
     """
     # Get model-specific agent template
     agent_template = get_prompt_constant(model_name, "AGENT_PROMPT_TEMPLATE", AGENT_PROMPT_TEMPLATE)
+    if agent_template != AGENT_PROMPT_TEMPLATE:
+        logger.debug(f"Using model-specific AGENT_PROMPT_TEMPLATE for '{model_name}'")
+
     # Get base instructions based on parallel tool calls setting
     if parallel_tool_calls_enabled:
         instructions_default = get_prompt_constant(
@@ -302,6 +305,10 @@ def get_model_specific_prompts(
         instructions_xml = get_prompt_constant(
             model_name, "REACT_BLOCK_XML_INSTRUCTIONS_MULTI", REACT_BLOCK_XML_INSTRUCTIONS_MULTI
         )
+        if instructions_default != REACT_BLOCK_INSTRUCTIONS_MULTI:
+            logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_MULTI for '{model_name}'")
+        if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_MULTI:
+            logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_MULTI for '{model_name}'")
     else:
         instructions_default = get_prompt_constant(
             model_name, "REACT_BLOCK_INSTRUCTIONS_SINGLE", REACT_BLOCK_INSTRUCTIONS_SINGLE
@@ -309,6 +316,10 @@ def get_model_specific_prompts(
         instructions_xml = get_prompt_constant(
             model_name, "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
         )
+        if instructions_default != REACT_BLOCK_INSTRUCTIONS_SINGLE:
+            logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_SINGLE for '{model_name}'")
+        if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_SINGLE:
+            logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
 
     # Add direct tool output capabilities if enabled
     if direct_tool_output_enabled:
@@ -318,15 +329,27 @@ def get_model_specific_prompts(
         direct_output_xml = get_prompt_constant(
             model_name, "XML_DIRECT_OUTPUT_CAPABILITIES", XML_DIRECT_OUTPUT_CAPABILITIES
         )
+        if direct_output_default != DEFAULT_DIRECT_OUTPUT_CAPABILITIES:
+            logger.debug(f"Using model-specific DEFAULT_DIRECT_OUTPUT_CAPABILITIES for '{model_name}'")
+        if direct_output_xml != XML_DIRECT_OUTPUT_CAPABILITIES:
+            logger.debug(f"Using model-specific XML_DIRECT_OUTPUT_CAPABILITIES for '{model_name}'")
         instructions_default += "\n" + direct_output_default
         instructions_xml += "\n" + direct_output_xml
 
     # Get other model-specific prompts
     react_block_tools = get_prompt_constant(model_name, "REACT_BLOCK_TOOLS", REACT_BLOCK_TOOLS)
+    if react_block_tools != REACT_BLOCK_TOOLS:
+        logger.debug(f"Using model-specific REACT_BLOCK_TOOLS for '{model_name}'")
+
     react_block_instructions_no_tools = get_prompt_constant(
         model_name, "REACT_BLOCK_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_INSTRUCTIONS_NO_TOOLS
     )
+    if react_block_instructions_no_tools != REACT_BLOCK_INSTRUCTIONS_NO_TOOLS:
+        logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_NO_TOOLS for '{model_name}'")
+
     react_block_output_format = get_prompt_constant(model_name, "REACT_BLOCK_OUTPUT_FORMAT", REACT_BLOCK_OUTPUT_FORMAT)
+    if react_block_output_format != REACT_BLOCK_OUTPUT_FORMAT:
+        logger.debug(f"Using model-specific REACT_BLOCK_OUTPUT_FORMAT for '{model_name}'")
 
     # Build initial prompt blocks
     prompt_blocks = {

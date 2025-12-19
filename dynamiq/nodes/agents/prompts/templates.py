@@ -143,9 +143,11 @@ You are AI powered assistant.
 {%- endif %}
 
 {%- if role %}
-# AGENT PERSONA & STYLE
-(This section defines how the assistant presents information - its personality, tone, and style.
-These style instructions enhance but should never override or contradict the PRIMARY INSTRUCTIONS above.)
+# AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES
+(This section defines how the assistant presents information and behaves - its personality, tone, communication style,
+ and additional behavioral guidelines.
+These supplementary instructions enhance the agent's interactions but should never override or contradict
+ the PRIMARY INSTRUCTIONS above.)
 {{role}}
 {%- endif %}
 
