@@ -112,11 +112,13 @@ class Neo4jCypherExecutor(ConnectionNode):
     input_schema: ClassVar[type[Neo4jCypherInputSchema]] = Neo4jCypherInputSchema
     _graph_store: Neo4jGraphStore | None = PrivateAttr(default=None)
 
-    def init_components(self, connection_manager=None):
+    def init_components(self, connection_manager=None) -> None:
         super().init_components(connection_manager)
         self._graph_store = Neo4jGraphStore(connection=self.connection, client=self.client, database=self.database)
 
-    def execute(self, input_data: Neo4jCypherInputSchema, config: RunnableConfig = None, **kwargs):
+    def execute(
+        self, input_data: Neo4jCypherInputSchema, config: RunnableConfig = None, **kwargs
+    ) -> dict[str, Any]:
         logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -369,7 +371,7 @@ class Neo4jCypherExecutor(ConnectionNode):
         cleaned = (query or "").strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.strip("`").strip()
-            if cleaned.startswith("cypher"):
+            if cleaned.lower().startswith("cypher"):
                 cleaned = cleaned[len("cypher") :].strip()
         return cleaned
 

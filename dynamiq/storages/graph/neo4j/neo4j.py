@@ -38,7 +38,7 @@ class Neo4jGraphStore:
         database: str | None = None,
         routing: str | RoutingControl | None = None,
         result_transformer: Any | None = None,
-    ):
+    ) -> tuple[list[Any], Any, list[str]]:
         """
         Execute a Cypher query with optional parameters and transformers.
 

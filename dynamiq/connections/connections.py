@@ -16,6 +16,7 @@ from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
     from chromadb import ClientAPI as ChromaClient
+    from neo4j import Driver as Neo4jDriver
     from openai import OpenAI as OpenAIClient
     from pinecone import Pinecone as PineconeClient
     from qdrant_client import QdrantClient
@@ -539,13 +540,15 @@ class Neo4j(BaseConnection):
     database: str | None = Field(default_factory=partial(get_env_var, "NEO4J_DATABASE", None))
     verify_connectivity: bool = True
 
-    def connect(self):
+    def connect(self) -> "Neo4jDriver":
         from neo4j import GraphDatabase
 
         driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password))
         if self.verify_connectivity:
             driver.verify_connectivity()
         return driver
+
+
 
 
 class WeaviateDeploymentType(str, enum.Enum):
