@@ -229,6 +229,13 @@ def test_cypher_executor_blocks_cartesian_writes(cypher_executor_factory, runnab
         executor.execute(input_data, runnable_config)
 
 
+def test_cypher_executor_allows_cartesian_reads():
+    Neo4jCypherExecutor._validate_query(
+        "MATCH (a:Person), (b:Company) RETURN a, b",
+        allow_writes=True,
+    )
+
+
 def test_cypher_executor_handles_batch_queries(cypher_executor_factory, runnable_config):
     mock_store = MagicMock()
     counters = FakeCounters(nodes_created=0, relationships_created=0, properties_set=0)

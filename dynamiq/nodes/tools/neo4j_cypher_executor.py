@@ -379,7 +379,7 @@ class Neo4jCypherExecutor(ConnectionNode):
             raise ToolExecutionException("Cypher query cannot be empty.", recoverable=True)
         if not allow_writes and cls._contains_write(query):
             raise ToolExecutionException("Cypher contains write operations but allow_writes is false.")
-        if allow_writes and cls._contains_cartesian_match(query):
+        if allow_writes and cls._contains_write(query) and cls._contains_cartesian_match(query):
             raise ToolExecutionException(
                 "Cypher contains comma-separated MATCH/MERGE patterns that may create cartesian products. "
                 "Use chained MATCH with WITH, or a single MATCH with relationship patterns.",
