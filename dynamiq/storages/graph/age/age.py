@@ -225,5 +225,11 @@ class ApacheAgeGraphStore(BaseGraphStore):
             if candidate in columns:
                 return candidate
         if columns:
-            return sorted(columns)[0]
+            fallback = sorted(columns)[0]
+            logger.warning(
+                "Falling back to graph id column '%s' from ag_catalog.ag_graph; available columns: %s",
+                fallback,
+                sorted(columns),
+            )
+            return fallback
         raise RuntimeError("Unable to introspect ag_catalog.ag_graph columns for Apache AGE.")

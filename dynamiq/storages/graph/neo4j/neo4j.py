@@ -39,7 +39,7 @@ class Neo4jGraphStore(BaseGraphStore):
         database: str | None = None,
         routing: str | RoutingControl | None = None,
         result_transformer: Any | None = None,
-    ) -> tuple[list[Any], Any, list[str]]:
+    ) -> tuple[Any, Any, list[str]]:
         """
         Execute a Cypher query with optional parameters and transformers.
 
@@ -58,7 +58,14 @@ class Neo4jGraphStore(BaseGraphStore):
         if routing:
             execute_kwargs["routing_"] = self._normalize_routing(routing)
         if result_transformer:
-            execute_kwargs["result_transformer_"] = result_transformer
+
+            def _transform_with_metadata(result: Any) -> tuple[Any, Any, list[str]]:
+                transformed = result_transformer(result)
+                summary = result.consume()
+                keys = result.keys()
+                return transformed, summary, keys
+
+            execute_kwargs["result_transformer_"] = _transform_with_metadata
 
         try:
             return self.client.execute_query(query, parameters_=params, **execute_kwargs)
@@ -144,7 +151,7 @@ class Neo4jGraphStore(BaseGraphStore):
         total_nodes_created = 0
         total_properties_set = 0
         total_relationships_created = 0
-        last_records: list[dict[str, Any]] = []
+        all_records: list[dict[str, Any]] = []
         last_keys: list[str] = []
 
         if nodes:
@@ -171,12 +178,11 @@ class Neo4jGraphStore(BaseGraphStore):
             node_records, node_summary, node_keys = self.run_cypher(node_query, node_params, database=database)
             total_nodes_created += node_summary.counters.nodes_created
             total_properties_set += node_summary.counters.properties_set
-            last_records = self.format_records(node_records)
-            last_keys = node_keys
+            all_records.extend(self.format_records(node_records))
+            if node_keys:
+                last_keys = node_keys
 
         if relationships:
-            last_records = []
-            last_keys = []
             for idx, rel in enumerate(relationships):
                 rel_type = self._format_relationship_type(rel.get("type") or "")
                 start_label = self._format_single_label(rel.get("start_label") or "")
@@ -204,14 +210,15 @@ class Neo4jGraphStore(BaseGraphStore):
                 rel_records, rel_summary, rel_keys = self.run_cypher(rel_query, rel_params, database=database)
                 total_relationships_created += rel_summary.counters.relationships_created
                 total_properties_set += rel_summary.counters.properties_set
-                last_records = self.format_records(rel_records)
-                last_keys = rel_keys
+                all_records.extend(self.format_records(rel_records))
+                if rel_keys:
+                    last_keys = rel_keys
 
         return {
             "nodes_created": total_nodes_created,
             "properties_set": total_properties_set,
             "relationships_created": total_relationships_created,
-            "records": last_records,
+            "records": all_records,
             "keys": last_keys,
         }
 

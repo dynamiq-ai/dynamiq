@@ -4,6 +4,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from dynamiq.connections import ApacheAge, Neo4j
+from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
@@ -69,6 +70,24 @@ Apache AGE notes:
 
 
 class CypherInputSchema(BaseModel):
+    """Schema for Cypher tool inputs.
+
+    Args:
+        mode: Execution mode.
+        query: Cypher query or list of queries in execute mode.
+        parameters: Parameters for Cypher execution.
+        database: Optional database name override.
+        routing: Routing preference for clustered deployments.
+        return_graph: Whether to return graph results instead of rows.
+        include_properties: Whether to include node and relationship property metadata.
+        allow_writes: Whether to allow write queries.
+
+    Raises:
+        ValueError: If required fields are missing or incompatible with the selected mode.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     mode: Literal["execute", "introspect"] = Field(default="execute", description="Execution mode.")
     query: str | list[str] | None = Field(
         default=None, description="Cypher query or list of queries (execute mode only)."
@@ -113,11 +132,11 @@ class CypherInputSchema(BaseModel):
             raise ValueError("parameters list is only supported when query is a list.")
         return self
 
-    model_config = ConfigDict(extra="forbid")
-
 
 class CypherExecutor(ConnectionNode):
     """Tool for executing Cypher queries against Neo4j or Apache AGE."""
+
+    input_schema: ClassVar[type[CypherInputSchema]] = CypherInputSchema
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Cypher Executor"
@@ -127,17 +146,20 @@ class CypherExecutor(ConnectionNode):
     database: str | None = None
     graph_name: str | None = None
     create_graph_if_missing: bool | None = None
-
-    input_schema: ClassVar[type[CypherInputSchema]] = CypherInputSchema
     _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
     _backend_name: str | None = PrivateAttr(default=None)
 
-    def init_components(self, connection_manager=None) -> None:
+    def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
+        """Initialize graph store and backend metadata.
+
+        Args:
+            connection_manager: Optional connection manager instance.
+        """
         super().init_components(connection_manager)
         if isinstance(self.connection, ApacheAge):
             self._backend_name = "age"
             self._graph_store = ApacheAgeGraphStore(
-                connection=self.connection if isinstance(self.connection, ApacheAge) else None,
+                connection=self.connection,
                 client=self.client,
                 graph_name=self.graph_name,
                 create_graph_if_missing=self.create_graph_if_missing,
@@ -155,6 +177,19 @@ class CypherExecutor(ConnectionNode):
         return BASE_CYPHER_DESCRIPTION
 
     def execute(self, input_data: CypherInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
+        """Run Cypher queries or introspect schema via the configured backend.
+
+        Args:
+            input_data: Validated Cypher input payload.
+            config: Optional runnable configuration.
+            **kwargs: Extra execution context forwarded to callbacks.
+
+        Returns:
+            Dictionary payload containing records or graph output, plus metadata.
+
+        Raises:
+            ToolExecutionException: If execution fails or the graph store is not initialized.
+        """
         logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
@@ -490,4 +525,3 @@ class CypherExecutor(ConnectionNode):
             counters_dict["contains_system_updates"] = value() if callable(value) else value
 
         return counters_dict
-
