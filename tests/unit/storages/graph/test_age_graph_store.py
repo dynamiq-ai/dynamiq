@@ -22,6 +22,6 @@ def test_age_run_cypher_executes_query():
     sql, params = last_call.args
     assert "cypher" in sql
     assert "agtype_to_json" in sql
-    assert "graph" in sql
-    assert "MATCH (n) RETURN n AS result" in sql
-    assert params[0] == json.dumps({"name": "Ada"})
+    assert params[0] == "graph"
+    assert params[1] == "MATCH (n) RETURN n AS result"
+    assert params[2] == json.dumps({"name": "Ada"})
