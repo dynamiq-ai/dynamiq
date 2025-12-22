@@ -5,7 +5,7 @@ from dynamiq.callbacks import DynamiqTracingCallbackHandler, TracingCallbackHand
 from dynamiq.connections import Neo4j
 from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.tools import Neo4jCypherExecutor
+from dynamiq.nodes.tools import CypherExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -30,7 +30,7 @@ def build_ingest_agent() -> Agent:
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0, max_tokens=2048)
     connection = Neo4j()
 
-    cypher_executor = Neo4jCypherExecutor(connection=connection, name="cypher_executor")
+    cypher_executor = CypherExecutor(connection=connection, name="cypher_executor")
 
     return Agent(
         name="neo4j_ingest_agent",

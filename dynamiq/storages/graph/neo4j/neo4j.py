@@ -5,13 +5,14 @@ from neo4j import RoutingControl
 from neo4j.exceptions import Neo4jError
 
 from dynamiq.connections import Neo4j as Neo4jConnection
+from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.utils.logger import logger
 
 LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 PROPERTY_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-class Neo4jGraphStore:
+class Neo4jGraphStore(BaseGraphStore):
     """
     Lightweight wrapper around the Neo4j Python driver.
 
@@ -69,6 +70,51 @@ class Neo4jGraphStore:
     def format_records(records: Iterable[Any]) -> list[dict[str, Any]]:
         """Convert Neo4j Record objects to plain dicts."""
         return [record.data() for record in records]
+
+    def introspect_schema(self, *, include_properties: bool, **kwargs: Any) -> dict[str, Any]:
+        database = kwargs.get("database")
+        labels_records, _, _ = self.run_cypher(
+            "CALL db.labels() YIELD label RETURN label ORDER BY label",
+            database=database,
+        )
+        reltype_records, _, _ = self.run_cypher(
+            "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType ORDER BY relationshipType",
+            database=database,
+        )
+        labels = [r["label"] for r in labels_records]
+        rel_types = [r["relationshipType"] for r in reltype_records]
+
+        node_props: list[dict[str, Any]] = []
+        rel_props: list[dict[str, Any]] = []
+
+        if include_properties:
+            try:
+                node_props_records, _, _ = self.run_cypher(
+                    "CALL db.schema.nodeTypeProperties()",
+                    database=database,
+                )
+                node_props = [r.data() for r in node_props_records]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Node property introspection failed: {exc}")
+
+            try:
+                rel_props_records, _, _ = self.run_cypher(
+                    "CALL db.schema.relTypeProperties()",
+                    database=database,
+                )
+                rel_props = [r.data() for r in rel_props_records]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Relationship property introspection failed: {exc}")
+
+        return {
+            "labels": labels,
+            "relationship_types": rel_types,
+            "node_properties": node_props,
+            "relationship_properties": rel_props,
+        }
+
+    def supports_graph_result(self) -> bool:
+        return True
 
     def write_graph(
         self,

@@ -3,15 +3,17 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from dynamiq.connections import Neo4j
+from dynamiq.connections import ApacheAge, Neo4j
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.storages.graph.age import ApacheAgeGraphStore
+from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
 from dynamiq.utils.logger import logger
 
-DESCRIPTION_NEO4J_CYPHER = """Executes parameterized Cypher against Neo4j or introspects schema
+BASE_CYPHER_DESCRIPTION = """Executes parameterized Cypher against Neo4j or Apache AGE, or introspects schema
 
 Inputs:
 - mode: execute | introspect
@@ -50,8 +52,23 @@ Usage tips:
   SET r.role = $role
 - For write-then-read flows, prefer a multi-query call with a list of queries and parameters."""
 
+NEO4J_BACKEND_NOTES = """
+Neo4j notes:
+- return_graph is supported to return nodes/relationships instead of rows.
+- routing can be 'r' or 'w' when using Neo4j clusters.
+- database can target a named Neo4j database.
+"""
 
-class Neo4jCypherInputSchema(BaseModel):
+AGE_BACKEND_NOTES = """
+Apache AGE notes:
+- AGE requires queries to RETURN a single column; alias it as `result` (e.g., RETURN n AS result).
+- return_graph is not supported for AGE backends.
+- Provide graph_name via the ApacheAge connection or the tool's graph_name field.
+- Avoid passing a list of queries; use a single query string for AGE.
+"""
+
+
+class CypherInputSchema(BaseModel):
     mode: Literal["execute", "introspect"] = Field(default="execute", description="Execution mode.")
     query: str | list[str] | None = Field(
         default=None, description="Cypher query or list of queries (execute mode only)."
@@ -99,32 +116,51 @@ class Neo4jCypherInputSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class Neo4jCypherExecutor(ConnectionNode):
-    """Tool for executing Cypher queries against Neo4j."""
+class CypherExecutor(ConnectionNode):
+    """Tool for executing Cypher queries against Neo4j or Apache AGE."""
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Neo4j Cypher Executor"
-    description: str = DESCRIPTION_NEO4J_CYPHER
+    name: str = "Cypher Executor"
+    description: str = BASE_CYPHER_DESCRIPTION
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
-    connection: Neo4j
+    connection: Neo4j | ApacheAge
     database: str | None = None
+    graph_name: str | None = None
+    create_graph_if_missing: bool | None = None
 
-    input_schema: ClassVar[type[Neo4jCypherInputSchema]] = Neo4jCypherInputSchema
-    _graph_store: Neo4jGraphStore | None = PrivateAttr(default=None)
+    input_schema: ClassVar[type[CypherInputSchema]] = CypherInputSchema
+    _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
+    _backend_name: str | None = PrivateAttr(default=None)
 
     def init_components(self, connection_manager=None) -> None:
         super().init_components(connection_manager)
-        self._graph_store = Neo4jGraphStore(connection=self.connection, client=self.client, database=self.database)
+        if isinstance(self.connection, ApacheAge):
+            self._backend_name = "age"
+            self._graph_store = ApacheAgeGraphStore(
+                connection=self.connection if isinstance(self.connection, ApacheAge) else None,
+                client=self.client,
+                graph_name=self.graph_name,
+                create_graph_if_missing=self.create_graph_if_missing,
+            )
+        else:
+            self._backend_name = "neo4j"
+            self._graph_store = Neo4jGraphStore(connection=self.connection, client=self.client, database=self.database)
+        self.description = self._build_description()
 
-    def execute(
-        self, input_data: Neo4jCypherInputSchema, config: RunnableConfig = None, **kwargs
-    ) -> dict[str, Any]:
+    def _build_description(self) -> str:
+        if self._backend_name == "age":
+            return BASE_CYPHER_DESCRIPTION + AGE_BACKEND_NOTES
+        if self._backend_name == "neo4j":
+            return BASE_CYPHER_DESCRIPTION + NEO4J_BACKEND_NOTES
+        return BASE_CYPHER_DESCRIPTION
+
+    def execute(self, input_data: CypherInputSchema, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:
         logger.info(f"Tool {self.name} - {self.id}: started with INPUT DATA:\n{input_data.model_dump()}")
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         if not self._graph_store:
-            raise ToolExecutionException("Neo4j graph store is not initialized.", recoverable=True)
+            raise ToolExecutionException("Graph store is not initialized.", recoverable=True)
 
         database = input_data.database or self.database
         routing = input_data.routing
@@ -132,7 +168,10 @@ class Neo4jCypherExecutor(ConnectionNode):
 
         try:
             if input_data.mode == "introspect":
-                result_payload = self._introspect_schema(input_data, database)
+                result_payload = self._graph_store.introspect_schema(
+                    include_properties=input_data.include_properties,
+                    database=database,
+                )
                 result_payload["mode"] = input_data.mode
                 result_payload["content"] = self._build_schema_content(result_payload)
                 logger.info(
@@ -218,6 +257,8 @@ class Neo4jCypherExecutor(ConnectionNode):
         self._validate_query(cleaned_query, allow_writes=allow_writes)
 
         if return_graph:
+            if not self._graph_store.supports_graph_result():
+                raise ToolExecutionException("return_graph is only supported for Neo4j backends.", recoverable=True)
             import neo4j
 
             transformer = neo4j.Result.graph
@@ -235,14 +276,10 @@ class Neo4jCypherExecutor(ConnectionNode):
             result_payload["graph"] = self._serialize_graph(records)
             result_payload["keys"] = []
         else:
-            result_payload["records"] = Neo4jGraphStore.format_records(records)
-            result_payload["keys"] = keys
+            result_payload["records"] = self._graph_store.format_records(records)
+            result_payload["keys"] = keys or []
 
-        result_payload["summary"] = {
-            "query": summary.query,
-            "counters": self._serialize_counters(summary.counters),
-            "result_available_after": summary.result_available_after,
-        }
+        result_payload["summary"] = self._build_summary(summary, cleaned_query)
         result_payload["query"] = cleaned_query
         result_payload["parameters_used"] = parameters
         result_payload["content"] = self._build_content(result_payload, return_graph)
@@ -283,13 +320,26 @@ class Neo4jCypherExecutor(ConnectionNode):
         rels = payload.get("relationship_types") or []
         node_props = payload.get("node_properties") or []
         rel_props = payload.get("relationship_properties") or []
-        node_samples = [
-            f"{_first_label(p.get('nodeLabels'))}.{p.get('propertyName')}:{p.get('propertyTypes')}"
-            for p in node_props[:5]
-        ]
-        rel_samples = [
-            f"{_first_label(p.get('relType'))}.{p.get('propertyName')}:{p.get('propertyTypes')}" for p in rel_props[:5]
-        ]
+        node_samples = []
+        for entry in node_props[:5]:
+            if "nodeLabels" in entry:
+                node_samples.append(
+                    f"{_first_label(entry.get('nodeLabels'))}.{entry.get('propertyName')}:{entry.get('propertyTypes')}"
+                )
+            else:
+                props = entry.get("properties") or []
+                if props:
+                    node_samples.append(f"{entry.get('labels')}.{props[0].get('property')}:{props[0].get('type')}")
+        rel_samples = []
+        for entry in rel_props[:5]:
+            if "relType" in entry:
+                rel_samples.append(
+                    f"{_first_label(entry.get('relType'))}.{entry.get('propertyName')}:{entry.get('propertyTypes')}"
+                )
+            else:
+                props = entry.get("properties") or []
+                if props:
+                    rel_samples.append(f"{entry.get('type')}.{props[0].get('property')}:{props[0].get('type')}")
         return (
             f"Labels: {labels}. "
             f"Relationship types: {rels}. "
@@ -325,46 +375,25 @@ class Neo4jCypherExecutor(ConnectionNode):
                 )
         return " ".join(snippets)
 
-    def _introspect_schema(self, input_data: Neo4jCypherInputSchema, database: str | None) -> dict[str, Any]:
-        labels_records, _, _ = self._graph_store.run_cypher(
-            "CALL db.labels() YIELD label RETURN label ORDER BY label",
-            database=database,
-        )
-        reltype_records, _, _ = self._graph_store.run_cypher(
-            "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType ORDER BY relationshipType",
-            database=database,
-        )
-        labels = [r["label"] for r in labels_records]
-        rel_types = [r["relationshipType"] for r in reltype_records]
+    @classmethod
+    def _build_summary(cls, summary: Any, fallback_query: str) -> dict[str, Any]:
+        payload = {"query": fallback_query, "counters": {}, "result_available_after": None}
+        if summary is None:
+            return payload
+        if isinstance(summary, dict):
+            payload["query"] = summary.get("query", payload["query"])
+            payload["counters"] = summary.get("counters", payload["counters"])
+            payload["result_available_after"] = summary.get(
+                "result_available_after",
+                payload["result_available_after"],
+            )
+            return payload
 
-        node_props: list[dict[str, Any]] = []
-        rel_props: list[dict[str, Any]] = []
-
-        if input_data.include_properties:
-            try:
-                node_props_records, _, _ = self._graph_store.run_cypher(
-                    "CALL db.schema.nodeTypeProperties()",
-                    database=database,
-                )
-                node_props = [r.data() for r in node_props_records]
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"Node property introspection failed: {exc}")
-
-            try:
-                rel_props_records, _, _ = self._graph_store.run_cypher(
-                    "CALL db.schema.relTypeProperties()",
-                    database=database,
-                )
-                rel_props = [r.data() for r in rel_props_records]
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"Relationship property introspection failed: {exc}")
-
-        return {
-            "labels": labels,
-            "relationship_types": rel_types,
-            "node_properties": node_props,
-            "relationship_properties": rel_props,
-        }
+        payload["query"] = getattr(summary, "query", payload["query"])
+        counters = getattr(summary, "counters", None)
+        payload["counters"] = cls._serialize_counters(counters) if counters is not None else {}
+        payload["result_available_after"] = getattr(summary, "result_available_after", None)
+        return payload
 
     @staticmethod
     def _clean_query(query: str) -> str:
@@ -461,3 +490,4 @@ class Neo4jCypherExecutor(ConnectionNode):
             counters_dict["contains_system_updates"] = value() if callable(value) else value
 
         return counters_dict
+

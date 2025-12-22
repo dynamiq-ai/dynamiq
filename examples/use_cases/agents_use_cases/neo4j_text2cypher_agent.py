@@ -1,14 +1,14 @@
 from dynamiq.connections import Neo4j as Neo4jConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools import Neo4jCypherExecutor
+from dynamiq.nodes.tools import CypherExecutor
 from dynamiq.nodes.types import InferenceMode
 
 
 def build_llm() -> OpenAI:
     return OpenAI(
-        name="gpt-4o-mini",
-        model="gpt-4o-mini",
+        name="gpt-5",
+        model="gpt-5",
         temperature=0,
         max_tokens=2048,
     )
@@ -25,7 +25,7 @@ def build_readonly_agent() -> Agent:
     llm = build_llm()
     connection = build_connection()
 
-    cypher_executor = Neo4jCypherExecutor(connection=connection, name="cypher_executor")
+    cypher_executor = CypherExecutor(connection=connection, name="cypher_executor")
 
     return Agent(
         name="neo4j_reader",
@@ -54,7 +54,7 @@ def build_ingest_agent() -> Agent:
     llm = build_llm()
     connection = build_connection()
 
-    cypher_executor = Neo4jCypherExecutor(connection=connection, name="cypher_executor")
+    cypher_executor = CypherExecutor(connection=connection, name="cypher_executor")
 
     return Agent(
         name="neo4j_ingest_reader",
@@ -93,7 +93,7 @@ def seed_sample_graph(connection: Neo4jConnection) -> dict:
         Bob WORKS_AT Dynamiq
         Dynamiq BUILDS Dynamiq Platform
     """
-    executor = Neo4jCypherExecutor(connection=connection, name="cypher_executor_seed")
+    executor = CypherExecutor(connection=connection, name="cypher_executor_seed")
     executor.init_components()
     query = """
     MERGE (c:Company {id: $company_id})

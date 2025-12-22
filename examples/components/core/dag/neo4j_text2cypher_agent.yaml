@@ -24,7 +24,7 @@ nodes:
       max_tokens: 2048
     tools:
       - id: cypher-executor
-        type: dynamiq.nodes.tools.neo4j_cypher_executor.Neo4jCypherExecutor
+        type: dynamiq.nodes.tools.cypher_executor.CypherExecutor
         name: cypher_executor
         connection: neo4j-conn
     role: >
@@ -52,7 +52,7 @@ nodes:
       max_tokens: 2048
     tools:
       - id: cypher-executor-ingest
-        type: dynamiq.nodes.tools.neo4j_cypher_executor.Neo4jCypherExecutor
+        type: dynamiq.nodes.tools.cypher_executor.CypherExecutor
         name: cypher_executor
         connection: neo4j-conn
     role: >
