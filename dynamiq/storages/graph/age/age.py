@@ -50,14 +50,13 @@ class ApacheAgeGraphStore(BaseGraphStore):
         self._ensure_age_loaded()
         params = parameters or {}
         safe_graph = self._validate_label(self.graph_name)
-        query_literal = self._to_dollar_quoted(query)
         sql = (
-            "SELECT ag_catalog.agtype_to_json(result) AS result "  # nosec B608 - safe_graph validated
-            f"FROM cypher('{safe_graph}', {query_literal}, %s::agtype) AS (result agtype)"
+            "SELECT ag_catalog.agtype_to_json(result) AS result "
+            "FROM cypher(%s, %s, %s::agtype) AS (result agtype)"
         )
 
         with self.client.cursor() as cursor:
-            cursor.execute(sql, (json.dumps(params),))
+            cursor.execute(sql, (safe_graph, query, json.dumps(params)))
             rows = cursor.fetchall()
 
         records: list[Any] = []
