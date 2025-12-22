@@ -160,6 +160,7 @@ class Neo4jGraphStore(BaseGraphStore):
         if nodes:
             node_lines: list[str] = []
             node_params: dict[str, Any] = {}
+            return_nodes: list[str] = []
             for idx, node in enumerate(nodes):
                 labels = node.get("labels") or []
                 identity_key = self._format_property_key(node.get("identity_key") or "id")
@@ -176,8 +177,9 @@ class Neo4jGraphStore(BaseGraphStore):
                 node_lines.append(
                     f"MERGE (n{idx}{label_string} {{{identity_key}: ${param_id}}})\n" f"SET n{idx} += ${param_props}"
                 )
+                return_nodes.append(f"n{idx}")
 
-            node_query = "\n".join(node_lines)
+            node_query = "\n".join(node_lines) + "\nRETURN " + ", ".join(return_nodes)
             node_records, node_summary, node_keys = self.run_cypher(node_query, node_params, database=database)
             total_nodes_created += node_summary.counters.nodes_created
             total_properties_set += node_summary.counters.properties_set
@@ -203,7 +205,8 @@ class Neo4jGraphStore(BaseGraphStore):
                     f"MATCH (s:{start_label} {{{start_identity_key}: $start_id}})\n"
                     f"MATCH (e:{end_label} {{{end_identity_key}: $end_id}})\n"
                     f"MERGE (s)-[r:{rel_type}]->(e)\n"
-                    f"SET r += $props"
+                    f"SET r += $props\n"
+                    "RETURN r"
                 )
                 rel_params = {
                     "start_id": start_identity,
