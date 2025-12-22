@@ -68,6 +68,13 @@ class ApacheAgeGraphStore(BaseGraphStore):
         summary = {"query": query, "counters": {}, "result_available_after": None}
         return records, summary, []
 
+    def update_client(self, client: Any) -> None:
+        self.client = client
+        self._age_loaded = False
+        self._ensure_age_loaded()
+        if self.create_graph_if_missing:
+            self._ensure_graph_exists()
+
     def introspect_schema(self, *, include_properties: bool, **kwargs: Any) -> dict[str, Any]:
         labels = self._filter_internal(self._get_labels(kind="v"))
         rel_types = self._filter_internal(self._get_labels(kind="e"))

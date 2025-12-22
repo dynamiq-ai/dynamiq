@@ -73,6 +73,9 @@ class Neo4jGraphStore(BaseGraphStore):
             logger.error(f"Neo4j query failed: {exc.code} - {exc.message}")
             raise
 
+    def update_client(self, client: Any) -> None:
+        self.client = client
+
     @staticmethod
     def format_records(records: Iterable[Any]) -> list[dict[str, Any]]:
         """Convert Neo4j Record objects to plain dicts."""

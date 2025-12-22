@@ -24,6 +24,11 @@ class BaseGraphStore(ABC):
         """Whether the backend can return native graph objects."""
         return False
 
+    def update_client(self, client: Any) -> None:
+        """Update the underlying client reference if the connection is reinitialized."""
+        if hasattr(self, "client"):
+            self.client = client
+
     @staticmethod
     def format_records(records: Iterable[Any]) -> list[dict[str, Any]]:
         formatted: list[dict[str, Any]] = []

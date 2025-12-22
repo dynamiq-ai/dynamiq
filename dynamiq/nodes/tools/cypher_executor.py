@@ -169,6 +169,17 @@ class CypherExecutor(ConnectionNode):
             self._graph_store = Neo4jGraphStore(connection=self.connection, client=self.client, database=self.database)
         self.description = self._build_description()
 
+    def ensure_client(self) -> None:
+        previous_client = self.client
+        super().ensure_client()
+        if self.client is previous_client:
+            return
+        if not self._graph_store:
+            return
+        graph_client = getattr(self._graph_store, "client", None)
+        if graph_client is not self.client:
+            self._graph_store.update_client(self.client)
+
     def _build_description(self) -> str:
         if self._backend_name == "age":
             return BASE_CYPHER_DESCRIPTION + AGE_BACKEND_NOTES
@@ -479,14 +490,30 @@ class CypherExecutor(ConnectionNode):
             }
 
         def _relationship_to_dict(rel):
+            start_node = getattr(rel, "start_node", None)
+            end_node = getattr(rel, "end_node", None)
+            start_node_id = (
+                getattr(start_node, "id", None) if start_node is not None else getattr(rel, "start_node_id", None)
+            )
+            end_node_id = getattr(end_node, "id", None) if end_node is not None else getattr(rel, "end_node_id", None)
+            start_node_element_id = (
+                getattr(start_node, "element_id", None)
+                if start_node is not None
+                else getattr(rel, "start_node_element_id", None)
+            )
+            end_node_element_id = (
+                getattr(end_node, "element_id", None)
+                if end_node is not None
+                else getattr(rel, "end_node_element_id", None)
+            )
             return {
                 "id": getattr(rel, "id", None),
                 "element_id": getattr(rel, "element_id", None),
                 "type": getattr(rel, "type", None),
-                "start_node_id": getattr(rel, "start_node_id", None),
-                "end_node_id": getattr(rel, "end_node_id", None),
-                "start_node_element_id": getattr(rel, "start_node_element_id", None),
-                "end_node_element_id": getattr(rel, "end_node_element_id", None),
+                "start_node_id": start_node_id,
+                "end_node_id": end_node_id,
+                "start_node_element_id": start_node_element_id,
+                "end_node_element_id": end_node_element_id,
                 "properties": dict(rel),
             }
 
