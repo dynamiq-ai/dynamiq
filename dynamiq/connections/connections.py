@@ -531,20 +531,24 @@ class Neo4j(BaseConnection):
         username (str): Username for authentication.
         password (str): Password for authentication.
         database (str | None): Optional database name; if omitted, Neo4j uses the user's home database.
-        verify_connectivity (bool): Whether to call driver.verify_connectivity() after creating the driver.
+        connectivity_verification_enabled (bool): Whether to call driver.verify_connectivity()
+        after creating the driver.
     """
 
     uri: str = Field(default_factory=partial(get_env_var, "NEO4J_URI"))
     username: str = Field(default_factory=partial(get_env_var, "NEO4J_USERNAME"))
     password: str = Field(default_factory=partial(get_env_var, "NEO4J_PASSWORD"))
     database: str | None = Field(default_factory=partial(get_env_var, "NEO4J_DATABASE", None))
-    verify_connectivity: bool = True
+    connectivity_verification_enabled: bool = Field(
+        default=True,
+        validation_alias="verify_connectivity",
+    )
 
     def connect(self) -> "Neo4jDriver":
         from neo4j import GraphDatabase
 
         driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password))
-        if self.verify_connectivity:
+        if self.connectivity_verification_enabled:
             driver.verify_connectivity()
         return driver
 
@@ -1010,11 +1014,14 @@ class ApacheAge(PostgreSQL):
 
     Attributes:
         graph_name (str): Name of the AGE graph to query.
-        create_graph_if_missing (bool): Whether to create the graph if it does not exist.
+        graph_creation_if_missing_enabled (bool): Whether to create the graph if it does not exist.
     """
 
     graph_name: str = Field(default_factory=partial(get_env_var, "APACHE_AGE_GRAPH_NAME", "graph"))
-    create_graph_if_missing: bool = Field(default_factory=partial(get_env_var, "APACHE_AGE_CREATE_GRAPH", False))
+    graph_creation_if_missing_enabled: bool = Field(
+        default_factory=partial(get_env_var, "APACHE_AGE_CREATE_GRAPH", False),
+        validation_alias="create_graph_if_missing",
+    )
 
 
 class Exa(Http):

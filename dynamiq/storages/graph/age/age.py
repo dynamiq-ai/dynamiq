@@ -19,7 +19,7 @@ class ApacheAgeGraphStore(BaseGraphStore):
         connection: ApacheAge | None = None,
         client: Any | None = None,
         graph_name: str | None = None,
-        create_graph_if_missing: bool | None = None,
+        graph_creation_if_missing_enabled: bool | None = None,
     ):
         if client is None and connection is None:
             raise ValueError("Either 'connection' or 'client' must be provided.")
@@ -27,10 +27,10 @@ class ApacheAgeGraphStore(BaseGraphStore):
         self.connection = connection
         self.client = client or connection.connect()
         self.graph_name = graph_name or (connection.graph_name if connection else None)
-        self.create_graph_if_missing = (
-            create_graph_if_missing
-            if create_graph_if_missing is not None
-            else (connection.create_graph_if_missing if connection else False)
+        self.graph_creation_if_missing_enabled = (
+            graph_creation_if_missing_enabled
+            if graph_creation_if_missing_enabled is not None
+            else (connection.graph_creation_if_missing_enabled if connection else False)
         )
 
         if not self.graph_name:
@@ -38,7 +38,7 @@ class ApacheAgeGraphStore(BaseGraphStore):
 
         self._age_loaded = False
         self._ensure_age_loaded()
-        if self.create_graph_if_missing:
+        if self.graph_creation_if_missing_enabled:
             self._ensure_graph_exists()
 
     def run_cypher(
@@ -71,7 +71,7 @@ class ApacheAgeGraphStore(BaseGraphStore):
         self.client = client
         self._age_loaded = False
         self._ensure_age_loaded()
-        if self.create_graph_if_missing:
+        if self.graph_creation_if_missing_enabled:
             self._ensure_graph_exists()
 
     def introspect_schema(self, *, include_properties: bool, **kwargs: Any) -> dict[str, Any]:

@@ -22,16 +22,16 @@ Inputs:
 - parameters: dict for $params, or list aligned with query list (additionalProperties allowed)
 - database: optional override
 - routing: 'r' for read / 'w' for write (clusters)
-- return_graph: if true, return nodes/relationships instead of rows
-- include_properties: when introspecting, include node/rel property metadata
-- allow_writes: if false, block write queries by regex guardrails
+- graph_return_enabled: if true, return nodes/relationships instead of rows
+- property_metadata_enabled: when introspecting, include node/rel property metadata
+- writes_allowed: if false, block write queries by regex guardrails
 
 Outputs:
 - execute mode: records or graph, keys, summary (query, counters, latency), content summary with preview.
   For multi-query, results is a list of per-query payloads and content summarizes each query.
-  If return_graph is true, graph.nodes/graph.relationships are returned instead of tabular rows.
+  If graph_return_enabled is true, graph.nodes/graph.relationships are returned instead of tabular rows.
 - introspect mode: labels, relationship_types, node_properties, relationship_properties, and content summary.
-If return_graph is true, graph.nodes/graph.relationships are returned instead of tabular rows.
+If graph_return_enabled is true, graph.nodes/graph.relationships are returned instead of tabular rows.
 
 Key capabilities:
 - Safe, parameterized Cypher execution (MATCH/OPTIONAL MATCH/RETURN, MERGE/SET when allowed)
@@ -55,7 +55,7 @@ Usage tips:
 
 NEO4J_BACKEND_NOTES = """
 Neo4j notes:
-- return_graph is supported to return nodes/relationships instead of rows.
+- graph_return_enabled is supported to return nodes/relationships instead of rows.
 - routing can be 'r' or 'w' when using Neo4j clusters.
 - database can target a named Neo4j database.
 """
@@ -63,7 +63,7 @@ Neo4j notes:
 AGE_BACKEND_NOTES = """
 Apache AGE notes:
 - AGE requires queries to RETURN a single column; alias it as `result` (e.g., RETURN n AS result).
-- return_graph is not supported for AGE backends.
+- graph_return_enabled is not supported for AGE backends.
 - Provide graph_name via the ApacheAge connection or the tool's graph_name field.
 - Avoid passing a list of queries; use a single query string for AGE.
 """
@@ -78,15 +78,15 @@ class CypherInputSchema(BaseModel):
         parameters: Parameters for Cypher execution.
         database: Optional database name override.
         routing: Routing preference for clustered deployments.
-        return_graph: Whether to return graph results instead of rows.
-        include_properties: Whether to include node and relationship property metadata.
-        allow_writes: Whether to allow write queries.
+        graph_return_enabled: Whether to return graph results instead of rows.
+        property_metadata_enabled: Whether to include node and relationship property metadata.
+        writes_allowed: Whether to allow write queries.
 
     Raises:
         ValueError: If required fields are missing or incompatible with the selected mode.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     mode: Literal["execute", "introspect"] = Field(default="execute", description="Execution mode.")
     query: str | list[str] | None = Field(
@@ -99,15 +99,21 @@ class CypherInputSchema(BaseModel):
     )
     database: str | None = Field(default=None, description="Optional database name override.")
     routing: str | None = Field(default=None, description="Routing preference ('r' for read, 'w' for write).")
-    return_graph: bool = Field(
+    graph_return_enabled: bool = Field(
         default=False,
         description="If true, returns the Neo4j graph result (nodes/relationships) instead of rows.",
+        validation_alias="return_graph",
     )
-    include_properties: bool = Field(
+    property_metadata_enabled: bool = Field(
         default=True,
         description="If true, include node and relationship property metadata (introspect mode).",
+        validation_alias="include_properties",
     )
-    allow_writes: bool = Field(default=True, description="If false, reject write queries by regex guardrails.")
+    writes_allowed: bool = Field(
+        default=True,
+        description="If false, reject write queries by regex guardrails.",
+        validation_alias="allow_writes",
+    )
 
     @model_validator(mode="after")
     def validate_mode_inputs(self):
@@ -118,8 +124,8 @@ class CypherInputSchema(BaseModel):
             elif not (self.query or "").strip():
                 raise ValueError("query is required in execute mode.")
         else:
-            if self.return_graph:
-                raise ValueError("return_graph is only supported in execute mode.")
+            if self.graph_return_enabled:
+                raise ValueError("graph_return_enabled is only supported in execute mode.")
             if self.query is not None:
                 raise ValueError("query is not supported in introspect mode.")
             if self.parameters:
@@ -145,7 +151,10 @@ class CypherExecutor(ConnectionNode):
     connection: Neo4j | ApacheAge
     database: str | None = None
     graph_name: str | None = None
-    create_graph_if_missing: bool | None = None
+    graph_creation_if_missing_enabled: bool | None = Field(
+        default=None,
+        validation_alias="create_graph_if_missing",
+    )
     _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
     _backend_name: str | None = PrivateAttr(default=None)
 
@@ -162,7 +171,7 @@ class CypherExecutor(ConnectionNode):
                 connection=self.connection,
                 client=self.client,
                 graph_name=self.graph_name,
-                create_graph_if_missing=self.create_graph_if_missing,
+                graph_creation_if_missing_enabled=self.graph_creation_if_missing_enabled,
             )
         else:
             self._backend_name = "neo4j"
@@ -215,7 +224,7 @@ class CypherExecutor(ConnectionNode):
         try:
             if input_data.mode == "introspect":
                 result_payload = self._graph_store.introspect_schema(
-                    include_properties=input_data.include_properties,
+                    include_properties=input_data.property_metadata_enabled,
                     database=database,
                 )
                 result_payload["mode"] = input_data.mode
@@ -231,15 +240,15 @@ class CypherExecutor(ConnectionNode):
                     parameters=input_data.parameters,
                     database=database,
                     routing=routing,
-                    return_graph=input_data.return_graph,
-                    allow_writes=input_data.allow_writes,
+                    graph_return_enabled=input_data.graph_return_enabled,
+                    writes_allowed=input_data.writes_allowed,
                 )
                 result_payload = {
                     "mode": input_data.mode,
                     "queries": [self._clean_query(query) for query in input_data.query],
                     "results": results,
                 }
-                result_payload["content"] = self._build_batch_content(results, input_data.return_graph)
+                result_payload["content"] = self._build_batch_content(results, input_data.graph_return_enabled)
                 logger.info(
                     f"Tool {self.name} - {self.id}: finished successfully. Content: {result_payload['content']}"
                 )
@@ -250,8 +259,8 @@ class CypherExecutor(ConnectionNode):
                 parameters=input_data.parameters,
                 database=database,
                 routing=routing,
-                return_graph=input_data.return_graph,
-                allow_writes=input_data.allow_writes,
+                graph_return_enabled=input_data.graph_return_enabled,
+                writes_allowed=input_data.writes_allowed,
             )
             result_payload["mode"] = input_data.mode
             logger.info(f"Tool {self.name} - {self.id}: finished successfully. Content: {result_payload['content']}")
@@ -267,8 +276,8 @@ class CypherExecutor(ConnectionNode):
         parameters: dict[str, Any] | list[dict[str, Any]],
         database: str | None,
         routing: str | None,
-        return_graph: bool,
-        allow_writes: bool,
+        graph_return_enabled: bool,
+        writes_allowed: bool,
     ) -> list[dict[str, Any]]:
         if isinstance(parameters, list):
             params_list = parameters
@@ -282,8 +291,8 @@ class CypherExecutor(ConnectionNode):
                     parameters=query_params,
                     database=database,
                     routing=routing,
-                    return_graph=return_graph,
-                    allow_writes=allow_writes,
+                    graph_return_enabled=graph_return_enabled,
+                    writes_allowed=writes_allowed,
                 )
             )
         return results
@@ -295,16 +304,19 @@ class CypherExecutor(ConnectionNode):
         parameters: dict[str, Any],
         database: str | None,
         routing: str | None,
-        return_graph: bool,
-        allow_writes: bool,
+        graph_return_enabled: bool,
+        writes_allowed: bool,
     ) -> dict[str, Any]:
         transformer = None
         cleaned_query = self._clean_query(query or "")
-        self._validate_query(cleaned_query, allow_writes=allow_writes)
+        self._validate_query(cleaned_query, writes_allowed=writes_allowed)
 
-        if return_graph:
+        if graph_return_enabled:
             if not self._graph_store.supports_graph_result():
-                raise ToolExecutionException("return_graph is only supported for Neo4j backends.", recoverable=True)
+                raise ToolExecutionException(
+                    "graph_return_enabled is only supported for Neo4j backends.",
+                    recoverable=True,
+                )
             import neo4j
 
             transformer = neo4j.Result.graph
@@ -318,7 +330,7 @@ class CypherExecutor(ConnectionNode):
         )
 
         result_payload: dict[str, Any] = {}
-        if return_graph:
+        if graph_return_enabled:
             result_payload["graph"] = self._serialize_graph(records)
             result_payload["keys"] = []
         else:
@@ -328,7 +340,7 @@ class CypherExecutor(ConnectionNode):
         result_payload["summary"] = self._build_summary(summary, cleaned_query)
         result_payload["query"] = cleaned_query
         result_payload["parameters_used"] = parameters
-        result_payload["content"] = self._build_content(result_payload, return_graph)
+        result_payload["content"] = self._build_content(result_payload, graph_return_enabled)
         return result_payload
 
     @staticmethod
@@ -451,12 +463,12 @@ class CypherExecutor(ConnectionNode):
         return cleaned
 
     @classmethod
-    def _validate_query(cls, query: str, *, allow_writes: bool) -> None:
+    def _validate_query(cls, query: str, *, writes_allowed: bool) -> None:
         if not query:
             raise ToolExecutionException("Cypher query cannot be empty.", recoverable=True)
-        if not allow_writes and cls._contains_write(query):
-            raise ToolExecutionException("Cypher contains write operations but allow_writes is false.")
-        if allow_writes and cls._contains_write(query) and cls._contains_cartesian_match(query):
+        if not writes_allowed and cls._contains_write(query):
+            raise ToolExecutionException("Cypher contains write operations but writes_allowed is false.")
+        if writes_allowed and cls._contains_write(query) and cls._contains_cartesian_match(query):
             raise ToolExecutionException(
                 "Cypher contains comma-separated MATCH/MERGE patterns that may create cartesian products. "
                 "Use chained MATCH with WITH, or a single MATCH with relationship patterns.",
@@ -476,7 +488,7 @@ class CypherExecutor(ConnectionNode):
         return bool(pattern.search(cypher))
 
     @staticmethod
-    def _serialize_graph(graph) -> dict[str, Any]:
+    def _serialize_graph(graph: Any | None) -> dict[str, Any]:
         """Convert Neo4j Graph result into JSON-serializable structures."""
         if graph is None:
             return {"nodes": [], "relationships": []}
@@ -523,7 +535,7 @@ class CypherExecutor(ConnectionNode):
         return {"nodes": nodes, "relationships": relationships}
 
     @staticmethod
-    def _serialize_counters(counters) -> dict[str, Any]:
+    def _serialize_counters(counters: Any | None) -> dict[str, Any]:
         """Convert Neo4j SummaryCounters to a JSON-serializable dict."""
         if counters is None:
             return {}

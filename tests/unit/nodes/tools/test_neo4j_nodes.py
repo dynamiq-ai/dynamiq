@@ -71,7 +71,7 @@ def dummy_connection() -> Neo4jConnection:
         uri="bolt://localhost:7687",
         username="user",
         password="pass",
-        verify_connectivity=False,
+        connectivity_verification_enabled=False,
     )
 
 
@@ -140,7 +140,7 @@ def test_cypher_executor_returns_graph(monkeypatch, cypher_executor_factory, run
 
     executor = cypher_executor_factory(mock_store)
 
-    input_data = CypherInputSchema(query="MATCH (n)-[r]->(m) RETURN n,r,m", return_graph=True)
+    input_data = CypherInputSchema(query="MATCH (n)-[r]->(m) RETURN n,r,m", graph_return_enabled=True)
     result = executor.execute(input_data, runnable_config)
 
     assert result["graph"]["nodes"][0]["labels"] == ["Person"]
@@ -167,7 +167,7 @@ def test_cypher_executor_introspects_schema(cypher_executor_factory, runnable_co
 
     executor = cypher_executor_factory(mock_store)
 
-    input_data = CypherInputSchema(mode="introspect", include_properties=True)
+    input_data = CypherInputSchema(mode="introspect", property_metadata_enabled=True)
     result = executor.execute(input_data, runnable_config)
 
     assert result["labels"] == ["Person"]
@@ -188,7 +188,7 @@ def test_cypher_executor_introspect_skips_properties_when_disabled(cypher_execut
 
     executor = cypher_executor_factory(mock_store)
 
-    input_data = CypherInputSchema(mode="introspect", include_properties=False)
+    input_data = CypherInputSchema(mode="introspect", property_metadata_enabled=False)
     result = executor.execute(input_data, runnable_config)
 
     assert result["node_properties"] == []
@@ -205,7 +205,7 @@ def test_cypher_executor_rejects_write_when_disallowed(cypher_executor_factory, 
     )
     executor = cypher_executor_factory(mock_store)
 
-    input_data = CypherInputSchema(query="CREATE (n:Person)", allow_writes=False)
+    input_data = CypherInputSchema(query="CREATE (n:Person)", writes_allowed=False)
 
     with pytest.raises(ToolExecutionException):
         executor.execute(input_data, runnable_config)
@@ -227,7 +227,7 @@ def test_cypher_executor_blocks_cartesian_writes(cypher_executor_factory, runnab
 
     input_data = CypherInputSchema(
         query="MATCH (a:Person {name: 'A'}), (b:Company {name: 'B'}) MERGE (a)-[:WORKS_AT]->(b)",
-        allow_writes=True,
+        writes_allowed=True,
     )
 
     with pytest.raises(ToolExecutionException):
@@ -237,7 +237,7 @@ def test_cypher_executor_blocks_cartesian_writes(cypher_executor_factory, runnab
 def test_cypher_executor_allows_cartesian_reads():
     CypherExecutor._validate_query(
         "MATCH (a:Person), (b:Company) RETURN a, b",
-        allow_writes=True,
+        writes_allowed=True,
     )
 
 
@@ -285,7 +285,7 @@ def test_cypher_executor_yaml_roundtrip(tmp_path, monkeypatch):
         uri="bolt://localhost:7687",
         username="user",
         password="pass",
-        verify_connectivity=False,
+        connectivity_verification_enabled=False,
     )
     node = CypherExecutor(id="neo4j-node", connection=connection, database="neo4j")
     workflow = Workflow(id="neo4j-workflow", flow=Flow(id="neo4j-flow", nodes=[node]))
