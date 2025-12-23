@@ -123,7 +123,7 @@ class CypherInputSchema(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_mode_inputs(self):
+    def validate_mode_inputs(self: "CypherInputSchema") -> "CypherInputSchema":
         if self.mode == "execute":
             if isinstance(self.query, list):
                 if not self.query or any(not str(item).strip() for item in self.query):
@@ -511,7 +511,7 @@ class CypherExecutor(ConnectionNode):
         if graph is None:
             return {"nodes": [], "relationships": []}
 
-        def _node_to_dict(node):
+        def _node_to_dict(node: Any) -> dict[str, Any]:
             return {
                 "id": getattr(node, "id", None),
                 "element_id": getattr(node, "element_id", None),
@@ -519,7 +519,7 @@ class CypherExecutor(ConnectionNode):
                 "properties": dict(node),
             }
 
-        def _relationship_to_dict(rel):
+        def _relationship_to_dict(rel: Any) -> dict[str, Any]:
             start_node = getattr(rel, "start_node", None)
             end_node = getattr(rel, "end_node", None)
             start_node_id = (

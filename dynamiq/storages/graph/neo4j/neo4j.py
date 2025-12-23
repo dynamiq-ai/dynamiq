@@ -253,7 +253,7 @@ class Neo4jGraphStore(BaseGraphStore):
             raise ValueError(f"Invalid Neo4j property key: '{key}'")
         return key
 
-    def close(self):
+    def close(self: "Neo4jGraphStore") -> None:
         if self.client:
             self.client.close()
 
