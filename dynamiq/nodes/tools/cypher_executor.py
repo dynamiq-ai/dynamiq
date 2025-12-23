@@ -335,9 +335,12 @@ class CypherExecutor(ConnectionNode):
                     "graph_return_enabled is only supported for Neo4j backends.",
                     recoverable=True,
                 )
-            import neo4j
 
-            transformer = neo4j.Result.graph
+            def _graph_transformer(result: Any) -> Any:
+                graph_attr = getattr(result, "graph", None)
+                return graph_attr() if callable(graph_attr) else graph_attr
+
+            transformer = _graph_transformer
 
         records, summary, keys = self._graph_store.run_cypher(
             query=cleaned_query,

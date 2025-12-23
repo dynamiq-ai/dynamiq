@@ -60,7 +60,12 @@ class Neo4jGraphStore(BaseGraphStore):
         if result_transformer:
 
             def _transform_with_metadata(result: Any) -> tuple[Any, Any, list[str]]:
-                transformed = result_transformer(result)
+                if callable(result_transformer):
+                    transformed = result_transformer(result)
+                elif hasattr(result_transformer, "__get__"):
+                    transformed = result_transformer.__get__(result, type(result))
+                else:
+                    transformed = result_transformer
                 summary = result.consume()
                 keys = result.keys()
                 return transformed, summary, keys
