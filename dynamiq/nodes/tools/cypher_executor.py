@@ -459,11 +459,16 @@ class CypherExecutor(ConnectionNode):
         payload = {"query": fallback_query, "counters": {}, "result_available_after": None}
         if summary is None:
             return payload
+
+        def _extract_query(source: Any) -> str:
+            if isinstance(source, dict):
+                value = source.get("query", payload["query"])
+            else:
+                value = getattr(source, "query", payload["query"])
+            return value.text if hasattr(value, "text") else value
+
         if isinstance(summary, dict):
-            summary_query = summary.get("query", payload["query"])
-            if hasattr(summary_query, "text"):
-                summary_query = summary_query.text
-            payload["query"] = summary_query
+            payload["query"] = _extract_query(summary)
             payload["counters"] = summary.get("counters", payload["counters"])
             payload["result_available_after"] = summary.get(
                 "result_available_after",
@@ -471,10 +476,7 @@ class CypherExecutor(ConnectionNode):
             )
             return payload
 
-        summary_query = getattr(summary, "query", payload["query"])
-        if hasattr(summary_query, "text"):
-            summary_query = summary_query.text
-        payload["query"] = summary_query
+        payload["query"] = _extract_query(summary)
         counters = getattr(summary, "counters", None)
         payload["counters"] = cls._serialize_counters(counters) if counters is not None else {}
         payload["result_available_after"] = getattr(summary, "result_available_after", None)
