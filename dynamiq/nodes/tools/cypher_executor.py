@@ -3,7 +3,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from dynamiq.connections import ApacheAge, Neo4j
+from dynamiq.connections import ApacheAge, Neo4j, Neptune
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -12,10 +12,10 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.graph.age import ApacheAgeGraphStore
 from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.storages.graph.neo4j import Neo4jGraphStore
+from dynamiq.storages.graph.neptune import NeptuneGraphStore
 from dynamiq.utils.logger import logger
 
-BASE_CYPHER_DESCRIPTION = """Executes parameterized Cypher against Neo4j or Apache AGE, or introspects schema
-
+BASE_CYPHER_DESCRIPTION = """Executes parameterized Cypher
 Inputs:
 - mode: execute | introspect
 - query: Cypher text or list of Cypher texts (execute mode)
@@ -66,6 +66,13 @@ Apache AGE notes:
 - graph_return_enabled is not supported for AGE backends.
 - Provide graph_name via the ApacheAge connection or the tool's graph_name field.
 - Avoid passing a list of queries; use a single query string for AGE.
+"""
+
+NEPTUNE_BACKEND_NOTES = """
+Neptune notes:
+- Supports openCypher over the Neptune HTTP endpoint.
+- graph_return_enabled is not supported for Neptune backends.
+ - Configure host/port on the Neptune connection; the /openCypher path is derived automatically.
 """
 
 
@@ -140,7 +147,7 @@ class CypherInputSchema(BaseModel):
 
 
 class CypherExecutor(ConnectionNode):
-    """Tool for executing Cypher queries against Neo4j or Apache AGE."""
+    """Tool for executing Cypher queries against Neo4j, Apache AGE, or Neptune."""
 
     input_schema: ClassVar[type[CypherInputSchema]] = CypherInputSchema
 
@@ -148,7 +155,7 @@ class CypherExecutor(ConnectionNode):
     name: str = "Cypher Executor"
     description: str = BASE_CYPHER_DESCRIPTION
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
-    connection: Neo4j | ApacheAge
+    connection: Neo4j | ApacheAge | Neptune
     database: str | None = None
     graph_name: str | None = None
     graph_creation_if_missing_enabled: bool | None = Field(
@@ -173,6 +180,15 @@ class CypherExecutor(ConnectionNode):
                 graph_name=self.graph_name,
                 graph_creation_if_missing_enabled=self.graph_creation_if_missing_enabled,
             )
+        elif isinstance(self.connection, Neptune):
+            self._backend_name = "neptune"
+            self._graph_store = NeptuneGraphStore(
+                connection=self.connection,
+                client=self.client,
+                endpoint=self.connection.endpoint,
+                verify_ssl=self.connection.verify_ssl,
+                timeout_seconds=self.connection.timeout_seconds,
+            )
         else:
             self._backend_name = "neo4j"
             self._graph_store = Neo4jGraphStore(connection=self.connection, client=self.client, database=self.database)
@@ -192,6 +208,8 @@ class CypherExecutor(ConnectionNode):
     def _build_description(self) -> str:
         if self._backend_name == "age":
             return BASE_CYPHER_DESCRIPTION + AGE_BACKEND_NOTES
+        if self._backend_name == "neptune":
+            return BASE_CYPHER_DESCRIPTION + NEPTUNE_BACKEND_NOTES
         if self._backend_name == "neo4j":
             return BASE_CYPHER_DESCRIPTION + NEO4J_BACKEND_NOTES
         return BASE_CYPHER_DESCRIPTION

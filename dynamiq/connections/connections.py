@@ -303,6 +303,42 @@ class AWS(BaseConnection):
         return boto3.Session(**params)
 
 
+class Neptune(BaseConnection):
+    """
+    Represents a connection to Amazon Neptune openCypher via HTTP.
+
+    Attributes:
+        host (str): Neptune host (e.g. localhost or db-neptune...).
+        port (int): Neptune port.
+        use_https (bool): Whether to use https for the endpoint.
+        verify_ssl (bool): Whether to verify SSL certificates.
+        timeout_seconds (int): Request timeout in seconds.
+    """
+
+    host: str = Field(default_factory=partial(get_env_var, "NEPTUNE_HOST", "localhost"))
+    port: int = Field(default_factory=partial(get_env_var, "NEPTUNE_PORT", 8182))
+    use_https: bool = Field(default_factory=partial(get_env_var, "NEPTUNE_USE_HTTPS", True))
+    verify_ssl: bool = Field(default_factory=partial(get_env_var, "NEPTUNE_VERIFY_SSL", True))
+    timeout_seconds: int = Field(default_factory=partial(get_env_var, "NEPTUNE_TIMEOUT_SECONDS", 30))
+
+    @property
+    def endpoint(self) -> str:
+        scheme = "https" if self.use_https else "http"
+        return f"{scheme}://{self.host}:{self.port}/openCypher"
+
+    def connect(self):
+        try:
+            import requests
+        except ImportError as exc:
+            raise ModuleNotFoundError(
+                "Could not import requests python package. Please install it with `pip install requests`."
+            ) from exc
+
+        session = requests.Session()
+        logger.debug("Connected to Neptune via HTTP endpoint=%s", self.endpoint)
+        return session
+
+
 class Gemini(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "GEMINI_API_KEY"))
 
