@@ -460,7 +460,10 @@ class CypherExecutor(ConnectionNode):
         if summary is None:
             return payload
         if isinstance(summary, dict):
-            payload["query"] = summary.get("query", payload["query"])
+            summary_query = summary.get("query", payload["query"])
+            if hasattr(summary_query, "text"):
+                summary_query = summary_query.text
+            payload["query"] = summary_query
             payload["counters"] = summary.get("counters", payload["counters"])
             payload["result_available_after"] = summary.get(
                 "result_available_after",
@@ -468,7 +471,10 @@ class CypherExecutor(ConnectionNode):
             )
             return payload
 
-        payload["query"] = getattr(summary, "query", payload["query"])
+        summary_query = getattr(summary, "query", payload["query"])
+        if hasattr(summary_query, "text"):
+            summary_query = summary_query.text
+        payload["query"] = summary_query
         counters = getattr(summary, "counters", None)
         payload["counters"] = cls._serialize_counters(counters) if counters is not None else {}
         payload["result_available_after"] = getattr(summary, "result_available_after", None)
