@@ -219,8 +219,7 @@ class WorkflowYAMLLoader:
                 raise WorkflowYAMLLoaderException(f"Value 'type' not found for connection '{conn_id}'")
 
             conn_cls = cls.get_entity_by_type(entity_type=conn_type, entity_registry=registry)
-            conn_init_data = conn_data.copy()
-            conn_init_data["id"] = conn_id
+            conn_init_data = conn_data | {"id": conn_id}
             conn_init_data.pop("type", None)
             try:
                 connection = conn_cls(**conn_init_data)
@@ -236,7 +235,7 @@ class WorkflowYAMLLoader:
         cls,
         node_id: str,
         conn_data: dict,
-        registry: dict[str, Any],
+        registry: dict[str, Any] | None = None,
     ) -> BaseConnection:
         """
         Create an inline connection from node's connection data.
@@ -363,25 +362,20 @@ class WorkflowYAMLLoader:
         """
         conn_value = node_data.get("connection")
         if conn_value is None:
-            return None
+            return
 
-        # Handle reference by ID (string)
         if isinstance(conn_value, str):
             conn = connections.get(conn_value)
             if not conn:
                 raise WorkflowYAMLLoaderException(f"Connection '{conn_value}' for node '{node_id}' not found")
             return conn
 
-        # Handle inline connection (dict)
         if isinstance(conn_value, dict):
-            if registry is None:
-                raise WorkflowYAMLLoaderException(f"Registry is required for inline connection in node '{node_id}'")
             connection = cls.get_inline_connection(
                 node_id=node_id,
                 conn_data=conn_value,
                 registry=registry,
             )
-            # Add to connections dict for potential reuse
             connections[connection.id] = connection
             return connection
 
