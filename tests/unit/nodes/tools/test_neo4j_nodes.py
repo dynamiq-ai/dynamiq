@@ -147,13 +147,16 @@ def test_cypher_executor_returns_graph(monkeypatch, cypher_executor_factory, run
     assert result["graph"]["relationships"][0]["type"] == "KNOWS"
     assert result["keys"] == []
     assert "Nodes: 1" in result["content"]
-    mock_store.run_cypher.assert_called_once_with(
-        query="MATCH (n)-[r]->(m) RETURN n,r,m",
-        parameters={},
-        database=None,
-        routing=None,
-        result_transformer="graph_transformer",
-    )
+    mock_store.run_cypher.assert_called_once()
+    call_kwargs = mock_store.run_cypher.call_args.kwargs
+    assert call_kwargs["query"] == "MATCH (n)-[r]->(m) RETURN n,r,m"
+    assert call_kwargs["parameters"] == {}
+    assert call_kwargs["database"] is None
+    assert call_kwargs["routing"] is None
+    transformer = call_kwargs["result_transformer"]
+    assert callable(transformer)
+    result_with_graph = SimpleNamespace(graph="graph_transformer")
+    assert transformer(result_with_graph) == "graph_transformer"
 
 
 def test_cypher_executor_introspects_schema(cypher_executor_factory, runnable_config):
