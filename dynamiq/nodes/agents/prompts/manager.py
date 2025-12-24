@@ -65,13 +65,12 @@ class AgentPromptManager:
 
         # Prompt blocks and variables
         # Store initial blocks for reset
-        self._initial_blocks: dict[str, str] = {
+        self._prompt_blocks: dict[str, str] = {
             "date": "{{ date }}",
             "tools": "{{ tool_description }}",
             "instructions": "",
             "context": "{{ context }}",
         }
-        self._prompt_blocks: dict[str, str] = self._initial_blocks.copy()
 
         # Store initial variables for reset
         self._initial_variables: dict[str, Any] = {
@@ -113,7 +112,6 @@ class AgentPromptManager:
         Both prompt blocks and variables are reset to their initial state.
         The date is refreshed on each reset to ensure it's always current.
         """
-        self._prompt_blocks = self._initial_blocks.copy()
         self._prompt_variables = self._initial_variables.copy()
         self._prompt_variables["date"] = datetime.now().strftime("%d %B %Y")
 
@@ -354,6 +352,7 @@ def get_model_specific_prompts(
             )
 
         case InferenceMode.XML:
+            logger.info(f"+ Setting up prompts for ReAct-style Agent for model '{direct_tool_output_enabled}'")
             xml_instructions_no_tools = get_prompt_constant(
                 model_name, "REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS
             )

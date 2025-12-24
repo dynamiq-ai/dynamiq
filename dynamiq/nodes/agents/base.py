@@ -486,16 +486,6 @@ class Agent(Node):
         else:
             history_messages = None
 
-        if self.role:
-            # Only auto-wrap the entire role in a raw block if the user did not
-            # provide explicit raw/endraw markers. This allows roles to mix
-            # literal sections (via raw) with Jinja variables like {{ input }}
-            # without creating nested raw blocks.
-            if ("{% raw %}" in self.role) or ("{% endraw %}" in self.role):
-                self.system_prompt_manager.set_block("role", self.role)
-            else:
-                self.system_prompt_manager.set_block("role", f"{{% raw %}}{self.role}{{% endraw %}}")
-
         files = input_data.files
         uploaded_file_names: set[str] = set()
         if files:
@@ -504,7 +494,7 @@ class Agent(Node):
                 self.tools.append(FileReadTool(file_store=self.file_store.backend, llm=self.llm))
                 self.tools.append(FileSearchTool(file_store=self.file_store.backend))
                 self.tools.append(FileListTool(file_store=self.file_store.backend))
-                self._init_prompt_blocks()
+                self.system_prompt_manager.set_variable("tool_description", self.tool_description)
             normalized_files = self._ensure_named_files(files)
             uploaded_file_names = {
                 getattr(f, "name", None)

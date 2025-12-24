@@ -1345,6 +1345,16 @@ class Agent(BaseAgent):
             has_tools=bool(self.tools),
         )
 
+        # Only auto-wrap the entire role in a raw block if the user did not
+        # provide explicit raw/endraw markers. This allows roles to mix
+        # literal sections (via raw) with Jinja variables like {{ input }}
+        # without creating nested raw blocks.
+        if self.role:
+            if ("{% raw %}" in self.role) or ("{% endraw %}" in self.role):
+                self.system_prompt_manager.set_block("role", self.role)
+            else:
+                self.system_prompt_manager.set_block("role", f"{{% raw %}}{self.role}{{% endraw %}}")
+
     @staticmethod
     def _build_unique_file_key(files_map: dict[str, Any], base: str) -> str:
         key = base or "file"
