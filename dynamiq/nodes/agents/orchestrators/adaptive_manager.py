@@ -1,5 +1,3 @@
-from jinja2 import Template
-
 from dynamiq.nodes.agents.base import AgentManager
 from dynamiq.nodes.agents.prompts.orchestrators.adaptive import (
     PROMPT_TEMPLATE_ADAPTIVE_FINAL,
@@ -69,8 +67,8 @@ class AdaptiveAgentManager(AgentManager):
 
     def _reflect(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'reflect' action."""
-        prompt = Template(self.system_prompt_manager._prompt_blocks.get("reflect")).render(
-            **(self._prompt_variables | kwargs)
+        prompt = self.system_prompt_manager.render_block(
+            "reflect", **(self.system_prompt_manager._prompt_variables | kwargs)
         )
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
@@ -85,8 +83,8 @@ class AdaptiveAgentManager(AgentManager):
 
     def _respond(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'respond' action."""
-        prompt = Template(self.system_prompt_manager._prompt_blocks.get("respond")).render(
-            **(self._prompt_variables | kwargs)
+        prompt = self.system_prompt_manager.render_block(
+            "respond", **(self.system_prompt_manager._prompt_variables | kwargs)
         )
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:

@@ -1319,21 +1319,27 @@ class AgentManager(Agent):
 
     def _plan(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'plan' action."""
-        prompt = self.system_prompt_manager.render_block("plan", **kwargs)
+        prompt = self.system_prompt_manager.render_block(
+            "plan", **(self.system_prompt_manager._prompt_variables | kwargs)
+        )
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
 
         return llm_result
 
     def _assign(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'assign' action."""
-        prompt = self.system_prompt_manager.render_block("assign", **kwargs)
+        prompt = self.system_prompt_manager.render_block(
+            "assign", **(self.system_prompt_manager._prompt_variables | kwargs)
+        )
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
 
         return llm_result
 
     def _final(self, config: RunnableConfig, **kwargs) -> str:
         """Executes the 'final' action."""
-        prompt = self.system_prompt_manager.render_block("final", **kwargs)
+        prompt = self.system_prompt_manager.render_block(
+            "final", **(self.system_prompt_manager._prompt_variables | kwargs)
+        )
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         if self.streaming.enabled:
             return self.stream_content(
@@ -1350,6 +1356,8 @@ class AgentManager(Agent):
         Executes the single 'handle_input' action to either respond or plan
         based on user request complexity.
         """
-        prompt = self.system_prompt_manager.render_block("handle_input", **kwargs)
+        prompt = self.system_prompt_manager.render_block(
+            "handle_input", **(self.system_prompt_manager._prompt_variables | kwargs)
+        )
         llm_result = self._run_llm([Message(role=MessageRole.USER, content=prompt)], config, **kwargs).output["content"]
         return llm_result

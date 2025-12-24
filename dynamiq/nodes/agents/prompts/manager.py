@@ -352,7 +352,6 @@ def get_model_specific_prompts(
             )
 
         case InferenceMode.XML:
-            logger.info(f"+ Setting up prompts for ReAct-style Agent for model '{direct_tool_output_enabled}'")
             xml_instructions_no_tools = get_prompt_constant(
                 model_name, "REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS
             )

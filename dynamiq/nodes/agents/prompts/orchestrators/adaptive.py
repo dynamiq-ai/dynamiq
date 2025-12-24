@@ -309,7 +309,7 @@ When the orchestrator calls the "reflect" action:
 3. Consider whether:
    - We should revise our plan.
    - We need additional subtasks.
-   - The current approach is good enough to finalize asnwer.
+   - The current approach is good enough to finalize answer.
 4. Output your refined or confirmed plan in valid XML within <output>...</output> tags.
 
 Use the following structure:
