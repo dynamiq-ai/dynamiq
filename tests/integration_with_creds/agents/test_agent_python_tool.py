@@ -103,60 +103,26 @@ def run_and_assert_agent(agent: Agent, agent_input, expected_length, run_config)
 
 
 @pytest.mark.integration
-def test_react_agent_default_mode(
-    llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config
+@pytest.mark.parametrize(
+    "inference_mode",
+    [
+        InferenceMode.DEFAULT,
+        InferenceMode.XML,
+        pytest.param(InferenceMode.STRUCTURED_OUTPUT, marks=pytest.mark.skip(reason="Skipping test for JSON")),
+        pytest.param(InferenceMode.FUNCTION_CALLING, marks=pytest.mark.skip(reason="Skipping test for FC")),
+    ],
+    ids=["default", "xml", "structured_output", "function_calling"],
+)
+def test_react_agent_inference_modes(
+    llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config, inference_mode
 ):
+    """Test agent with Python tool across different inference modes."""
     agent = Agent(
-        name="Test Agent DEFAULT",
+        name=f"Test Agent {inference_mode.value}",
         llm=llm_instance,
         tools=[string_length_tool_instance],
         role=agent_role,
-        inference_mode=InferenceMode.DEFAULT,
-        verbose=True,
-    )
-    run_and_assert_agent(agent, agent_input, expected_length, run_config)
-
-
-@pytest.mark.integration
-def test_react_agent_xml_mode(
-    llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config
-):
-    agent = Agent(
-        name="Test Agent XML",
-        llm=llm_instance,
-        tools=[string_length_tool_instance],
-        role=agent_role,
-        inference_mode=InferenceMode.XML,
-        verbose=True,
-    )
-    run_and_assert_agent(agent, agent_input, expected_length, run_config)
-
-
-@pytest.mark.skip(reason="Skipping test for JSON")
-def test_react_agent_structured_output_mode(
-    llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config
-):
-    agent = Agent(
-        name="Test Agent STRUCTURED_OUTPUT",
-        llm=llm_instance,
-        tools=[string_length_tool_instance],
-        role=agent_role,
-        inference_mode=InferenceMode.STRUCTURED_OUTPUT,
-        verbose=True,
-    )
-    run_and_assert_agent(agent, agent_input, expected_length, run_config)
-
-
-@pytest.mark.skip(reason="Skipping test for FC")
-def test_react_agent_function_calling_mode(
-    llm_instance, string_length_tool_instance, agent_role, agent_input, expected_length, run_config
-):
-    agent = Agent(
-        name="Test Agent FUNCTION_CALLING",
-        llm=llm_instance,
-        tools=[string_length_tool_instance],
-        role=agent_role,
-        inference_mode=InferenceMode.FUNCTION_CALLING,
+        inference_mode=inference_mode,
         verbose=True,
     )
     run_and_assert_agent(agent, agent_input, expected_length, run_config)

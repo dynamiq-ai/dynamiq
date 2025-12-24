@@ -92,7 +92,7 @@ def qdrant_connection():
 def openai_llm(openai_connection):
     return OpenAI(
         name="OpenAI",
-        model="gpt-4o-mini",
+        model="gpt-5-mini",
         connection=openai_connection,
         max_tokens=1000,
         temperature=0,
