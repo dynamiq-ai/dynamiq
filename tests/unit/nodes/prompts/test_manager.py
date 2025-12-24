@@ -49,16 +49,62 @@ def test_reset():
     """Test resetting to initial state."""
     manager = AgentPromptManager(tool_description="Calculator")
 
-    # Modify state
+    # Modify state - both variables and blocks
     manager.set_variable("temp_var", "temp")
     assert "temp_var" in manager._prompt_variables
+
+    manager.set_block("custom_block", "Custom content")
+    assert "custom_block" in manager._prompt_blocks
+    assert manager._prompt_blocks["custom_block"] == "Custom content"
+
+    # Modify an initial block
+    manager.set_block("instructions", "Modified instructions")
+    assert manager._prompt_blocks["instructions"] == "Modified instructions"
 
     # Reset
     manager.reset()
 
+    # Verify variables are reset
     assert "temp_var" not in manager._prompt_variables
     assert "tool_description" in manager._prompt_variables
     assert manager._prompt_variables["tool_description"] == "Calculator"
+
+    # Verify blocks are reset
+    assert "custom_block" not in manager._prompt_blocks
+    assert manager._prompt_blocks["instructions"] == ""  # Back to initial empty state
+
+    # Verify initial blocks are still present
+    assert "date" in manager._prompt_blocks
+    assert "tools" in manager._prompt_blocks
+    assert "context" in manager._prompt_blocks
+
+
+def test_reset_removes_role_block():
+    """Test that reset() removes dynamically added role blocks.
+
+    This addresses the concern that if an agent's role attribute is set on one run
+    then removed, the old 'role' block would persist across runs without proper reset.
+    """
+    manager = AgentPromptManager(tool_description="Helper")
+
+    # Simulate first run: agent has a role
+    manager.set_block("role", "You are a helpful assistant")
+    assert "role" in manager._prompt_blocks
+    assert manager._prompt_blocks["role"] == "You are a helpful assistant"
+
+    # Generate prompt with role
+    prompt = manager.generate_prompt()
+    assert "You are a helpful assistant" in prompt
+
+    # Reset between runs
+    manager.reset()
+
+    # Verify role block is removed
+    assert "role" not in manager._prompt_blocks
+
+    # Generate prompt again - role should not appear
+    prompt = manager.generate_prompt()
+    assert "You are a helpful assistant" not in prompt
 
 
 def test_generate_prompt_basic():

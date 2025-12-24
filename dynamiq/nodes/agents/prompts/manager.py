@@ -64,12 +64,14 @@ class AgentPromptManager:
         self.agent_template: str = AGENT_PROMPT_TEMPLATE
 
         # Prompt blocks and variables
-        self._prompt_blocks: dict[str, str] = {
+        # Store initial blocks for reset
+        self._initial_blocks: dict[str, str] = {
             "date": "{{ date }}",
             "tools": "{{ tool_description }}",
             "instructions": "",
             "context": "{{ context }}",
         }
+        self._prompt_blocks: dict[str, str] = self._initial_blocks.copy()
 
         # Store initial variables for reset
         self._initial_variables: dict[str, Any] = {
@@ -107,9 +109,11 @@ class AgentPromptManager:
         """
         Resets prompt manager to its initial state.
 
-        This should be called between runs to prevent variable accumulation.
+        This should be called between runs to prevent variable and block accumulation.
+        Both prompt blocks and variables are reset to their initial state.
         The date is refreshed on each reset to ensure it's always current.
         """
+        self._prompt_blocks = self._initial_blocks.copy()
         self._prompt_variables = self._initial_variables.copy()
         self._prompt_variables["date"] = datetime.now().strftime("%d %B %Y")
 
