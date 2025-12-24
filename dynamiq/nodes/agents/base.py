@@ -383,12 +383,10 @@ class Agent(Node):
 
     def _init_prompt_blocks(self):
         """Initializes default prompt blocks and variables."""
-        # Initialize prompt manager for this agent
         model_name = getattr(self.llm, "model", None)
 
         self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
         self.system_prompt_manager.setup_for_base_agent()
-        # Defaults; overwritten by ReAct agent / per-call logic when delegation is enabled.
         self.system_prompt_manager.update_variables({"delegation_instructions": "", "delegation_instructions_xml": ""})
 
     def set_block(self, block_name: str, content: str):
@@ -1269,9 +1267,6 @@ class AgentManager(Agent):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._init_actions()
-
-        # Setup manager-specific prompts
-        self.system_prompt_manager.setup_for_agent_manager(manager_type="default")
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""

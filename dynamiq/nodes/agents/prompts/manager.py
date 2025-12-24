@@ -228,31 +228,6 @@ class AgentPromptManager:
         else:
             logger.debug(f"Using default prompts for model '{self.model_name}'")
 
-    def setup_for_agent_manager(self, manager_type: str = "default") -> None:
-        """
-        Setup prompts for AgentManager.
-
-        Args:
-            manager_type: Type of manager (e.g., "linear", "adaptive", "default")
-        """
-        if not self.model_name:
-            return
-
-        # Get base template
-        self.agent_template = get_prompt_constant(self.model_name, "AGENT_PROMPT_TEMPLATE", AGENT_PROMPT_TEMPLATE)
-
-        if self.agent_template != AGENT_PROMPT_TEMPLATE:
-            logger.info(
-                f"Applied model-specific template for AgentManager '{manager_type}' with model '{self.model_name}'"
-            )
-
-        # Manager-specific prompt blocks can be customized here
-        manager_prompt_key = f"{manager_type.upper()}_MANAGER_PROMPT"
-        manager_specific_prompt = get_prompt_constant(self.model_name, manager_prompt_key, None)
-
-        if manager_specific_prompt:
-            logger.info(f"Applied {manager_type} manager-specific prompts for model '{self.model_name}'")
-
     def build_delegation_variables(self, delegation_allowed: bool = False) -> dict[str, str]:
         """
         Provide prompt snippets for delegate_final guidance when enabled.
