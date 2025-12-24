@@ -49,6 +49,7 @@ class WorkflowYAMLLoader:
             requirements.append(requirement)
 
         for key, value in data.items():
+            # Skip fields that use 'type'/'object' keywords for different purposes (JSON Schema, prompts)
             if key in ("prompt", "schema", "response_format"):
                 continue
 
@@ -131,6 +132,7 @@ class WorkflowYAMLLoader:
                         data[key] = value
 
         for key, value in data.items():
+            # Skip fields that use 'type'/'object' keywords for different purposes (JSON Schema, prompts)
             if key in ("prompt", "schema", "response_format"):
                 continue
 
