@@ -44,12 +44,17 @@ def image_bytes(image_file_path):
 # Test configuration fixtures
 @pytest.fixture(scope="module")
 def agent_role():
-    return "helpful assistant that accurately analyzes images and provides technical details"
+    return (
+        "helpful assistant that accurately analyzes images and provides technical details." " Make sure to save file."
+    )
 
 
 @pytest.fixture(scope="module")
 def camera_query():
-    return "Look at this image and tell me what camera manufacturer is likely used to take this photo."
+    return (
+        "Look at this image that depicts camera and tell its manufacturer."
+        "Please save name of the camera to the summary.txt"
+    )
 
 
 @pytest.fixture(scope="module")
@@ -78,9 +83,9 @@ def gemini_connection():
 def openai_llm(openai_connection):
     return OpenAI(
         connection=openai_connection,
-        model="gpt-5-mini",
+        model="gpt-4o-mini",
         max_tokens=3000,
-        temperature=0,
+        temperature=0.1,
     )
 
 
@@ -90,7 +95,7 @@ def gemini_llm(gemini_connection):
         connection=gemini_connection,
         model="gemini-3.0-flash-exp",
         max_tokens=3000,
-        temperature=0,
+        temperature=0.1,
     )
 
 
@@ -109,8 +114,11 @@ def _run_and_assert_agent(agent, input_data, expected_keywords, run_config, expe
     workflow = Workflow(flow=Flow(nodes=[agent]))
     tracing = TracingCallbackHandler()
 
+    # Create config with tracing callback attached
+    config = run_config.model_copy(update={"callbacks": [tracing]})
+
     try:
-        result = workflow.run(input_data=input_data)
+        result = workflow.run(input_data=input_data, config=config)
         logger.info(f"Agent run completed with status: {result.status}")
 
         if result.status != RunnableStatus.SUCCESS:
@@ -192,12 +200,7 @@ def test_agent_filestore_multiple_files(
     )
 
     input_data = {
-        "input": (
-            # "Write hello to the file.txt and the list all fiels to verify"
-            f"{camera_query} "
-            "Please save your analysis to a file named 'summary.txt' with a brief summary of technical"
-            " information about the camera used."
-        ),
+        "input": (camera_query),
         "files": [image_bytes],
     }
 

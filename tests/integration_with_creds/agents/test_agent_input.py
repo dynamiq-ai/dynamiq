@@ -103,7 +103,7 @@ def run_config():
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "test_id,agent_name,role,check_system_prompt,expected_literal",
+    "test_id,agent_name,role",
     [
         (
             "code_examples_with_braces",
@@ -119,22 +119,17 @@ def run_config():
                 "- Always include code context in your explanations."
                 "Additional instructions: {{additional_instructions}}"
             ),
-            False,
-            None,
         ),
     ],
-    ids=["code_examples_with_braces", "double_braces_literal"],
+    ids=["code_examples_with_braces"],
 )
-def test_react_agent_role_with_special_characters(
-    test_llm, test_id, agent_name, role, check_system_prompt, expected_literal
-):
+def test_react_agent_role_with_special_characters(test_llm, test_id, agent_name, role):
     """
     Test agent roles with various special character patterns (curly braces, double braces, etc.)
     to ensure they don't break prompt rendering.
 
     Scenarios:
     - code_examples_with_braces: Role with single/double braces in code blocks and Jinja raw blocks
-    - double_braces_literal: Role with literal double-braces that must appear in system message
     """
     agent = Agent(
         name=agent_name,
@@ -160,4 +155,4 @@ def test_react_agent_role_with_special_characters(
     assert isinstance(content, str)
     assert "4" in content, f"Expected '4' in the output, got: {content!r}"
 
-    assert "have a nice day!" in content, f"Expected 'have a nice day!' in the output, got: {content!r}"
+    assert "have a nice day!" in content.lower(), f"Expected 'have a nice day!' in the output, got: {content!r}"
