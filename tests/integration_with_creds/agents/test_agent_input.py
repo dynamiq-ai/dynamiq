@@ -117,7 +117,7 @@ def run_config():
                 "{% raw %}<Button onClick={handleClick} data={{userId: 123}} />{% endraw %}\n"
                 "```\n"
                 "- Always include code context in your explanations."
-                "Additional instructions: {{additional_instructions}}"
+                " Additional instructions: {{additional_instructions}}"
             ),
         ),
     ],

@@ -53,7 +53,7 @@ def agent_role():
 def camera_query():
     return (
         "Look at this image that depicts camera and tell its manufacturer."
-        "Please save name of the camera to the summary.txt"
+        " Please save name of the camera to the summary.txt"
     )
 
 
