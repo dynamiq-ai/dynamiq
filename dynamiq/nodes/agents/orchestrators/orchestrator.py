@@ -228,6 +228,8 @@ class Orchestrator(Node, ABC):
     def reset_run_state(self):
         self._run_depends = []
         self._chat_history = []
+        if self.manager:
+            self.manager.reset_run_state()
 
     @abstractmethod
     def run_flow(self, input_task: str, config: RunnableConfig = None, **kwargs) -> dict[str, Any]:

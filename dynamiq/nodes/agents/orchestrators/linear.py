@@ -84,9 +84,8 @@ class LinearOrchestrator(Orchestrator):
         return data
 
     def reset_run_state(self):
+        super().reset_run_state()
         self._results = {}
-        self._run_depends = []
-        self._chat_history = []
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
