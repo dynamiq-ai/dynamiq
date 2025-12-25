@@ -497,8 +497,7 @@ class Agent(Node):
                 self.tools.append(FileListTool(file_store=self.file_store.backend))
 
                 new_tool_description = self.tool_description
-                self.system_prompt_manager.set_variable("tool_description", new_tool_description)
-                self.system_prompt_manager._initial_variables["tool_description"] = new_tool_description
+                self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
             normalized_files = self._ensure_named_files(files)
             uploaded_file_names = {
                 getattr(f, "name", None)

@@ -104,6 +104,20 @@ class AgentPromptManager:
         else:
             self._prompt_variables = variables.copy()
 
+    def set_initial_variable(self, var_name: str, value: Any):
+        """
+        Sets or updates a specific initial variable that persists across resets.
+
+        This method should be used when you need to update the initial state
+        that the manager returns to when reset() is called.
+
+        Args:
+            var_name: Name of the variable to set
+            value: Value to set for the variable
+        """
+        self._initial_variables[var_name] = value
+        self._prompt_variables[var_name] = value
+
     def reset(self):
         """
         Resets prompt manager to its initial state.
