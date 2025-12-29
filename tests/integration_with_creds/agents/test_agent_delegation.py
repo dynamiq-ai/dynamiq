@@ -54,9 +54,9 @@ def test_delegation_flag_verified_in_traces(llm_instance, run_config, inference_
         name="CalculatorAgentTool",
         id="calculator_agent_tool",
         llm=calculator_llm,
-        description="You are a mathematical calculator assistant. Use the calculator tool"
+        description="You are a mathematical calculator assistant. Use the calculator tool "
         "to perform calculations accurately.",
-        role="You are a mathematical calculator assistant."
+        role="You are a mathematical calculator assistant. "
         "Use the calculator tool to perform calculations accurately.",
         inference_mode=inference_mode,
         tools=[],
@@ -67,7 +67,7 @@ def test_delegation_flag_verified_in_traces(llm_instance, run_config, inference_
         name="DelegatorAgent",
         id="delegator_agent",
         llm=delegator_llm,
-        role="You are a helpful assistant. When users ask mathematical questions, delegate to"
+        role="You are a helpful assistant. When users ask mathematical questions, delegate to "
         "the CalculatorAgentTool and use delegate_final.",
         inference_mode=inference_mode,
         tools=[calculator_agent],
@@ -104,8 +104,6 @@ def test_delegation_flag_verified_in_traces(llm_instance, run_config, inference_
             f"[{inference_mode.value}] Run: name={node_name}, "
             f"id={node_id}, group={node_group}, parent_run_id={run.parent_run_id}"
         )
-        logger.info("Node name")
-        logger.info(node_name)
         if node_name == "DelegatorLLM":
             main_agent_run += 1
 

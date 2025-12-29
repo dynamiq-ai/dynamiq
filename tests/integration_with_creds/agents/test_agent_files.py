@@ -28,9 +28,13 @@ def image_file_path(data_folder_path):
     return os.path.join(data_folder_path, "img.jpeg")
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def image_bytes(image_file_path):
-    """Load image and return as BytesIO file object."""
+    """Load image and return as BytesIO file object.
+
+    Uses function scope to ensure each test gets a fresh BytesIO with stream position at 0.
+    This prevents issues when multiple LLM fixtures are parametrized and the stream is consumed.
+    """
     with open(image_file_path, "rb") as f:
         image_data = f.read()
 
@@ -193,7 +197,7 @@ def test_agent_filestore_multiple_files(
         id=f"multi_file_agent_{llm_fixture}",
         llm=llm,
         role=agent_role,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.XML,
         file_store=file_store_config,
         tools=[],
         verbose=True,
