@@ -1463,6 +1463,7 @@ class Agent(BaseAgent):
                                         "Please correct the action field or state that you cannot answer the question. "
                                     )
 
+                                delegate_final = self._should_delegate_final(tool, action_input)
                                 self.stream_reasoning(
                                     {
                                         "thought": thought,
@@ -1470,12 +1471,12 @@ class Agent(BaseAgent):
                                         "tool": {"name": tool.name, "type": tool.type},
                                         "action_input": action_input,
                                         "loop_num": loop_num,
+                                        "delegate_final": delegate_final,
                                     },
                                     config,
                                     **kwargs,
                                 )
 
-                                delegate_final = self._should_delegate_final(tool, action_input)
                                 tool_result, tool_files = self._run_tool(
                                     tool, action_input, config, delegate_final=delegate_final, **kwargs
                                 )
@@ -1506,6 +1507,8 @@ class Agent(BaseAgent):
                                     "Please correct the action field or state that you cannot answer the question."
                                 )
 
+                            delegate_final = self._should_delegate_final(tool, action_input)
+
                             self.stream_reasoning(
                                 {
                                     "thought": thought,
@@ -1513,6 +1516,7 @@ class Agent(BaseAgent):
                                     "tool": {"name": tool.name, "type": tool.type},
                                     "action_input": action_input,
                                     "loop_num": loop_num,
+                                    "delegate_final": delegate_final,
                                 },
                                 config,
                                 **kwargs,
@@ -1520,7 +1524,7 @@ class Agent(BaseAgent):
 
                             tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
                             tool_result = self._tool_cache.get(tool_cache_entry, None)
-                            delegate_final = self._should_delegate_final(tool, action_input)
+
                             if not tool_result:
                                 tool_result, tool_files = self._run_tool(
                                     tool, action_input, config, delegate_final=delegate_final, **kwargs
