@@ -4,7 +4,7 @@ from typing import Any
 
 from psycopg import sql
 
-from dynamiq.connections import ApacheAge
+from dynamiq.connections import ApacheAGE
 from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.utils.logger import logger
 
@@ -16,29 +16,25 @@ class ApacheAgeGraphStore(BaseGraphStore):
 
     def __init__(
         self,
-        connection: ApacheAge | None = None,
+        connection: ApacheAGE | None = None,
         client: Any | None = None,
         graph_name: str | None = None,
-        graph_creation_if_missing_enabled: bool | None = None,
+        create_graph_if_not_exists: bool = False,
     ):
         if client is None and connection is None:
             raise ValueError("Either 'connection' or 'client' must be provided.")
 
         self.connection = connection
         self.client = client or connection.connect()
-        self.graph_name = graph_name or (connection.graph_name if connection else None)
-        self.graph_creation_if_missing_enabled = (
-            graph_creation_if_missing_enabled
-            if graph_creation_if_missing_enabled is not None
-            else (connection.graph_creation_if_missing_enabled if connection else False)
-        )
+        self.graph_name = graph_name
+        self.create_graph_if_not_exists = create_graph_if_not_exists
 
         if not self.graph_name:
             raise ValueError("graph_name must be provided for Apache AGE.")
 
         self._age_loaded = False
         self._ensure_age_loaded()
-        if self.graph_creation_if_missing_enabled:
+        if self.create_graph_if_not_exists:
             self._ensure_graph_exists()
 
     def run_cypher(
@@ -71,7 +67,7 @@ class ApacheAgeGraphStore(BaseGraphStore):
         self.client = client
         self._age_loaded = False
         self._ensure_age_loaded()
-        if self.graph_creation_if_missing_enabled:
+        if self.create_graph_if_not_exists:
             self._ensure_graph_exists()
 
     def introspect_schema(self, *, include_properties: bool, **kwargs: Any) -> dict[str, Any]:

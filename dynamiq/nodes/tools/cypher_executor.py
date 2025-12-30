@@ -3,7 +3,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from dynamiq.connections import ApacheAge, AWSNeptune, Neo4j
+from dynamiq.connections import ApacheAGE, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -64,7 +64,7 @@ AGE_BACKEND_NOTES = """
 Apache AGE notes:
 - AGE requires queries to RETURN a single column; alias it as `result` (e.g., RETURN n AS result).
 - graph_return_enabled is not supported for AGE backends.
-- Provide graph_name via the ApacheAge connection or the tool's graph_name field.
+- Provide graph_name via the CypherExecutor's graph_name field.
 - Avoid passing a list of queries; use a single query string for AGE.
 """
 
@@ -155,13 +155,10 @@ class CypherExecutor(ConnectionNode):
     name: str = "Cypher Executor"
     description: str = BASE_CYPHER_DESCRIPTION
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
-    connection: Neo4j | ApacheAge | AWSNeptune
+    connection: Neo4j | ApacheAGE | AWSNeptune
     database: str | None = None
     graph_name: str | None = None
-    graph_creation_if_missing_enabled: bool | None = Field(
-        default=None,
-        validation_alias="create_graph_if_missing",
-    )
+    create_graph_if_not_exists: bool = False
     _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
     _backend_name: str | None = PrivateAttr(default=None)
 
@@ -172,13 +169,13 @@ class CypherExecutor(ConnectionNode):
             connection_manager: Optional connection manager instance.
         """
         super().init_components(connection_manager)
-        if isinstance(self.connection, ApacheAge):
+        if isinstance(self.connection, ApacheAGE):
             self._backend_name = "age"
             self._graph_store = ApacheAgeGraphStore(
                 connection=self.connection,
                 client=self.client,
                 graph_name=self.graph_name,
-                graph_creation_if_missing_enabled=self.graph_creation_if_missing_enabled,
+                create_graph_if_not_exists=self.create_graph_if_not_exists,
             )
         elif isinstance(self.connection, AWSNeptune):
             self._backend_name = "neptune"

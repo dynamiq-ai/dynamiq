@@ -5,7 +5,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", 
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from dynamiq.connections import ApacheAge  # noqa: E402
+from dynamiq.connections import ApacheAGE  # noqa: E402
 from dynamiq.nodes.agents import Agent  # noqa: E402
 from dynamiq.nodes.llms import OpenAI  # noqa: E402
 from dynamiq.nodes.tools import CypherExecutor  # noqa: E402
@@ -21,21 +21,25 @@ def build_llm() -> OpenAI:
     )
 
 
-def build_connection() -> ApacheAge:
+def build_connection() -> ApacheAGE:
     os.environ.setdefault("POSTGRESQL_HOST", "localhost")
     os.environ.setdefault("POSTGRESQL_PORT", "55432")
     os.environ.setdefault("POSTGRESQL_DATABASE", "db")
     os.environ.setdefault("POSTGRESQL_USER", os.environ.get("USER", "postgres"))
     os.environ.setdefault("POSTGRESQL_PASSWORD", "password")
-    os.environ.setdefault("APACHE_AGE_GRAPH_NAME", "graph")
-    return ApacheAge()
+    return ApacheAGE()
 
 
 def build_readonly_agent() -> Agent:
     llm = build_llm()
     connection = build_connection()
 
-    cypher_executor = CypherExecutor(connection=connection, name="cypher_executor")
+    cypher_executor = CypherExecutor(
+        connection=connection,
+        name="cypher_executor",
+        graph_name="graph",
+        create_graph_if_not_exists=False,
+    )
 
     return Agent(
         name="age_reader",
@@ -58,7 +62,7 @@ def build_readonly_agent() -> Agent:
     )
 
 
-def seed_sample_graph(connection: ApacheAge) -> dict:
+def seed_sample_graph(connection: ApacheAGE) -> dict:
     """
     Populate a small demo graph for testing in Apache AGE.
 
@@ -72,7 +76,12 @@ def seed_sample_graph(connection: ApacheAge) -> dict:
         Bob WORKS_AT Dynamiq
         Dynamiq BUILDS Dynamiq Platform
     """
-    executor = CypherExecutor(connection=connection, name="cypher_executor_seed")
+    executor = CypherExecutor(
+        connection=connection,
+        name="cypher_executor_seed",
+        graph_name="graph",
+        create_graph_if_not_exists=True,
+    )
     executor.init_components()
     query = """
     CREATE (c:Company {id: $company_id, name: $company_name})

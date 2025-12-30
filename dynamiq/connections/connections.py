@@ -1044,20 +1044,11 @@ class PostgreSQL(BaseConnection):
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
 
 
-class ApacheAge(PostgreSQL):
+class ApacheAGE(PostgreSQL):
     """
     Represents a connection to PostgreSQL with Apache AGE enabled.
-
-    Attributes:
-        graph_name (str): Name of the AGE graph to query.
-        graph_creation_if_missing_enabled (bool): Whether to create the graph if it does not exist.
     """
-
-    graph_name: str = Field(default_factory=partial(get_env_var, "APACHE_AGE_GRAPH_NAME", "graph"))
-    graph_creation_if_missing_enabled: bool = Field(
-        default_factory=partial(get_env_var, "APACHE_AGE_CREATE_GRAPH", False),
-        validation_alias="create_graph_if_missing",
-    )
+    pass
 
 
 class Exa(Http):
