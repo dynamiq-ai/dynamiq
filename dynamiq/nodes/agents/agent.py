@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from enum import Enum
 from typing import Any, Callable, Mapping, Union, get_args, get_origin
 
-import regex
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
@@ -830,33 +829,65 @@ class Agent(BaseAgent):
             thought_match = re.search(thought_pattern, output, re.DOTALL)
             thought = thought_match.group(1).strip() if thought_match else None
 
-            action_pattern = r"Action:\s*(.*?)\nAction Input:\s*(\{(?:[^{}]|(?R))*\})"
-
-            remaining_text = output
             actions = []
+            action_input_matches = list(re.finditer(r"Action Input:", output))
+            for i, input_match in enumerate(action_input_matches):
+                preceding_text = output[:input_match.start()]
+                # Find the last "Action:" before this "Action Input:"
+                # Search for "Action:" literal, allowing some whitespace/newlines before the name
+                all_actions = list(re.finditer(r"Action:\s*(.*?)(?:\n|\r|\s{2,})", preceding_text, re.DOTALL))
+                if not all_actions:
+                    all_actions = list(re.finditer(r"Action:\s*(.*)", preceding_text, re.DOTALL))
 
-            while "Action:" in remaining_text:
-                action_match = regex.search(action_pattern, remaining_text, re.DOTALL)
-                if not action_match:
-                    break
+                if all_actions:
+                    action_match = all_actions[-1]
+                    action_name = action_match.group(1).strip()
 
-                action_name = action_match.group(1).strip()
-                raw_input = action_match.group(2).strip()
+                    # Extract potential JSON string starting after "Action Input:"
+                    json_str_candidate = output[input_match.end():].strip()
 
-                for marker in ["```json", "```JSON", "```"]:
-                    raw_input = raw_input.replace(marker, "").strip()
+                    brace_count = 0
+                    json_end = 0
+                    in_string = False
+                    escape = False
+                    found_start = False
+                    start_idx = 0
 
-                try:
-                    action_input = json.loads(raw_input.strip())
-                    actions.append({"tool_name": action_name, "tool_input": action_input})
-                except json.JSONDecodeError as e:
-                    raise ActionParsingException(
-                        f"Invalid JSON in Action Input for {action_name}: {str(e)} : {raw_input}",
-                        recoverable=True,
-                    )
+                    for j, char in enumerate(json_str_candidate):
+                        if not found_start:
+                            if char == '{':
+                                found_start = True
+                                start_idx = j
+                                brace_count = 1
+                            continue
 
-                end_pos = action_match.end()
-                remaining_text = remaining_text[end_pos:]
+                        if char == '"' and not escape:
+                            in_string = not in_string
+
+                        if char == '\\' and not escape:
+                            escape = True
+                        else:
+                            escape = False
+
+                        if not in_string:
+                            if char == '{':
+                                brace_count += 1
+                            elif char == '}':
+                                brace_count -= 1
+                                if brace_count == 0:
+                                    json_end = j + 1
+                                    break
+
+                    if json_end > 0:
+                        raw_input = json_str_candidate[start_idx:json_end]
+                        for marker in ["```json", "```JSON", "```"]:
+                            raw_input = raw_input.replace(marker, "").strip()
+
+                        try:
+                            action_input = json.loads(raw_input)
+                            actions.append({"tool_name": action_name, "tool_input": action_input})
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Invalid JSON in Action Input for {action_name}: {str(e)}")
 
             if not actions:
                 logger.info("No valid Action and Action Input pairs found in the output ")
