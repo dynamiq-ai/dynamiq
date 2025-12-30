@@ -1,7 +1,7 @@
 import json
 from typing import Any
 
-from dynamiq.connections import Neptune as NeptuneConnection
+from dynamiq.connections import AWSNeptune as AWSNeptuneConnection
 from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.utils.logger import logger
 
@@ -11,11 +11,11 @@ class NeptuneGraphStore(BaseGraphStore):
 
     def __init__(
         self,
-        connection: NeptuneConnection | None = None,
+        connection: AWSNeptuneConnection | None = None,
         client: Any | None = None,
         endpoint: str | None = None,
         verify_ssl: bool | None = None,
-        timeout_seconds: int | None = None,
+        timeout: int | None = None,
     ) -> None:
         if client is None and connection is None:
             raise ValueError("Either 'connection' or 'client' must be provided.")
@@ -24,8 +24,8 @@ class NeptuneGraphStore(BaseGraphStore):
         self.client = client or connection.connect()
         self.endpoint = endpoint or (connection.endpoint if connection else None)
         self.verify_ssl = verify_ssl if verify_ssl is not None else (connection.verify_ssl if connection else True)
-        self.timeout_seconds = (
-            timeout_seconds if timeout_seconds is not None else (connection.timeout_seconds if connection else 30)
+        self.timeout = (
+            timeout if timeout is not None else (connection.timeout if connection else 30)
         )
 
         if not self.endpoint:
@@ -47,7 +47,7 @@ class NeptuneGraphStore(BaseGraphStore):
                 data=json.dumps(payload),
                 headers={"Content-Type": "application/json"},
                 verify=self.verify_ssl,
-                timeout=self.timeout_seconds,
+                timeout=self.timeout,
             )
             response.raise_for_status()
             records = response.json().get("results", [])

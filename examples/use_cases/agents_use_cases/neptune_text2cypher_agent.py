@@ -1,4 +1,4 @@
-from dynamiq.connections import Neptune as NeptuneConnection
+from dynamiq.connections import AWSNeptune as AWSNeptuneConnection
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools import CypherExecutor
@@ -14,11 +14,11 @@ def build_llm() -> OpenAI:
     )
 
 
-def build_connection() -> NeptuneConnection:
+def build_connection() -> AWSNeptuneConnection:
     """
     Uses environment variables like NEPTUNE_HOST, NEPTUNE_PORT, NEPTUNE_USE_HTTPS, and NEPTUNE_VERIFY_SSL.
     """
-    return NeptuneConnection(use_https=True, verify_ssl=False)
+    return AWSNeptuneConnection(use_https=True, verify_ssl=False)
 
 
 def build_readonly_agent() -> Agent:
@@ -49,7 +49,7 @@ def build_readonly_agent() -> Agent:
     )
 
 
-def seed_sample_graph(connection: NeptuneConnection) -> dict:
+def seed_sample_graph(connection: AWSNeptuneConnection) -> dict:
     """
     Populate a small demo graph for testing.
 

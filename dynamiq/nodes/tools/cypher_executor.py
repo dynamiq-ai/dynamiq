@@ -3,7 +3,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from dynamiq.connections import ApacheAge, Neo4j, Neptune
+from dynamiq.connections import ApacheAge, AWSNeptune, Neo4j
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -155,7 +155,7 @@ class CypherExecutor(ConnectionNode):
     name: str = "Cypher Executor"
     description: str = BASE_CYPHER_DESCRIPTION
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
-    connection: Neo4j | ApacheAge | Neptune
+    connection: Neo4j | ApacheAge | AWSNeptune
     database: str | None = None
     graph_name: str | None = None
     graph_creation_if_missing_enabled: bool | None = Field(
@@ -180,14 +180,14 @@ class CypherExecutor(ConnectionNode):
                 graph_name=self.graph_name,
                 graph_creation_if_missing_enabled=self.graph_creation_if_missing_enabled,
             )
-        elif isinstance(self.connection, Neptune):
+        elif isinstance(self.connection, AWSNeptune):
             self._backend_name = "neptune"
             self._graph_store = NeptuneGraphStore(
                 connection=self.connection,
                 client=self.client,
                 endpoint=self.connection.endpoint,
                 verify_ssl=self.connection.verify_ssl,
-                timeout_seconds=self.connection.timeout_seconds,
+                timeout=self.connection.timeout,
             )
         else:
             self._backend_name = "neo4j"

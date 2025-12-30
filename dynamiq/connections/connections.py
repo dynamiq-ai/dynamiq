@@ -303,7 +303,7 @@ class AWS(BaseConnection):
         return boto3.Session(**params)
 
 
-class Neptune(BaseConnection):
+class AWSNeptune(BaseConnection):
     """
     Represents a connection to Amazon Neptune openCypher via HTTP.
 
@@ -312,14 +312,14 @@ class Neptune(BaseConnection):
         port (int): Neptune port.
         use_https (bool): Whether to use https for the endpoint.
         verify_ssl (bool): Whether to verify SSL certificates.
-        timeout_seconds (int): Request timeout in seconds.
+        timeout (int): Request timeout in seconds.
     """
 
     host: str = Field(default_factory=partial(get_env_var, "NEPTUNE_HOST", "localhost"))
     port: int = Field(default_factory=partial(get_env_var, "NEPTUNE_PORT", 8182))
     use_https: bool = Field(default_factory=partial(get_env_var, "NEPTUNE_USE_HTTPS", True))
     verify_ssl: bool = Field(default_factory=partial(get_env_var, "NEPTUNE_VERIFY_SSL", True))
-    timeout_seconds: int = Field(default_factory=partial(get_env_var, "NEPTUNE_TIMEOUT_SECONDS", 30))
+    timeout: int = Field(default_factory=partial(get_env_var, "NEPTUNE_TIMEOUT", 30))
 
     @property
     def endpoint(self) -> str:
