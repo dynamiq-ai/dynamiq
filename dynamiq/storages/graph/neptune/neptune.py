@@ -1,9 +1,12 @@
 import json
+import re
 from typing import Any
 
 from dynamiq.connections import AWSNeptune as AWSNeptuneConnection
 from dynamiq.storages.graph.base import BaseGraphStore
 from dynamiq.utils.logger import logger
+
+LABEL_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class NeptuneGraphStore(BaseGraphStore):
@@ -110,7 +113,8 @@ class NeptuneGraphStore(BaseGraphStore):
             "bool": "BOOLEAN",
         }
         for label in labels:
-            query = f"MATCH (a:`{label}`) RETURN properties(a) AS props LIMIT 100"
+            safe_label = self._validate_label(label)
+            query = f"MATCH (a:`{safe_label}`) RETURN properties(a) AS props LIMIT 100"
             records, _, _ = self.run_cypher(query)
             seen: set[tuple[str, str]] = set()
             for record in records:
@@ -136,7 +140,8 @@ class NeptuneGraphStore(BaseGraphStore):
             "bool": "BOOLEAN",
         }
         for label in labels:
-            query = f"MATCH ()-[e:`{label}`]->() RETURN properties(e) AS props LIMIT 100"
+            safe_label = self._validate_label(label)
+            query = f"MATCH ()-[e:`{safe_label}`]->() RETURN properties(e) AS props LIMIT 100"
             records, _, _ = self.run_cypher(query)
             seen: set[tuple[str, str]] = set()
             for record in records:
@@ -155,8 +160,9 @@ class NeptuneGraphStore(BaseGraphStore):
         triple_template = "(:`{a}`)-[:`{e}`]->(:`{b}`)"
         triples: list[str] = []
         for label in edge_labels:
+            safe_label = self._validate_label(label)
             query = (
-                f"MATCH (a)-[e:`{label}`]->(b) "
+                f"MATCH (a)-[e:`{safe_label}`]->(b) "
                 "RETURN {from: labels(a), edge: type(e), to: labels(b)} AS result LIMIT 10"
             )
             records, _, _ = self.run_cypher(query)
@@ -176,3 +182,20 @@ class NeptuneGraphStore(BaseGraphStore):
                     )
                 )
         return triples
+
+    @staticmethod
+    def _validate_label(label: str) -> str:
+        """Validate label to prevent Cypher injection.
+
+        Args:
+            label: Label name to validate.
+
+        Returns:
+            The validated label.
+
+        Raises:
+            ValueError: If label contains invalid characters.
+        """
+        if not LABEL_PATTERN.match(label):
+            raise ValueError(f"Invalid Neptune label: '{label}'")
+        return label
