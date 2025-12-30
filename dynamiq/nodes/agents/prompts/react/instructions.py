@@ -10,42 +10,6 @@ DELEGATION_INSTRUCTIONS_XML = (
     "<answer> yourself; the system will return the agent's result directly."
 )
 
-DEFAULT_DIRECT_OUTPUT_CAPABILITIES = """
-ADVANCED FEATURES:
-- Tool outputs are automatically cached and can be referenced directly
-- You can return raw tool observation directly using:
-Thought: [Your reasoning about using direct tool output]
-Answer: <answer type="tool_output" action="tool_name" action_input="tool_input">
-- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
-- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
-- The tool must have been called in a previous step with the exact same action and action_input
-- action_input must match exactly what you used when calling the tool (including JSON key order)
-- This bypasses summarization and returns the complete tool output to the user
-- Use this format only when the raw tool output is exactly what the user needs
-- If the tool hasn't been executed yet, you must call it first in the current step
-"""
-
-XML_DIRECT_OUTPUT_CAPABILITIES = """
-ADVANCED FEATURES:
-- Tool outputs are automatically cached and can be referenced directly
-- You can return raw tool outputs directly using:
-<output>
-    <thought>
-        [Your reasoning about using direct tool output]
-    </thought>
-    <answer>
-        <answer type="tool_output" action="tool_name" action_input="tool_input">
-    </answer>
-</output>
-- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
-- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
-- The tool must have been called in a previous step with the exact same action and action_input
-- action_input must match exactly what you used when calling the tool (including JSON key order)
-- This bypasses summarization and returns the complete tool output to the user
-- Use this format only when the raw tool output is exactly what the user needs
-- If the tool hasn't been executed yet, you must call it first in the current step
-"""
-
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 

@@ -81,11 +81,6 @@ class Agent(BaseAgent):
         description="Enable multi-tool execution in a single step. "
         "When True, the agent can call multiple tools in parallel.",
     )
-    direct_tool_output_enabled: bool = Field(
-        default=False,
-        description="Enable direct tool output capability. "
-        "When True, the agent can return raw tool outputs directly without summarization.",
-    )
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
@@ -1341,7 +1336,6 @@ class Agent(BaseAgent):
         self.system_prompt_manager.setup_for_react_agent(
             inference_mode=self.inference_mode,
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-            direct_tool_output_enabled=self.direct_tool_output_enabled,
             has_tools=bool(self.tools),
         )
 

@@ -27,7 +27,7 @@ from dynamiq.nodes.agents.prompts.orchestrators.linear import (
 from dynamiq.nodes.agents.prompts.overrides.gpt import (
     REACT_BLOCK_XML_INSTRUCTIONS_SINGLE as GPT_REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
 )
-from dynamiq.nodes.agents.prompts.react import XML_DIRECT_OUTPUT_CAPABILITIES
+from dynamiq.nodes.agents.prompts.react import DELEGATION_INSTRUCTIONS_XML
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
 
@@ -66,7 +66,7 @@ def test_agent_initialization_with_model_specific_prompts(test_llm):
         tools=[python_tool],
         inference_mode="XML",
         verbose=False,
-        direct_tool_output_enabled=True,
+        delegation_allowed=True,
     )
 
     # Verify prompt manager is initialized
@@ -82,7 +82,7 @@ def test_agent_initialization_with_model_specific_prompts(test_llm):
     prompt = agent.system_prompt_manager.generate_prompt()
 
     assert prompt is not None
-    assert XML_DIRECT_OUTPUT_CAPABILITIES in prompt
+    assert DELEGATION_INSTRUCTIONS_XML in prompt
     assert GPT_REACT_BLOCK_XML_INSTRUCTIONS_SINGLE == get_prompt_constant(
         "gpt-5.1", "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", None
     )
