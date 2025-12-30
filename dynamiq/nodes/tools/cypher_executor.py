@@ -20,7 +20,7 @@ Inputs:
 - mode: execute | introspect
 - query: Cypher text or list of Cypher texts (execute mode)
 - parameters: dict for $params, or list aligned with query list (additionalProperties allowed)
-- database: optional override
+- database: optional database name (Neo4j only; overrides connection default)
 - routing: 'r' for read / 'w' for write (clusters)
 - graph_return_enabled: if true, return nodes/relationships instead of rows
 - property_metadata_enabled: when introspecting, include node/rel property metadata
@@ -35,14 +35,14 @@ If graph_return_enabled is true, graph.nodes/graph.relationships are returned in
 
 Key capabilities:
 - Safe, parameterized Cypher execution (MATCH/OPTIONAL MATCH/RETURN, MERGE/SET when allowed)
-- Supports database selection and read routing
+- Supports runtime database selection (Neo4j) and read routing
 - Returns tabular records or graph objects
 - Fetches schema labels/relationship types/property metadata
 
 Usage tips:
 - Always use parameters (e.g., $name) instead of string concatenation
 - Set routing='r' for read-only queries in clusters
-- Provide database explicitly when available
+- For Neo4j: use database input to override the connection's default database
 - Use mode="introspect" to fetch schema hints for query generation
 - For writes, avoid comma-separated MATCH/MERGE patterns (cartesian products)
 - Prefer safe write pattern:
@@ -57,7 +57,8 @@ NEO4J_BACKEND_NOTES = """
 Neo4j notes:
 - graph_return_enabled is supported to return nodes/relationships instead of rows.
 - routing can be 'r' or 'w' when using Neo4j clusters.
-- database can target a named Neo4j database.
+- database input overrides the default database from the Neo4j connection.
+- If no database is specified, Neo4j uses the connection's default or the user's home database.
 """
 
 AGE_BACKEND_NOTES = """
@@ -156,7 +157,6 @@ class CypherExecutor(ConnectionNode):
     description: str = BASE_CYPHER_DESCRIPTION
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     connection: Neo4j | ApacheAGE | AWSNeptune
-    database: str | None = None
     graph_name: str | None = None
     create_graph_if_not_exists: bool = False
     _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
@@ -188,7 +188,7 @@ class CypherExecutor(ConnectionNode):
             )
         else:
             self._backend_name = "neo4j"
-            self._graph_store = Neo4jGraphStore(connection=self.connection, client=self.client, database=self.database)
+            self._graph_store = Neo4jGraphStore(connection=self.connection, client=self.client)
         self.description = self._build_description()
 
     def ensure_client(self) -> None:
@@ -232,7 +232,7 @@ class CypherExecutor(ConnectionNode):
         if not self._graph_store:
             raise ToolExecutionException("Graph store is not initialized.", recoverable=True)
 
-        database = input_data.database or self.database
+        database = input_data.database
         routing = input_data.routing
         result_payload: dict[str, Any] = {}
 

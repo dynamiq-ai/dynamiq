@@ -290,7 +290,7 @@ def test_cypher_executor_yaml_roundtrip(tmp_path, monkeypatch):
         password="pass",
         connectivity_verification_enabled=False,
     )
-    node = CypherExecutor(id="neo4j-node", connection=connection, database="neo4j")
+    node = CypherExecutor(id="neo4j-node", connection=connection)
     workflow = Workflow(id="neo4j-workflow", flow=Flow(id="neo4j-flow", nodes=[node]))
 
     yaml_path = tmp_path / "neo4j_workflow.yaml"
@@ -305,6 +305,5 @@ def test_cypher_executor_yaml_roundtrip(tmp_path, monkeypatch):
     roundtrip = Workflow.from_yaml_file(str(roundtrip_path), init_components=True)
 
     roundtrip_node = roundtrip.flow.nodes[0]
-    assert roundtrip_node.database == "neo4j"
     assert roundtrip_node.connection.id == "neo4j-conn"
     assert roundtrip_node.connection.uri == "bolt://localhost:7687"
