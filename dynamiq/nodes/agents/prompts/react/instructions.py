@@ -48,7 +48,10 @@ IMPORTANT RULES:
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - Files are automatically collected and will be returned with your final answer
-- Mention created files in your final answer so users know what was generated"""  # noqa: E501
+- Mention created files in your final answer so users know what was generated
+
+{{ delegation_instructions }}
+"""  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
 
@@ -108,8 +111,6 @@ CRITICAL XML FORMAT RULES:
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
-{{ delegation_instructions_xml }}
-
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags
 - Use double quotes for all strings
@@ -120,6 +121,8 @@ FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
 - Generated files are automatically collected and returned with your final answer
 - File operations are handled transparently - focus on the task, not file management
+
+{{ delegation_instructions_xml }}
 """  # noqa: E501
 
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
@@ -488,12 +491,12 @@ IMPORTANT RULES:
 - Ensure proper JSON syntax with quoted keys and values
 - To return an agent tool's response as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call finish yourself afterward; the system will return the agent's result directly.
 
-{{ delegation_instructions }}
-
 FILE HANDLING:
 - Tools may generate files that are automatically collected
 - Generated files will be included in the final response
 - Never return empty response.
+
+{{ delegation_instructions }}
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
@@ -515,11 +518,11 @@ FUNCTION CALLING GUIDELINES:
 - Chain multiple tool calls when necessary for complex tasks
 - If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
 
-{{ delegation_instructions }}
-
 FILE HANDLING:
 - Tools may generate files that will be included in the final response
 - Files created by tools are automatically collected and returned
+
+{{ delegation_instructions }}
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
