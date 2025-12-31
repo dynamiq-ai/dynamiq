@@ -105,9 +105,6 @@ class WorkflowYAMLLoader:
         Raises:
             WorkflowYAMLLoaderException: If a requirement_id cannot be resolved.
         """
-        if not resolved_requirements:
-            return
-
         cls._apply_requirements_to_dict(data, resolved_requirements, overwrite=overwrite)
 
     @classmethod
