@@ -120,8 +120,8 @@ class AgentPromptManager:
         """
         Resets prompt manager to its initial state.
 
-        This should be called between runs to prevent variable and block accumulation.
-        Both prompt blocks and variables are reset to their initial state.
+        This should be called between runs to prevent variable accumulation.
+        Prompt variables are reset to their initial state.
         The date is refreshed on each reset to ensure it's always current.
         """
         self._prompt_variables = self._initial_variables.copy()
