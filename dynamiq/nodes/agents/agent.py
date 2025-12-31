@@ -329,7 +329,7 @@ class Agent(BaseAgent):
                 if parsed_result.get("is_final", False):
                     final_answer = parsed_result.get("answer", "")
                     self.log_final_output(thought, final_answer, loop_num)
-                    return "final_answer", final_answer, None
+                    return thought, "final_answer", final_answer
 
                 tools_data = parsed_result.get("tools", [])
                 action = tools_data
@@ -391,7 +391,7 @@ class Agent(BaseAgent):
                 thought = parsed_data.get("thought")
                 final_answer = parsed_data.get("answer")
                 self.log_final_output(thought, final_answer, loop_num)
-                return "final_answer", final_answer, None
+                return thought, "final_answer", final_answer
 
             except TagNotFoundError:
                 logger.debug("XMLParser: Not a final answer structure, trying action structure.")
@@ -668,7 +668,7 @@ class Agent(BaseAgent):
 
         return None
 
-    def run_agent(
+    def _run_agent(
         self,
         input_message: Message | VisionMessage,
         history_messages: list[Message] | None = None,
