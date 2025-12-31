@@ -202,13 +202,23 @@ def test_apply_resolved_raises_on_missing():
     assert REQ_MISSING in str(exc_info.value)
 
 
-def test_apply_resolved_handles_empty():
+def test_apply_resolved_handles_empty_data_no_requirements():
     data = {"nodes": {NODE_1: {"type": OPENAI_NODE}}}
     original = {"nodes": {NODE_1: {"type": OPENAI_NODE}}}
 
     WorkflowYAMLLoader.apply_resolved_requirements(data, {})
 
     assert data == original
+
+
+def test_apply_resolved_raises_on_empty_resolved_with_requirements():
+    """Verify that empty resolved_requirements raises when data contains requirements."""
+    data = {"nodes": {NODE_1: {"connection": {"type": OPENAI_CONN, "object": REQUIREMENT, "requirement_id": REQ_1}}}}
+
+    with pytest.raises(WorkflowYAMLLoaderException) as exc_info:
+        WorkflowYAMLLoader.apply_resolved_requirements(data, {})
+
+    assert REQ_1 in str(exc_info.value)
 
 
 def test_requirement_data_from_valid_dict():
