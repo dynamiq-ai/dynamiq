@@ -228,6 +228,26 @@ class Agent(BaseAgent):
                 **kwargs,
             )
 
+    def _append_assistant_message(self, llm_result: Any, llm_generated_output: str) -> None:
+        """
+        Appends the assistant's message to conversation history based on inference mode.
+
+        Args:
+            llm_result: The full LLM result object (needed for function calling mode).
+            llm_generated_output: The generated text output from the LLM.
+        """
+        if self.inference_mode == InferenceMode.FUNCTION_CALLING:
+            # For function calling, construct a message that includes the tool call
+            if "tool_calls" in dict(llm_result.output):
+                tool_call = list(llm_result.output["tool_calls"].values())[0]
+                function_name = tool_call["function"]["name"]
+                function_args = json.dumps(tool_call["function"]["arguments"])
+                message_content = f"Function call: {function_name}({function_args})"
+                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=message_content, static=True))
+        elif llm_generated_output:
+            # For other modes, use the generated text output
+            self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True))
+
     def _handle_default_mode(
         self, llm_generated_output: str, loop_num: int
     ) -> tuple[str | None, str | None, dict | list | None]:
@@ -778,11 +798,8 @@ class Agent(BaseAgent):
                 # Unpack action details
                 thought, action, action_input = result
 
-                self._prompt.messages.append(
-                    Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True)
-                )
+                self._append_assistant_message(llm_result, llm_generated_output)
 
-                # Execute tools and handle delegation
                 final_answer = self._execute_tools_and_update_prompt(
                     action, action_input, thought, loop_num, config, **kwargs
                 )
@@ -909,7 +926,6 @@ class Agent(BaseAgent):
         self.system_prompt_manager.setup_for_react_agent(
             inference_mode=self.inference_mode,
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-            direct_tool_output_enabled=self.direct_tool_output_enabled,
             has_tools=bool(self.tools),
         )
 
@@ -998,6 +1014,8 @@ class Agent(BaseAgent):
             }
 
         try:
+            logger.info(f"tool_input_d edadasdasdsa: {tool_input}, _______________________________")
+
             tool_result, tool_files, dependency = self._run_tool(
                 tool,
                 tool_input,
