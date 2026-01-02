@@ -5,6 +5,7 @@ import pytest
 
 from dynamiq import connections, prompts
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents.components.parser import extract_final_answer, parse_action, parse_thought
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     JSONParsingError,
@@ -77,7 +78,7 @@ def test_parse_thought(default_react_agent):
     Action: search
     Action Input: {"query": "weather in San Francisco"}
     """
-    thought = default_react_agent._parse_thought(output)
+    thought = parse_thought(output)
     assert thought == "I need to search for information about the weather."
 
 
@@ -88,7 +89,7 @@ def test_parse_action_missing_action_input(default_react_agent):
     Action: search
     """
     with pytest.raises(ActionParsingException):
-        default_react_agent._parse_action(output)
+        parse_action(output, parallel_tool_calls_enabled=False)
 
 
 def test_extract_final_answer(default_react_agent):
@@ -97,7 +98,7 @@ def test_extract_final_answer(default_react_agent):
     Thought: I found all the information needed.
     Answer: The weather in San Francisco is foggy with a high of 65°F.
     """
-    answer = default_react_agent._extract_final_answer(output)
+    answer = extract_final_answer(output)
     assert answer[0] == "I found all the information needed."
     assert answer[1] == "The weather in San Francisco is foggy with a high of 65°F."
 

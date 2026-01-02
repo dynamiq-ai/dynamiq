@@ -419,7 +419,7 @@ class Agent(BaseAgent):
                     config,
                     **kwargs,
                 )
-                return thought, action, None
+                return thought, action, tools_data
 
             except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
                 self._append_recovery_instruction(
@@ -786,7 +786,8 @@ class Agent(BaseAgent):
                         result = self._handle_structured_output_mode(llm_generated_output, loop_num)
                     case InferenceMode.XML:
                         result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
-
+                # Append assistant message to conversation history (before any early returns)
+                self._append_assistant_message(llm_result, llm_generated_output)
                 # Handle final answer
                 if result[1] == "final_answer":
                     return result[2]
@@ -797,8 +798,6 @@ class Agent(BaseAgent):
 
                 # Unpack action details
                 thought, action, action_input = result
-
-                self._append_assistant_message(llm_result, llm_generated_output)
 
                 final_answer = self._execute_tools_and_update_prompt(
                     action, action_input, thought, loop_num, config, **kwargs
@@ -1014,8 +1013,6 @@ class Agent(BaseAgent):
             }
 
         try:
-            logger.info(f"tool_input_d edadasdasdsa: {tool_input}, _______________________________")
-
             tool_result, tool_files, dependency = self._run_tool(
                 tool,
                 tool_input,
