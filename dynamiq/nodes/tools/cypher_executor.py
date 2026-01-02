@@ -1,4 +1,5 @@
 import re
+from enum import Enum
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
@@ -147,6 +148,12 @@ class CypherInputSchema(BaseModel):
         return self
 
 
+class BackendName(str, Enum):
+    AGE = "age"
+    NEPTUNE = "neptune"
+    NEO4J = "neo4j"
+
+
 class CypherExecutor(ConnectionNode):
     """Tool for executing Cypher queries against Neo4j, Apache AGE, or Neptune."""
 
@@ -160,7 +167,7 @@ class CypherExecutor(ConnectionNode):
     graph_name: str | None = None
     create_graph_if_not_exists: bool = False
     _graph_store: BaseGraphStore | None = PrivateAttr(default=None)
-    _backend_name: str | None = PrivateAttr(default=None)
+    _backend_name: BackendName | None = PrivateAttr(default=None)
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """Initialize graph store and backend metadata.
@@ -170,7 +177,7 @@ class CypherExecutor(ConnectionNode):
         """
         super().init_components(connection_manager)
         if isinstance(self.connection, ApacheAGE):
-            self._backend_name = "age"
+            self._backend_name = BackendName.AGE
             self._graph_store = ApacheAgeGraphStore(
                 connection=self.connection,
                 client=self.client,
@@ -178,7 +185,7 @@ class CypherExecutor(ConnectionNode):
                 create_graph_if_not_exists=self.create_graph_if_not_exists,
             )
         elif isinstance(self.connection, AWSNeptune):
-            self._backend_name = "neptune"
+            self._backend_name = BackendName.NEPTUNE
             self._graph_store = NeptuneGraphStore(
                 connection=self.connection,
                 client=self.client,
@@ -187,7 +194,7 @@ class CypherExecutor(ConnectionNode):
                 timeout=self.connection.timeout,
             )
         else:
-            self._backend_name = "neo4j"
+            self._backend_name = BackendName.NEO4J
             self._graph_store = Neo4jGraphStore(connection=self.connection, client=self.client)
         self.description = self._build_description()
 
@@ -203,11 +210,11 @@ class CypherExecutor(ConnectionNode):
             self._graph_store.update_client(self.client)
 
     def _build_description(self) -> str:
-        if self._backend_name == "age":
+        if self._backend_name == BackendName.AGE:
             return BASE_CYPHER_DESCRIPTION + AGE_BACKEND_NOTES
-        if self._backend_name == "neptune":
+        if self._backend_name == BackendName.NEPTUNE:
             return BASE_CYPHER_DESCRIPTION + NEPTUNE_BACKEND_NOTES
-        if self._backend_name == "neo4j":
+        if self._backend_name == BackendName.NEO4J:
             return BASE_CYPHER_DESCRIPTION + NEO4J_BACKEND_NOTES
         return BASE_CYPHER_DESCRIPTION
 

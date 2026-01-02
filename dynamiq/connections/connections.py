@@ -327,13 +327,7 @@ class AWSNeptune(BaseConnection):
         return f"{scheme}://{self.host}:{self.port}/openCypher"
 
     def connect(self):
-        try:
-            import requests
-        except ImportError as exc:
-            raise ModuleNotFoundError(
-                "Could not import requests python package. Please install it with `pip install requests`."
-            ) from exc
-
+        import requests
         session = requests.Session()
         logger.debug("Connected to Neptune via HTTP endpoint=%s", self.endpoint)
         return session
