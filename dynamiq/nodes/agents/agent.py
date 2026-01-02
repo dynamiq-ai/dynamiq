@@ -1138,6 +1138,13 @@ class Agent(BaseAgent):
     def generate_structured_output_schemas(self):
         tool_names = [self.sanitize_tool_name(tool.name) for tool in self.tools]
 
+        action_input_description = "Input for chosen action."
+        if self.delegation_allowed and any(isinstance(tool, Agent) for tool in self.tools):
+            action_input_description += (
+                ' For agent tools, include {"input": "<subtask>", "delegate_final": true} '
+                "to return that agent's response directly as the final answer."
+            )
+
         schema = {
             "type": "json_schema",
             "json_schema": {
@@ -1157,7 +1164,7 @@ class Agent(BaseAgent):
                         },
                         "action_input": {
                             "type": "string",
-                            "description": "Input for chosen action.",
+                            "description": action_input_description,
                         },
                     },
                     "additionalProperties": False,
