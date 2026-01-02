@@ -448,6 +448,16 @@ class Agent(Node):
         input_message = input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
         input_message = input_message.format_message(**input_dict)
 
+        # Only auto-wrap the entire role in a raw block if the user did not
+        # provide explicit raw/endraw markers. This allows roles to mix
+        # literal sections (via raw) with Jinja variables like {{ input }}
+        # without creating nested raw blocks.
+        if self.role:
+            if ("{% raw %}" in self.role) or ("{% endraw %}" in self.role):
+                self.system_prompt_manager.set_block("role", self.role)
+            else:
+                self.system_prompt_manager.set_block("role", f"{{% raw %}}{self.role}{{% endraw %}}")
+
         use_memory = self.memory and (input_dict.get("user_id") or input_dict.get("session_id"))
 
         if use_memory:

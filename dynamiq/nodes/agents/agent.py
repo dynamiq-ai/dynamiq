@@ -776,6 +776,10 @@ class Agent(BaseAgent):
                 )
                 logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, " f"reasoning:\n{llm_reasoning}...")
 
+                # Append assistant message to conversation history BEFORE parsing
+                # This ensures the LLM can see its own output during error recovery
+                self._append_assistant_message(llm_result, llm_generated_output)
+
                 # Parse LLM output based on inference mode
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
@@ -786,8 +790,6 @@ class Agent(BaseAgent):
                         result = self._handle_structured_output_mode(llm_generated_output, loop_num)
                     case InferenceMode.XML:
                         result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
-                # Append assistant message to conversation history (before any early returns)
-                self._append_assistant_message(llm_result, llm_generated_output)
                 # Handle final answer
                 if result[1] == "final_answer":
                     return result[2]
@@ -927,16 +929,6 @@ class Agent(BaseAgent):
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             has_tools=bool(self.tools),
         )
-
-        # Only auto-wrap the entire role in a raw block if the user did not
-        # provide explicit raw/endraw markers. This allows roles to mix
-        # literal sections (via raw) with Jinja variables like {{ input }}
-        # without creating nested raw blocks.
-        if self.role:
-            if ("{% raw %}" in self.role) or ("{% endraw %}" in self.role):
-                self.system_prompt_manager.set_block("role", self.role)
-            else:
-                self.system_prompt_manager.set_block("role", f"{{% raw %}}{self.role}{{% endraw %}}")
 
     @staticmethod
     def _build_unique_file_key(files_map: dict[str, Any], base: str) -> str:
