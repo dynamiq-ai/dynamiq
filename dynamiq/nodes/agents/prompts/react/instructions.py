@@ -2,6 +2,7 @@ DELEGATION_INSTRUCTIONS = (
     "- Optional: If you want an agent tool's response returned verbatim as the final output, "
     'set "delegate_final": true in that tool\'s input. Use this only for a single agent tool call '
     "and do not provide your own final answer; the system will return the agent's result directly."
+    "Do not set delegate_final: true inside metadata of the input, it has to be a separate field."
 )
 
 DELEGATION_INSTRUCTIONS_XML = (
