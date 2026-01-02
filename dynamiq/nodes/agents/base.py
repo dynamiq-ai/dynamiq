@@ -113,20 +113,6 @@ class AgentStatus(str, Enum):
     FAIL = "fail"
 
 
-class AgentIntermediateStepModelObservation(BaseModel):
-    initial: str | dict | None = None
-    tool_using: str | dict | list | None = None
-    tool_input: str | dict | list | None = None
-    tool_output: Any = None
-    updated: str | dict | None = None
-
-
-class AgentIntermediateStep(BaseModel):
-    input_data: str | dict
-    agent_model_observation: AgentIntermediateStepModelObservation = Field(..., alias="model_observation")
-    final_answer: str | dict | None = None
-
-
 class ToolParams(BaseModel):
     global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
     by_name_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_name")
@@ -287,7 +273,6 @@ class Agent(Node):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._intermediate_steps: dict[int, dict] = {}
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
 
@@ -462,6 +447,16 @@ class Agent(Node):
 
         input_message = input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
         input_message = input_message.format_message(**input_dict)
+
+        # Only auto-wrap the entire role in a raw block if the user did not
+        # provide explicit raw/endraw markers. This allows roles to mix
+        # literal sections (via raw) with Jinja variables like {{ input }}
+        # without creating nested raw blocks.
+        if self.role:
+            if ("{% raw %}" in self.role) or ("{% endraw %}" in self.role):
+                self.system_prompt_manager.set_block("role", self.role)
+            else:
+                self.system_prompt_manager.set_block("role", f"{{% raw %}}{self.role}{{% endraw %}}")
 
         use_memory = self.memory and (input_dict.get("user_id") or input_dict.get("session_id"))
 
@@ -1207,7 +1202,6 @@ class Agent(Node):
 
     def reset_run_state(self):
         """Resets the agent's run state."""
-        self._intermediate_steps = {}
         self._run_depends = []
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self.system_prompt_manager.reset()
