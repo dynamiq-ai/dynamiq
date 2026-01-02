@@ -500,7 +500,9 @@ class CypherExecutor(ConnectionNode):
         if not query:
             raise ToolExecutionException("Cypher query cannot be empty.", recoverable=True)
         if not writes_allowed and cls._contains_write(query):
-            raise ToolExecutionException("Cypher contains write operations but writes_allowed is false.", recoverable=True)
+            raise ToolExecutionException(
+                "Cypher contains write operations " "but writes_allowed is false.", recoverable=True
+            )
         if writes_allowed and cls._contains_write(query) and cls._contains_cartesian_match(query):
             raise ToolExecutionException(
                 "Cypher contains comma-separated MATCH/MERGE patterns that may create cartesian products. "
