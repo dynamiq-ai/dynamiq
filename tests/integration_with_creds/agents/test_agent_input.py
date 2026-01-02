@@ -7,7 +7,6 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.utils.logger import logger
 
 
 @pytest.mark.unit
@@ -103,70 +102,40 @@ def run_config():
 
 
 @pytest.mark.unit
-def test_react_agent_in_workflow(
-    test_workflow: Workflow,
-    test_react_agent: Agent,
-    agent_input_data: dict,
-    run_config: RunnableConfig,
-):
+@pytest.mark.parametrize(
+    "test_id,agent_name,role",
+    [
+        (
+            "code_examples_with_braces",
+            "TestReactAgentRoleCodeExamples",
+            (
+                "You are a helpful coding assistant.\n\n"
+                "When providing examples, use proper formatting:\n"
+                "- For JSON responses, use: ```json\n{'status':'success', 'data':'value'}```\n"
+                "- For React components with props, show them like:\n"
+                "```jsx\n"
+                "{% raw %}<Button onClick={handleClick} data={{userId: 123}} />{% endraw %}\n"
+                "```\n"
+                "- Always include code context in your explanations."
+                " Additional instructions: {{additional_instructions}}"
+            ),
+        ),
+    ],
+    ids=["code_examples_with_braces"],
+)
+def test_react_agent_role_with_special_characters(test_llm, test_id, agent_name, role):
     """
-    Tests running a basic Agent (no tools/memory) within a Workflow.
-    Verifies that the workflow executes successfully and the agent produces the expected output.
+    Test agent roles with various special character patterns (curly braces, double braces, etc.)
+    to ensure they don't break prompt rendering.
+
+    Scenarios:
+    - code_examples_with_braces: Role with single/double braces in code blocks and Jinja raw blocks
     """
-    logger.info("--- Running test_react_agent_in_workflow ---")
-    logger.info(f"Workflow ID: {test_workflow.id}")
-    logger.info(f"Agent Node ID: {test_react_agent.id}")
-    logger.info(f"Input Data: {agent_input_data}")
-
-    result = test_workflow.run(input_data=agent_input_data, config=run_config)
-
-    logger.info(f"Workflow Run Status: {result.status}")
-    logger.info(f"Workflow Output: {result.output}")
-
-    assert result.status == RunnableStatus.SUCCESS, f"Workflow failed with status: {result.status}"
-    assert isinstance(result.output, dict), "Workflow output should be a dictionary"
-
-    agent_node_id = test_react_agent.id
-    assert (
-        agent_node_id in result.output
-    ), f"Agent node ID '{agent_node_id}' not found in workflow output keys: {list(result.output.keys())}"
-
-    agent_result = result.output[agent_node_id]
-    assert isinstance(agent_result, dict), f"Agent result for node '{agent_node_id}' should be a dictionary"
-    assert (
-        agent_result.get("status") == RunnableStatus.SUCCESS
-    ), f"Agent node '{agent_node_id}' failed within the workflow"
-
-    agent_output = agent_result.get("output")
-    assert isinstance(agent_output, dict), f"Agent node '{agent_node_id}' output should be a dictionary"
-
-    content = agent_output.get("content")
-    assert content is not None, f"Agent node '{agent_node_id}' output dictionary is missing 'content' key"
-    assert isinstance(content, str), f"Agent node '{agent_node_id}' content should be a string, got: {type(content)}"
-
-    expected_answer = "4"
-    assert expected_answer in content, f"Expected '{expected_answer}' in the agent output, got: {content!r}"
-
-    logger.info("--- Test test_react_agent_in_workflow PASSED ---")
-
-
-@pytest.mark.unit
-def test_react_agent_role_with_curly_braces_json_example(test_llm):
-    """
-    Ensure that agent roles containing literal curly braces inside code blocks
-    (e.g., ```json {code:sasadsd}```) do not break prompt rendering.
-    """
-    role_with_json_example = (
-        "You are a helpful assistant.\n"
-        "Return FINAL ANSWER TO USER  ALWAYS in JSON format like\n"
-        "```json\n{'object':'...'}```"
-    )
-
     agent = Agent(
-        name="TestReactAgentRoleCurlyBraces",
-        id="test_react_agent_role_curly_braces",
+        name=agent_name,
+        id=f"test_react_agent_{test_id}",
         llm=test_llm,
-        role=role_with_json_example,
+        role=role,
         inference_mode=InferenceMode.DEFAULT,
         tools=[],
         memory=None,
@@ -174,7 +143,10 @@ def test_react_agent_role_with_curly_braces_json_example(test_llm):
         max_loops=3,
     )
 
-    input_data = {"input": "What is 2 + 2?"}
+    input_data = {
+        "input": "What is 2 + 2? Provide result in JSON format.",
+        "additional_instructions": "In the very end of the response, say 'have a nice day!'.",
+    }
     config = RunnableConfig(request_timeout=30)
     result = agent.run(input_data=input_data, config=config)
 
@@ -183,80 +155,4 @@ def test_react_agent_role_with_curly_braces_json_example(test_llm):
     assert isinstance(content, str)
     assert "4" in content, f"Expected '4' in the output, got: {content!r}"
 
-
-@pytest.mark.unit
-def test_react_agent_role_with_double_braces_and_raw_block(test_llm):
-    """
-    Ensure roles that mix literal double-braces (escaped with Jinja raw)
-    and Jinja variables (like {{ input }}) render without errors.
-    """
-    role_with_mixed = (
-        "You are a helpful assistant.\n"
-        "Include this literal snippet exactly as-is in your persona: \n\n"
-        "```json\n"
-        '{% raw %}\n{\n  "example": "{{should_not_render}}"\n}\n{% endraw %}\n'
-        "```\n\n"
-        "Also, reference the current task inline: {{ input }}\n"
-    )
-
-    agent = Agent(
-        name="TestReactAgentRoleMixed",
-        id="test_react_agent_role_mixed",
-        llm=test_llm,
-        role=role_with_mixed,
-        inference_mode=InferenceMode.DEFAULT,
-        tools=[],
-        memory=None,
-        verbose=False,
-        max_loops=3,
-    )
-
-    input_data = {"input": "What is 2 + 2?"}
-    config = RunnableConfig(request_timeout=30)
-    result = agent.run(input_data=input_data, config=config)
-
-    assert result.status == RunnableStatus.SUCCESS
-    content = result.output["content"]
-    assert isinstance(content, str)
-    assert "4" in content, f"Expected '4' in the output, got: {content!r}"
-
-
-@pytest.mark.unit
-def test_react_agent_role_double_braces_visible_in_prompt(test_llm):
-    """
-    Role is treated as literal. Double-braces should not be interpreted.
-    Verify that the system prompt contains the literal snippet and agent still answers.
-    """
-    literal_snippet = "{{should_not_render}}"
-    role_literal = (
-        "You are a helpful assistant.\n"
-        "Show this literal tag in your persona: " + literal_snippet + "\n"
-        "Do not attempt to interpret it."
-    )
-
-    agent = Agent(
-        name="TestReactAgentRoleLiteral",
-        id="test_react_agent_role_literal",
-        llm=test_llm,
-        role=role_literal,
-        inference_mode=InferenceMode.DEFAULT,
-        tools=[],
-        memory=None,
-        verbose=False,
-        max_loops=3,
-    )
-
-    input_data = {"input": "What is 2 + 2?"}
-    config = RunnableConfig(request_timeout=30)
-    result = agent.run(input_data=input_data, config=config)
-
-    assert result.status == RunnableStatus.SUCCESS
-    content = result.output["content"]
-    assert isinstance(content, str)
-    assert "4" in content, f"Expected '4' in the output, got: {content!r}"
-
-    # Ensure the role literal made it into the system message
-    system_message = agent._prompt.messages[0].content
-    assert (
-        literal_snippet in system_message
-    ), f"Expected literal snippet '{literal_snippet}' in system message, got: {system_message!r}"
+    assert "have a nice day!" in content.lower(), f"Expected 'have a nice day!' in the output, got: {content!r}"

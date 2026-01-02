@@ -30,6 +30,35 @@ from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
+final_answer_function_schema = {
+    "type": "function",
+    "strict": True,
+    "function": {
+        "name": "provide_final_answer",
+        "description": "Function should be called when if you can answer the initial request"
+        " or if there is not request at all.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "thought": {
+                    "type": "string",
+                    "description": "Your reasoning about why you can answer original question.",
+                },
+                "answer": {"type": "string", "description": "Answer on initial request."},
+            },
+            "required": ["thought", "answer"],
+        },
+    },
+}
+
+TYPE_MAPPING = {
+    int: "integer",
+    float: "float",
+    bool: "boolean",
+    str: "string",
+    dict: "object",
+}
+
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
 

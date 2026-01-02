@@ -483,6 +483,20 @@ class Agent(Node):
 
                 new_tool_description = self.tool_description
                 self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
+
+                # Update prompt blocks if agent was created with no tools
+                if self.system_prompt_manager._prompt_blocks.get("tools") == "":
+                    # Check if this is a ReAct Agent
+                    from dynamiq.nodes.agents.agent import Agent
+
+                    if isinstance(self, Agent):
+                        # For ReAct agents, re-run setup with has_tools=True
+                        self.system_prompt_manager.setup_for_react_agent(
+                            inference_mode=self.inference_mode,
+                            parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
+                            has_tools=True,
+                        )
+
             normalized_files = self._ensure_named_files(files)
             uploaded_file_names = {
                 getattr(f, "name", None)

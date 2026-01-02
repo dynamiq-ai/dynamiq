@@ -2,6 +2,7 @@ DELEGATION_INSTRUCTIONS = (
     "- Optional: If you want an agent tool's response returned verbatim as the final output, "
     'set "delegate_final": true in that tool\'s input. Use this only for a single agent tool call '
     "and do not provide your own final answer; the system will return the agent's result directly."
+    "Do not set delegate_final: true inside metadata of the input, it has to be a separate field."
 )
 
 DELEGATION_INSTRUCTIONS_XML = (
@@ -9,42 +10,6 @@ DELEGATION_INSTRUCTIONS_XML = (
     "tool's <input> or <action_input>. Use this only for a single agent tool call and do not provide an "
     "<answer> yourself; the system will return the agent's result directly."
 )
-
-DEFAULT_DIRECT_OUTPUT_CAPABILITIES = """
-ADVANCED FEATURES:
-- Tool outputs are automatically cached and can be referenced directly
-- You can return raw tool observation directly using:
-Thought: [Your reasoning about using direct tool output]
-Answer: <answer type="tool_output" action="tool_name" action_input="tool_input">
-- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
-- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
-- The tool must have been called in a previous step with the exact same action and action_input
-- action_input must match exactly what you used when calling the tool (including JSON key order)
-- This bypasses summarization and returns the complete tool output to the user
-- Use this format only when the raw tool output is exactly what the user needs
-- If the tool hasn't been executed yet, you must call it first in the current step
-"""
-
-XML_DIRECT_OUTPUT_CAPABILITIES = """
-ADVANCED FEATURES:
-- Tool outputs are automatically cached and can be referenced directly
-- You can return raw tool outputs directly using:
-<output>
-    <thought>
-        [Your reasoning about using direct tool output]
-    </thought>
-    <answer>
-        <answer type="tool_output" action="tool_name" action_input="tool_input">
-    </answer>
-</output>
-- For quoted JSON inputs, use: <answer type="tool_output" action="tool_name" action_input='{"key": "value"}'>
-- CRITICAL: You can ONLY use this feature AFTER a tool has been executed and its output saved
-- The tool must have been called in a previous step with the exact same action and action_input
-- action_input must match exactly what you used when calling the tool (including JSON key order)
-- This bypasses summarization and returns the complete tool output to the user
-- Use this format only when the raw tool output is exactly what the user needs
-- If the tool hasn't been executed yet, you must call it first in the current step
-"""
 
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
@@ -78,13 +43,15 @@ IMPORTANT RULES:
 - Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
-{{ delegation_instructions }}
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - Files are automatically collected and will be returned with your final answer
-- Mention created files in your final answer so users know what was generated"""  # noqa: E501
+- Mention created files in your final answer so users know what was generated
+
+{{ delegation_instructions }}
+"""  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
 
@@ -144,8 +111,6 @@ CRITICAL XML FORMAT RULES:
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 - Make sure to adhere to AGENT PERSONA & STYLE & ADDITIONAL BEHAVIORAL GUIDELINES.
 
-{{ delegation_instructions_xml }}
-
 JSON FORMATTING REQUIREMENTS:
 - Put JSON on single line within tags
 - Use double quotes for all strings
@@ -156,6 +121,8 @@ FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
 - Generated files are automatically collected and returned with your final answer
 - File operations are handled transparently - focus on the task, not file management
+
+{{ delegation_instructions_xml }}
 """  # noqa: E501
 
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
@@ -524,12 +491,12 @@ IMPORTANT RULES:
 - Ensure proper JSON syntax with quoted keys and values
 - To return an agent tool's response as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call finish yourself afterward; the system will return the agent's result directly.
 
-{{ delegation_instructions }}
-
 FILE HANDLING:
 - Tools may generate files that are automatically collected
 - Generated files will be included in the final response
 - Never return empty response.
+
+{{ delegation_instructions }}
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
@@ -551,11 +518,11 @@ FUNCTION CALLING GUIDELINES:
 - Chain multiple tool calls when necessary for complex tasks
 - If you want an agent tool's response returned verbatim as the final output, include "delegate_final": true inside that tool's action_input. Use this only for a single agent tool call and do not call provide_final_answer yourself; the system will return the agent's result directly.
 
-{{ delegation_instructions }}
-
 FILE HANDLING:
 - Tools may generate files that will be included in the final response
 - Files created by tools are automatically collected and returned
+
+{{ delegation_instructions }}
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """

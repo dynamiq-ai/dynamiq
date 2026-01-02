@@ -8,7 +8,6 @@ from typing import Any
 from jinja2 import Template
 
 from dynamiq.nodes.agents.prompts.react import (
-    DEFAULT_DIRECT_OUTPUT_CAPABILITIES,
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
     HISTORY_SUMMARIZATION_PROMPT,
@@ -24,7 +23,6 @@ from dynamiq.nodes.agents.prompts.react import (
     REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS,
     REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
     REACT_MAX_LOOPS_PROMPT,
-    XML_DIRECT_OUTPUT_CAPABILITIES,
 )
 from dynamiq.nodes.agents.prompts.registry import get_prompt_constant
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
@@ -122,8 +120,8 @@ class AgentPromptManager:
         """
         Resets prompt manager to its initial state.
 
-        This should be called between runs to prevent variable and block accumulation.
-        Both prompt blocks and variables are reset to their initial state.
+        This should be called between runs to prevent variable accumulation.
+        Prompt variables are reset to their initial state.
         The date is refreshed on each reset to ensure it's always current.
         """
         self._prompt_variables = self._initial_variables.copy()
@@ -208,7 +206,6 @@ class AgentPromptManager:
         self,
         inference_mode: InferenceMode,
         parallel_tool_calls_enabled: bool,
-        direct_tool_output_enabled: bool,
         has_tools: bool,
     ) -> None:
         """
@@ -221,7 +218,6 @@ class AgentPromptManager:
             model_name=self.model_name,
             inference_mode=inference_mode,
             parallel_tool_calls_enabled=parallel_tool_calls_enabled,
-            direct_tool_output_enabled=direct_tool_output_enabled,
             has_tools=has_tools,
         )
 
@@ -267,7 +263,6 @@ def get_model_specific_prompts(
     model_name: str,
     inference_mode: InferenceMode,
     parallel_tool_calls_enabled: bool,
-    direct_tool_output_enabled: bool,
     has_tools: bool,
 ) -> tuple[dict[str, str], str]:
     """
@@ -277,7 +272,6 @@ def get_model_specific_prompts(
         model_name: The LLM model name
         inference_mode: The inference mode being used
         parallel_tool_calls_enabled: Whether parallel tool calls are enabled
-        direct_tool_output_enabled: Whether direct tool output is enabled
         has_tools: Whether the agent has tools
 
     Returns:
@@ -311,21 +305,6 @@ def get_model_specific_prompts(
             logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_SINGLE for '{model_name}'")
         if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_SINGLE:
             logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
-
-    # Add direct tool output capabilities if enabled
-    if direct_tool_output_enabled:
-        direct_output_default = get_prompt_constant(
-            model_name, "DEFAULT_DIRECT_OUTPUT_CAPABILITIES", DEFAULT_DIRECT_OUTPUT_CAPABILITIES
-        )
-        direct_output_xml = get_prompt_constant(
-            model_name, "XML_DIRECT_OUTPUT_CAPABILITIES", XML_DIRECT_OUTPUT_CAPABILITIES
-        )
-        if direct_output_default != DEFAULT_DIRECT_OUTPUT_CAPABILITIES:
-            logger.debug(f"Using model-specific DEFAULT_DIRECT_OUTPUT_CAPABILITIES for '{model_name}'")
-        if direct_output_xml != XML_DIRECT_OUTPUT_CAPABILITIES:
-            logger.debug(f"Using model-specific XML_DIRECT_OUTPUT_CAPABILITIES for '{model_name}'")
-        instructions_default += "\n" + direct_output_default
-        instructions_xml += "\n" + direct_output_xml
 
     # Get other model-specific prompts
     react_block_tools = get_prompt_constant(model_name, "REACT_BLOCK_TOOLS", REACT_BLOCK_TOOLS)
