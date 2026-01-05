@@ -72,7 +72,7 @@ class WorkflowYAMLLoader:
         """
         Check if the type value represents a node type (dotted path like 'module.ClassName').
 
-        Node types use dotted path format (e.g., 'dynamiq.nodes.agents.ReActAgent'),
+        Node types use dotted path format (e.g., 'dynamiq.nodes.agents.Agent'),
         while other types (e.g., JSON schema types like 'string', 'object') don't contain dots.
 
         Args:
