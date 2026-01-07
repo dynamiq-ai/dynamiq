@@ -10,7 +10,7 @@ from dynamiq.nodes import Node
 from dynamiq.nodes.managers import NodeManager
 from dynamiq.nodes.node import ConnectionNode, NodeDependency
 from dynamiq.prompts import Prompt
-from dynamiq.serializers.types import ObjectType, RequirementData, WorkflowYamlData
+from dynamiq.serializers.types import RequirementData, WorkflowYamlData
 from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
@@ -27,16 +27,16 @@ class WorkflowYAMLLoader:
     @classmethod
     def get_requirements(cls, data: dict) -> list[RequirementData]:
         """
-        Recursively scan YAML data and extract all dicts with object='requirement'.
+        Recursively scan YAML data and extract all requirement dicts.
 
-        This method does NOT initialize any components. It only identifies
-        dicts that need external resolution via requirement_id.
+        A requirement dict is identified by having both $type and $id fields.
+        This method does NOT initialize any components.
 
         Args:
             data: Dictionary containing workflow YAML data.
 
         Returns:
-            List of RequirementData for all dicts with object='requirement'.
+            List of RequirementData for all requirement dicts.
         """
         requirements: list[RequirementData] = []
         cls._get_requirements_from_dict(data, requirements)
@@ -44,7 +44,7 @@ class WorkflowYAMLLoader:
 
     @classmethod
     def _get_requirements_from_dict(cls, data: dict, requirements: list[RequirementData]) -> None:
-        """Recursively extract requirements from a dictionary."""
+        """Recursively extract RequirementData from dicts with both $type and $id."""
         if requirement := RequirementData.from_dict(data):
             requirements.append(requirement)
 
@@ -60,7 +60,7 @@ class WorkflowYAMLLoader:
 
     @classmethod
     def _get_requirements_from_list(cls, items: list, requirements: list[RequirementData]) -> None:
-        """Recursively extract requirements from a list."""
+        """Recursively extract RequirementData from a list."""
         for item in items:
             if isinstance(item, dict):
                 cls._get_requirements_from_dict(item, requirements)
@@ -87,70 +87,72 @@ class WorkflowYAMLLoader:
     def apply_resolved_requirements(
         cls,
         data: dict,
-        resolved_requirements: dict[str, dict],
-        overwrite: bool = False,
+        resolved_requirements: dict[str, Any],
     ) -> None:
         """
         Apply resolved requirement data to YAML dict in-place before initialization.
 
-        Mutates the raw YAML data by merging resolved data into all dicts
-        that have a matching requirement_id.
+        Replaces requirement dicts (identified by both $type and $id) with the corresponding
+        resolved data. The resolved value can be any type (dict, list, string, etc.).
 
         Args:
             data: Raw YAML data dictionary (will be mutated).
-            resolved_requirements: Dict mapping requirement_id to resolved data.
-            overwrite: If True, resolved values overwrite existing values.
-                       If False (default), only missing fields are filled.
+            resolved_requirements: Dict mapping $id to resolved data (any type).
 
         Raises:
-            WorkflowYAMLLoaderException: If a requirement_id cannot be resolved.
+            WorkflowYAMLLoaderException: If a $id cannot be resolved.
         """
-        cls._apply_requirements_to_dict(data, resolved_requirements, overwrite=overwrite)
+        cls._apply_requirements_to_dict(data, resolved_requirements)
 
     @classmethod
     def _apply_requirements_to_dict(
         cls,
         data: dict,
-        resolved_requirements: dict[str, dict],
-        overwrite: bool = False,
+        resolved_requirements: dict[str, Any],
     ) -> None:
-        """Recursively apply requirements to a dictionary and its nested structures."""
-        if data.get("object") == ObjectType.REQUIREMENT.value:
-            requirement_id = data.get("requirement_id")
-            if requirement_id:
-                if requirement_id not in resolved_requirements:
-                    raise WorkflowYAMLLoaderException(
-                        f"Cannot resolve requirement_id '{requirement_id}': not found in resolved_requirements. "
-                        f"Use get_requirements() to get requirements and resolve them before parsing."
-                    )
-                resolved = resolved_requirements[requirement_id]
-                for key, value in resolved.items():
-                    if overwrite or key not in data:
-                        data[key] = value
+        """Recursively apply requirements to a dictionary and its nested structures.
 
-        for key, value in data.items():
+        When a requirement dict is found (has both $type and $id), it is completely
+        replaced with the resolved data at the parent level.
+        """
+        for key, value in list(data.items()):
             # Skip fields that use 'type'/'object' keywords for different purposes (JSON Schema, prompts)
             if key in ("prompt", "schema", "response_format"):
                 continue
 
             if isinstance(value, dict):
-                cls._apply_requirements_to_dict(value, resolved_requirements, overwrite=overwrite)
+                if requirement := RequirementData.from_dict(value):
+                    if requirement.id not in resolved_requirements:
+                        raise WorkflowYAMLLoaderException(
+                            f"Cannot resolve $id '{requirement.id}': not found in resolved_requirements. "
+                            f"Use get_requirements() to get requirements and resolve them before parsing."
+                        )
+                    data[key] = resolved_requirements[requirement.id]
+                else:
+                    cls._apply_requirements_to_dict(value, resolved_requirements)
             elif isinstance(value, list):
-                cls._apply_requirements_to_list(value, resolved_requirements, overwrite=overwrite)
+                cls._apply_requirements_to_list(value, resolved_requirements)
 
     @classmethod
     def _apply_requirements_to_list(
         cls,
         items: list,
-        resolved_requirements: dict[str, dict],
-        overwrite: bool = False,
+        resolved_requirements: dict[str, Any],
     ) -> None:
         """Recursively apply requirements within a list."""
-        for item in items:
+        for i, item in enumerate(items):
             if isinstance(item, dict):
-                cls._apply_requirements_to_dict(item, resolved_requirements, overwrite=overwrite)
+                if requirement := RequirementData.from_dict(item):
+                    if requirement.id not in resolved_requirements:
+                        raise WorkflowYAMLLoaderException(
+                            f"Cannot resolve $id '{requirement.id}': not found in resolved_requirements. "
+                            f"Use get_requirements() to get requirements and resolve them before parsing."
+                        )
+                    items[i] = resolved_requirements[requirement.id]
+                else:
+                    cls._apply_requirements_to_dict(item, resolved_requirements)
             elif isinstance(item, list):
-                cls._apply_requirements_to_list(item, resolved_requirements, overwrite=overwrite)
+                cls._apply_requirements_to_list(item, resolved_requirements)
 
     @classmethod
     def get_entity_by_type(cls, entity_type: str, entity_registry: dict[str, Any] | None = None) -> Any:
@@ -257,9 +259,9 @@ class WorkflowYAMLLoader:
         conn_init_data = conn_data.copy()
         conn_init_data.pop("type", None)
 
-        # Use requirement_id as connection id if id is not provided, otherwise generate UUID
+        # Generate UUID for connection id if not provided
         if "id" not in conn_init_data:
-            conn_init_data["id"] = conn_init_data.get("requirement_id") or generate_uuid()
+            conn_init_data["id"] = generate_uuid()
 
         try:
             connection = conn_cls(**conn_init_data)
@@ -1111,7 +1113,7 @@ class WorkflowYAMLLoader:
             requirements = WorkflowYAMLLoader.get_requirements(data)
 
             # Step 2: Resolve requirements via external API
-            resolved = {req.requirement_id: api_fetch(req.requirement_id) for req in requirements}
+            resolved = {req.id: api_fetch(req.id) for req in requirements}
 
             # Step 3: Apply resolved requirements to YAML data (mutates in-place)
             WorkflowYAMLLoader.apply_resolved_requirements(data, resolved)
