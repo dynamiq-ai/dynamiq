@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .report-container {
+            background-color: white;
+            padding: 40px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+
+        .header {
+            border-bottom: 3px solid #2c3e50;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        .title {
+            font-size: 2.5em;
+            color: #2c3e50;
+            margin: 0;
+        }
+
+        .subtitle {
+            font-size: 1.2em;
+            color: #7f8c8d;
+            margin: 10px 0;
+        }
+
+        .metadata {
+            font-size: 0.9em;
+            color: #95a5a6;
+            margin-top: 10px;
+        }
+
+        .section {
+            margin: 30px 0;
+        }
+
+        .section-title {
+            font-size: 1.8em;
+            color: #34495e;
+            border-left: 4px solid #3498db;
+            padding-left: 15px;
+            margin: 20px 0 10px 0;
+        }
+
+        .section-content {
+            font-size: 1em;
+            line-height: 1.8;
+            margin: 15px 0;
+            text-align: justify;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        .data-table th {
+            background-color: #34495e;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: bold;
+        }
+
+        .data-table td {
+            padding: 10px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .data-table tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .data-table tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+
+        .footer {
+            border-top: 2px solid #ecf0f1;
+            margin-top: 40px;
+            padding-top: 20px;
+            text-align: center;
+            font-size: 0.9em;
+            color: #95a5a6;
+        }
+
+        .highlight {
+            background-color: #fff3cd;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+
+        .key-metric {
+            display: inline-block;
+            background-color: #e8f4f8;
+            padding: 10px 15px;
+            margin: 5px;
+            border-radius: 5px;
+            border-left: 3px solid #3498db;
+        }
+
+        .key-metric-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .key-metric-label {
+            font-size: 0.9em;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+    <div class="report-container">
+        <div class="header">
+            <h1 class="title">{{ title }}</h1>
+            <p class="subtitle">{{ subtitle }}</p>
+            <div class="metadata">
+                <strong>Author:</strong> {{ author }} |
+                <strong>Date:</strong> {{ date }}
+            </div>
+        </div>
+
+        {% if key_metrics %}
+        <div class="section">
+            <h2 class="section-title">Key Metrics</h2>
+            <div style="text-align: center;">
+                {% for metric in key_metrics %}
+                <div class="key-metric">
+                    <div class="key-metric-value">{{ metric.value }}</div>
+                    <div class="key-metric-label">{{ metric.label }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% for section in sections %}
+        <div class="section">
+            <h2 class="section-title">{{ section.title }}</h2>
+            <div class="section-content">
+                {{ section.content }}
+            </div>
+        </div>
+        {% endfor %}
+
+        {% if data_table %}
+        <div class="section">
+            <h2 class="section-title">Data Summary</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        {% for header in data_table.headers %}
+                        <th>{{ header }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in data_table.rows %}
+                    <tr>
+                        {% for cell in row %}
+                        <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <div class="footer">
+            <p>Generated by Dynamiq Document Creator | {{ generation_time }}</p>
+        </div>
+    </div>
+</body>
+</html>

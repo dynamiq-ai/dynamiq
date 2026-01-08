@@ -174,6 +174,18 @@ You are AI powered assistant.
 {{instructions}}
 {%- endif %}
 
+{%- if skills %}
+# AVAILABLE SKILLS
+You have access to specialized skills that can be loaded on-demand:
+{{skills}}
+
+To use a skill:
+1. List available skills: Use SkillsTool with action="list"
+2. Load a skill: Use SkillsTool with action="load" and skill_name="skill_name"
+3. Follow the loaded skill's instructions
+4. Unload when done: Use SkillsTool with action="unload" and skill_name="skill_name"
+{%- endif %}
+
 {%- if tools %}
 # AVAILABLE TOOLS
 {{tools}}
@@ -386,6 +398,10 @@ class Agent(Node):
         default=512,
         description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
     )
+    skills_enabled: bool = Field(
+        default=False,
+        description="Enable skills support. Skills are stored in FileStore under .skills/ prefix.",
+    )
 
     input_message: Message | VisionMessage | None = None
     role: str | None = Field(
@@ -475,6 +491,10 @@ class Agent(Node):
             self.tools.append(FileSearchTool(file_store=self.file_store_backend))
             self.tools.append(FileListTool(file_store=self.file_store_backend))
 
+        # Initialize skills support if enabled
+        if self.skills_enabled and self.file_store_backend:
+            self._init_skills()
+
         self._init_prompt_blocks()
 
     @model_validator(mode="after")
@@ -559,6 +579,46 @@ class Agent(Node):
             "delegation_instructions": "",
             "delegation_instructions_xml": "",
         }
+
+    def _init_skills(self):
+        """Initialize skills support using FileStore."""
+        from dynamiq.nodes.tools.skills_tool import SkillsTool
+        from dynamiq.skills.loader import SkillLoader
+
+        # Add SkillsTool to tools
+        skills_tool = SkillsTool(file_store=self.file_store_backend)
+        self.tools.append(skills_tool)
+
+        # Discover available skills
+        loader = SkillLoader(self.file_store_backend)
+        available_skills = loader.discover_skills()
+
+        # Update prompt with skills info
+        skills_summary = self._format_skills_summary(available_skills)
+        self._prompt_blocks["skills"] = skills_summary
+
+        logger.info(
+            f"Agent {self.name} - {self.id}: initialized with {len(available_skills)} skills"
+        )
+
+    def _format_skills_summary(self, skills) -> str:
+        """Format skills summary for prompt.
+
+        Args:
+            skills: List of SkillReference objects
+
+        Returns:
+            Formatted string with skill information
+        """
+        if not skills:
+            return ""
+
+        lines = []
+        for skill in skills:
+            tags_str = f" [{', '.join(skill.tags)}]" if skill.tags else ""
+            lines.append(f"- **{skill.name}**{tags_str}: {skill.description}")
+
+        return "\n".join(lines)
 
     def set_block(self, block_name: str, content: str):
         """Adds or updates a prompt block."""

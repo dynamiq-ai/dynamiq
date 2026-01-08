@@ -1824,7 +1824,7 @@ class Agent(BaseAgent):
                 elif param_type := TYPE_MAPPING.get(param):
                     types.append(param_type)
 
-                elif issubclass(param, Enum):
+                elif isinstance(param, type) and issubclass(param, Enum):
                     element_type = TYPE_MAPPING.get(
                         self.filter_format_type(type(list(param.__members__.values())[0].value))[0]
                     )
