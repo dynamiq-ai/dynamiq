@@ -2,7 +2,6 @@ import io
 import os
 from datetime import datetime
 from pathlib import Path
-from pathlib import Path
 
 import pandas as pd
 import numpy as np
@@ -61,6 +60,7 @@ def read_skill_file(skill_name: str) -> bytes:
     if not skill_path.exists():
         raise FileNotFoundError(f"Skill file not found: {skill_path}")
     return skill_path.read_bytes()
+
 
 def upload_skills_to_filestore(file_store: InMemoryFileStore) -> None:
     """Upload skills to FileStore."""

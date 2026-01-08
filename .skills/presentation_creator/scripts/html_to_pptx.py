@@ -4,13 +4,12 @@ HTML to PPTX Converter
 Converts HTML slides to PowerPoint presentations with formatting preservation.
 """
 
-from pptx import Presentation
-from pptx.util import Inches, Pt
-from pptx.enum.text import PP_ALIGN
-from pptx.dml.color import RGBColor
-from bs4 import BeautifulSoup
 import re
-from pathlib import Path
+
+from bs4 import BeautifulSoup
+from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.util import Inches, Pt
 
 
 class HTMLToPPTXConverter:
@@ -36,7 +35,7 @@ class HTMLToPPTXConverter:
             Path to created PPTX file
         """
         # Read HTML
-        with open(html_path, 'r', encoding='utf-8') as f:
+        with open(html_path, encoding="utf-8") as f:
             html_content = f.read()
 
         # Parse HTML
@@ -233,9 +232,10 @@ def generate_thumbnails(pptx_path, output_dir):
     Returns:
         List of thumbnail paths
     """
-    from pptx import Presentation
-    from PIL import Image, ImageDraw
     import os
+
+    from PIL import Image, ImageDraw
+    from pptx import Presentation
 
     os.makedirs(output_dir, exist_ok=True)
     prs = Presentation(pptx_path)

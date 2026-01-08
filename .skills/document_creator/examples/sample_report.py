@@ -142,20 +142,28 @@ if __name__ == "__main__":
         "sections": [
             {
                 "title": "Executive Summary",
-                "content": "Q4 2024 showed strong growth with revenue increasing by 25% year-over-year. Key highlights include expansion into new markets and successful product launches."
+                "content": "Q4 2024 showed strong growth with revenue "
+                "increasing by 25% year-over-year. "
+                "Key highlights include expansion "
+                "into new markets and successful product launches.",
             },
             {
                 "title": "Key Metrics",
-                "content": "Total revenue: $5.2M | New customers: 342 | Customer retention: 94% | Average deal size: $15,200"
+                "content": "Total revenue: $5.2M | New customers: 342 "
+                "| Customer retention: 94% | Average deal size: $15,200",
             },
             {
                 "title": "Regional Performance",
-                "content": "North America led with $2.8M in revenue, followed by Europe at $1.6M and Asia-Pacific at $0.8M. All regions showed positive growth trends."
+                "content": "North America led with $2.8M in revenue, followed by "
+                "Europe at $1.6M and Asia-Pacific at $0.8M. "
+                "All regions showed positive growth trends.",
             },
             {
                 "title": "Recommendations",
-                "content": "Continue investment in top-performing regions, increase marketing spend in emerging markets, and focus on customer retention programs."
-            }
+                "content": "Continue investment in top-performing regions, "
+                "increase marketing spend in emerging markets, "
+                "and focus on customer retention programs.",
+            },
         ],
         "data_table": [
             ["Region", "Revenue", "Growth", "Customers"],
