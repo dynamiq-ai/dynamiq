@@ -67,7 +67,7 @@ def create_enhanced_context_agent() -> Agent:
         role=AGENT_ROLE,
         inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
-        direct_tool_output_enabled=True,
+        delegation_allowed=True,
         summarization_config=context_config,
         max_loops=15,
         verbose=True,

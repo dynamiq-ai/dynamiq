@@ -75,8 +75,7 @@ class AdaptiveOrchestrator(Orchestrator):
         return data
 
     def reset_run_state(self):
-        self._chat_history = []
-        self._run_depends = []
+        super().reset_run_state()
 
     def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
         """
