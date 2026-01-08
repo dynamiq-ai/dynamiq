@@ -47,6 +47,8 @@ class WorkflowYAMLLoader:
         """Recursively extract RequirementData from dicts with both $type and $id."""
         if requirement := RequirementData.from_dict(data):
             requirements.append(requirement)
+            # Don't recurse into requirement dicts - they will be replaced entirely
+            return
 
         for key, value in data.items():
             # Skip fields that use 'type'/'object' keywords for different purposes (JSON Schema, prompts)
