@@ -315,10 +315,9 @@ class Agent(Node):
             self.tools.append(FileSearchTool(file_store=self.file_store_backend))
             self.tools.append(FileListTool(file_store=self.file_store_backend))
 
+        self._init_prompt_blocks()
         if self.skills_enabled and self.file_store_backend:
             self._init_skills()
-
-        self._init_prompt_blocks()
 
     @model_validator(mode="after")
     def validate_input_fields(self):
@@ -412,7 +411,7 @@ class Agent(Node):
 
         # Update prompt with skills info
         skills_summary = self._format_skills_summary(available_skills)
-        self._prompt_blocks["skills"] = skills_summary
+        self.system_prompt_manager.set_block("skills", skills_summary)
 
         logger.info(
             f"Agent {self.name} - {self.id}: initialized with {len(available_skills)} skills"
