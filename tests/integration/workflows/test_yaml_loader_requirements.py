@@ -150,7 +150,7 @@ def test_get_requirements_requires_both_type_and_id():
 
 def test_requirement_data_model():
     """Verify RequirementData model works correctly."""
-    req = RequirementData(type="connection", id=REQ_1)
+    req = RequirementData.model_validate({"$type": "connection", "$id": REQ_1})
 
     assert req.type == "connection"
     assert req.id == REQ_1

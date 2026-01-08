@@ -16,11 +16,9 @@ class RequirementData(BaseModel):
     type: str = Field(..., alias="$type", description="The $type field value")
     id: str = Field(..., alias="$id", description="The $id field - unique identifier for external resolution")
 
-    model_config = ConfigDict(populate_by_name=True)
-
     @classmethod
     def from_dict(cls, data: dict) -> "RequirementData | None":
-        """Create RequirementData from dict."""
+        """Create RequirementData from dict if it has $type and $id keys."""
         try:
             return cls.model_validate(data)
         except ValidationError:
