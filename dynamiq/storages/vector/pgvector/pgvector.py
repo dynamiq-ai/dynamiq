@@ -16,6 +16,7 @@ from dynamiq.nodes.dry_run import DryRunMixin
 from dynamiq.storages.vector.base import BaseVectorStore, BaseVectorStoreParams, BaseWriterVectorStoreParams
 from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
+from dynamiq.storages.vector.utils import create_pgvector_file_id_filter, create_pgvector_file_ids_filter
 from dynamiq.types import Document
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
@@ -606,6 +607,40 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                     conn.commit()
         else:
             logger.warning("No filters provided. No documents will be deleted.")
+
+    def delete_documents_by_file_id(self, file_id: str) -> None:
+        """
+        Delete documents from the vector store based on the provided file ID.
+        File ID should be located in the metadata of the document.
+
+        Args:
+            file_id (str): The file ID to filter by.
+        """
+        filters = create_pgvector_file_id_filter(file_id)
+        self.delete_documents_by_filters(filters)
+
+    def delete_documents_by_file_ids(self, file_ids: list[str], batch_size: int = 500) -> None:
+        """
+        Delete documents from the vector store based on the provided list of file IDs.
+        File IDs should be located in the metadata of the documents.
+
+        Args:
+            file_ids (list[str]): The list of file IDs to filter by.
+            batch_size (int): Maximum number of file IDs to process in a single batch. Defaults to 500.
+        """
+        if not file_ids:
+            logger.warning("No file IDs provided. No documents will be deleted.")
+            return
+
+        if len(file_ids) > batch_size:
+            for i in range(0, len(file_ids), batch_size):
+                batch = file_ids[i : i + batch_size]
+                filters = create_pgvector_file_ids_filter(batch)
+                self.delete_documents_by_filters(filters)
+                logger.debug(f"Deleted documents batch {i//batch_size + 1} with {len(batch)} file IDs")
+        else:
+            filters = create_pgvector_file_ids_filter(file_ids)
+            self.delete_documents_by_filters(filters)
 
     def delete_documents(self, document_ids: list[str] | None = None, delete_all: bool = False) -> None:
         """
