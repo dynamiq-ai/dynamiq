@@ -411,10 +411,8 @@ class Agent(Node):
         custom_metadata = input_data.metadata.copy()
 
         # Add extra fields that were provided (model allows extra fields with ConfigDict extra="allow")
-        # Exclude all standard schema fields - we only want the extra fields
-        standard_fields = set(AgentInputSchema.model_fields.keys())
-        extra_fields = input_data.model_dump(exclude=standard_fields)
-        custom_metadata.update(extra_fields)
+        if input_data.model_extra:
+            custom_metadata.update(input_data.model_extra)
 
         # Clean up any leaked fields
         if "files" in custom_metadata:
