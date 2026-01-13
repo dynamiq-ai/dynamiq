@@ -78,6 +78,7 @@ nodes:
     cloud: ${oc.env:PINECONE_CLOUD}
     region: ${oc.env:PINECONE_REGION}
     pods: 1
+    create_if_not_exist: true
     depends:
       - node: document-embedder-node-1
     input_transformer:
