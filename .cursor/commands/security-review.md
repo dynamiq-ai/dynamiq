@@ -1,137 +1,35 @@
-# Security Review
+Perform a security audit of the current code, focusing on vulnerabilities specific to the Dynamiq AI orchestration framework.
 
-Analyze the code for security vulnerabilities specific to the Dynamiq AI orchestration framework.
+Check for these issues in order of severity:
 
-## What to Analyze
+**CRITICAL:**
 
-Review the code against these security areas:
+1. **Hardcoded Secrets**: Search for API keys, passwords, or tokens as string literals. They should use `Field(default_factory=partial(get_env_var, "VAR_NAME"))` instead.
 
-### 1. Credential Management (CRITICAL)
+2. **Dangerous Code Execution**: Find any `eval()`, `exec()`, or `compile()` usage outside of `dynamiq/nodes/tools/python.py`. All dynamic code must go through the RestrictedPython sandbox.
 
-- Hardcoded API keys, tokens, or passwords in source code
-- Credentials logged via `logger.info/debug/error` statements
-- Secrets included in `to_dict()` without `include_secure_params=False`
-- Connection objects serialized without credential masking
+3. **Credential Exposure**: Check `to_dict()` implementations - they must support `include_secure_params=False` and never log credentials.
 
-**Secure pattern:**
-```python
-api_key: str = Field(default_factory=partial(get_env_var, "API_KEY"))
-```
+**HIGH:**
 
-### 2. Dynamic Code Execution (CRITICAL)
+4. **Injection Vulnerabilities**: Look for string interpolation in Cypher/SQL queries. Find user input directly embedded in LLM prompts without sanitization.
 
-- Usage of `eval()`, `exec()`, `compile()` outside `dynamiq/nodes/tools/python.py`
-- Import statements bypassing `ALLOWED_MODULES` whitelist
-- Attribute access bypassing `DynamiqRestrictingNodeTransformer`
-- `__builtins__` modification attempts
+5. **Missing Input Validation**: Identify nodes without `input_schema` Pydantic models, especially those accepting user input.
 
-**Sandbox boundaries:**
-- All code execution must go through `compile_restricted()`
-- Blocked modules: os, subprocess, sys, socket, pickle, marshal
+6. **Unsafe Deserialization**: Check for `pickle.loads()` or `jsonpickle.decode()` on untrusted data. Review YAML loading for unsafe type resolution.
 
-### 3. Input Validation (HIGH)
+7. **Authentication Issues**: Find `verify_certs=False`, missing TLS configuration, or credentials in connection strings.
 
-- Nodes without `input_schema` Pydantic model
-- String interpolation in Cypher/SQL queries without parameterization
-- User input directly embedded in LLM prompts
-- File paths from user input without sanitization
-- JSONPath expressions from untrusted sources
+**MEDIUM:**
 
-**Injection vectors to check:**
-- `dynamiq/nodes/tools/cypher_executor.py` - Cypher injection
-- Agent system prompts - Prompt injection
-- `WorkflowYAMLLoader` - YAML injection
+8. **Path Traversal**: Check file operations for `../` handling and path validation against allowed directories.
 
-### 4. Serialization Security (HIGH)
+9. **Missing Tenant Isolation**: Review vector store and memory backends for multi-tenant data separation.
 
-- `pickle.loads()` or `jsonpickle.decode()` on untrusted data
-- YAML deserialization without safe_load equivalent
-- Node type resolution from untrusted YAML type strings
-- `NodeManager` registry allowing arbitrary class instantiation
+10. **Dependency Vulnerabilities**: Note any `# nosec` annotations and check critical dependencies like RestrictedPython, litellm, jsonpickle.
 
-### 5. Authentication (HIGH)
-
-- Missing authentication on HTTP endpoints
-- Bearer tokens in query parameters instead of headers
-- Missing TLS/SSL verification (`verify_certs=False`)
-- Connection strings with embedded credentials
-
-**Connection security checks:**
-- Elasticsearch: `verify_certs` and `ca_path`
-- PostgreSQL: Password in connection string
-- AWS: IAM role vs hardcoded access keys
-- Neo4j: Password in URI vs auth tuple
-
-### 6. LLM Security (HIGH)
-
-- System prompts containing sensitive internal information
-- User input concatenated into prompts without sanitization
-- Tool descriptions exposing internal API details
-- Model outputs executed without validation
-
-### 7. File System (MEDIUM)
-
-- Path traversal: `../` in file paths from user input
-- Unrestricted file uploads without type validation
-- Temporary files with sensitive data not cleaned up
-- `is_files_allowed=True` without proper access controls
-
-### 8. Vector Store Security (MEDIUM)
-
-- PII/sensitive data stored without encryption
-- Missing tenant isolation in multi-tenant stores
-- Document metadata containing sensitive information
-- Memory backends storing history indefinitely
-
-### 9. Network Security (MEDIUM)
-
-- HTTP connections instead of HTTPS
-- Missing timeout configuration
-- SSRF vulnerabilities in URL-accepting parameters
-
-### 10. Dependencies (MEDIUM)
-
-- Outdated dependencies with known CVEs
-- Unpinned dependency versions
-- Review `# nosec` annotations in code
-
-**Critical dependencies to audit:**
-- `RestrictedPython` - Sandbox security
-- `litellm` - LLM API security
-- `jsonpickle` - Serialization security
-
-## Severity Classification
-
-| Severity | Description |
-|----------|-------------|
-| CRITICAL | Immediate exploitation risk (code execution, credential exposure) |
-| HIGH | Significant impact (injection, auth bypass) |
-| MEDIUM | Potential impact (path traversal, missing validation) |
-
-## Output Format
-
-Provide findings as:
-
-```markdown
-## Security Analysis Report
-
-### Critical Vulnerabilities
-- [ ] CRITICAL: Description with file:line reference
-
-### High-Risk Findings
-- [ ] HIGH: Description with file:line reference
-
-### Medium-Risk Issues
-- [ ] MEDIUM: Description with file:line reference
-
-### Recommendations
-1. Actionable security improvement
-```
-
-## Key Files to Check
-
-- `dynamiq/nodes/tools/python.py` - RestrictedPython sandbox
-- `dynamiq/nodes/tools/cypher_executor.py` - Query injection
-- `dynamiq/connections/connections.py` - Credential handling
-- `dynamiq/serializers/loaders/yaml.py` - Deserialization
-- `dynamiq/nodes/agents/agent.py` - Prompt injection
+For each finding, report:
+- Severity level (CRITICAL/HIGH/MEDIUM)
+- File path and line number
+- Description of the vulnerability
+- Recommended fix
