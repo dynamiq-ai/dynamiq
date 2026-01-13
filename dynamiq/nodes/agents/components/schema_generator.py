@@ -71,18 +71,29 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
     return "\n".join(input_formats)
 
 
-def generate_structured_output_schemas(tools: list[Node], sanitize_tool_name: Callable[[str], str]) -> dict:
+def generate_structured_output_schemas(
+    tools: list[Node], sanitize_tool_name: Callable[[str], str], delegation_allowed: bool
+) -> dict:
     """
     Generate schema for structured output mode.
 
     Args:
         tools: List of tools to generate schema for
         sanitize_tool_name: Function to sanitize tool names
+        delegation_allowed: Whether delegation is allowed
 
     Returns:
         Dictionary containing the structured output schema
     """
     tool_names = [sanitize_tool_name(tool.name) for tool in tools]
+
+    action_input_description = "Input for chosen action."
+
+    if delegation_allowed and any(isinstance(tool, BaseAgent) for tool in tools):
+        action_input_description += (
+            ' For agent tools, include {"input": "<subtask>", "delegate_final": true} '
+            "to return that agent's response directly as the final answer."
+        )
 
     schema = {
         "type": "json_schema",
@@ -103,7 +114,7 @@ def generate_structured_output_schemas(tools: list[Node], sanitize_tool_name: Ca
                     },
                     "action_input": {
                         "type": "string",
-                        "description": "Input for chosen action.",
+                        "description": action_input_description,
                     },
                 },
                 "additionalProperties": False,

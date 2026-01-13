@@ -26,6 +26,7 @@ def test_indexing_flow(rag_examples_folder, rag_data_path, rag_yaml_file_name):
             data_folder_path=rag_data_path,
             cm=cm,
             extensions=[".html"],
+            init_components=False,  # Lazy init to avoid initializing retriever before index exists
         )
     assert result.status == RunnableStatus.SUCCESS
     assert dumped_tracing

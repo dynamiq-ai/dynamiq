@@ -1,0 +1,89 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+  neo4j-conn:
+    type: dynamiq.connections.Neo4j
+    uri: ${oc.env:NEO4J_URI}
+    username: ${oc.env:NEO4J_USERNAME}
+    password: ${oc.env:NEO4J_PASSWORD}
+    database: ${oc.env:NEO4J_DATABASE}
+
+nodes:
+  neo4j-reader-agent:
+    type: dynamiq.nodes.agents.Agent
+    name: Neo4j Reader Agent
+    description: Converts questions to Cypher and runs them against Neo4j.
+    llm:
+      id: reader-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o-mini
+      temperature: 0
+      max_tokens: 2048
+    tools:
+      - id: cypher-executor
+        type: dynamiq.nodes.tools.cypher_executor.CypherExecutor
+        name: cypher_executor
+        connection: neo4j-conn
+    role: >
+      You answer questions against Neo4j. If schema is unknown, call cypher_executor with mode=introspect.
+      Then execute a parameterized read query with cypher_executor (allow_writes=false).
+      Use only mode=execute or mode=introspect; do not use mode=r/w.
+      Use routing='r' for read queries when supported.
+      Avoid comma-separated MATCH patterns that create cartesian products; prefer chained MATCH clauses
+      or explicit relationship patterns.
+      Use the XML protocol exactly with <action>cypher_executor</action>.
+      action_input MUST be valid JSON using double quotes only (never single quotes or Python dict syntax).
+    inference_mode: XML
+    max_loops: 8
+
+  neo4j-ingest-agent:
+    type: dynamiq.nodes.agents.Agent
+    name: Neo4j Ingest + Reader Agent
+    description: Ingests graph facts then answers questions with Cypher.
+    llm:
+      id: ingest-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o-mini
+      temperature: 0
+      max_tokens: 2048
+    tools:
+      - id: cypher-executor-ingest
+        type: dynamiq.nodes.tools.cypher_executor.CypherExecutor
+        name: cypher_executor
+        connection: neo4j-conn
+    role: >
+      You can ingest data into Neo4j and then answer questions.
+      Always use XML actions: <action>cypher_executor</action> with matching JSON in <action_input>.
+      action_input MUST be valid JSON using double quotes only (never single quotes or Python dict syntax).
+      For new raw text, extract entities/relations, write them via cypher_executor with allow_writes=true,
+      then query with allow_writes=false and provide the final answer.
+      Use only mode=execute or mode=introspect; do not use mode=r/w.
+      Use routing='r' for read queries when supported.
+      Avoid comma-separated MATCH patterns (cartesian products).
+      Prefer MATCH ... WITH ... MATCH or single MATCH with relationship patterns.
+    inference_mode: XML
+    max_loops: 8
+
+flows:
+  neo4j-reader-flow:
+    name: Neo4j Reader Flow
+    nodes:
+      - neo4j-reader-agent
+
+  neo4j-ingest-flow:
+    name: Neo4j Ingest Flow
+    nodes:
+      - neo4j-ingest-agent
+
+workflows:
+  neo4j-reader-workflow:
+    flow: neo4j-reader-flow
+    version: 1
+
+  neo4j-ingest-workflow:
+    flow: neo4j-ingest-flow
+    version: 1
