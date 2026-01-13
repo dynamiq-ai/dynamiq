@@ -1,0 +1,170 @@
+---
+description: Pre-PR code review to catch issues before submitting - based on BUGBOT rules
+globs:
+  - "dynamiq/**/*.py"
+  - "tests/**/*.py"
+alwaysApply: false
+---
+
+# Pre-PR Review
+
+Run this before creating a PR to catch issues that BUGBOT would flag. Review changed files against this checklist.
+
+## How to Use
+
+When invoked, I will:
+1. Identify the changed/new files in scope
+2. Check each file against the rules below
+3. Report issues with specific line references
+4. Suggest fixes for each issue
+
+---
+
+## 🚨 BLOCKING Issues (Must Fix)
+
+### Security
+
+- [ ] **No `eval()`, `exec()`, `compile()`** outside `dynamiq/nodes/tools/python.py`
+- [ ] **No hardcoded secrets** - API keys, passwords, tokens as string literals
+  ```python
+  # BAD: api_key = "sk-abc123..."
+  # GOOD: api_key: str = Field(default_factory=partial(get_env_var, "API_KEY"))
+  ```
+
+### Pydantic
+
+- [ ] **No `@dataclass`** - Use `pydantic.BaseModel` instead
+- [ ] **Structured data uses BaseModel** - Not plain dicts or custom classes
+
+### Node Patterns
+
+- [ ] **ConnectionNode for external services** - Not plain `Node`
+- [ ] **`super().init_components()` called** - When overriding `init_components()`
+- [ ] **`_connection_manager` stored** - In `init_components()` for reconnection
+- [ ] **No client creation in `execute()`** - Use `init_components()` instead
+
+### Serialization
+
+- [ ] **`to_dict()` implemented properly** - With `for_tracing` and `include_secure_params`
+- [ ] **Nested nodes serialized** - Call nested `to_dict()` with same params
+- [ ] **Non-serializable fields excluded** - `client`, `vector_store`, `executor` in `to_dict_exclude_params`
+- [ ] **YAML roundtrip works** - Test `from_yaml_file()` → `to_yaml_file()` → `from_yaml_file()`
+
+### Async
+
+- [ ] **No blocking in async** - No `time.sleep()`, `requests.*`, sync file I/O in async methods
+
+---
+
+## ⚠️ Should Fix
+
+### Code Style
+
+- [ ] **Type annotations** on all functions/methods
+- [ ] **Lines ≤ 120 characters**
+- [ ] **Descriptive names** - No single-letter variables (except `i`, `j`, `k` in loops)
+- [ ] **Boolean field naming** - Use `*_enabled`, `*_allowed`, not `enable_*`, `allow_*`
+  ```python
+  # BAD: enable_streaming: bool
+  # GOOD: streaming_enabled: bool
+  ```
+- [ ] **Method prefixes** - `get_*`, `is_*`, `has_*`, `create_*`, `validate_*`, etc.
+- [ ] **Private members** - `_prefix` for internal methods/attributes
+- [ ] **Enums over strings** - Use `RunnableStatus.SUCCESS` not `"success"`
+
+### Node Development
+
+- [ ] **`input_schema` defined** - Pydantic model for input validation
+- [ ] **`NodeGroup` set** - Proper categorization
+- [ ] **`name` and `description`** - Human-readable strings
+- [ ] **`Field()` with descriptions** - For all public fields
+
+### Documentation
+
+- [ ] **Docstrings on public APIs** - Google-style with Args, Returns, Raises
+- [ ] **No obvious comments** - Code should be self-documenting
+
+### Testing
+
+- [ ] **Tests for new nodes** - In `tests/unit/` or `tests/integration/`
+- [ ] **Regression test for bug fixes** - Prevent recurrence
+
+---
+
+## 📋 Quick Checks by File Type
+
+### New Node (`dynamiq/nodes/**/*.py`)
+
+```python
+class MyNode(ConnectionNode):  # ✓ Correct base class
+    group: NodeGroup = NodeGroup.TOOLS  # ✓ Group set
+    name: str = "My Tool"  # ✓ Human name
+    description: str = "Does something useful"  # ✓ Description
+    
+    connection: MyConnection | None = None  # ✓ Connection field
+    client: Any | None = None  # ✓ Client field
+    
+    input_schema: ClassVar[type[MyInputSchema]] = MyInputSchema  # ✓ Input schema
+    
+    @property
+    def to_dict_exclude_params(self):  # ✓ Exclude runtime objects
+        return super().to_dict_exclude_params | {"client": True}
+    
+    def init_components(self, connection_manager: ConnectionManager | None = None):
+        connection_manager = connection_manager or ConnectionManager()
+        self._connection_manager = connection_manager  # ✓ Store reference
+        super().init_components(connection_manager)  # ✓ Call super
+    
+    def execute(self, input_data: MyInputSchema, config: RunnableConfig = None, **kwargs) -> dict:
+        # ✓ Type hints, ✓ Returns dict
+        ...
+```
+
+### New Connection (`dynamiq/connections/*.py`)
+
+```python
+class MyConnection(BaseApiKeyConnection):
+    api_key: str = Field(default_factory=partial(get_env_var, "MY_API_KEY"))  # ✓ Env var
+    
+    def connect(self) -> MyClient:  # ✓ Returns client
+        return MyClient(api_key=self.api_key)
+    
+    @property
+    def conn_params(self) -> dict:  # ✓ Connection params
+        return {"api_key": self.api_key}
+```
+
+### Agent/Tool Changes
+
+- [ ] **Tool `input_schema`** - Required fields with descriptions
+- [ ] **Tool `description`** - Clear enough for LLM to understand usage
+- [ ] **`is_optimized_for_agents`** - Set if output needs string conversion
+
+---
+
+## 🔍 What I Check
+
+When you run this command, I will scan for:
+
+1. **Import statements** - Dangerous imports, missing type imports
+2. **Class definitions** - Base class, required fields, validators
+3. **Method signatures** - Type hints, return types
+4. **String literals** - Potential hardcoded secrets
+5. **Field definitions** - Proper `Field()` usage, naming conventions
+6. **Serialization methods** - `to_dict()` implementation
+7. **Connection handling** - `init_components()` pattern
+8. **Test coverage** - Corresponding test files
+
+---
+
+## 📝 Commit Message Format
+
+Before committing, ensure message follows:
+```
+feat: add new capability
+fix: resolve issue with X
+refactor: improve Y implementation
+docs: update Z documentation
+test: add tests for W
+chore: update dependencies
+```

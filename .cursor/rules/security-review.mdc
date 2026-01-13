@@ -1,0 +1,371 @@
+---
+description: Security analysis and vulnerability review for Dynamiq AI orchestration framework
+globs:
+  - "dynamiq/**/*.py"
+  - "tests/**/*.py"
+  - "examples/**/*.py"
+alwaysApply: false
+---
+
+# Dynamiq Security Review
+
+Comprehensive security analysis command for the Dynamiq AI orchestration framework. Use this to identify vulnerabilities, insecure patterns, and security anti-patterns specific to AI/LLM orchestration.
+
+## Security Architecture Context
+
+Dynamiq handles sensitive operations including:
+
+- **External API credentials** via Connection classes and environment variables
+- **Dynamic code execution** via Python tool with RestrictedPython sandbox
+- **User input processing** through node input_schema validation
+- **Database queries** via SQL executors and Cypher tools
+- **LLM interactions** that may leak sensitive context
+- **Serialization/deserialization** of workflows and node configurations
+
+## Security Analysis Checklist
+
+### 1. Credential and Secret Management
+
+<analysis>
+name: credential_security
+description: Analyze credential handling and exposure risks
+severity: CRITICAL
+check_for:
+  - Hardcoded API keys, tokens, or passwords in source code
+  - Credentials logged via `logger.info/debug/error` statements
+  - Secrets included in `to_dict()` serialization without `include_secure_params=False`
+  - Connection objects serialized in YAML without credential masking
+  - Environment variables with default fallback values exposing placeholders
+  - API keys passed in URL parameters instead of headers
+  
+secure_patterns:
+  - Use `Field(default_factory=partial(get_env_var, "VAR_NAME"))` for credentials
+  - Implement `to_dict_exclude_secure_params` property excluding sensitive fields
+  - Use `for_tracing=True` to minimize data in callback payloads
+  - Never log `connection.api_key` or `connection.password` values
+  
+dangerous_patterns:
+  - `api_key = "sk-..."` or `password = "..."` literals
+  - `logger.info(f"Connection: {connection}")` without masking
+  - `connection.model_dump()` without exclude parameter
+  - `headers = {"Authorization": f"Bearer {api_key}"}` in logs
+</analysis>
+
+### 2. Dynamic Code Execution (Python Tool)
+
+<analysis>
+name: code_execution_security
+description: Review RestrictedPython sandbox implementation
+severity: CRITICAL
+check_for:
+  - Usage of `eval()`, `exec()`, `compile()` outside designated sandbox
+  - Import statements bypassing `ALLOWED_MODULES` whitelist
+  - Attribute access bypassing `DynamiqRestrictingNodeTransformer`
+  - Dunder attribute access beyond `ALLOWED_DUNDER_ATTRIBUTES`
+  - Custom builtins injected without proper guarding
+  - `restricted_import()` function bypass attempts
+  
+sandbox_boundaries:
+  - All code execution must go through `compile_restricted()` 
+  - Guard functions: `_getattr_`, `_getitem_`, `_getiter_`, `_write_`
+  - Blocked modules: os, subprocess, sys, socket, pickle, marshal
+  - `restricted_import()` only allows modules in `ALLOWED_MODULES` list
+  
+escape_vectors_to_check:
+  - `__builtins__` modification after sandbox initialization
+  - `type()` and `object.__subclasses__()` for class enumeration
+  - `getattr(obj, '__class__')` chaining to access restricted attributes
+  - Frame inspection via `sys._getframe()` (should be blocked)
+  - Pickle deserialization of malicious payloads
+</analysis>
+
+### 3. Input Validation and Injection
+
+<analysis>
+name: input_validation
+description: Analyze input validation and injection vulnerabilities
+severity: HIGH
+check_for:
+  - Nodes without `input_schema` Pydantic model for validation
+  - String interpolation in Cypher/SQL queries without parameterization
+  - User input directly embedded in LLM prompts enabling injection
+  - File paths from user input without sanitization
+  - URL parameters constructed from user data without encoding
+  - JSONPath expressions from untrusted sources
+  
+injection_vectors:
+  - Cypher injection: `dynamiq/nodes/tools/cypher_executor.py`
+  - SQL injection: Database tool implementations
+  - Prompt injection: Agent system prompts with user input
+  - YAML injection: `WorkflowYAMLLoader` processing untrusted files
+  - JSONPath injection: `jsonpath_filter()` with user-provided paths
+  
+secure_patterns:
+  - Define `input_schema: type[BaseModel]` for all public nodes
+  - Use parameterized queries: `MATCH (n) WHERE n.id = $id`
+  - Escape user input in prompts: `{% raw %}{{user_input}}{% endraw %}`
+  - Validate file paths against allowed directories
+  - Use `Pydantic.field_validator` for complex input rules
+</analysis>
+
+### 4. Serialization Security
+
+<analysis>
+name: serialization_security
+description: Review serialization/deserialization vulnerabilities
+severity: HIGH
+check_for:
+  - `pickle.loads()` or `jsonpickle.decode()` on untrusted data
+  - YAML deserialization without safe_load equivalent
+  - `eval()` or `exec()` on serialized data
+  - Node type resolution from untrusted YAML type strings
+  - Callback data containing executable payloads
+  
+yaml_specific:
+  - `WorkflowYAMLLoader.load()` resolves types from `type:` field
+  - `NodeManager` registry allows arbitrary node class instantiation
+  - Connection classes instantiated from YAML configuration
+  - Nested node initialization from deserialized data
+  
+secure_patterns:
+  - Validate `type` field against whitelist before instantiation
+  - Use `yaml.safe_load()` for configuration files
+  - Sanitize node IDs and names from YAML input
+  - Verify connection class types before `init_components()`
+</analysis>
+
+### 5. Authentication and Authorization
+
+<analysis>
+name: auth_security
+description: Analyze authentication flows and authorization controls
+severity: HIGH
+check_for:
+  - Missing authentication on HTTP endpoints (tools, callbacks)
+  - Bearer tokens in query parameters instead of headers
+  - API keys shared across multiple services
+  - Missing TLS/SSL verification (`verify_certs=False`)
+  - Session tokens without expiration
+  - Connection strings with embedded credentials
+  
+connection_security:
+  - Elasticsearch: `verify_certs` and `ca_path` configuration
+  - PostgreSQL: Password in connection string vs secure parameter
+  - AWS: IAM role vs hardcoded access keys
+  - Weaviate/Pinecone: API key exposure in logs
+  - Neo4j: Password in URI vs auth tuple
+  
+secure_patterns:
+  - Use `conn_params` property for secure parameter passing
+  - Enable SSL/TLS: `use_ssl=True`, `verify_certs=True`
+  - Use AWS IAM roles: `profile` parameter instead of keys
+  - Rotate API keys and use short-lived tokens where possible
+</analysis>
+
+### 6. LLM Security and Prompt Safety
+
+<analysis>
+name: llm_security
+description: Review LLM-specific security concerns
+severity: HIGH
+check_for:
+  - System prompts containing sensitive internal information
+  - User input concatenated into prompts without sanitization
+  - Tool descriptions exposing internal API details
+  - Agent `role` parameter with exploitable instructions
+  - Conversation history containing credentials
+  - Model outputs executed without validation
+  
+prompt_injection_vectors:
+  - `Agent.system_prompt_manager` templates with user data
+  - `Message(role="user", content=user_input)` direct injection
+  - Tool `description` field with malicious instructions
+  - `input_message` in agent flows from external sources
+  
+secure_patterns:
+  - Sanitize user input before prompt inclusion
+  - Use separate system vs user message channels
+  - Validate and sanitize LLM outputs before execution
+  - Limit tool access based on user authorization
+  - Implement output filtering for sensitive data patterns
+</analysis>
+
+### 7. File System Security
+
+<analysis>
+name: filesystem_security
+description: Analyze file system access and path traversal risks
+severity: MEDIUM
+check_for:
+  - Path traversal: `../` in file paths from user input
+  - Unrestricted file uploads without type validation
+  - Temporary files with sensitive data not cleaned up
+  - World-readable permissions on credential files
+  - `is_files_allowed=True` without proper access controls
+  
+file_operations:
+  - `Workflow.to_yaml_file()` - Output path validation
+  - `WorkflowYAMLLoader.load()` - Input path validation
+  - Python tool file operations within sandbox
+  - Document converters (DOCX, PDF, PPTX) reading files
+  - Dry run artifacts in temporary directories
+  
+secure_patterns:
+  - Use `pathlib.Path.resolve()` and validate against base directory
+  - Implement file type validation via `filetype` library
+  - Clean up temporary files in `finally` blocks
+  - Use secure temporary directory with restricted permissions
+</analysis>
+
+### 8. Memory and Vector Store Security
+
+<analysis>
+name: storage_security
+description: Review vector store and memory backend security
+severity: MEDIUM
+check_for:
+  - PII/sensitive data stored without encryption
+  - Vector embeddings of sensitive documents without access control
+  - Memory backends storing conversation history indefinitely
+  - Missing tenant isolation in multi-tenant vector stores
+  - Document metadata containing sensitive information
+  
+storage_backends:
+  - Qdrant: Collection access controls, payload encryption
+  - Pinecone: Namespace isolation, metadata filtering
+  - Weaviate: Multi-tenancy configuration, RBAC
+  - Milvus: User authentication, collection permissions
+  - PostgreSQL (pgvector): Row-level security, encryption
+  - Memory backends: SQLite, PostgreSQL, DynamoDB data encryption
+  
+secure_patterns:
+  - Encrypt sensitive document content before embedding
+  - Implement tenant isolation via namespaces/collections
+  - Set retention policies for conversation memory
+  - Filter metadata before storage to remove PII
+  - Use database encryption at rest where available
+</analysis>
+
+### 9. Network and External Service Security
+
+<analysis>
+name: network_security
+description: Analyze external service communication security
+severity: MEDIUM
+check_for:
+  - HTTP connections instead of HTTPS
+  - Missing timeout configuration allowing resource exhaustion
+  - Unvalidated redirects in HTTP clients
+  - SSRF vulnerabilities in URL-accepting parameters
+  - DNS rebinding potential in service endpoints
+  
+external_services:
+  - HTTP tool: URL validation and scheme restrictions
+  - Firecrawl/ScaleSerp: Target URL validation
+  - MCP tools: SSE/STDIO connection security
+  - Webhook callbacks: Endpoint validation
+  - E2B sandbox: Code execution boundaries
+  
+secure_patterns:
+  - Enforce HTTPS: `url.startswith("https://")`
+  - Set appropriate timeouts: connection, read, total
+  - Validate URLs against allowlist for SSRF protection
+  - Use request signing for webhook callbacks
+  - Implement rate limiting for external API calls
+</analysis>
+
+### 10. Dependency Security
+
+<analysis>
+name: dependency_security
+description: Review dependency-related security risks
+severity: MEDIUM
+check_for:
+  - Outdated dependencies with known CVEs
+  - Unpinned dependency versions in pyproject.toml
+  - Dependencies with excessive permissions
+  - Supply chain risks in transitive dependencies
+  - Dev dependencies included in production
+  
+critical_dependencies:
+  - `RestrictedPython~8.0` - Sandbox security
+  - `litellm` - LLM API security
+  - `pydantic~2.11` - Input validation
+  - `requests^2.32.5` - HTTP security
+  - `jsonpickle~3.0.3` - Serialization security (nosec annotations)
+  - `lxml^5.3.1` - XML parsing security
+  
+secure_patterns:
+  - Pin major and minor versions: `~1.2.0` not `^1.0.0`
+  - Regular dependency audits: `pip-audit`, `safety`
+  - Review `# nosec` annotations in code
+  - Separate dev and production dependencies
+</analysis>
+
+## Security Review Commands
+
+When asked to perform a security review, analyze the code against ALL checklist items above and provide:
+
+1. **Critical Vulnerabilities**: Issues requiring immediate attention
+2. **High-Risk Findings**: Significant security concerns
+3. **Medium-Risk Issues**: Security improvements recommended
+4. **Security Best Practices**: Preventive measures to implement
+
+## Vulnerability Severity Classification
+
+| Severity | Description | Examples |
+|----------|-------------|----------|
+| CRITICAL | Immediate exploitation risk | Code execution escape, credential exposure |
+| HIGH | Significant security impact | SQL injection, prompt injection, auth bypass |
+| MEDIUM | Potential security impact | Path traversal, missing validation |
+| LOW | Defense in depth | Logging verbosity, error messages |
+
+## Example Analysis Output
+
+```markdown
+## Security Analysis Report
+
+### Critical Vulnerabilities
+- [ ] CRITICAL: `execute()` in custom_node.py uses `eval()` on user input
+- [ ] CRITICAL: API key hardcoded in `examples/api_test.py`
+
+### High-Risk Findings
+- [ ] HIGH: Cypher query in `neo4j_tool.py` uses string formatting
+- [ ] HIGH: YAML loader processes untrusted type fields without validation
+
+### Medium-Risk Issues
+- [ ] MEDIUM: Missing `input_schema` on `CustomHTTPTool` node
+- [ ] MEDIUM: File path not validated in document converter
+
+### Security Recommendations
+1. Implement input validation on all user-facing nodes
+2. Add credential scanning to CI/CD pipeline
+3. Enable TLS verification on all external connections
+4. Audit RestrictedPython sandbox escape attempts
+```
+
+## File Patterns to Prioritize
+
+- `dynamiq/nodes/tools/python.py` - RestrictedPython sandbox
+- `dynamiq/nodes/tools/cypher_executor.py` - Query injection
+- `dynamiq/connections/connections.py` - Credential handling
+- `dynamiq/serializers/loaders/yaml.py` - Deserialization
+- `dynamiq/nodes/agents/agent.py` - Prompt injection
+- `dynamiq/nodes/node.py` - Input validation patterns
+- `dynamiq/connections/managers.py` - Connection security
+- `dynamiq/cache/managers/workflow.py` - Cache key security
+
+## Security Testing Patterns
+
+```python
+# Test for credential exposure
+assert "api_key" not in node.to_dict(include_secure_params=False)
+
+# Test for input validation
+with pytest.raises(ValidationError):
+    node.validate_input_schema({"malicious": "'; DROP TABLE users;--"})
+
+# Test for sandbox escape
+with pytest.raises(ImportError):
+    python_tool.execute({"code": "import os; os.system('ls')"})
+```
