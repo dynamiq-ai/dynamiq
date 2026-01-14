@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import re
+from enum import Enum
 from typing import Any, Sequence
 
 import filetype
@@ -894,6 +895,13 @@ class ToolCacheEntry(BaseModel):
         return data
 
 
+class SummarizationMode(str, Enum):
+    """Summarization mode."""
+
+    REPLACE = "replace"
+    PRESERVE = "preserve"
+
+
 class SummarizationConfig(BaseModel):
     """Configuration for agent history summarization.
 
@@ -903,9 +911,15 @@ class SummarizationConfig(BaseModel):
           which summarization will be applied. Defaults to None.
         context_usage_ratio (float): Relative percentage of tokens in prompt after which summarization will be applied.
         context_history_length (int): Number of history messages that will be prepended.
+        max_attempts (int): Maximum number of attempts to generate a summary.
+        mode (SummarizationMode): Summarization mode. Options:
+            - SummarizationMode.REPLACE: Replace entire history with summary (default, memory efficient)
+            - SummarizationMode.PRESERVE: Preserve message structure, only shorten tool outputs (legacy)
     """
 
     enabled: bool = False
     max_token_context_length: int | None = None
     context_usage_ratio: float = 0.8
     context_history_length: int = 4
+    max_attempts: int = 3
+    mode: SummarizationMode = SummarizationMode.REPLACE
