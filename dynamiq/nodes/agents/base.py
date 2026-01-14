@@ -223,6 +223,10 @@ class Agent(Node):
         default=512,
         description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
     )
+    skills_enabled: bool = Field(
+        default=False,
+        description="Enable skills support. Skills are stored in FileStore under .skills/ prefix.",
+    )
 
     input_message: Message | VisionMessage | None = None
     role: str | None = Field(
@@ -312,6 +316,8 @@ class Agent(Node):
             self.tools.append(FileListTool(file_store=self.file_store_backend))
 
         self._init_prompt_blocks()
+        if self.skills_enabled and self.file_store_backend:
+            self._init_skills()
 
     @model_validator(mode="after")
     def validate_input_fields(self):
@@ -389,6 +395,46 @@ class Agent(Node):
         self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
         self.system_prompt_manager.setup_for_base_agent()
         self.system_prompt_manager.update_variables({"delegation_instructions": "", "delegation_instructions_xml": ""})
+
+    def _init_skills(self):
+        """Initialize skills support using FileStore."""
+        from dynamiq.nodes.tools.skills_tool import SkillsTool
+        from dynamiq.skills.loader import SkillLoader
+
+        # Add SkillsTool to tools
+        skills_tool = SkillsTool(file_store=self.file_store_backend)
+        self.tools.append(skills_tool)
+
+        # Discover available skills
+        loader = SkillLoader(self.file_store_backend)
+        available_skills = loader.discover_skills()
+
+        # Update prompt with skills info
+        skills_summary = self._format_skills_summary(available_skills)
+        self.system_prompt_manager.set_block("skills", skills_summary)
+
+        logger.info(
+            f"Agent {self.name} - {self.id}: initialized with {len(available_skills)} skills"
+        )
+
+    def _format_skills_summary(self, skills) -> str:
+        """Format skills summary for prompt.
+
+        Args:
+            skills: List of SkillReference objects
+
+        Returns:
+            Formatted string with skill information
+        """
+        if not skills:
+            return ""
+
+        lines = []
+        for skill in skills:
+            tags_str = f" [{', '.join(skill.tags)}]" if skill.tags else ""
+            lines.append(f"- **{skill.name}**{tags_str}: {skill.description}")
+
+        return "\n".join(lines)
 
     def set_block(self, block_name: str, content: str):
         """Adds or updates a prompt block."""
