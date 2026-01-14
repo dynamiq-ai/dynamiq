@@ -142,7 +142,7 @@ class AgentInputSchema(BaseModel):
 
     user_id: str | None = Field(default=None, description="Parameter to provide user ID.")
     session_id: str | None = Field(default=None, description="Parameter to provide session ID.")
-    metadata: dict | list = Field(default={}, description="Parameter to provide metadata.")
+    metadata: dict = Field(default={}, description="Parameter to provide metadata in key-value pairs.")
 
     model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
 
@@ -444,20 +444,23 @@ class Agent(Node):
         """Sets or updates a prompt variable."""
         self.system_prompt_manager.set_variable(variable_name, value)
 
-    def _prepare_metadata(self, input_data: dict) -> dict:
+    def _prepare_metadata(self, input_data: AgentInputSchema) -> dict:
         """
         Prepare metadata from input data.
 
         Args:
-            input_data (dict): Input data containing user information
+            input_data: Agent input schema containing user information
 
         Returns:
             dict: Processed metadata
         """
-        EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata", "files", "images", "tool_params"}
-        custom_metadata = input_data.get("metadata", {}).copy()
-        custom_metadata.update({k: v for k, v in input_data.items() if k not in EXCLUDED_KEYS})
+        custom_metadata = input_data.metadata.copy()
 
+        # Add extra fields that were provided (model allows extra fields with ConfigDict extra="allow")
+        if input_data.model_extra:
+            custom_metadata.update(input_data.model_extra)
+
+        # Clean up any leaked fields
         if "files" in custom_metadata:
             del custom_metadata["files"]
         if "images" in custom_metadata:
@@ -465,13 +468,10 @@ class Agent(Node):
         if "tool_params" in custom_metadata:
             del custom_metadata["tool_params"]
 
-        user_id = input_data.get("user_id")
-        session_id = input_data.get("session_id")
-
-        if user_id:
-            custom_metadata["user_id"] = user_id
-        if session_id:
-            custom_metadata["session_id"] = session_id
+        if input_data.user_id:
+            custom_metadata["user_id"] = input_data.user_id
+        if input_data.session_id:
+            custom_metadata["session_id"] = input_data.session_id
 
         return custom_metadata
 
@@ -485,12 +485,10 @@ class Agent(Node):
         """
         Executes the agent with the given input data.
         """
-        input_dict = dict(input_data)
-        log_data = input_dict.copy()
-
+        # Convert to dict only for logging (to avoid logging BytesIO objects)
+        log_data = input_data.model_dump()
         if log_data.get("images"):
             log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
-
         if log_data.get("files"):
             log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
 
@@ -499,20 +497,24 @@ class Agent(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        custom_metadata = self._prepare_metadata(input_dict)
+        custom_metadata = self._prepare_metadata(input_data)
         self._current_call_context = {
-            "user_id": input_dict.get("user_id"),
-            "session_id": input_dict.get("session_id"),
+            "user_id": input_data.user_id,
+            "session_id": input_data.session_id,
             "metadata": custom_metadata,
         }
 
         input_message = input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
-        input_message = input_message.format_message(**input_dict)
+        # Convert to dict for format_message, excluding fields that are unsafe for templates
+        # (binary data like files/images, complex objects like tool_params, and input which is already handled)
+        standard_fields = set(AgentInputSchema.model_fields.keys())
+        extra_fields = input_data.model_dump(exclude=standard_fields)
+        input_message = input_message.format_message(**extra_fields)
 
-        use_memory = self.memory and (input_dict.get("user_id") or input_dict.get("session_id"))
+        use_memory = self.memory and (input_data.user_id or input_data.session_id)
 
         if use_memory:
-            history_messages = self._retrieve_memory(input_dict)
+            history_messages = self._retrieve_memory(input_data)
             if len(history_messages) > 0:
                 history_messages.insert(
                     0,
@@ -642,18 +644,19 @@ class Agent(Node):
         )
         return conversation
 
-    def _retrieve_memory(self, input_data: dict) -> list[Message]:
+    def _retrieve_memory(self, input_data: AgentInputSchema) -> list[Message]:
         """
+        Args:
+            input_data: Agent input schema containing user information
+
+        Returns:
+            list[Message]: List of messages forming a valid conversation context
         Retrieves memory messages when user_id and/or session_id are provided.
         """
-        user_id = input_data.get("user_id")
-        session_id = input_data.get("session_id")
-
-        user_query = input_data.get("input", "")
         history_messages = self.retrieve_conversation_history(
-            user_query=user_query,
-            user_id=user_id,
-            session_id=session_id,
+            user_query=input_data.input,
+            user_id=input_data.user_id,
+            session_id=input_data.session_id,
             strategy=self.memory_retrieval_strategy,
         )
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
