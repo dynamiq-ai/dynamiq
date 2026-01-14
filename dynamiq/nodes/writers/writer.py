@@ -10,6 +10,7 @@ from dynamiq.nodes.node import NodeDependency, NodeGroup, ensure_config
 from dynamiq.nodes.writers.base import Writer
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
+from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
 
 DESCRIPTION_VECTOR_STORE_WRITER = """Writes documents (or text) to a vector store.
@@ -223,3 +224,8 @@ class VectorStoreWriter(Node):
                 f"Error: {str(e)}. Please analyze the error and take appropriate action.",
                 recoverable=True,
             )
+
+    def dry_run_cleanup(self, dry_run_config: DryRunConfig | None = None) -> None:
+        """Clean up resources created during dry run."""
+        if self.document_writer:
+            self.document_writer.dry_run_cleanup(dry_run_config)
