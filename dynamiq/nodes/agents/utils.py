@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import re
+from enum import Enum
 from typing import Any, Sequence
 
 import filetype
@@ -878,39 +879,6 @@ def process_tool_output_for_agent(content: Any, max_tokens: int = TOOL_MAX_TOKEN
     return content
 
 
-def extract_thought_from_intermediate_steps(intermediate_steps):
-    """Extract thought process from the intermediate steps structure."""
-    if not intermediate_steps:
-        return None
-
-    for step_key, step_value in intermediate_steps.items():
-        if isinstance(step_value, dict) and "model_observation" in step_value:
-            model_obs = step_value["model_observation"]
-
-            if isinstance(model_obs, dict):
-                if "initial" in model_obs:
-                    initial = model_obs["initial"]
-
-                    if initial.startswith("{") and '"thought"' in initial:
-                        try:
-                            json_data = json.loads(initial)
-                            if "thought" in json_data:
-                                return json_data["thought"]
-                        except json.JSONDecodeError:
-                            pass
-
-                    if "<thought>" in initial:
-                        thought_match = re.search(r"<thought>\s*(.*?)\s*</thought>", initial, re.DOTALL)
-                        if thought_match:
-                            return thought_match.group(1)
-
-                    thought_match = re.search(r"Thought:\s*(.*?)(?:\n\n|\nAnswer:)", initial, re.DOTALL)
-                    if thought_match:
-                        return thought_match.group(1)
-
-    return None
-
-
 class ToolCacheEntry(BaseModel):
     """Single key entry in tool cache."""
 
@@ -927,6 +895,13 @@ class ToolCacheEntry(BaseModel):
         return data
 
 
+class SummarizationMode(str, Enum):
+    """Summarization mode."""
+
+    REPLACE = "replace"
+    PRESERVE = "preserve"
+
+
 class SummarizationConfig(BaseModel):
     """Configuration for agent history summarization.
 
@@ -936,9 +911,15 @@ class SummarizationConfig(BaseModel):
           which summarization will be applied. Defaults to None.
         context_usage_ratio (float): Relative percentage of tokens in prompt after which summarization will be applied.
         context_history_length (int): Number of history messages that will be prepended.
+        max_attempts (int): Maximum number of attempts to generate a summary.
+        mode (SummarizationMode): Summarization mode. Options:
+            - SummarizationMode.REPLACE: Replace entire history with summary (default, memory efficient)
+            - SummarizationMode.PRESERVE: Preserve message structure, only shorten tool outputs (legacy)
     """
 
     enabled: bool = False
     max_token_context_length: int | None = None
     context_usage_ratio: float = 0.8
     context_history_length: int = 4
+    max_attempts: int = 3
+    mode: SummarizationMode = SummarizationMode.REPLACE

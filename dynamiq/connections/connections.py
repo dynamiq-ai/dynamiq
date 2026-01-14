@@ -328,6 +328,7 @@ class AWSNeptune(BaseConnection):
 
     def connect(self):
         import requests
+
         session = requests.Session()
         logger.debug("Connected to Neptune via HTTP endpoint=%s", self.endpoint)
         return session
@@ -1042,6 +1043,7 @@ class ApacheAGE(PostgreSQL):
     """
     Represents a connection to PostgreSQL with Apache AGE enabled.
     """
+
     pass
 
 

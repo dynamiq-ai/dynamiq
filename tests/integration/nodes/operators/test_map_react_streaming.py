@@ -21,15 +21,23 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 
 @pytest.fixture
 def mock_llm_response_text():
-    return (
-        "Thought: We'll try a noop, then query and scrape.\n"
-        "Action: NoOp Tool\n"
-        "Action Input: {}\n"
-        "Action: Exa Search Tool\n"
-        'Action Input: {"query": "test", "limit": 1}\n'
-        "Action: Firecrawl Tool\n"
-        'Action Input: {"url": "https://example.com"}'
-    )
+    return """<output>
+  <thought>We'll try a noop, then query and scrape.</thought>
+  <tool_calls>
+    <tool>
+      <name>NoOp Tool</name>
+      <input>{}</input>
+    </tool>
+    <tool>
+      <name>Exa Search Tool</name>
+      <input>{"query": "test", "limit": 1}</input>
+    </tool>
+    <tool>
+      <name>Firecrawl Tool</name>
+      <input>{"url": "https://example.com"}</input>
+    </tool>
+  </tool_calls>
+</output>"""
 
 
 @pytest.fixture
@@ -83,7 +91,7 @@ def run(input_data):
     agent = Agent(
         name="React Agent",
         llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="map_react_stream", mode=StreamingMode.ALL),
@@ -125,7 +133,8 @@ def run(input_data):
     for entity_id, items in llm_events_by_entity.items():
         assert len(items) > 0
         joined = "".join(str(chunk) for _, chunk in items)
-        assert ("Action:" in joined) or ("Thought:" in joined) or ("mocked_response" in joined)
+        # Check for XML format or mocked response
+        assert ("<thought>" in joined) or ("<tool" in joined) or ("mocked_response" in joined)
 
     # Verify each tool produced at least one trace
     def is_tool_group(g):
