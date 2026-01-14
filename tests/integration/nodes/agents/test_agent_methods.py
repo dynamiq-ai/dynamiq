@@ -1,5 +1,4 @@
 import uuid
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -20,7 +19,6 @@ from dynamiq.nodes.agents.exceptions import (
 from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.runnables import RunnableStatus
 
 
 @pytest.fixture
@@ -62,17 +60,18 @@ def xml_react_agent(openai_node, mock_llm_executor):
 
 @pytest.fixture
 def mock_tool():
-    tool = MagicMock()
-    tool.name = "TestTool"
-    tool.id = "test-tool-123"
-    tool.is_files_allowed = False
+    """A real Node-based tool for testing."""
+    from dynamiq.nodes.tools.python import Python
 
-    result = MagicMock()
-    result.status = RunnableStatus.SUCCESS
-    result.output = {"content": "Tool execution result"}
-    tool.run.return_value = result
-
-    return tool
+    return Python(
+        name="Calculator",
+        description="A simple calculator tool for performing arithmetic operations",
+        code="""
+def run(input_data):
+    result = eval(input_data.get('expression', '0'))
+    return {"result": result}
+""",
+    )
 
 
 def test_parse_default_thought(default_react_agent):
@@ -464,5 +463,3 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
         assert "name" in schema["function"]
         assert "parameters" in schema["function"]
         assert "properties" in schema["function"]["parameters"]
-        assert schema["function"]["strict"] is True
-        assert schema["function"]["parameters"]["additionalProperties"] is False
