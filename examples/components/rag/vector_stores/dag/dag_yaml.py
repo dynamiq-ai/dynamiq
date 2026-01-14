@@ -20,11 +20,12 @@ def indexing_flow(
     data_folder_path: str,
     cm: ConnectionManager,
     extensions: list[str] | None = None,
+    init_components: bool = True,
 ):
     wf_data = WorkflowYAMLLoader.load(
         file_path=yaml_file_path,
         connection_manager=cm,
-        init_components=True,
+        init_components=init_components,
     )
     tracing_indexing_wf = TracingCallbackHandler()
     indexing_wf = Workflow.from_yaml_file_data(file_data=wf_data, wf_id="indexing-workflow")

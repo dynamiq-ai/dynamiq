@@ -10,7 +10,8 @@ from dynamiq.nodes import Node
 from dynamiq.nodes.managers import NodeManager
 from dynamiq.nodes.node import ConnectionNode, NodeDependency
 from dynamiq.prompts import Prompt
-from dynamiq.serializers.types import WorkflowYamlData
+from dynamiq.serializers.types import RequirementData, WorkflowYamlData
+from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
 
@@ -23,12 +24,57 @@ class WorkflowYAMLLoaderException(Exception):
 class WorkflowYAMLLoader:
     """Loader class for parsing YAML files and creating workflow components."""
 
+    @classmethod
+    def get_requirements(cls, data: dict) -> list[RequirementData]:
+        """
+        Recursively scan YAML data and extract all requirement dicts.
+
+        A requirement dict is identified by having both $type and $id fields.
+        This method does NOT initialize any components.
+
+        Args:
+            data: Dictionary containing workflow YAML data.
+
+        Returns:
+            List of RequirementData for all requirement dicts.
+        """
+        requirements: list[RequirementData] = []
+        cls._get_requirements_from_dict(data, requirements)
+        return requirements
+
+    @classmethod
+    def _get_requirements_from_dict(cls, data: dict, requirements: list[RequirementData]) -> None:
+        """Recursively extract RequirementData from dicts with both $type and $id."""
+        if requirement := RequirementData.from_dict(data):
+            requirements.append(requirement)
+            # Don't recurse into requirement dicts - they will be replaced entirely
+            return
+
+        for key, value in data.items():
+            # Skip fields that use 'type'/'object' keywords for different purposes (JSON Schema, prompts)
+            if key in ("prompt", "schema", "response_format"):
+                continue
+
+            if isinstance(value, dict):
+                cls._get_requirements_from_dict(value, requirements)
+            elif isinstance(value, list):
+                cls._get_requirements_from_list(value, requirements)
+
+    @classmethod
+    def _get_requirements_from_list(cls, items: list, requirements: list[RequirementData]) -> None:
+        """Recursively extract RequirementData from a list."""
+        for item in items:
+            if isinstance(item, dict):
+                cls._get_requirements_from_dict(item, requirements)
+            elif isinstance(item, list):
+                cls._get_requirements_from_list(item, requirements)
+
     @staticmethod
     def is_node_type(type_value: str | None) -> bool:
         """
         Check if the type value represents a node type (dotted path like 'module.ClassName').
 
-        Node types use dotted path format (e.g., 'dynamiq.nodes.agents.ReActAgent'),
+        Node types use dotted path format (e.g., 'dynamiq.nodes.agents.Agent'),
         while other types (e.g., JSON schema types like 'string', 'object') don't contain dots.
 
         Args:
@@ -38,6 +84,77 @@ class WorkflowYAMLLoader:
             True if the type value is a node type (contains a dot), False otherwise.
         """
         return bool(type_value and "." in type_value)
+
+    @classmethod
+    def apply_resolved_requirements(
+        cls,
+        data: dict,
+        resolved_requirements: dict[str, Any],
+    ) -> None:
+        """
+        Apply resolved requirement data to YAML dict in-place before initialization.
+
+        Replaces requirement dicts (identified by both $type and $id) with the corresponding
+        resolved data. The resolved value can be any type (dict, list, string, etc.).
+
+        Args:
+            data: Raw YAML data dictionary (will be mutated).
+            resolved_requirements: Dict mapping $id to resolved data (any type).
+
+        Raises:
+            WorkflowYAMLLoaderException: If a $id cannot be resolved.
+        """
+        cls._apply_requirements_to_dict(data, resolved_requirements)
+
+    @classmethod
+    def _apply_requirements_to_dict(
+        cls,
+        data: dict,
+        resolved_requirements: dict[str, Any],
+    ) -> None:
+        """Recursively apply requirements to a dictionary and its nested structures.
+
+        When a requirement dict is found (has both $type and $id), it is completely
+        replaced with the resolved data at the parent level.
+        """
+        for key, value in list(data.items()):
+            # Skip fields that use 'type'/'object' keywords for different purposes (JSON Schema, prompts)
+            if key in ("prompt", "schema", "response_format"):
+                continue
+
+            if isinstance(value, dict):
+                if requirement := RequirementData.from_dict(value):
+                    if requirement.id not in resolved_requirements:
+                        raise WorkflowYAMLLoaderException(
+                            f"Cannot resolve $id '{requirement.id}': not found in resolved_requirements. "
+                            f"Use get_requirements() to get requirements and resolve them before parsing."
+                        )
+                    data[key] = resolved_requirements[requirement.id]
+                else:
+                    cls._apply_requirements_to_dict(value, resolved_requirements)
+            elif isinstance(value, list):
+                cls._apply_requirements_to_list(value, resolved_requirements)
+
+    @classmethod
+    def _apply_requirements_to_list(
+        cls,
+        items: list,
+        resolved_requirements: dict[str, Any],
+    ) -> None:
+        """Recursively apply requirements within a list."""
+        for i, item in enumerate(items):
+            if isinstance(item, dict):
+                if requirement := RequirementData.from_dict(item):
+                    if requirement.id not in resolved_requirements:
+                        raise WorkflowYAMLLoaderException(
+                            f"Cannot resolve $id '{requirement.id}': not found in resolved_requirements. "
+                            f"Use get_requirements() to get requirements and resolve them before parsing."
+                        )
+                    items[i] = resolved_requirements[requirement.id]
+                else:
+                    cls._apply_requirements_to_dict(item, resolved_requirements)
+            elif isinstance(item, list):
+                cls._apply_requirements_to_list(item, resolved_requirements)
 
     @classmethod
     def get_entity_by_type(cls, entity_type: str, entity_registry: dict[str, Any] | None = None) -> Any:
@@ -78,21 +195,26 @@ class WorkflowYAMLLoader:
         return entity
 
     @classmethod
-    def get_connections(cls, data: dict[str, dict], registry: dict[str, Any]) -> dict[str, BaseConnection]:
+    def get_connections(
+        cls,
+        data: dict[str, dict],
+        registry: dict[str, Any],
+    ) -> dict[str, BaseConnection]:
         """
         Get connections from the provided data.
 
         Args:
-            data (dict[str, dict]): The data containing connection information.
-            registry (dict[str, Any]): A registry of entities.
+            data: The data containing connection information.
+            registry: A registry of entities.
 
         Returns:
-            dict[str, BaseConnection]: A dictionary of connections.
+            A dictionary of connections.
 
         Raises:
             WorkflowYAMLLoaderException: If there's an error in connection data or initialization.
         """
         connections = {}
+
         for conn_id, conn_data in data.get("connections", {}).items():
             if conn_id in connections:
                 raise WorkflowYAMLLoaderException(f"Connection '{conn_id}' already exists")
@@ -110,6 +232,45 @@ class WorkflowYAMLLoader:
             connections[conn_id] = connection
 
         return connections
+
+    @classmethod
+    def get_inline_connection(
+        cls,
+        node_id: str,
+        conn_data: dict,
+        registry: dict[str, Any] | None = None,
+    ) -> BaseConnection:
+        """
+        Create an inline connection from node's connection data.
+
+        Args:
+            node_id: The ID of the node that uses this connection.
+            conn_data: The connection data dictionary.
+            registry: A registry of entities.
+
+        Returns:
+            The created connection.
+
+        Raises:
+            WorkflowYAMLLoaderException: If the connection data is invalid.
+        """
+        if not (conn_type := conn_data.get("type")):
+            raise WorkflowYAMLLoaderException(f"Value 'type' not found for inline connection in node '{node_id}'")
+
+        conn_cls = cls.get_entity_by_type(entity_type=conn_type, entity_registry=registry)
+        conn_init_data = conn_data.copy()
+        conn_init_data.pop("type", None)
+
+        # Generate UUID for connection id if not provided
+        if "id" not in conn_init_data:
+            conn_init_data["id"] = generate_uuid()
+
+        try:
+            connection = conn_cls(**conn_init_data)
+        except Exception as e:
+            raise WorkflowYAMLLoaderException(f"Inline connection for node '{node_id}' data is invalid. Error: {e}")
+
+        return connection
 
     @classmethod
     def init_prompt(cls, prompt_init_data: dict) -> Prompt:
@@ -177,49 +338,85 @@ class WorkflowYAMLLoader:
 
     @classmethod
     def get_node_connection(
-        cls, node_id: str, node_data: dict, connections: dict[id, BaseConnection]
+        cls,
+        node_id: str,
+        node_data: dict,
+        connections: dict[str, BaseConnection],
+        registry: dict[str, Any] | None = None,
     ) -> BaseConnection | None:
         """
         Get the connection for a node.
 
+        Supports both:
+        - Reference by ID (string): Looks up connection in the connections dictionary.
+        - Inline connection (dict): Creates a new connection from the provided data.
+
         Args:
-            node_id (str): The ID of the node.
-            node_data (dict): The data for the node.
-            connections (dict[id, BaseConnection]): A dictionary of available connections.
+            node_id: The ID of the node.
+            node_data: The data for the node.
+            connections: A dictionary of available connections.
+            registry: A registry of entities (required for inline connections).
 
         Returns:
-            BaseConnection | None: The connection for the node, or None if not found.
+            The connection for the node, or None if not found.
 
         Raises:
-            WorkflowYAMLLoaderException: If the specified connection is not found.
+            WorkflowYAMLLoaderException: If the specified connection is not found or invalid.
         """
-        conn = None
-        if conn_id := node_data.get("connection"):
-            conn = connections.get(conn_id)
+        conn_value = node_data.get("connection")
+        if conn_value is None:
+            return
+
+        if isinstance(conn_value, str):
+            conn = connections.get(conn_value)
             if not conn:
-                raise WorkflowYAMLLoaderException(f"Connection '{conn_id}' for node '{node_id}' not found")
-        return conn
+                raise WorkflowYAMLLoaderException(f"Connection '{conn_value}' for node '{node_id}' not found")
+            return conn
+
+        if isinstance(conn_value, dict):
+            connection = cls.get_inline_connection(
+                node_id=node_id,
+                conn_data=conn_value,
+                registry=registry,
+            )
+            connections[connection.id] = connection
+            return connection
+
+        raise WorkflowYAMLLoaderException(
+            f"Invalid connection format for node '{node_id}'. Expected string (reference) or dict (inline)."
+        )
 
     @classmethod
     def get_node_vector_store_connection(
-        cls, node_id: str, node_data: dict, connections: dict[id, BaseConnection]
+        cls,
+        node_id: str,
+        node_data: dict,
+        connections: dict[str, BaseConnection],
+        registry: dict[str, Any] | None = None,
     ) -> Any | None:
         """
         Get the vector store connection for a node.
 
         Args:
-            node_id (str): The ID of the node.
-            node_data (dict): The data for the node.
-            connections (dict[id, BaseConnection]): A dictionary of available connections.
+            node_id: The ID of the node.
+            node_data: The data for the node.
+            connections: A dictionary of available connections.
+            registry: A registry of entities (required for inline connections).
 
         Returns:
-            Any | None: The vector store connection for the node, or None if not found.
+            The vector store connection for the node, or None if not found.
 
         Raises:
             WorkflowYAMLLoaderException: If the specified vector store connection is not found or
                                          does not support vector store initialization.
         """
-        if conn := cls.get_node_connection(node_id=node_id, node_data=node_data, connections=connections):
+        conn = cls.get_node_connection(
+            node_id=node_id,
+            node_data=node_data,
+            connections=connections,
+            registry=registry,
+        )
+        if conn:
             if not (conn_to_vs := getattr(conn, "connect_to_vector_store", None)) or not callable(conn_to_vs):
                 raise WorkflowYAMLLoaderException(
                     f"Vector store connection '{conn.id}' for node '{node_id}' not support vector store initialization"
@@ -548,7 +745,12 @@ class WorkflowYAMLLoader:
                 if isinstance(node_cls, ConnectionNode)
                 else cls.get_node_connection
             )
-            node_init_data["connection"] = get_node_conn(node_id=node_id, node_data=node_data, connections=connections)
+            node_init_data["connection"] = get_node_conn(
+                node_id=node_id,
+                node_data=node_data,
+                connections=connections,
+                registry=registry,
+            )
         if prompt_data := node_init_data.get("prompt"):
             node_init_data["prompt"] = (
                 cls.get_node_prompt(node_id=node_id, node_data=node_data, prompts=prompts)
@@ -907,15 +1109,32 @@ class WorkflowYAMLLoader:
 
         Raises:
             WorkflowYAMLLoaderException: If parsing fails.
+
+        Usage:
+            # Step 1: Extract all requirements without initialization
+            requirements = WorkflowYAMLLoader.get_requirements(data)
+
+            # Step 2: Resolve requirements via external API
+            resolved = {req.id: api_fetch(req.id) for req in requirements}
+
+            # Step 3: Apply resolved requirements to YAML data (mutates in-place)
+            WorkflowYAMLLoader.apply_resolved_requirements(data, resolved)
+
+            # Step 4: Parse the data
+            result = WorkflowYAMLLoader.parse(data)
         """
         nodes, flows = {}, {}
         # Mutable shared registry that updates with each new entity.
         node_registry, connection_registry = {}, {}
+
         if init_components and connection_manager is None:
             connection_manager = ConnectionManager()
 
         try:
-            connections = cls.get_connections(data=data, registry=connection_registry)
+            connections = cls.get_connections(
+                data=data,
+                registry=connection_registry,
+            )
             prompts = cls.get_prompts(data)
 
             nodes_data = data.get("nodes", {})
