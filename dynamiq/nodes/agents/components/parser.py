@@ -9,9 +9,9 @@ from dynamiq.nodes.agents.exceptions import ActionParsingException
 from dynamiq.utils.logger import logger
 
 
-def parse_thought(output: str) -> str:
+def parse_default_thought(output: str) -> str:
     """
-    Extracts thought from the output string.
+    Extracts thought from the output string in default inference mode format.
 
     Args:
         output: The LLM output string
@@ -31,9 +31,11 @@ def parse_thought(output: str) -> str:
     return ""
 
 
-def parse_action(output: str, parallel_tool_calls_enabled: bool) -> tuple[str | None, str | None, dict | list | None]:
+def parse_default_action(
+    output: str, parallel_tool_calls_enabled: bool
+) -> tuple[str | None, str | None, dict | list | None]:
     """
-    Parses the action(s), input(s), and thought from the output string.
+    Parses the action(s), input(s), and thought from the output string in default inference mode format.
 
     Supports both single tool actions and multiple sequential tool calls
     when multi-tool is enabled.
@@ -52,9 +54,7 @@ def parse_action(output: str, parallel_tool_calls_enabled: bool) -> tuple[str | 
         ActionParsingException: If parsing fails or format is invalid
     """
     try:
-        thought_pattern = r"Thought:\s*(.*?)(?:Action:|$)"
-        thought_match = re.search(thought_pattern, output, re.DOTALL)
-        thought = thought_match.group(1).strip() if thought_match else None
+        thought = parse_default_thought(output) or None
 
         action_pattern = r"Action:\s*(.*?)\nAction Input:\s*(\{(?:[^{}]|(?R))*\})"
 
@@ -111,9 +111,9 @@ def parse_action(output: str, parallel_tool_calls_enabled: bool) -> tuple[str | 
         )
 
 
-def extract_final_answer(output: str) -> tuple[str, str]:
+def extract_default_final_answer(output: str) -> tuple[str, str]:
     """
-    Extracts the final thought and answer from the output string.
+    Extracts the final thought and answer from the output string in default inference mode format.
 
     Args:
         output: The LLM output string containing Thought and Answer

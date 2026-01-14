@@ -5,7 +5,11 @@ import pytest
 
 from dynamiq import connections, prompts
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.agents.components.parser import extract_final_answer, parse_action, parse_thought
+from dynamiq.nodes.agents.components.parser import (
+    extract_default_final_answer,
+    parse_default_action,
+    parse_default_thought,
+)
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     JSONParsingError,
@@ -71,34 +75,34 @@ def mock_tool():
     return tool
 
 
-def test_parse_thought(default_react_agent):
+def test_parse_default_thought(default_react_agent):
     """Test extracting thought from agent output."""
     output = """
     Thought: I need to search for information about the weather.
     Action: search
     Action Input: {"query": "weather in San Francisco"}
     """
-    thought = parse_thought(output)
+    thought = parse_default_thought(output)
     assert thought == "I need to search for information about the weather."
 
 
-def test_parse_action_missing_action_input(default_react_agent):
+def test_parse_default_action_missing_action_input(default_react_agent):
     """Test parsing with missing action input raises an exception."""
     output = """
     Thought: I need to search for information about the weather.
     Action: search
     """
     with pytest.raises(ActionParsingException):
-        parse_action(output, parallel_tool_calls_enabled=False)
+        parse_default_action(output, parallel_tool_calls_enabled=False)
 
 
-def test_extract_final_answer(default_react_agent):
+def test_extract_default_final_answer(default_react_agent):
     """Test extracting the final answer from the output."""
     output = """
     Thought: I found all the information needed.
     Answer: The weather in San Francisco is foggy with a high of 65°F.
     """
-    answer = extract_final_answer(output)
+    answer = extract_default_final_answer(output)
     assert answer[0] == "I found all the information needed."
     assert answer[1] == "The weather in San Francisco is foggy with a high of 65°F."
 
@@ -401,3 +405,64 @@ def test_xmlparser_parse_with_only_opening_answer_tag():
 
     assert "GDP of France" in result["answer"]
     assert "3.2 trillion USD" in result["answer"]
+
+
+def test_generate_structured_output_schemas(openai_node, mock_tool):
+    """Test structured output schema generation."""
+    from dynamiq.nodes.agents.components.schema_generator import generate_structured_output_schemas
+
+    agent = Agent(name="Test Agent", llm=openai_node, tools=[mock_tool], inference_mode=InferenceMode.DEFAULT)
+
+    schema = generate_structured_output_schemas(
+        tools=[mock_tool], sanitize_tool_name=agent.sanitize_tool_name, delegation_allowed=False
+    )
+
+    # Verify schema structure
+    assert "type" in schema
+    assert schema["type"] == "json_schema"
+    assert "json_schema" in schema
+
+    json_schema = schema["json_schema"]
+    assert json_schema["name"] == "plan_next_action"
+    assert json_schema["strict"] is True
+
+    # Verify required fields
+    assert set(json_schema["schema"]["required"]) == {"thought", "action", "action_input"}
+
+    # Verify properties
+    properties = json_schema["schema"]["properties"]
+    assert "thought" in properties
+    assert "action" in properties
+    assert "action_input" in properties
+
+
+def test_generate_function_calling_schemas(openai_node, mock_tool):
+    """Test function calling schema generation."""
+    from dynamiq.nodes.agents.components.schema_generator import generate_function_calling_schemas
+
+    agent = Agent(name="Test Agent", llm=openai_node, tools=[mock_tool], inference_mode=InferenceMode.FUNCTION_CALLING)
+
+    schemas = generate_function_calling_schemas(
+        tools=[mock_tool], delegation_allowed=False, sanitize_tool_name=agent.sanitize_tool_name, llm=openai_node
+    )
+
+    # Should have at least final answer function + mock tool
+    assert len(schemas) >= 2
+
+    # First schema should be the final answer function
+    final_answer_schema = schemas[0]
+    assert final_answer_schema["type"] == "function"
+    assert final_answer_schema["function"]["name"] == "provide_final_answer"
+    assert "thought" in final_answer_schema["function"]["parameters"]["properties"]
+    assert "answer" in final_answer_schema["function"]["parameters"]["properties"]
+
+    # Verify all schemas have required structure
+    for schema in schemas:
+        assert "type" in schema
+        assert schema["type"] == "function"
+        assert "function" in schema
+        assert "name" in schema["function"]
+        assert "parameters" in schema["function"]
+        assert "properties" in schema["function"]["parameters"]
+        assert schema["function"]["strict"] is True
+        assert schema["function"]["parameters"]["additionalProperties"] is False

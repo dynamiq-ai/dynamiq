@@ -90,10 +90,20 @@ class Agent(BaseAgent):
     _response_format: dict[str, Any] | None = None
     _history_manager: HistoryManager | None = None
 
-    def model_post_init(self, __context: Any) -> None:
-        """Initialize components after model creation."""
-        super().model_post_init(__context)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self._history_manager = HistoryManager(self)
+
+    def clone(self) -> "Agent":
+        """
+        Create a safe clone of the agent.
+
+        Overrides the base clone() to ensure _history_manager points to the cloned agent instance.
+        """
+        cloned = super().clone()
+        # Reinitialize history manager to point to the cloned agent, not the original
+        cloned._history_manager = HistoryManager(cloned)
+        return cloned
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -239,11 +249,23 @@ class Agent(BaseAgent):
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             # For function calling, construct a message that includes the tool call
             if "tool_calls" in dict(llm_result.output):
-                tool_call = list(llm_result.output["tool_calls"].values())[0]
-                function_name = tool_call["function"]["name"]
-                function_args = json.dumps(tool_call["function"]["arguments"])
-                message_content = f"Function call: {function_name}({function_args})"
-                self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=message_content, static=True))
+                try:
+                    tool_call = list(llm_result.output["tool_calls"].values())[0]
+                    function_name = tool_call["function"]["name"]
+                    function_args = json.dumps(tool_call["function"]["arguments"])
+                    message_content = f"Function call: {function_name}({function_args})"
+                    self._prompt.messages.append(
+                        Message(role=MessageRole.ASSISTANT, content=message_content, static=True)
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to extract tool call from LLM result: {e}. Using raw output instead.")
+                    self._prompt.messages.append(
+                        Message(
+                            role=MessageRole.ASSISTANT,
+                            content=llm_generated_output or "Cannot extract tool call from LLM result.",
+                            static=True,
+                        )
+                    )
         elif llm_generated_output:
             # For other modes, use the generated text output
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True))
@@ -265,11 +287,13 @@ class Agent(BaseAgent):
             return None, None, None
 
         if "Answer:" in llm_generated_output:
-            thought, final_answer = parser.extract_final_answer(llm_generated_output)
+            thought, final_answer = parser.extract_default_final_answer(llm_generated_output)
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
-        thought, action, action_input = parser.parse_action(llm_generated_output, self.parallel_tool_calls_enabled)
+        thought, action, action_input = parser.parse_default_action(
+            llm_generated_output, self.parallel_tool_calls_enabled
+        )
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
 
@@ -798,14 +822,12 @@ class Agent(BaseAgent):
                 if result[0] is None:
                     continue
 
-                # Unpack action details
                 thought, action, action_input = result
 
                 final_answer = self._execute_tools_and_update_prompt(
                     action, action_input, thought, loop_num, config, **kwargs
                 )
 
-                # if final answer is delegated, return it immediately.
                 if final_answer is not None:
                     return final_answer
 
@@ -920,7 +942,7 @@ class Agent(BaseAgent):
             )
         elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
             self._response_format = schema_generator.generate_structured_output_schemas(
-                self.tools, self.sanitize_tool_name
+                self.tools, self.sanitize_tool_name, self.delegation_allowed
             )
 
         # Setup ReAct-specific prompts via prompt manager
@@ -929,6 +951,16 @@ class Agent(BaseAgent):
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             has_tools=bool(self.tools),
         )
+
+        # Only auto-wrap the entire role in a raw block if the user did not
+        # provide explicit raw/endraw markers. This allows roles to mix
+        # literal sections (via raw) with Jinja variables like {{ input }}
+        # without creating nested raw blocks.
+        if self.role:
+            if ("{% raw %}" in self.role) or ("{% endraw %}" in self.role):
+                self.system_prompt_manager.set_block("role", self.role)
+            else:
+                self.system_prompt_manager.set_block("role", f"{{% raw %}}{self.role}{{% endraw %}}")
 
     @staticmethod
     def _build_unique_file_key(files_map: dict[str, Any], base: str) -> str:
