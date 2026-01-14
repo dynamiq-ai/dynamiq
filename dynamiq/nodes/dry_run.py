@@ -65,7 +65,7 @@ class DryRunMixin:
         if dry_run_config.delete_documents and self._tracked_documents:
             try:
                 self.delete_documents(list(self._tracked_documents))
-                logger.debug(f"Cleaned up {len(self._tracked_documents)} tracked documents")
+                logger.info(f"Cleaned up {len(self._tracked_documents)} tracked documents")
                 self._tracked_documents = []
             except Exception as e:
                 logger.error(f"Failed to clean up tracked documents: {e}")
@@ -73,7 +73,7 @@ class DryRunMixin:
         if dry_run_config.delete_collection and self._tracked_collection:
             try:
                 self.delete_collection(self._tracked_collection)
-                logger.debug(f"Cleaned up collection: {self._tracked_collection}")
+                logger.info(f"Cleaned up collection: {self._tracked_collection}")
                 self._tracked_collection = None
             except Exception as e:
                 logger.error(f"Failed to clean up collection {self._tracked_collection}: {e}")
