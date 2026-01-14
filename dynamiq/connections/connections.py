@@ -1016,7 +1016,7 @@ class PostgreSQL(BaseConnection):
                 password=self.password,
                 row_factory=psycopg.rows.dict_row,
             )
-            conn.autocommit = True
+            conn.autocommit = False
             logger.debug(
                 f"Connected to PostgreSQL with host={self.host}, "
                 f"port={str(self.port)}, user={self.user}, "

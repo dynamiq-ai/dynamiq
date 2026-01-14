@@ -1,11 +1,12 @@
+import re
 from contextlib import contextmanager
-from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
 import psycopg
 from pgvector.psycopg import register_vector
 from psycopg import Cursor
+from psycopg import errors as psycopg_errors
 from psycopg.rows import dict_row
 from psycopg.sql import SQL, Identifier
 from psycopg.sql import Literal as SQLLiteral
@@ -58,6 +59,13 @@ DEFAULT_KEYWORD_INDEX_NAME = "dynamiq_keyword_index"
 DEFAULT_SCHEMA_NAME = "public"
 DEFAULT_LANGUAGE = "english"
 
+DEFAULT_KEYWORD_RANK_CONSTANT = 60
+DEFAULT_TOP_K_SUBQUERY_MULTIPLIER = 4
+
+DEFAULT_IVFFLAT_LISTS = None  # Auto-calculated
+DEFAULT_HNSW_M = 16
+DEFAULT_HNSW_EF_CONSTRUCTION = 64
+
 
 class PGVectorStoreParams(BaseVectorStoreParams):
     table_name: str = DEFAULT_TABLE_NAME
@@ -94,6 +102,9 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         embedding_key: str = "embedding",
         keyword_index_name: str = DEFAULT_KEYWORD_INDEX_NAME,
         language: str = DEFAULT_LANGUAGE,
+        ivfflat_lists: int | None = DEFAULT_IVFFLAT_LISTS,
+        hnsw_m: int = DEFAULT_HNSW_M,
+        hnsw_ef_construction: int = DEFAULT_HNSW_EF_CONSTRUCTION,
         dry_run_config: DryRunConfig | None = None,
     ):
         """
@@ -103,18 +114,21 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             connection (PostgreSQL | str): PostgreSQL connection instance. Defaults to None.
             client (Optional[PostgreSQL]): PostgreSQL client instance. Defaults to None.
             create_extension (bool): Whether to create the vector extension (if it does not exist). Defaults to True.
-            table_name (str): Name of the table in the database. Defaults to None.
-            schema_name (str): Name of the schema in the database. Defaults to None.
+            table_name (str): Name of the table in the database.
+            schema_name (str): Name of the schema in the database.
             dimension (int): Dimension of the embeddings. Defaults to 1536.
             vector_function (PGVectorVectorFunction): The vector function to use for similarity calculations.
-                Defaults to 'cosine_similarity'.
             index_method (PGVectorIndexMethod): The index method to use for the vector store.
-                Defaults to 'exact_nearest_neighbor_search'.
-            index_name (str): Name of the index to create. Defaults to None.
-            create_if_not_exist (bool): Whether to create the table and index if they do not exist. Defaults to False.
-            content_key (Optional[str]): The field used to store content in the storage. Defaults to 'content'.
-            embedding_key (Optional[str]): The field used to store embeddings in the storage. Defaults to 'embedding'.
-            dry_run_config (Optional[DryRunConfig]): Configuration for dry run mode. Defaults to None.
+            index_name (str): Name of the index to create.
+            create_if_not_exist (bool): Whether to create the table and index if they do not exist.
+            content_key (str): The field used to store content in the storage.
+            embedding_key (str): The field used to store embeddings in the storage.
+            keyword_index_name (str): Name of the keyword index.
+            language (str): Language for full-text search.
+            ivfflat_lists (int | None): Number of lists for IVFFLAT index. Auto-calculated if None.
+            hnsw_m (int): Number of connections per layer for HNSW index.
+            hnsw_ef_construction (int): Size of the dynamic candidate list for HNSW index construction.
+            dry_run_config (Optional[DryRunConfig]): Configuration for dry run mode.
         """
         super().__init__(dry_run_config=dry_run_config)
 
@@ -123,19 +137,20 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         if index_method is not None and index_method not in PGVectorIndexMethod:
             raise ValueError(f"index_method must be one of {list(PGVectorIndexMethod)}")
 
-        if client is None or client.closed:
+        if client is None:
             if isinstance(connection, str):
                 self.connection_string = connection
                 self._conn = psycopg.connect(self.connection_string)
-                self.client = self._conn
             elif isinstance(connection, PostgreSQL):
                 self._conn = connection.connect()
                 self.connection_string = connection.conn_params
-                self.client = self._conn
             else:
-                raise ValueError("connection must be a string or PostgreSQL object")
+                raise ValueError("Either 'connection' (str or PostgreSQL) or 'client' must be provided")
+            self.client = self._conn
         else:
+            self.client = client
             self._conn = client
+            self.connection_string = None
 
         self.create_extension = create_extension
         if self.create_extension:
@@ -151,6 +166,9 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         self.vector_function = vector_function
         self.keyword_index_name = keyword_index_name
         self.language = language
+        self.ivfflat_lists = ivfflat_lists
+        self.hnsw_m = hnsw_m
+        self.hnsw_ef_construction = hnsw_ef_construction
 
         self.content_key = content_key
         self.embedding_key = embedding_key
@@ -166,16 +184,18 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         if self.create_if_not_exist:
             with self._get_connection() as conn:
-
-                if not self._check_if_table_exists(conn) and not self._check_if_schema_exists(conn):
-                    self._track_collection(f"{self.schema_name}.{self.table_name}")
+                # Check if table exists before creating it
+                table_exists = self._check_if_table_exists(conn)
 
                 self._create_schema(conn)
                 self._create_tables(conn)
                 if self.index_method in [PGVectorIndexMethod.IVFFLAT, PGVectorIndexMethod.HNSW]:
-                    self.index_name = index_name or f"{self.index_method}_index"
+                    self.index_name = index_name or f"{self.table_name}_{self.index_method}_index"
                     self._create_index(conn)
                 self._create_keyword_index(conn)
+
+                if not table_exists:
+                    self._track_collection(f"{self.schema_name}.{self.table_name}")
         else:
             if not self._check_if_schema_exists(self._conn):
                 msg = f"Schema '{self.schema_name}' does not exist"
@@ -186,6 +206,61 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         logger.debug(f"PGVectorStore initialized with table_name: {self.table_name}")
 
+    def _sanitize_error_message(self, error_msg: str) -> str:
+        """
+        Sanitize error messages to prevent exposure of credentials.
+
+        Args:
+            error_msg: Raw error message from database operations.
+
+        Returns:
+            Sanitized error message safe for logging.
+        """
+        sanitized = error_msg
+
+        # Remove connection string patterns
+        sanitized = re.sub(r'postgresql://[^\'"\s]+', "postgresql://[REDACTED]", sanitized)
+        sanitized = re.sub(r'password=[^\'"\s&]+', "password=[REDACTED]", sanitized)
+        sanitized = re.sub(r'user=[^\'"\s&]+', "user=[REDACTED]", sanitized)
+
+        if len(sanitized) > 500:
+            sanitized = sanitized[:497] + "..."
+
+        return sanitized
+
+    def _prepare_filters(self, filters: dict[str, Any] | None) -> tuple[SQL, tuple]:
+        """
+        Prepare filters for SQL queries.
+
+        Args:
+            filters: Dictionary of filters to convert to SQL WHERE clause.
+
+        Returns:
+            Tuple of (SQL where clause, parameter tuple).
+        """
+        if not filters:
+            return SQL(""), ()
+        return _convert_filters_to_query(filters)
+
+    def _set_pgvector_runtime_params(self, conn: "PsycopgConnection", top_k: int) -> None:
+        """
+        Set pgvector runtime parameters for optimal query performance.
+
+        Args:
+            conn: Database connection to set parameters on.
+            top_k: Number of results requested, used to tune parameters.
+        """
+        if self.index_method == PGVectorIndexMethod.IVFFLAT:
+            # For IVFFLAT, probes should be proportional to top_k but capped
+            probes = max(top_k // 10, 1)
+            probes = min(probes, 100)
+            conn.execute(f"SET ivfflat.probes = {probes}")
+        elif self.index_method == PGVectorIndexMethod.HNSW:
+            # For HNSW, ef_search should be at least top_k
+            ef_search = max(top_k * 2, 40)
+            ef_search = min(ef_search, 1000)
+            conn.execute(f"SET hnsw.ef_search = {ef_search}")
+
     @contextmanager
     def _get_connection(self):
         """Context manager for handling a single connection"""
@@ -193,14 +268,18 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         import psycopg
 
         if self._conn is None or self._conn.closed:
-            if self.client is None:
-                self._conn = psycopg.connect(self.connection_string)
-            else:
-                self._conn = self.client
+            if not self.connection_string:
+                raise VectorStoreException("Connection is closed and no connection string available for reconnection")
+            self._conn = psycopg.connect(self.connection_string)
+            self.client = self._conn
         try:
             yield self._conn
         except Exception as e:
-            self._conn.rollback()
+            if self._conn and not self._conn.closed:
+                try:
+                    self._conn.rollback()
+                except Exception as rollback_error:
+                    logger.warning(f"Failed to rollback transaction: {rollback_error}")
             raise e
 
     def _check_if_schema_exists(self, conn: psycopg.Connection) -> bool:
@@ -254,7 +333,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             result = self._execute_sql_query(query, (self.schema_name, self.table_name), cursor=cur).fetchone()
             return bool(result["exists"])
 
-    def _execute_sql_query(self, sql_query: Any, params: tuple | None = None, cursor: Cursor | None = None) -> Any:
+    def _execute_sql_query(self, sql_query: Any, params: tuple | None = None, cursor: Cursor | None = None) -> Cursor:
         """
         Internal method to execute a SQL query.
 
@@ -265,23 +344,52 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         Raises:
             VectorStoreException: If an error occurs while executing the query.
+            ValueError: If invalid data is provided.
 
         Returns:
-            Any: The result of the query.
+            Cursor: The cursor with query results.
         """
 
         params = params or ()
 
-        sql_query_str = sql_query.as_string(cursor) if not isinstance(sql_query, str) else sql_query
-
         try:
             result = cursor.execute(sql_query, params)
-        except Exception as e:
-            self._conn.rollback()
-            msg = f"Encountered an error while executing SQL query: {sql_query_str} with params: {params}. \nError: {e}"
-            raise VectorStoreException(msg)
+            return result
 
-        return result
+        except psycopg_errors.OperationalError as e:
+            # Connection issues
+            sanitized_error = self._sanitize_error_message(str(e))
+            logger.warning(f"Database connection error: {sanitized_error}")
+            raise VectorStoreException("Database connection error") from e
+
+        except psycopg_errors.UniqueViolation as e:
+            # Duplicate key
+            sanitized_error = self._sanitize_error_message(str(e))
+            logger.debug(f"Duplicate key violation: {sanitized_error}")
+            raise VectorStoreException("Document already exists") from e
+
+        except psycopg_errors.DataError as e:
+            # Invalid data (e.g., wrong vector dimension, invalid JSON)
+            sanitized_error = self._sanitize_error_message(str(e))
+            logger.error(f"Data validation error: {sanitized_error}")
+            raise ValueError("Invalid document data provided") from e
+
+        except psycopg_errors.SyntaxError as e:
+            # SQL syntax error
+            sanitized_error = self._sanitize_error_message(str(e))
+            logger.error(f"SQL syntax error: {sanitized_error}")
+            raise VectorStoreException("Database query syntax error") from e
+
+        except psycopg_errors.InsufficientPrivilege as e:
+            # Permission error
+            sanitized_error = self._sanitize_error_message(str(e))
+            logger.error(f"Insufficient privileges: {sanitized_error}")
+            raise VectorStoreException("Insufficient database privileges") from e
+
+        except Exception as e:
+            sanitized_error = self._sanitize_error_message(str(e))
+            logger.error(f"Unexpected database error: {sanitized_error}", exc_info=True)
+            raise VectorStoreException("Unexpected database error") from e
 
     def _create_tables(
         self,
@@ -367,19 +475,50 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             raise ValueError(msg)
 
         vector_ops = VECTOR_FUNCTION_TO_POSTGRESQL_OPS[self.vector_function]
-        query = SQL(
-            """
-            CREATE INDEX IF NOT EXISTS {index_name}
-            ON {schema_name}.{table_name} USING {index_method} ({embedding} {vector_ops});
-            """
-        ).format(
-            index_name=Identifier(f"{self.table_name}_{self.index_method}_index"),
-            schema_name=Identifier(self.schema_name),
-            table_name=Identifier(self.table_name),
-            index_method=Identifier(self.index_method),
-            vector_ops=Identifier(vector_ops),
-            embedding=Identifier(embedding_key),
-        )
+
+        if self.index_method == PGVectorIndexMethod.IVFFLAT:
+            lists = self.ivfflat_lists
+            if lists is None:
+                try:
+                    # Estimate based on the amount of rows
+                    row_count = self.count_documents()
+                    lists = max(min(row_count // 1000, 1000), 10)
+                except Exception:
+                    lists = 100
+
+            query = SQL(
+                """
+                CREATE INDEX IF NOT EXISTS {index_name}
+                ON {schema_name}.{table_name} USING ivfflat ({embedding} {vector_ops})
+                WITH (lists = {lists})
+                """
+            ).format(
+                index_name=Identifier(f"{self.table_name}_{self.index_method}_index"),
+                schema_name=Identifier(self.schema_name),
+                table_name=Identifier(self.table_name),
+                embedding=Identifier(embedding_key),
+                vector_ops=Identifier(vector_ops),
+                lists=SQLLiteral(lists),
+            )
+        elif self.index_method == PGVectorIndexMethod.HNSW:
+            query = SQL(
+                """
+                CREATE INDEX IF NOT EXISTS {index_name}
+                ON {schema_name}.{table_name} USING hnsw ({embedding} {vector_ops})
+                WITH (m = {m}, ef_construction = {ef_construction})
+                """
+            ).format(
+                index_name=Identifier(f"{self.table_name}_{self.index_method}_index"),
+                schema_name=Identifier(self.schema_name),
+                table_name=Identifier(self.table_name),
+                embedding=Identifier(embedding_key),
+                vector_ops=Identifier(vector_ops),
+                m=SQLLiteral(self.hnsw_m),
+                ef_construction=SQLLiteral(self.hnsw_ef_construction),
+            )
+        else:
+            # EXACT search
+            return
 
         with conn.cursor() as cur:
             self._execute_sql_query(query, cursor=cur)
@@ -399,29 +538,16 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         """
 
         content_key = content_key or self.content_key
-
-        check_if_keyword_index_exists_query = SQL(
-            """
-            SELECT 1
-            FROM pg_indexes
-            WHERE schemaname = {schema_name}
-            AND tablename = {table_name}
-            AND indexname = {index_name};
-            """
-        ).format(
-            schema_name=SQLLiteral(self.schema_name),
-            table_name=SQLLiteral(self.table_name),
-            index_name=SQLLiteral(self.keyword_index_name),
-        )
+        table_specific_keyword_index_name = f"{self.table_name}_{self.keyword_index_name}"
 
         create_keyword_index_query = SQL(
             """
-            CREATE INDEX {index_name}
+            CREATE INDEX IF NOT EXISTS {index_name}
             ON {schema_name}.{table_name}
             USING gin(to_tsvector({language}, {content_key}));
             """
         ).format(
-            index_name=Identifier(self.keyword_index_name),
+            index_name=Identifier(table_specific_keyword_index_name),
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
             content_key=Identifier(content_key),
@@ -429,10 +555,8 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         )
 
         with conn.cursor() as cur:
-            index_exists = bool(self._execute_sql_query(check_if_keyword_index_exists_query, cursor=cur).fetchone())
-            if not index_exists:
-                self._execute_sql_query(create_keyword_index_query, cursor=cur)
-                conn.commit()
+            self._execute_sql_query(create_keyword_index_query, cursor=cur)
+            conn.commit()
 
     def _drop_index(self, conn: psycopg.Connection) -> None:
         """
@@ -541,14 +665,15 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         Args:
             documents (list[Document]): List of Document objects to write.
+            content_key (str | None): The field used to store content in the storage. Defaults to None.
+            embedding_key (str | None): The field used to store embeddings in the storage. Defaults to None.
 
         Returns:
             int: Number of documents successfully written.
 
         Raises:
-            ValueError: If documents are not of type Document.
+            ValueError: If documents are not of type Document or have invalid embeddings.
         """
-
         if not documents:
             return 0
 
@@ -559,32 +684,41 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         content_key = content_key or self.content_key
         embedding_key = embedding_key or self.embedding_key
 
+        document_ids = []
+        for doc in documents:
+            if doc.embedding is not None and len(doc.embedding) != self.dimension:
+                raise ValueError(
+                    f"Document {doc.id} embedding dimension {len(doc.embedding)} "
+                    f"does not match configured dimension {self.dimension}"
+                )
+            document_ids.append(doc.id)
+
+        # Prepare batch data
+        batch_data = [(doc.id, doc.content, Jsonb(doc.metadata), doc.embedding) for doc in documents]
+
+        query = SQL(
+            """
+            INSERT INTO {schema_name}.{table_name} (id, {content_key}, metadata, {embedding_key})
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                {content_key} = EXCLUDED.{content_key},
+                metadata = EXCLUDED.metadata,
+                {embedding_key} = EXCLUDED.{embedding_key}
+            """
+        ).format(
+            schema_name=Identifier(self.schema_name),
+            table_name=Identifier(self.table_name),
+            content_key=Identifier(content_key),
+            embedding_key=Identifier(embedding_key),
+        )
+
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                written = 0
-                for doc in documents:
-                    query = SQL(
-                        """
-                        INSERT INTO {schema_name}.{table_name} (id, {content_key}, metadata, {embedding_key})
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE
-                        SET {content_key} = EXCLUDED.{content_key},
-                        metadata = EXCLUDED.metadata,
-                        {embedding_key} = EXCLUDED.{embedding_key};
-                        """
-                    ).format(
-                        schema_name=Identifier(self.schema_name),
-                        table_name=Identifier(self.table_name),
-                        content_key=Identifier(content_key),
-                        embedding_key=Identifier(embedding_key),
-                    )
-                    self._execute_sql_query(
-                        query, (doc.id, doc.content, Jsonb(doc.metadata), doc.embedding), cursor=cur
-                    )
-                    self._track_documents([doc.id])
-                    written += 1
+                cur.executemany(query, batch_data)
                 conn.commit()
-                return written
+
+        self._track_documents(document_ids)
+        return len(documents)
 
     def delete_documents_by_filters(self, filters: dict[str, Any], top_k: int = 1000) -> None:
         """
@@ -592,15 +726,15 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         Args:
             filters (dict[str, Any]): Filters to select documents to delete.
+            top_k (int): Unused parameter, kept for compatibility.
         """
         if filters:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
-                    sql_where_clause, params = _convert_filters_to_query(filters)
+                    sql_where_clause, params = self._prepare_filters(filters)
                     query = SQL("DELETE FROM {schema_name}.{table_name}").format(
                         schema_name=Identifier(self.schema_name),
                         table_name=Identifier(self.table_name),
-                        sql_where_clause=sql_where_clause,
                     )
                     query += sql_where_clause
                     self._execute_sql_query(query, params, cursor=cur)
@@ -671,15 +805,22 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                         conn.commit()
 
     def list_documents(
-        self, include_embeddings: bool = False, content_key: str | None = None, embedding_key: str | None = None
+        self,
+        include_embeddings: bool = False,
+        content_key: str | None = None,
+        embedding_key: str | None = None,
+        offset: int = 0,
+        limit: int | None = None,
     ) -> list[Document]:
         """
-        List documents in the pgvector vector store.
+        List documents in the pgvector vector store with optional pagination.
 
         Args:
             include_embeddings (bool): Whether to include embeddings in the results. Defaults to False.
             content_key (str): The field used to store content in the storage. Defaults to None.
             embedding_key (str): The field used to store embeddings in the storage. Defaults to None.
+            offset (int): Number of documents to skip. Defaults to 0.
+            limit (int | None): Maximum number of documents to return. If None, returns all documents.
 
         Returns:
             list[Document]: List of Document objects retrieved.
@@ -687,14 +828,21 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         content_key = content_key or self.content_key
         embedding_key = embedding_key or self.embedding_key
 
-        select_fields = f"id, {content_key}, metadata" + (f", {embedding_key}" if include_embeddings else "")
+        select_columns = [SQL("id"), Identifier(content_key), SQL("metadata")]
+        if include_embeddings:
+            select_columns.append(Identifier(embedding_key))
+
+        query = SQL("SELECT {} FROM {}.{} ORDER BY id").format(
+            SQL(", ").join(select_columns),
+            Identifier(self.schema_name),
+            Identifier(self.table_name),
+        )
+
+        if limit is not None:
+            query = query + SQL(" LIMIT {} OFFSET {}").format(SQLLiteral(limit), SQLLiteral(offset))
+
         with self._get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
-                query = SQL("SELECT {select_fields} FROM {schema_name}.{table_name}").format(
-                    select_fields=SQL(select_fields),
-                    schema_name=Identifier(self.schema_name),
-                    table_name=Identifier(self.table_name),
-                )
                 result = self._execute_sql_query(query, cursor=cur)
                 records = result.fetchall()
 
@@ -736,10 +884,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 document.embedding = None
 
             if doc.get("score") is not None:
-                document.score = doc["score"]
-
-                if isinstance(doc["score"], Decimal):
-                    document.score = float(doc["score"])
+                document.score = float(doc["score"])
             else:
                 document.score = None
 
@@ -789,9 +934,9 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         Args:
             query_embedding (list[float]): The query embedding vector.
-            filters (dict[str, Any] | None): Filters for the query. Defaults to None.
             top_k (int): Maximum number of documents to retrieve. Defaults to 10.
             exclude_document_embeddings (bool): Whether to exclude embeddings in results. Defaults to True.
+            filters (dict[str, Any] | None): Filters for the query. Defaults to None.
             content_key (str): The field used to store content in the storage. Defaults to None.
             embedding_key (str): The field used to store embeddings in the storage. Defaults to None.
 
@@ -799,7 +944,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             list[Document]: List of retrieved Document objects.
 
         Raises:
-            ValueError: If query_embedding is empty or filter format is incorrect.
+            ValueError: If query_embedding is empty or has incorrect dimension.
         """
         if not query_embedding:
             msg = "query_embedding must be a non-empty list"
@@ -807,6 +952,10 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         if len(query_embedding) != self.dimension:
             msg = f"query_embedding must be of dimension {self.dimension}"
+            raise ValueError(msg)
+
+        if top_k <= 0:
+            msg = f"top_k must be positive, got {top_k}"
             raise ValueError(msg)
 
         vector_function = self.vector_function
@@ -837,10 +986,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         )
 
         # Handle filters if they exist
-        where_clause = SQL("")
-        params = ()
-        if filters:
-            where_clause, params = _convert_filters_to_query(filters)
+        where_clause, params = self._prepare_filters(filters)
 
         # Determine sort order based on vector function type
         is_distance_metric = vector_function in ["l2_distance", "l1_distance"]
@@ -858,6 +1004,9 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         sql_query = base_select + where_clause + order_by
 
         with self._get_connection() as conn:
+            # Set runtime params for the current index method
+            self._set_pgvector_runtime_params(conn, top_k)
+
             with conn.cursor(row_factory=dict_row) as cur:
                 result = self._execute_sql_query(sql_query, params, cursor=cur)
                 records = result.fetchall()
@@ -879,9 +1028,9 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         Args:
             query (str): The query string.
-            filters (dict[str, Any] | None): Filters for the query. Defaults to None.
             top_k (int): Maximum number of documents to retrieve. Defaults to 10.
             exclude_document_embeddings (bool): Whether to exclude embeddings in results. Defaults to True.
+            filters (dict[str, Any] | None): Filters for the query. Defaults to None.
             content_key (str): The field used to store content in the storage. Defaults to None.
             embedding_key (str): The field used to store embeddings in the storage. Defaults to None.
 
@@ -889,10 +1038,14 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             list[Document]: List of retrieved Document objects.
 
         Raises:
-            ValueError: If query is empty or filter format is incorrect.
+            ValueError: If query is empty.
         """
         if not query:
             msg = "query must be provided for keyword retrieval"
+            raise ValueError(msg)
+
+        if top_k <= 0:
+            msg = f"top_k must be positive, got {top_k}"
             raise ValueError(msg)
 
         content_key = content_key or self.content_key
@@ -917,12 +1070,16 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         )
 
         # Handle filters if they exist
-        where_clause = SQL("")
-        params = ()
+        filter_clause, params = self._prepare_filters(filters)
         if filters:
-            where_clause, params = _convert_filters_to_query(filters)
-
-            where_clause = SQL(where_clause.as_string().replace("WHERE", "AND"))
+            filter_str = filter_clause.as_string(None)
+            if filter_str.strip().startswith("WHERE"):
+                # Remove "WHERE" prefix and convert to AND for keyword search
+                where_clause = SQL(" AND " + filter_str[5:])
+            else:
+                where_clause = filter_clause
+        else:
+            where_clause = SQL("")
 
         # Build the ORDER BY and LIMIT clause
         order_by = SQL(" ORDER BY score DESC LIMIT {limit}").format(limit=SQLLiteral(top_k))
@@ -944,8 +1101,8 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         query_embedding: list[float],
         top_k: int = 10,
         exclude_document_embeddings: bool = True,
-        keyword_rank_constant: int = 40,
-        top_k_subquery_multiplier: int = 4,
+        keyword_rank_constant: int = DEFAULT_KEYWORD_RANK_CONSTANT,
+        top_k_subquery_multiplier: int = DEFAULT_TOP_K_SUBQUERY_MULTIPLIER,
         filters: dict[str, Any] | None = None,
         alpha: float = 0.5,
         content_key: str | None = None,
@@ -956,10 +1113,13 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         Args:
             query (str): The query string.
-            query_embedding (list[float] | None): The query embedding vector. Defaults to None.
-            filters (dict[str, Any] | None): Filters for the query. Defaults to None.
+            query_embedding (list[float]): The query embedding vector.
             top_k (int): Maximum number of documents to retrieve. Defaults to 10.
-            alpha (float): The weight to give to the keyword search. Defaults to 0.5.
+            exclude_document_embeddings (bool): Whether to exclude embeddings in results. Defaults to True.
+            keyword_rank_constant (int): Constant used in RRF (Reciprocal Rank Fusion) score calculation.
+            top_k_subquery_multiplier (int): Multiplier for subquery limits to ensure enough candidates.
+            filters (dict[str, Any] | None): Filters for the query. Defaults to None.
+            alpha (float): Weight for semantic search (0-1). 0 = pure keyword, 1 = pure semantic, 0.5 = balanced.
             content_key (str): The field used to store content in the storage. Defaults to None.
             embedding_key (str): The field used to store embeddings in the storage. Defaults to None.
 
@@ -967,7 +1127,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             list[Document]: List of retrieved Document objects.
 
         Raises:
-            ValueError: If query_embedding is empty or filter format is incorrect.
+            ValueError: If parameters are invalid.
         """
 
         if not query:
@@ -978,10 +1138,17 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             msg = f"query_embedding must be of dimension {self.dimension}"
             raise ValueError(msg)
 
+        if not 0 <= alpha <= 1:
+            msg = f"alpha must be between 0 and 1, got {alpha}"
+            raise ValueError(msg)
+
+        if top_k <= 0:
+            msg = f"top_k must be positive, got {top_k}"
+            raise ValueError(msg)
+
         vector_function = self.vector_function
         content_key = content_key or self.content_key
         embedding_key = embedding_key or self.embedding_key
-        query = query or self.query
 
         # If alpha is 0, perform purely keyword search
         if alpha == 0:
@@ -1013,91 +1180,104 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         # Determine sort order based on vector function type
         is_distance_metric = vector_function in ["l2_distance", "l1_distance"]
-
-        # Sort by score in ascending order if using a distance metric
-        # as the smaller the distance, the more similar the vectors are
         sort_order = "ASC" if is_distance_metric else "DESC"
 
-        # Set the limit for the subquery to top_k multiplied by a constant to ensure enough results
-        top_k_subquery_limit = top_k * top_k_subquery_multiplier
+        # Optimize subquery limit based on alpha
+        if alpha < 0.1 or alpha > 0.9:
+            subquery_limit = max(top_k * 2, 20)
+        else:
+            subquery_limit = max(top_k * top_k_subquery_multiplier, 50)
 
-        # Extract the filters from the query
-        where_clause = SQL("")
-        where_clause_for_keyword_search = SQL("")
-        params = ()
-        if filters:
-            where_clause, params = _convert_filters_to_query(filters)
+        # Apply filters to avoid duplication
+        base_where_clause, params = self._prepare_filters(filters)
 
-            where_clause_for_keyword_search = SQL(where_clause.as_string().replace("WHERE", "AND"))
-
-        # Build the semantic search query with rank and filters
+        embedding_select = SQL("") if exclude_document_embeddings else SQL(f", {embedding_key}")
         semantic_search_query = SQL(
             """
             WITH semantic_search AS (
-                SELECT *, RANK() OVER (ORDER BY {score_definition} {sort_order}) AS rank
+                SELECT id, {content_key}, metadata{embedding_select},
+                       RANK() OVER (ORDER BY {score_definition} {sort_order}) AS rank
                 FROM {schema_name}.{table_name}
                 {where_clause}
-                LIMIT {top_k_limit}
+                LIMIT {subquery_limit}
             ),
             """
         ).format(
+            content_key=Identifier(content_key),
+            embedding_select=embedding_select,
             score_definition=SQL(score_definition),
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
-            top_k_limit=SQLLiteral(top_k_subquery_limit),
+            where_clause=base_where_clause,
+            subquery_limit=SQLLiteral(subquery_limit),
             sort_order=SQL(sort_order),
-            where_clause=where_clause,
         )
 
-        # Build the keyword search query with filters
         keyword_search_query = SQL(
             """
             keyword_search AS (
-                SELECT *, RANK() OVER (ORDER BY ts_rank_cd(to_tsvector({language}, {content_key}), query) DESC) AS rank
+                SELECT id, {content_key}, metadata{embedding_select},
+                       RANK() OVER (ORDER BY ts_rank_cd(to_tsvector({language}, {content_key}), query) DESC) AS rank
                 FROM {schema_name}.{table_name}, plainto_tsquery({language}, {query}) query
-                WHERE to_tsvector('english', {content_key}) @@ query
-                {where_clause_for_keyword_search}
-                LIMIT {top_k_limit}
+                WHERE to_tsvector({language}, {content_key}) @@ query
+                {where_clause}
+                LIMIT {subquery_limit}
             )
             """
         ).format(
+            content_key=Identifier(content_key),
+            embedding_select=embedding_select,
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
-            content_key=Identifier(content_key),
             language=SQLLiteral(self.language),
             query=SQLLiteral(query),
-            top_k_limit=SQLLiteral(top_k_subquery_limit),
-            where_clause_for_keyword_search=where_clause_for_keyword_search,
-        )
-
-        embedding_key_select = (
-            ""
-            if exclude_document_embeddings
-            else "COALESCE(semantic_search.{embedding_key}, keyword_search.{embedding_key}) AS {embedding_key},"
+            where_clause=base_where_clause,
+            subquery_limit=SQLLiteral(subquery_limit),
         )
 
         # Build the final query to merge the results and sort them by score
-        merge_query = SQL(
-            """
-            SELECT
-                COALESCE(semantic_search.id, keyword_search.id) AS id,
-                COALESCE(semantic_search.{content_key}, keyword_search.{content_key}) AS {content_key},
-                COALESCE(semantic_search.metadata, keyword_search.metadata) AS metadata,
-                {embedding_key_select}
-                COALESCE({alpha} / ({k} + semantic_search.rank), 0.0) +
-                COALESCE((1 - {alpha}) / ({k} + keyword_search.rank), 0.0) AS score
-            FROM semantic_search
-            FULL OUTER JOIN keyword_search ON semantic_search.id = keyword_search.id
-            ORDER BY score DESC
-            LIMIT {top_k}
-            """
-        ).format(
-            content_key=Identifier(content_key),
-            top_k=SQLLiteral(top_k),
-            alpha=SQLLiteral(alpha),
-            k=SQLLiteral(keyword_rank_constant),
-            embedding_key_select=SQL(embedding_key_select),
-        )
+        if exclude_document_embeddings:
+            merge_query = SQL(
+                """
+                SELECT
+                    COALESCE(semantic_search.id, keyword_search.id) AS id,
+                    COALESCE(semantic_search.{content_key}, keyword_search.{content_key}) AS {content_key},
+                    COALESCE(semantic_search.metadata, keyword_search.metadata) AS metadata,
+                    COALESCE({alpha} / ({k} + semantic_search.rank), 0.0) +
+                    COALESCE((1 - {alpha}) / ({k} + keyword_search.rank), 0.0) AS score
+                FROM semantic_search
+                FULL OUTER JOIN keyword_search ON semantic_search.id = keyword_search.id
+                ORDER BY score DESC
+                LIMIT {top_k}
+                """
+            ).format(
+                content_key=Identifier(content_key),
+                top_k=SQLLiteral(top_k),
+                alpha=SQLLiteral(alpha),
+                k=SQLLiteral(keyword_rank_constant),
+            )
+        else:
+            merge_query = SQL(
+                """
+                SELECT
+                    COALESCE(semantic_search.id, keyword_search.id) AS id,
+                    COALESCE(semantic_search.{content_key}, keyword_search.{content_key}) AS {content_key},
+                    COALESCE(semantic_search.metadata, keyword_search.metadata) AS metadata,
+                    COALESCE(semantic_search.{embedding_key}, keyword_search.{embedding_key}) AS {embedding_key},
+                    COALESCE({alpha} / ({k} + semantic_search.rank), 0.0) +
+                    COALESCE((1 - {alpha}) / ({k} + keyword_search.rank), 0.0) AS score
+                FROM semantic_search
+                FULL OUTER JOIN keyword_search ON semantic_search.id = keyword_search.id
+                ORDER BY score DESC
+                LIMIT {top_k}
+                """
+            ).format(
+                content_key=Identifier(content_key),
+                embedding_key=Identifier(embedding_key),
+                top_k=SQLLiteral(top_k),
+                alpha=SQLLiteral(alpha),
+                k=SQLLiteral(keyword_rank_constant),
+            )
 
         sql_query = semantic_search_query + keyword_search_query + merge_query
 
