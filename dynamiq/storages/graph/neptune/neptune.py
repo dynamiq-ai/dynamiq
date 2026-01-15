@@ -27,9 +27,7 @@ class NeptuneGraphStore(BaseGraphStore):
         self.client = client or connection.connect()
         self.endpoint = endpoint or (connection.endpoint if connection else None)
         self.verify_ssl = verify_ssl if verify_ssl is not None else (connection.verify_ssl if connection else True)
-        self.timeout = (
-            timeout if timeout is not None else (connection.timeout if connection else 30)
-        )
+        self.timeout = timeout if timeout is not None else (connection.timeout if connection else 30)
 
         if not self.endpoint:
             raise ValueError("endpoint must be provided for Neptune.")

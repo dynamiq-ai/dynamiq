@@ -113,20 +113,6 @@ class AgentStatus(str, Enum):
     FAIL = "fail"
 
 
-class AgentIntermediateStepModelObservation(BaseModel):
-    initial: str | dict | None = None
-    tool_using: str | dict | list | None = None
-    tool_input: str | dict | list | None = None
-    tool_output: Any = None
-    updated: str | dict | None = None
-
-
-class AgentIntermediateStep(BaseModel):
-    input_data: str | dict
-    agent_model_observation: AgentIntermediateStepModelObservation = Field(..., alias="model_observation")
-    final_answer: str | dict | None = None
-
-
 class ToolParams(BaseModel):
     global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
     by_name_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_name")
@@ -287,7 +273,6 @@ class Agent(Node):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._intermediate_steps: dict[int, dict] = {}
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
 
@@ -1210,7 +1195,6 @@ class Agent(Node):
 
     def reset_run_state(self):
         """Resets the agent's run state."""
-        self._intermediate_steps = {}
         self._run_depends = []
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self.system_prompt_manager.reset()
