@@ -8,7 +8,7 @@ from pydantic import Field, model_validator
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent as BaseAgent
 from dynamiq.nodes.agents.components import parser, schema_generator
-from dynamiq.nodes.agents.components.history_manager import HistoryManager
+from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     AgentUnknownToolException,
@@ -62,7 +62,7 @@ TYPE_MAPPING = {
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
 
-class Agent(BaseAgent):
+class Agent(HistoryManagerMixin, BaseAgent):
     """Unified Agent that uses a ReAct-style strategy for processing tasks by interacting with tools in a loop."""
 
     name: str = "Agent"
@@ -88,18 +88,12 @@ class Agent(BaseAgent):
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
-    _history_manager: HistoryManager | None = None
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._history_manager = HistoryManager()
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
         Define attribute initializers for cloning.
 
         Ensures that cloned agents get fresh instances of:
-        - _history_manager: Independent conversation history
         - _tool_cache: Independent tool execution cache
 
         Returns:
@@ -108,7 +102,6 @@ class Agent(BaseAgent):
         base = super().get_clone_attr_initializers()
         base.update(
             {
-                "_history_manager": lambda _: HistoryManager(),
                 "_tool_cache": lambda _: {},
             }
         )
@@ -910,26 +903,11 @@ class Agent(BaseAgent):
         if not self.summarization_config.enabled:
             return summary_offset
 
-        if self._history_manager.is_token_limit_exceeded(
-            prompt=self._prompt,
-            model=self.llm.model,
-            token_limit=self.llm.get_token_limit(),
-            summarization_config=self.summarization_config,
-        ):
-            return self._history_manager.summarize_history(
-                prompt=self._prompt,
+        if self.is_token_limit_exceeded():
+            return self.summarize_history(
                 input_message=input_message,
                 summary_offset=summary_offset,
-                history_offset=self._history_offset,
-                summarization_config=self.summarization_config,
-                history_prompt=self.system_prompt_manager.history_prompt,
-                max_attempts=self.max_loops,
-                run_llm=self._run_llm,
-                agent_name=self.name,
-                agent_id=self.id,
                 config=config,
-                model=self.llm.model,
-                token_limit=self.llm.get_token_limit(),
                 **kwargs,
             )
 
@@ -955,7 +933,7 @@ class Agent(BaseAgent):
 
         system_message = Message(content=max_loops_prompt, role=MessageRole.SYSTEM, static=True)
         conversation_history = Message(
-            content=HistoryManager.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True
+            content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True
         )
         llm_final_attempt_result = self._run_llm(
             [system_message, input_message, conversation_history], config=config, **kwargs
