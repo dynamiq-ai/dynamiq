@@ -821,7 +821,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     return result[2]
 
                 # Handle recovery (for modes that support it)
-                if result[0] is None:
+                # Check if both thought and action are None, which indicates (None, None, None) recovery
+                if result[0] is None and result[1] is None:
                     continue
 
                 thought, action, action_input = result
