@@ -1,6 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
@@ -8,7 +8,7 @@ from pydantic import Field, model_validator
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent as BaseAgent
 from dynamiq.nodes.agents.components import parser, schema_generator
-from dynamiq.nodes.agents.components.history_manager import HistoryManager
+from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     AgentUnknownToolException,
@@ -62,7 +62,7 @@ TYPE_MAPPING = {
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
 
-class Agent(BaseAgent):
+class Agent(HistoryManagerMixin, BaseAgent):
     """Unified Agent that uses a ReAct-style strategy for processing tasks by interacting with tools in a loop."""
 
     name: str = "Agent"
@@ -88,22 +88,24 @@ class Agent(BaseAgent):
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
-    _history_manager: HistoryManager | None = None
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._history_manager = HistoryManager(self)
-
-    def clone(self) -> "Agent":
+    def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
-        Create a safe clone of the agent.
+        Define attribute initializers for cloning.
 
-        Overrides the base clone() to ensure _history_manager points to the cloned agent instance.
+        Ensures that cloned agents get fresh instances of:
+        - _tool_cache: Independent tool execution cache
+
+        Returns:
+            Dictionary mapping attribute names to initializer functions
         """
-        cloned = super().clone()
-        # Reinitialize history manager to point to the cloned agent, not the original
-        cloned._history_manager = HistoryManager(cloned)
-        return cloned
+        base = super().get_clone_attr_initializers()
+        base.update(
+            {
+                "_tool_cache": lambda _: {},
+            }
+        )
+        return base
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -819,7 +821,8 @@ class Agent(BaseAgent):
                     return result[2]
 
                 # Handle recovery (for modes that support it)
-                if result[0] is None:
+                # Check if both thought and action are None, which indicates (None, None, None) recovery
+                if result[0] is None and result[1] is None:
                     continue
 
                 thought, action, action_input = result
@@ -853,11 +856,9 @@ class Agent(BaseAgent):
                 )
                 continue
 
-            if self.summarization_config.enabled:
-                if self._history_manager.is_token_limit_exceeded():
-                    summary_offset = self._history_manager.summarize_history(
-                        input_message, summary_offset, config=config, **kwargs
-                    )
+            summary_offset = self._try_summarize_history(
+                input_message=input_message, summary_offset=summary_offset, config=config, **kwargs
+            )
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
@@ -881,6 +882,38 @@ class Agent(BaseAgent):
                 )
             return max_loop_final_answer
 
+    def _try_summarize_history(
+        self,
+        input_message: Message | VisionMessage,
+        summary_offset: int,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> int:
+        """
+        Check if summarization is needed and perform it if token limit is exceeded.
+
+        Args:
+            input_message: User request message
+            summary_offset: Current summary offset
+            config: Configuration for the agent run
+            **kwargs: Additional parameters for running the agent
+
+        Returns:
+            int: Updated summary offset after summarization (or unchanged if not needed)
+        """
+        if not self.summarization_config.enabled:
+            return summary_offset
+
+        if self.is_token_limit_exceeded():
+            return self.summarize_history(
+                input_message=input_message,
+                summary_offset=summary_offset,
+                config=config,
+                **kwargs,
+            )
+
+        return summary_offset
+
     def _handle_max_loops_exceeded(
         self, input_message: Message | VisionMessage, config: RunnableConfig | None = None, **kwargs
     ) -> str:
@@ -901,7 +934,7 @@ class Agent(BaseAgent):
 
         system_message = Message(content=max_loops_prompt, role=MessageRole.SYSTEM, static=True)
         conversation_history = Message(
-            content=HistoryManager.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True
+            content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True
         )
         llm_final_attempt_result = self._run_llm(
             [system_message, input_message, conversation_history], config=config, **kwargs

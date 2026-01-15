@@ -1,6 +1,4 @@
-"""History and context management for agents."""
-
-from typing import TYPE_CHECKING
+"""History and context management mixin for agents."""
 
 from dynamiq.nodes.agents.exceptions import ParsingError
 from dynamiq.nodes.agents.utils import SummarizationMode, XMLParser
@@ -8,11 +6,6 @@ from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTe
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
-if TYPE_CHECKING:
-    from dynamiq.nodes.agents.agent import Agent
-
-
-# Default summary request prompt
 DEFAULT_SUMMARY_PROMPT = (
     "Please provide a concise summary of the conversation history. "
     "Focus on key decisions, important information, and tool outputs. "
@@ -20,17 +13,20 @@ DEFAULT_SUMMARY_PROMPT = (
 )
 
 
-class HistoryManager:
-    """Manages conversation history, token limits, and summarization for agents."""
+class HistoryManagerMixin:
+    """Mixin that provides conversation history, token limits, and summarization management.
 
-    def __init__(self, agent: "Agent"):
-        """
-        Initialize the history manager.
-
-        Args:
-            agent: The agent instance to manage history for
-        """
-        self.agent = agent
+    This mixin expects the class using it to have the following attributes:
+    - _prompt: Prompt object with messages
+    - llm: LLM object with model and get_token_limit()
+    - summarization_config: SummarizationConfig object
+    - _history_offset: int offset for history
+    - system_prompt_manager: Object with history_prompt attribute
+    - max_loops: int for max attempts
+    - _run_llm: Callable to run LLM
+    - name: str agent name
+    - id: str agent id
+    """
 
     def is_token_limit_exceeded(self) -> bool:
         """
@@ -39,12 +35,12 @@ class HistoryManager:
         Returns:
             bool: Whether token limit is exceeded
         """
-        prompt_tokens = self.agent._prompt.count_tokens(self.agent.llm.model)
+        prompt_tokens = self._prompt.count_tokens(self.llm.model)
 
         return (
-            self.agent.summarization_config.max_token_context_length
-            and prompt_tokens > self.agent.summarization_config.max_token_context_length
-        ) or (prompt_tokens / self.agent.llm.get_token_limit() > self.agent.summarization_config.context_usage_ratio)
+            self.summarization_config.max_token_context_length
+            and prompt_tokens > self.summarization_config.max_token_context_length
+        ) or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
 
     def summarize_history(
         self,
@@ -252,15 +248,15 @@ class HistoryManager:
         Returns:
             int: Updated summary offset
         """
-        logger.info(f"Agent {self.agent.name} - {self.agent.id}: Summarization of tool output started (preserve mode).")
+        logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output started.")
         messages_history = "\nHistory to extract information from: \n"
         summary_sections = []
 
         offset = max(
-            self.agent._history_offset,
-            summary_offset - self.agent.summarization_config.context_history_length,
+            self._history_offset,
+            summary_offset - self.summarization_config.context_history_length,
         )
-        for index, message in enumerate(self.agent._prompt.messages[offset:]):
+        for index, message in enumerate(self._prompt.messages[offset:]):
             if message.role == MessageRole.USER:
                 if (index + offset >= summary_offset) and ("Observation:" in message.content):
                     messages_history += (
@@ -275,18 +271,15 @@ class HistoryManager:
             messages_history + f"\n Required tags in the output {[f'tool_output{index}' for index in summary_sections]}"
         )
 
-        # Use model-specific history summarization prompt from prompt manager
-        history_prompt = self.agent.system_prompt_manager.history_prompt
-
         summary_messages = [
-            Message(content=history_prompt, role=MessageRole.SYSTEM, static=True),
+            Message(content=self.system_prompt_manager.history_prompt, role=MessageRole.SYSTEM, static=True),
             input_message,
             Message(content=messages_history, role=MessageRole.USER, static=True),
         ]
 
         summary_tags = [f"tool_output{index}" for index in summary_sections]
-        for _ in range(self.agent.summarization_config.max_attempts):
-            llm_result = self.agent._run_llm(
+        for _ in range(self.max_loops):
+            llm_result = self._run_llm(
                 messages=summary_messages,
                 config=config,
                 **kwargs,
@@ -307,22 +300,25 @@ class HistoryManager:
                 continue
 
             for summary_index, message_index in enumerate(summary_sections[:-1]):
-                self.agent._prompt.messages[message_index].content = (
+                self._prompt.messages[message_index].content = (
                     f"Observation (shortened): \n{parsed_data.get(summary_tags[summary_index])}"
                 )
 
+            # Check if still exceeded after shortening
             if self.is_token_limit_exceeded():
-                self.agent._prompt.messages[summary_sections[-1]].content = (
+                self._prompt.messages[summary_sections[-1]].content = (
                     f"Observation (shortened): \n{parsed_data.get(summary_tags[-1])}"
                 )
-                summary_offset = len(self.agent._prompt.messages)
+                summary_offset = len(self._prompt.messages)
             else:
-                summary_offset = len(self.agent._prompt.messages) - 2
+                summary_offset = len(self._prompt.messages) - 2
 
-            logger.info(
-                f"Agent {self.agent.name} - {self.agent.id}: Summarization of tool output finished (preserve mode)."
-            )
+            logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output finished.")
             return summary_offset
+
+        # If we exhausted all attempts without success, return current offset
+        logger.warning(f"Agent {self.name} - {self.id}: Failed to summarize after {self.max_loops} attempts.")
+        return summary_offset
 
         logger.warning(
             f"Agent {self.agent.name} - {self.agent.id}: "
