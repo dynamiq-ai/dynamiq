@@ -1,6 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
@@ -92,18 +92,27 @@ class Agent(BaseAgent):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._history_manager = HistoryManager(self)
+        self._history_manager = HistoryManager()
 
-    def clone(self) -> "Agent":
+    def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         """
-        Create a safe clone of the agent.
+        Define attribute initializers for cloning.
 
-        Overrides the base clone() to ensure _history_manager points to the cloned agent instance.
+        Ensures that cloned agents get fresh instances of:
+        - _history_manager: Independent conversation history
+        - _tool_cache: Independent tool execution cache
+
+        Returns:
+            Dictionary mapping attribute names to initializer functions
         """
-        cloned = super().clone()
-        # Reinitialize history manager to point to the cloned agent, not the original
-        cloned._history_manager = HistoryManager(cloned)
-        return cloned
+        base = super().get_clone_attr_initializers()
+        base.update(
+            {
+                "_history_manager": lambda _: HistoryManager(),
+                "_tool_cache": lambda _: {},
+            }
+        )
+        return base
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -853,11 +862,9 @@ class Agent(BaseAgent):
                 )
                 continue
 
-            if self.summarization_config.enabled:
-                if self._history_manager.is_token_limit_exceeded():
-                    summary_offset = self._history_manager.summarize_history(
-                        input_message, summary_offset, config=config, **kwargs
-                    )
+            summary_offset = self._try_summarize_history(
+                input_message=input_message, summary_offset=summary_offset, config=config, **kwargs
+            )
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
@@ -880,6 +887,53 @@ class Agent(BaseAgent):
                     **kwargs,
                 )
             return max_loop_final_answer
+
+    def _try_summarize_history(
+        self,
+        input_message: Message | VisionMessage,
+        summary_offset: int,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> int:
+        """
+        Check if summarization is needed and perform it if token limit is exceeded.
+
+        Args:
+            input_message: User request message
+            summary_offset: Current summary offset
+            config: Configuration for the agent run
+            **kwargs: Additional parameters for running the agent
+
+        Returns:
+            int: Updated summary offset after summarization (or unchanged if not needed)
+        """
+        if not self.summarization_config.enabled:
+            return summary_offset
+
+        if self._history_manager.is_token_limit_exceeded(
+            prompt=self._prompt,
+            model=self.llm.model,
+            token_limit=self.llm.get_token_limit(),
+            summarization_config=self.summarization_config,
+        ):
+            return self._history_manager.summarize_history(
+                prompt=self._prompt,
+                input_message=input_message,
+                summary_offset=summary_offset,
+                history_offset=self._history_offset,
+                summarization_config=self.summarization_config,
+                history_prompt=self.system_prompt_manager.history_prompt,
+                max_attempts=self.max_loops,
+                run_llm=self._run_llm,
+                agent_name=self.name,
+                agent_id=self.id,
+                config=config,
+                model=self.llm.model,
+                token_limit=self.llm.get_token_limit(),
+                **kwargs,
+            )
+
+        return summary_offset
 
     def _handle_max_loops_exceeded(
         self, input_message: Message | VisionMessage, config: RunnableConfig | None = None, **kwargs

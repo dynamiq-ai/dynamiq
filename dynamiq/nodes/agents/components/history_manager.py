@@ -1,47 +1,59 @@
 """History and context management for agents."""
 
-from typing import TYPE_CHECKING
+from typing import Callable
 
 from dynamiq.nodes.agents.exceptions import ParsingError
-from dynamiq.nodes.agents.utils import XMLParser
-from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
+from dynamiq.nodes.agents.utils import SummarizationConfig, XMLParser
+from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-
-if TYPE_CHECKING:
-    from dynamiq.nodes.agents.agent import Agent
 
 
 class HistoryManager:
     """Manages conversation history, token limits, and summarization for agents."""
 
-    def __init__(self, agent: "Agent"):
-        """
-        Initialize the history manager.
+    def __init__(self):
+        """Initialize the history manager without any agent dependency."""
+        pass
 
-        Args:
-            agent: The agent instance to manage history for
-        """
-        self.agent = agent
-
-    def is_token_limit_exceeded(self) -> bool:
+    def is_token_limit_exceeded(
+        self,
+        prompt: Prompt,
+        model: str,
+        token_limit: int,
+        summarization_config: SummarizationConfig,
+    ) -> bool:
         """
         Check whether token limit for summarization is exceeded.
+
+        Args:
+            prompt: The prompt containing messages
+            model: The model name for token counting
+            token_limit: Maximum token limit for the model
+            summarization_config: Summarization configuration
 
         Returns:
             bool: Whether token limit is exceeded
         """
-        prompt_tokens = self.agent._prompt.count_tokens(self.agent.llm.model)
+        prompt_tokens = prompt.count_tokens(model)
 
         return (
-            self.agent.summarization_config.max_token_context_length
-            and prompt_tokens > self.agent.summarization_config.max_token_context_length
-        ) or (prompt_tokens / self.agent.llm.get_token_limit() > self.agent.summarization_config.context_usage_ratio)
+            summarization_config.max_token_context_length
+            and prompt_tokens > summarization_config.max_token_context_length
+        ) or (prompt_tokens / token_limit > summarization_config.context_usage_ratio)
 
     def summarize_history(
         self,
+        prompt: Prompt,
         input_message: Message | VisionMessage,
         summary_offset: int,
+        history_offset: int,
+        summarization_config: SummarizationConfig,
+        history_prompt: str,
+        max_attempts: int,
+        run_llm: Callable,
+        agent_name: str,
+        agent_id: str,
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> int:
@@ -49,23 +61,31 @@ class HistoryManager:
         Summarizes history and saves relevant information in the context.
 
         Args:
+            prompt: The prompt containing messages to summarize
             input_message: User request message
             summary_offset: Offset to the position of the first message in prompt that was not summarized
+            history_offset: Offset for the agent history
+            summarization_config: Summarization configuration
+            history_prompt: System prompt for history summarization
+            max_attempts: Maximum number of attempts to generate summary
+            run_llm: Function to call LLM (receives messages, config, **kwargs)
+            agent_name: Agent name for logging
+            agent_id: Agent ID for logging
             config: Configuration for the agent run
             **kwargs: Additional parameters for running the agent
 
         Returns:
             int: Number of summarized messages
         """
-        logger.info(f"Agent {self.agent.name} - {self.agent.id}: Summarization of tool output started.")
+        logger.info(f"Agent {agent_name} - {agent_id}: Summarization of tool output started.")
         messages_history = "\nHistory to extract information from: \n"
         summary_sections = []
 
         offset = max(
-            self.agent._history_offset,
-            summary_offset - self.agent.summarization_config.context_history_length,
+            history_offset,
+            summary_offset - summarization_config.context_history_length,
         )
-        for index, message in enumerate(self.agent._prompt.messages[offset:]):
+        for index, message in enumerate(prompt.messages[offset:]):
             if message.role == MessageRole.USER:
                 if (index + offset >= summary_offset) and ("Observation:" in message.content):
                     messages_history += (
@@ -80,9 +100,6 @@ class HistoryManager:
             messages_history + f"\n Required tags in the output {[f'tool_output{index}' for index in summary_sections]}"
         )
 
-        # Use model-specific history summarization prompt from prompt manager
-        history_prompt = self.agent.system_prompt_manager.history_prompt
-
         summary_messages = [
             Message(content=history_prompt, role=MessageRole.SYSTEM, static=True),
             input_message,
@@ -90,8 +107,8 @@ class HistoryManager:
         ]
 
         summary_tags = [f"tool_output{index}" for index in summary_sections]
-        for _ in range(self.agent.max_loops):
-            llm_result = self.agent._run_llm(
+        for _ in range(max_attempts):
+            llm_result = run_llm(
                 messages=summary_messages,
                 config=config,
                 **kwargs,
@@ -112,20 +129,27 @@ class HistoryManager:
                 continue
 
             for summary_index, message_index in enumerate(summary_sections[:-1]):
-                self.agent._prompt.messages[message_index].content = (
+                prompt.messages[message_index].content = (
                     f"Observation (shortened): \n{parsed_data.get(summary_tags[summary_index])}"
                 )
 
-            if self.is_token_limit_exceeded():
-                self.agent._prompt.messages[summary_sections[-1]].content = (
+            # Check if still exceeded after shortening
+            model = kwargs.get("model", "")
+            token_limit = kwargs.get("token_limit", float("inf"))
+            if self.is_token_limit_exceeded(prompt, model, token_limit, summarization_config):
+                prompt.messages[summary_sections[-1]].content = (
                     f"Observation (shortened): \n{parsed_data.get(summary_tags[-1])}"
                 )
-                summary_offset = len(self.agent._prompt.messages)
+                summary_offset = len(prompt.messages)
             else:
-                summary_offset = len(self.agent._prompt.messages) - 2
+                summary_offset = len(prompt.messages) - 2
 
-            logger.info(f"Agent {self.agent.name} - {self.agent.id}: Summarization of tool output finished.")
+            logger.info(f"Agent {agent_name} - {agent_id}: Summarization of tool output finished.")
             return summary_offset
+
+        # If we exhausted all attempts without success, return current offset
+        logger.warning(f"Agent {agent_name} - {agent_id}: Failed to summarize after {max_attempts} attempts.")
+        return summary_offset
 
     @staticmethod
     def aggregate_history(messages: list[Message | VisionMessage]) -> str:
