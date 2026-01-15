@@ -820,8 +820,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 if result[1] == "final_answer":
                     return result[2]
 
-                # Handle recovery (for modes that support it).
-                # Check if both thought and action are None, which indicates (None, None, None) recovery.
+                # Handle recovery (for modes that support it)
+                # Check if both thought and action are None, which indicates (None, None, None) recovery
                 if result[0] is None and result[1] is None:
                     continue
 
