@@ -254,7 +254,7 @@ def test_anthropic_llm_with_base64_pdf(model):
 
 @pytest.mark.integration
 @pytest.mark.parametrize("model", ["claude-sonnet-4-5"])
-def test_anthropic_llm_structured_output_strict(model, run_config):
+def test_anthropic_llm_structured_output_strict(model):
     """Test Anthropic LLM with structured output."""
     llm = create_claude_llm(model)
     schema_ = {
