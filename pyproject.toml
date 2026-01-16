@@ -90,6 +90,7 @@ mkdocs-material = "~9.5.27"
 mkdocstrings = "~0.25.1"
 mkdocstrings-python = "~1.10.4"
 requests-mock = "~1.12.1"
+reportlab="4.3.1"
 
 [tool.poetry.group.examples]
 optional = true
