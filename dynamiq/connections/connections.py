@@ -16,6 +16,7 @@ from dynamiq.utils.logger import logger
 
 if TYPE_CHECKING:
     from chromadb import ClientAPI as ChromaClient
+    from neo4j import Driver as Neo4jDriver
     from openai import OpenAI as OpenAIClient
     from pinecone import Pinecone as PineconeClient
     from qdrant_client import QdrantClient
@@ -302,6 +303,37 @@ class AWS(BaseConnection):
         return boto3.Session(**params)
 
 
+class AWSNeptune(BaseConnection):
+    """
+    Represents a connection to Amazon Neptune openCypher via HTTP.
+
+    Attributes:
+        host (str): Neptune host (e.g. localhost or db-neptune...).
+        port (int): Neptune port.
+        use_https (bool): Whether to use https for the endpoint.
+        verify_ssl (bool): Whether to verify SSL certificates.
+        timeout (int): Request timeout in seconds.
+    """
+
+    host: str = Field(default_factory=partial(get_env_var, "NEPTUNE_HOST", "localhost"))
+    port: int = Field(default_factory=partial(get_env_var, "NEPTUNE_PORT", 8182))
+    use_https: bool = Field(default_factory=partial(get_env_var, "NEPTUNE_USE_HTTPS", True))
+    verify_ssl: bool = Field(default_factory=partial(get_env_var, "NEPTUNE_VERIFY_SSL", True))
+    timeout: int = Field(default_factory=partial(get_env_var, "NEPTUNE_TIMEOUT", 30))
+
+    @property
+    def endpoint(self) -> str:
+        scheme = "https" if self.use_https else "http"
+        return f"{scheme}://{self.host}:{self.port}/openCypher"
+
+    def connect(self):
+        import requests
+
+        session = requests.Session()
+        logger.debug("Connected to Neptune via HTTP endpoint=%s", self.endpoint)
+        return session
+
+
 class Gemini(BaseApiKeyConnection):
     api_key: str = Field(default_factory=partial(get_env_var, "GEMINI_API_KEY"))
 
@@ -519,6 +551,37 @@ class Qdrant(BaseApiKeyConnection):
         )
 
         return qdrant_client
+
+
+class Neo4j(BaseConnection):
+    """
+    Represents a connection to a Neo4j database.
+
+    Attributes:
+        uri (str): The Neo4j connection URI, e.g. neo4j://localhost or neo4j+s://xxx.databases.neo4j.io.
+        username (str): Username for authentication.
+        password (str): Password for authentication.
+        database (str | None): Optional database name; if omitted, Neo4j uses the user's home database.
+        connectivity_verification_enabled (bool): Whether to call driver.verify_connectivity()
+        after creating the driver.
+    """
+
+    uri: str = Field(default_factory=partial(get_env_var, "NEO4J_URI"))
+    username: str = Field(default_factory=partial(get_env_var, "NEO4J_USERNAME"))
+    password: str = Field(default_factory=partial(get_env_var, "NEO4J_PASSWORD"))
+    database: str | None = Field(default_factory=partial(get_env_var, "NEO4J_DATABASE", None))
+    connectivity_verification_enabled: bool = Field(
+        default=True,
+        validation_alias="verify_connectivity",
+    )
+
+    def connect(self) -> "Neo4jDriver":
+        from neo4j import GraphDatabase
+
+        driver = GraphDatabase.driver(self.uri, auth=(self.username, self.password))
+        if self.connectivity_verification_enabled:
+            driver.verify_connectivity()
+        return driver
 
 
 class WeaviateDeploymentType(str, enum.Enum):
@@ -974,6 +1037,14 @@ class PostgreSQL(BaseConnection):
             the user, and the password for the connection.
         """
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+
+
+class ApacheAGE(PostgreSQL):
+    """
+    Represents a connection to PostgreSQL with Apache AGE enabled.
+    """
+
+    pass
 
 
 class Exa(Http):

@@ -1,16 +1,14 @@
 import json
-import re
-import types
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from enum import Enum
-from typing import Any, Callable, Mapping, Union, get_args, get_origin
+from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
 from pydantic import Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent as BaseAgent
-from dynamiq.nodes.agents.base import AgentIntermediateStep, AgentIntermediateStepModelObservation
+from dynamiq.nodes.agents.components import parser, schema_generator
+from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     AgentUnknownToolException,
@@ -22,638 +20,15 @@ from dynamiq.nodes.agents.exceptions import (
     XMLParsingError,
 )
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
-from dynamiq.nodes.llms.gemini import Gemini
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools import ContextManagerTool
 from dynamiq.nodes.tools.context_manager import _apply_context_manager_tool_effect
 from dynamiq.nodes.types import Behavior, InferenceMode
-from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
+from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
-
-DELEGATION_INSTRUCTIONS = (
-    '- Optional: If you want an agent tool\'s response returned verbatim as the final output, '
-    'set "delegate_final": true in that tool\'s input. Use this only for a single agent tool call '
-    "and do not provide your own final answer; the system will return the agent's result directly."
-)
-
-DELEGATION_INSTRUCTIONS_XML = (
-    '- To return an agent tool\'s response as the final output, include "delegate_final": true inside that '
-    "tool's <input> or <action_input>. Use this only for a single agent tool call and do not provide an "
-    "<answer> yourself; the system will return the agent's result directly."
-)
-
-REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
-
-Thought: [Your detailed reasoning about what to do next]
-Action: [Tool name from ONLY [{{ tools_name }}]]
-Action Input: [JSON input for the tool]
-
-After each action, you'll receive:
-Observation: [Result from the tool]
-
-When you have enough information to provide a final answer:
-Thought: [Your reasoning for the final answer]
-Answer: [Your complete answer to the user's question]
-
-For questions that don't require tools:
-Thought: [Your reasoning about the question]
-Answer: [Your direct response]
-
-IMPORTANT RULES:
-- ALWAYS start with "Thought:" even for simple responses
-- Keep the explanation on the same line as the label (e.g., Thought: I should...), without leading spaces or blank lines
-- Avoid starting the thought with phrases like "The user..." or "The model..."; refer to yourself in the first person (e.g., "I should...")
-- Explain why this specific tool is the right choice
-- Ensure Action Input is valid JSON without markdown formatting
-- Use proper JSON syntax with double quotes for keys and string values
-- Never use markdown code blocks (```) around your JSON
-- JSON must be properly formatted with correct commas and brackets
-- Only use tools from the provided list
-- If you can answer directly, use only Thought followed by Answer
-- Some tools are other agents. When calling an agent tool, provide JSON matching that agent's inputs; at minimum include {"input": "your subtask"}. Keep action_input to inputs only (no reasoning).
-{{ delegation_instructions }}
-FILE HANDLING:
-- Tools may generate or process files (images, CSVs, PDFs, etc.)
-- Files are automatically collected and will be returned with your final answer
-- Mention created files in your final answer so users know what was generated"""  # noqa: E501
-
-REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
-
-<output>
-    <thought>
-        [Your detailed reasoning about what to do next]
-    </thought>
-    <action>
-        [Tool name from ONLY [{{ tools_name }}]]
-    </action>
-    <action_input>
-        [JSON input for the tool - single line, properly escaped]
-    </action_input>
-</output>
-
-After each action, you'll receive:
-Observation: [Result from the tool]
-
-When you have enough information to provide a final answer:
-<output>
-    <thought>
-        [Your reasoning for the final answer]
-    </thought>
-    <answer>
-        [Your complete answer to the user's question]
-    </answer>
-</output>
-
-For questions that don't require tools:
-<output>
-    <thought>
-        [Your reasoning about the question]
-    </thought>
-    <answer>
-        [Your direct response]
-    </answer>
-</output>
-
-CRITICAL XML FORMAT RULES:
-- ALWAYS include <thought> tags with detailed reasoning
-- Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags
-- Write thoughts in the first person (e.g., "I will...", "I should...")
-- Explain why this specific tool is the right choice
-- For tool use, include action and action_input tags
-- For direct answers, only include thought and answer tags
-- JSON in <action_input> MUST be on single line with proper escaping
-- NO line breaks or control characters inside JSON strings
-- Use double quotes for JSON strings
-- Escape special characters in JSON (\\n for newlines, \\" for quotes)
-- Properly close all XML tags
-- For all tags other than <answer>, text content should ideally be XML-escaped
-- Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
-- Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
-- You may receive "Observation (shortened)" indicating that tool output was truncated
-- Some tools are other agents. When you choose an agent tool, the <action_input> must match the agent's inputs; minimally include {"input": "your subtask"}. Keep only inputs inside <action_input>.
-{{ delegation_instructions_xml }}
-
-JSON FORMATTING REQUIREMENTS:
-- Put JSON on single line within tags
-- Use double quotes for all strings
-- Escape newlines as \\n, quotes as \\"
-- NO multi-line JSON formatting
-
-FILE HANDLING:
-- Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
-- Generated files are automatically collected and returned with your final answer
-- File operations are handled transparently - focus on the task, not file management
-"""  # noqa: E501
-
-REACT_BLOCK_MULTI_TOOL_PLANNING = """
-MULTI-TOOL PLANNING AND STRATEGY:
-
-Core Principle: Scale tool usage to match task complexity
-Start with the minimum number of tools needed and scale up based on the task's requirements.
-
-Decision Framework:
-1. Zero Tools - Answer directly when:
-   - Question is within your knowledge base
-   - No real-time data needed
-   - Simple explanations or general concepts
-
-2. Single Tool - Use one tool when:
-   - Single fact verification needed
-   - One specific data point required
-   - Simple lookup or calculation
-
-3. Multiple Tools (2-4) - Use parallel tools when:
-   - Comparing information from different sources
-   - Gathering complementary data points
-   - Cross-referencing or validation needed
-
-4. Comprehensive Research (5+) - Use extensive tooling when:
-   - Deep analysis requested ("comprehensive", "detailed", "thorough")
-   - Multiple aspects of complex topic
-   - Creating reports or extensive documentation
-
-MANDATORY MULTI-TOOL PATTERNS:
-
-1. Research Tasks (Adaptive Scaling):
-   - START: Analyze query complexity
-   - IF simple fact: 1-2 tool calls
-   - IF moderate complexity: 3-4 tool calls with complementary queries
-   - IF comprehensive research: 5+ tool calls covering:
-     * Broad overview query
-     * Specific benefits/advantages/features
-     * Limitations/challenges/drawbacks
-     * Comparisons/alternatives
-     * Recent developments/updates
-
-   Example progression:
-   - Query 1: General topic overview
-   - Query 2: Specific aspect (benefits, use cases)
-   - Query 3: Challenges or limitations
-   - Query 4+: Deep dives on critical aspects
-
-2. Coding and Technical Tasks:
-   - Documentation lookup: 1-2 tools (official docs + examples)
-   - Debugging: 2-3 tools (error search + solution patterns)
-   - Architecture decisions: 3-5 tools (best practices + comparisons + examples)
-   - Full implementation: 5+ tools (docs + patterns + edge cases + optimization)
-
-3. Data Collection/Analysis:
-   - Single source: 1 tool
-   - Multiple sources: Use parallel calls for efficiency
-   - Comparative analysis: Minimum 3 sources
-   - Market research: 5+ diverse sources
-
-4. Verification and Fact-Checking:
-   - Simple facts: 1-2 authoritative sources
-   - Controversial topics: 3+ diverse sources
-   - Critical information: Cross-reference with 3+ sources
-
-EFFICIENCY GUIDELINES:
-
-1. Parallel vs Sequential:
-   - Use PARALLEL calls when queries are independent
-   - Use SEQUENTIAL only when later queries depend on earlier results
-   - Group related queries in single tool_calls block
-
-2. Query Optimization:
-   - Start broad, then narrow based on results
-   - Use different search parameters for variety
-   - Avoid redundant or overlapping queries
-   - Each tool call should add unique value
-
-3. Smart Scaling:
-   - Begin with essential queries
-   - Add detail queries based on initial results
-   - Stop when sufficient information gathered
-   - Don't over-research simple questions
-
-TASK-SPECIFIC STRATEGIES:
-
-1. Current Events/News:
-   - Recent headlines: 2-3 news sources
-   - In-depth coverage: 5+ sources including analysis
-   - Fact verification: Cross-reference 3+ sources
-
-2. Technical Documentation:
-   - Quick reference: 1-2 official sources
-   - Implementation guide: 3-4 sources (docs + examples + gotchas)
-   - Comprehensive tutorial: 5+ sources covering all aspects
-
-3. Product/Service Research:
-   - Basic info: 1-2 sources
-   - Comparison shopping: 3-5 sources
-   - Detailed analysis: 5+ including reviews, specs, alternatives
-
-4. Scientific/Academic Topics:
-   - Basic concepts: 1-2 authoritative sources
-   - Current research: 3-5 recent papers/articles
-   - Comprehensive review: 5+ sources spanning fundamentals to cutting-edge
-
-MULTIPLE ENTITIES PATTERN:
-When researching multiple distinct entities (companies, products, people, locations):
-- BAD: "Report about Company A, Company B, Company C"
-- GOOD: Separate queries for each entity
-  - Query 1: "Company A financial performance"
-  - Query 2: "Company B market position"
-  - Query 3: "Company C recent developments"
-- REASON: Each entity gets full search attention, avoiding diluted results
-
-QUERY FORMULATION BEST PRACTICES:
-1. Entity Separation: Search distinct subjects individually
-2. Perspective Variation: Use different angles for same topic
-   - "benefits of X" → "advantages of X" → "X success stories"
-3. Temporal Layering: Mix timeframes
-   - "latest developments in X"
-   - "X trends 2024-2025"
-   - "future of X"
-4. Source Diversification: Target different source types
-   - Official documentation
-   - Independent reviews/analysis
-   - Case studies/examples
-
-REFLECTION AND VALIDATION:
-
-1. Pre-Action Reflection: Before each tool use, ask:
-   - "Is this tool the most appropriate for this specific information need?"
-   - "How does this complement or build upon previous results?"
-   - "What specific aspect of the problem does this address?"
-
-2. Result Quality Assessment: After each tool use, evaluate:
-   - "Does this result meet my expectations in terms of quality and relevance?"
-   - "Are there any gaps or inconsistencies I need to address?"
-   - "Should I refine my approach based on what I've learned?"
-
-3. Strategic Adaptation: Throughout the process:
-   - "Is my current strategy still optimal given the results so far?"
-   - "Do I need to adjust my tool selection or query formulation?"
-   - "Have I gathered enough information or do I need additional perspectives?"
-
-4. Final Synthesis Validation: Before providing the answer:
-   - "Have I addressed all aspects of the original question?"
-   - "Are my conclusions well-supported by the gathered evidence?"
-   - "Is there any conflicting information I need to reconcile?"
-
-IMPORTANT RULES:
-- Quality over quantity - each tool call must serve a purpose
-- Explain your multi-tool strategy in your thought process
-- Adapt the number of tools based on result quality
-- If initial results are comprehensive, don't add unnecessary calls
-- For coding: balance between documentation, examples, and best practices
-- Always consider user's implicit needs beyond explicit request
-- Employ strategic thinking and reflection at each step
-"""  # noqa: E501
-
-
-REACT_BLOCK_INSTRUCTIONS_MULTI = (
-    REACT_BLOCK_MULTI_TOOL_PLANNING
-    + """\nAlways follow this exact format in your responses:
-**RESPONSE FORMAT:**
-
-Thought: [Your detailed reasoning about what to do next, including your multi-tool strategy if applicable]
-Action: [Tool name from ONLY [{{ tools_name }}]]
-Action Input: [JSON input for the tool]
-
-After each action, you'll receive:
-Observation: [Result from the tool]
-
-When you need to use multiple tools in parallel, list them sequentially:
-Thought: [Explain your multi-tool strategy and why each tool is needed]
-Action: [Tool name]
-Action Input: [JSON input]
-Action: [Another tool name]
-Action Input: [JSON input]
-... (repeat for each tool)
-
-When you have enough information to provide a final answer:
-Thought: [Your reasoning for the final answer based on all gathered information]
-Answer: [Your complete, well-structured answer synthesizing all tool results]
-
-For questions that don't require tools:
-Thought: [Your reasoning why tools aren't needed]
-Answer: [Your direct response]
-
-**FORMAT RULES:**
-- ALWAYS start with "Thought:" explaining your approach
-- Keep the content on the same line as each label (e.g., Thought: I should...), without leading spaces or blank lines
-- Refer to yourself in the first person when explaining your reasoning (e.g., "I will check...", not "The assistant will...")
-- Valid JSON only - no markdown formatting
-- Double quotes for JSON keys and string values
-- No code blocks (```) around JSON
-- Proper JSON syntax with commas and brackets
-- List each Action and Action Input separately
-- Only use tools from the provided list
-{{ delegation_instructions }}
-
-**FILE HANDLING:**
-- Tools may generate multiple files during execution
-- All generated files are automatically collected and returned
-- When using multiple tools, files from all tools are aggregated
-- Reference all created files in your final Answer
-"""  # noqa: E501
-)
-
-REACT_BLOCK_XML_INSTRUCTIONS_MULTI = (
-    REACT_BLOCK_MULTI_TOOL_PLANNING
-    + """\nAlways use one of these exact XML formats in your responses:
-**XML RESPONSE FORMATS:**
-
-For Tool Usage (Single or Multiple):
-<output>
-    <thought>
-        [Explain your strategy, including multi-tool planning if applicable]
-    </thought>
-    <tool_calls>
-        <tool>
-            <name>[Tool name from ONLY [{{ tools_name }}]]</name>
-            <input>[JSON input for the tool - single line, properly escaped]</input>
-        </tool>
-        <!-- Add more tool elements as needed based on your strategy -->
-        <tool>
-            <name>[Tool name]</name>
-            <input>[JSON input for the tool - single line, properly escaped]</input>
-            <input>[JSON input for the tool - single line, properly escaped]</input>
-        </tool>
-    </tool_calls>
-</output>
-
-When you have enough information to provide a final answer:
-<output>
-    <thought>
-        [Synthesize findings and explain your final reasoning]
-    </thought>
-    <answer>
-        [Complete, well-structured answer based on all gathered information]
-    </answer>
-</output>
-
-For questions that don't require tools:
-<output>
-    <thought>
-        [Explain why tools aren't needed for this query]
-    </thought>
-    <answer>
-        [Your direct response]
-    </answer>
-</output>
-
-After each tool usage, you'll receive:
-Observation: [Result(s) from the tool(s)]
-
-CRITICAL XML FORMAT RULES:
-- Always include strategic thinking in <thought> tags
-- Start content immediately after each opening tag; avoid leading newlines or indentation within the tags
-- Express reasoning in the first person (e.g., "I will compare...", "I should review...")
-- Group parallel tool calls in single <tool_calls> block
-- JSON in <input> tags MUST be on single line with proper escaping
-- NO line breaks or control characters inside JSON strings
-- Use double quotes for JSON strings
-- Escape special characters in JSON (\\n for newlines, \\" for quotes)
-- Use sequential outputs only when dependencies exist
-- Synthesize all results in final answer
-
-JSON FORMATTING REQUIREMENTS:
-- Put JSON on single line within tags
-- Use double quotes for all strings
-- Escape newlines as \\n, quotes as \\"
-- NO multi-line JSON formatting
-
-FILE HANDLING WITH MULTIPLE TOOLS:
-- Each tool may generate files independently
-- Files from all tools are automatically aggregated
-- Generated files are returned with the final answer
-
-{% if delegation_instructions_xml %}
-OPTIONAL AGENT PASSTHROUGH:
-{{ delegation_instructions_xml }}
-{% endif %}
-"""  # noqa: E501
-)
-
-
-# Common blocks
-REACT_BLOCK_TOOLS = """
-You have access to a variety of tools,
-and you are responsible for using
-them in any order you choose to complete the task:\n
-{{ tool_description }}
-
-Input formats for tools:
-{{ input_formats }}
-
-Note: For tools not listed in the input formats section,
-refer to their descriptions in the
-AVAILABLE TOOLS section for usage instructions.
-"""
-
-REACT_BLOCK_TOOLS_NO_FORMATS = """
-You have access to a variety of tools,
-and you are responsible for using
-them in any order you choose to complete the task:\n
-{{ tool_description }}
-"""
-
-REACT_BLOCK_NO_TOOLS = """Always follow this exact format in your responses:
-
-Thought: [Your detailed reasoning about the user's question]
-Answer: [Your complete answer to the user's question]
-
-IMPORTANT RULES:
-- ALWAYS start with "Thought:" to explain your reasoning process
-- Keep the explanation on the same line as "Thought:" without inserting blank lines or leading spaces
-- Use first-person language when thinking or answering (e.g., "I think...", "I recommend...")
-- Provide a clear, direct answer after your thought
-- If you cannot fully answer, explain why in your thought
-- Be thorough and helpful in your response
-- Do not mention tools or actions since you don't have access to any
-"""
-
-REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
-- Avoid phrases like 'based on the information gathered or provided.'
-- Clearly mention any files that were generated during the process.
-- Provide file names and brief descriptions of their contents.
-"""
-
-REACT_MAX_LOOPS_PROMPT = """
-You are tasked with providing a final answer based on information gathered during a process that has reached its maximum number of loops.
-Your goal is to analyze the given context and formulate a clear, concise response.
-First, carefully review the history, which contains thoughts and information gathered during the process.
-
-Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
-Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
-1. Fully supported by the information found in the context
-2. Clear and concise
-3. Directly addressing the original question or task, if possible
-If you cannot provide a full answer based on the given context, explain that due to limitations in the number of steps or potential issues with the tools used, you are unable to fully answer the question. In this case, suggest one or more of the following:
-1. Increasing the maximum number of loops for the agent setup
-2. Reviewing the tools settings
-3. Revising the input task description
-Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
-Provide your final answer or explanation within <answer> tags.
-Your response should be clear, concise, and professional.
-<answer>
-[Your final answer or explanation goes here]
-</answer>
-"""  # noqa: E501
-
-REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT = """Always structure your responses in this JSON format:
-
-{thought: [Your reasoning about the next step],
-action: [The tool you choose to use, if any from ONLY [{{ tools_name }}]],
-action_input: [JSON input in correct format you provide to the tool]}
-
-After each action, you'll receive:
-Observation: [Result from the tool]
-
-When you have enough information to provide a final answer:
-{thought: [Your reasoning for the final answer],
-action: finish
-action_input: [Response for initial request]}
-
-For questions that don't require tools:
-{thought: [Your reasoning for the final answer],
-action: finish
-action_input: [Your direct response]}
-
-IMPORTANT RULES:
-- You MUST ALWAYS include "thought" as the FIRST field in your JSON
-- Each tool has a specific input format you must strictly follow
-- In action_input field, provide properly formatted JSON with double quotes
-- Avoid using extra backslashes
-- Do not use markdown code blocks around your JSON
-- Never leave action_input empty
-- Ensure proper JSON syntax with quoted keys and values
-{{ delegation_instructions }}
-
-FILE HANDLING:
-- Tools may generate files that are automatically collected
-- Generated files will be included in the final response
-- Never return empty response.
-"""  # noqa: E501
-
-REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
-You need to use the right functions based on what the user asks.
-
-Use the function `provide_final_answer` when you can give a clear answer to the user's first question,
-and no extra steps, tools, or work are needed.
-Call this function if the user's input is simple and doesn't require additional help or tools.
-
-If the user's request requires the use of specific tools, such as [{{ tools_name }}],
- you must first call the appropriate function to invoke those tools.
-Only after utilizing the necessary tools and gathering the required information should
-you call `provide_final_answer` to deliver the final response.
-
-FUNCTION CALLING GUIDELINES:
-- Analyze the request carefully to determine if tools are needed
-- Call functions with properly formatted arguments
-- Handle tool responses appropriately before providing final answer
-- Chain multiple tool calls when necessary for complex tasks
-{{ delegation_instructions }}
-
-FILE HANDLING:
-- Tools may generate files that will be included in the final response
-- Files created by tools are automatically collected and returned
-"""  # noqa: E501
-
-REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
-Always structure your responses in this exact format:
-
-Thought: [Your detailed reasoning about the user's question]
-Answer: [Your complete response to the user's question]
-
-IMPORTANT RULES:
-- ALWAYS begin with "Thought:" to show your reasoning process
-- Keep the explanation on the same line as the label, avoiding leading spaces or blank lines
-- Write your reasoning in first person (e.g., "I should...", "I know...")
-- Use the "Thought" section to analyze the question and plan your response
-- Only after thinking through the problem, provide your answer
-- If you cannot fully answer, explain why in your thinking
-- Be thorough and helpful in your response
-- Do not mention tools or actions as you don't have access to any
-
-"""  # noqa: E501
-
-REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS = """Always use this exact XML format in your responses:
-<output>
-    <thought>
-        [Your detailed reasoning about the question]
-    </thought>
-    <answer>
-        [Your direct response to the user's question]
-    </answer>
-</output>
-
-IMPORTANT RULES:
-- ALWAYS include <thought> tags with detailed reasoning
-- Place text immediately after each opening tag without leading newlines or indentation
-- Only use thought and answer tags
-- Properly close all XML tags
-- Do not use markdown formatting inside XML
-- Do not mention tools or actions since you don't have access to any
-"""
-
-
-REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
-- Avoid phrases like 'based on the information gathered or provided.'
-"""
-
-
-REACT_MAX_LOOPS_PROMPT = """
-You are tasked with providing a final answer for initial user question based on information gathered during a process that has reached its maximum number of loops.
-Your goal is to analyze the given context and formulate a clear, concise response.
-First, carefully review the information gathered during the process, tool calls and their outputs.
-
-Analyze the context to identify key information, patterns, or partial answers that can contribute to a final response. Pay attention to any progress made, obstacles encountered, or partial results obtained.
-Based on your analysis, attempt to formulate a final answer to the original question or task. Your answer should be:
-1. Fully supported by the information found in the context
-2. Clear and concise
-3. Directly addressing the original question or task, if possible
-If you cannot provide a full answer based on the given context, explain that due to limitations in the number of steps or potential issues with the tools used, you are unable to fully answer the question. In this case, suggest one or more of the following:
-1. Increasing the maximum number of loops for the agent setup
-2. Reviewing the tools settings
-3. Revising the input task description
-Important: Do not mention specific errors in tools, exact steps, environments, code, or search results. Keep your response general and focused on the task at hand.
-Provide your final answer or explanation within <answer> tags.
-Your response should be clear, concise, and professional.
-<answer>
-[Your final answer or explanation goes here]
-</answer>
-"""  # noqa: E501
-
-HISTORY_SUMMARIZATION_PROMPT = """
-Task: Extract valuable information from tool outputs.
-
-Each tool output that needs to be processed is clearly marked using the following format:
-=== TOOL_OUTPUT [tool_number] ===
-
-Instructions:
-
-For each marked section, extract the relevant and valuable information.
-Wrap the extracted content in a custom tag that corresponds to the section number.
-Tag Format:
-Use <tool_outputX>, where X is the tool number.
-Example: If the tool output is labeled with the number 4, wrap your extracted content as follows:
-    <tool_output4>...extracted content...</tool_output4>
-
-You may encounter multiple tool outputs within the history.
-Ensure each extracted section is enclosed in its corresponding tag based on its tool number.
-
-Information that will not be included in extracted part will be removed.
-
-Guidelines:
-* Always include all required tags for every tool output.
-* If the tool output is irrelevant, provide only a general summary of it.
-* In output provide only tags and extracted information inside.
-* Try to keep information which responds for initial user request and is consistent with previous extracted information.
-* Preserve as much important details as possible.
-* Do not merge or combine content from different sections.
-* Maintain the numbering to match the original section order.
-* Do not leave tag empty.
-
-Input request:
-"""
 
 final_answer_function_schema = {
     "type": "function",
@@ -687,7 +62,7 @@ TYPE_MAPPING = {
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
 
-class Agent(BaseAgent):
+class Agent(HistoryManagerMixin, BaseAgent):
     """Unified Agent that uses a ReAct-style strategy for processing tasks by interacting with tools in a loop."""
 
     name: str = "Agent"
@@ -702,12 +77,35 @@ class Agent(BaseAgent):
         description="Enable multi-tool execution in a single step. "
         "When True, the agent can call multiple tools in parallel.",
     )
+    direct_tool_output_enabled: bool = Field(
+        default=False,
+        description="Enable direct tool output capability. "
+        "When True, the agent can return raw tool outputs directly without summarization.",
+    )
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
+
+    def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
+        """
+        Define attribute initializers for cloning.
+
+        Ensures that cloned agents get fresh instances of:
+        - _tool_cache: Independent tool execution cache
+
+        Returns:
+            Dictionary mapping attribute names to initializer functions
+        """
+        base = super().get_clone_attr_initializers()
+        base.update(
+            {
+                "_tool_cache": lambda _: {},
+            }
+        )
+        return base
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -795,137 +193,6 @@ class Agent(BaseAgent):
             logger.error(f"Failed to ensure ContextManagerTool: {e}")
         return self
 
-    def _parse_thought(self, output: str) -> tuple[str | None, str | None]:
-        """Extracts thought from the output string."""
-        thought_match = re.search(
-            r"Thought:\s*(.*?)Action",
-            output,
-            re.DOTALL,
-        )
-
-        if thought_match:
-            return thought_match.group(1).strip()
-
-        return ""
-
-    def _parse_action(self, output: str) -> tuple[str | None, str | None, dict | list | None]:
-        """
-        Parses the action(s), input(s),
-        and thought from the output string.
-        Supports both single tool actions
-        and multiple sequential tool calls when multi-tool is enabled.
-
-        Args:
-            output (str): The output string from the LLM containing Thought, Action, and Action Input.
-
-        Returns:
-            tuple: (thought, action_type, actions_data) where:
-                - thought is the extracted reasoning
-                - action_type is either a tool name (for single tool) or "multiple_tools" (for multiple tools)
-                - actions_data is either a dict (for single tool) or a list of dicts (for multiple tools)
-        """
-        try:
-            thought_pattern = r"Thought:\s*(.*?)(?:Action:|$)"
-            thought_match = re.search(thought_pattern, output, re.DOTALL)
-            thought = thought_match.group(1).strip() if thought_match else None
-
-            actions = []
-            action_input_matches = list(re.finditer(r"Action Input:", output))
-            for i, input_match in enumerate(action_input_matches):
-                preceding_text = output[:input_match.start()]
-                # Find the last "Action:" before this "Action Input:"
-                # Search for "Action:" literal, allowing some whitespace/newlines before the name
-                all_actions = list(re.finditer(r"Action:\s*(.*?)(?:\n|\r|\s{2,})", preceding_text, re.DOTALL))
-                if not all_actions:
-                    all_actions = list(re.finditer(r"Action:\s*(.*)", preceding_text, re.DOTALL))
-
-                if all_actions:
-                    action_match = all_actions[-1]
-                    action_name = action_match.group(1).strip()
-
-                    # Extract potential JSON string starting after "Action Input:"
-                    json_str_candidate = output[input_match.end():].strip()
-
-                    brace_count = 0
-                    json_end = 0
-                    in_string = False
-                    escape = False
-                    found_start = False
-                    start_idx = 0
-
-                    for j, char in enumerate(json_str_candidate):
-                        if not found_start:
-                            if char == '{':
-                                found_start = True
-                                start_idx = j
-                                brace_count = 1
-                            continue
-
-                        if char == '"' and not escape:
-                            in_string = not in_string
-
-                        if char == '\\' and not escape:
-                            escape = True
-                        else:
-                            escape = False
-
-                        if not in_string:
-                            if char == '{':
-                                brace_count += 1
-                            elif char == '}':
-                                brace_count -= 1
-                                if brace_count == 0:
-                                    json_end = j + 1
-                                    break
-
-                    if json_end > 0:
-                        raw_input = json_str_candidate[start_idx:json_end]
-                        for marker in ["```json", "```JSON", "```"]:
-                            raw_input = raw_input.replace(marker, "").strip()
-
-                        try:
-                            action_input = json.loads(raw_input)
-                            actions.append({"tool_name": action_name, "tool_input": action_input})
-                        except json.JSONDecodeError as e:
-                            logger.warning(f"Invalid JSON in Action Input for {action_name}: {str(e)}")
-
-            if not actions:
-                logger.info("No valid Action and Action Input pairs found in the output ")
-                raise ActionParsingException(
-                    "No valid Action and Action Input pairs found in the output.",
-                    recoverable=True,
-                )
-
-            if not self.parallel_tool_calls_enabled or len(actions) == 1:
-                action = actions[0]["tool_name"]
-                action_input = actions[0]["tool_input"]
-                return thought, action, action_input
-            else:
-                return thought, "multiple_tools", actions
-
-        except Exception as e:
-            logger.error(f"Error: {e}")
-            if isinstance(e, ActionParsingException):
-                raise
-            raise ActionParsingException(
-                f"Error parsing action(s): {str(e)}. "
-                f"Please ensure the output follows the format 'Thought: <text> "
-                f"Action: <action> Action Input: <valid JSON>' "
-                f"{'with possible multiple Action/Action Input pairs.' if self.parallel_tool_calls_enabled else ''}",
-                recoverable=True,
-            )
-
-    def tracing_final(self, loop_num, final_answer, config, kwargs):
-        self._intermediate_steps[loop_num]["final_answer"] = final_answer
-
-    def tracing_intermediate(self, loop_num, formatted_prompt, llm_generated_output):
-        self._intermediate_steps[loop_num] = AgentIntermediateStep(
-            input_data={"prompt": formatted_prompt},
-            model_observation=AgentIntermediateStepModelObservation(
-                initial=llm_generated_output,
-            ),
-        ).model_dump(by_alias=True)
-
     def _append_recovery_instruction(
         self,
         *,
@@ -955,16 +222,6 @@ class Agent(BaseAgent):
             Message(role=MessageRole.USER, content=correction_message, static=True)
         )
 
-    def _extract_final_answer(self, output: str) -> str:
-        """Extracts the final thought and answer as a tuple from the output string."""
-        match = re.search(r"Thought:\s*(.*?)\s*Answer:\s*(.*)", output, re.DOTALL)
-        if match:
-            thought = match.group(1).strip()
-            answer = match.group(2).strip()
-            return thought, answer
-        else:
-            return "", ""
-
     def stream_reasoning(self, content: dict[str, Any], config: RunnableConfig, **kwargs) -> None:
         """
         Streams intermediate reasoning of the Agent.
@@ -983,110 +240,508 @@ class Agent(BaseAgent):
                 **kwargs,
             )
 
-    def is_token_limit_exceeded(self) -> bool:
-        """Check whether token limit for summarization is exceeded.
-
-        Returns:
-            bool: Whether token limit is exceeded.
+    def _append_assistant_message(self, llm_result: Any, llm_generated_output: str) -> None:
         """
-        prompt_tokens = self._prompt.count_tokens(self.llm.model)
-
-        return (
-            self.summarization_config.max_token_context_length
-            and prompt_tokens > self.summarization_config.max_token_context_length
-        ) or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
-
-    def summarize_history(
-        self,
-        input_message,
-        summary_offset: int,
-        config: RunnableConfig | None = None,
-        **kwargs,
-    ) -> int:
-        """
-        Summarizes history and saves relevant information in the context
+        Appends the assistant's message to conversation history based on inference mode.
 
         Args:
-            input_message (Message | VisionMessage): User request message.
-            summary_offset (int): Offset to the position of the first message in prompt that was not summarized.
-            config (RunnableConfig | None): Configuration for the agent run.
-            **kwargs: Additional parameters for running the agent.
+            llm_result: The full LLM result object (needed for function calling mode).
+            llm_generated_output: The generated text output from the LLM.
+        """
+        if self.inference_mode == InferenceMode.FUNCTION_CALLING:
+            # For function calling, construct a message that includes the tool call
+            if "tool_calls" in dict(llm_result.output):
+                try:
+                    tool_call = list(llm_result.output["tool_calls"].values())[0]
+                    function_name = tool_call["function"]["name"]
+                    function_args = json.dumps(tool_call["function"]["arguments"])
+                    message_content = f"Function call: {function_name}({function_args})"
+                    self._prompt.messages.append(
+                        Message(role=MessageRole.ASSISTANT, content=message_content, static=True)
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to extract tool call from LLM result: {e}. Using raw output instead.")
+                    self._prompt.messages.append(
+                        Message(
+                            role=MessageRole.ASSISTANT,
+                            content=llm_generated_output or "Cannot extract tool call from LLM result.",
+                            static=True,
+                        )
+                    )
+        elif llm_generated_output:
+            # For other modes, use the generated text output
+            self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True))
+
+    def _handle_default_mode(
+        self, llm_generated_output: str, loop_num: int
+    ) -> tuple[str | None, str | None, dict | list | None]:
+        """Handle DEFAULT inference mode parsing."""
+        if not llm_generated_output or not llm_generated_output.strip():
+            self._append_recovery_instruction(
+                error_label="EmptyResponse",
+                error_detail="The model returned an empty reply while using the Thought/Action format.",
+                llm_generated_output=llm_generated_output,
+                extra_guidance=(
+                    "Re-evaluate the latest observation and respond with 'Thought:' followed by either "
+                    "an 'Action:' plus JSON 'Action Input:' or a final 'Answer:' section."
+                ),
+            )
+            return None, None, None
+
+        if "Answer:" in llm_generated_output:
+            thought, final_answer = parser.extract_default_final_answer(llm_generated_output)
+            self.log_final_output(thought, final_answer, loop_num)
+            return thought, "final_answer", final_answer
+
+        thought, action, action_input = parser.parse_default_action(
+            llm_generated_output, self.parallel_tool_calls_enabled
+        )
+        self.log_reasoning(thought, action, action_input, loop_num)
+        return thought, action, action_input
+
+    def _handle_function_calling_mode(
+        self, llm_result: Any, loop_num: int
+    ) -> tuple[str | None, str | None, dict | list | None] | tuple[str, str, str]:
+        """Handle FUNCTION_CALLING inference mode parsing.
 
         Returns:
-            int: Number of summarized messages.
+            tuple: (thought, action, action_input) for normal actions
+                   (thought, "final_answer", final_answer) for final answers
         """
-        logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output started.")
-        messages_history = "\nHistory to extract information from: \n"
-        summary_sections = []
+        if self.verbose:
+            logger.info(f"Agent {self.name} - {self.id}: using function calling inference mode")
 
-        offset = max(self._history_offset, summary_offset - self.summarization_config.context_history_length)
-        for index, message in enumerate(self._prompt.messages[offset:]):
-            if message.role == MessageRole.USER:
-                if (index + offset >= summary_offset) and ("Observation:" in message.content):
-                    messages_history += (
-                        f"=== TOOL_OUTPUT: {index + offset} === \n {message.content}"
-                        f"\n === TOOL_OUTPUT: {index + offset} === \n"
-                    )
-                    summary_sections.append(index + offset)
+        if "tool_calls" not in dict(llm_result.output):
+            logger.error("Error: No function called.")
+            raise ActionParsingException("Error: No function called, you need to call the correct function.")
+
+        action = list(llm_result.output["tool_calls"].values())[0]["function"]["name"].strip()
+        llm_generated_output_json = list(llm_result.output["tool_calls"].values())[0]["function"]["arguments"]
+
+        thought = llm_generated_output_json["thought"]
+        if action == "provide_final_answer":
+            final_answer = llm_generated_output_json["answer"]
+            self.log_final_output(thought, final_answer, loop_num)
+            return thought, "final_answer", final_answer
+
+        action_input = llm_generated_output_json["action_input"]
+
+        if isinstance(action_input, str):
+            try:
+                action_input = json.loads(action_input)
+            except json.JSONDecodeError as e:
+                raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+
+        self.log_reasoning(thought, action, action_input, loop_num)
+        return thought, action, action_input
+
+    def _handle_structured_output_mode(
+        self, llm_generated_output: str | dict, loop_num: int
+    ) -> tuple[str | None, str | None, dict | list | None] | tuple[str, str, str]:
+        """Handle STRUCTURED_OUTPUT inference mode parsing.
+
+        Returns:
+            tuple: (thought, action, action_input) for normal actions
+                   (thought, "final_answer", final_answer) for final answers
+        """
+        if self.verbose:
+            logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
+
+        try:
+            if isinstance(llm_generated_output, str):
+                llm_generated_output_json = json.loads(llm_generated_output)
             else:
-                messages_history += f"\n{message.content}\n"
+                llm_generated_output_json = llm_generated_output
+        except json.JSONDecodeError as e:
+            raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
 
-        messages_history = (
-            messages_history + f"\n Required tags in the output {[f'tool_output{index}' for index in summary_sections]}"
+        if "action" not in llm_generated_output_json or "thought" not in llm_generated_output_json:
+            raise ActionParsingException("No action or thought provided.", recoverable=True)
+
+        thought = llm_generated_output_json["thought"]
+        action = llm_generated_output_json["action"]
+        action_input = llm_generated_output_json["action_input"]
+
+        if action == "finish":
+            self.log_final_output(thought, action_input, loop_num)
+            return thought, "final_answer", action_input
+
+        try:
+            if isinstance(action_input, str):
+                action_input = json.loads(action_input)
+        except json.JSONDecodeError as e:
+            raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+
+        self.log_reasoning(thought, action, action_input, loop_num)
+        return thought, action, action_input
+
+    def _handle_xml_mode(
+        self, llm_generated_output: str, loop_num: int, config: RunnableConfig, **kwargs
+    ) -> tuple[str | None, str | None, dict | list | None]:
+        """Handle XML inference mode parsing."""
+        if self.verbose:
+            logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
+
+        if not llm_generated_output or not llm_generated_output.strip():
+            self._append_recovery_instruction(
+                error_label="EmptyResponse",
+                error_detail="The model returned an empty reply while XML format was required.",
+                llm_generated_output=llm_generated_output,
+                extra_guidance=(
+                    "Respond with <thought>...</thought> and "
+                    "either <action>/<action_input> or <answer> tags, "
+                    "making sure to address the latest observation."
+                ),
+            )
+            return None, None, None
+
+        if self.parallel_tool_calls_enabled:
+            try:
+                parsed_result = XMLParser.parse_unified_xml_format(llm_generated_output)
+
+                thought = parsed_result.get("thought", "")
+
+                if parsed_result.get("is_final", False):
+                    final_answer = parsed_result.get("answer", "")
+                    self.log_final_output(thought, final_answer, loop_num)
+                    return thought, "final_answer", final_answer
+
+                tools_data = parsed_result.get("tools", [])
+                action = tools_data
+
+                if len(tools_data) > 1:
+                    for tool_payload in tools_data:
+                        if isinstance(tool_payload.get("input"), dict) and tool_payload["input"].get("delegate_final"):
+                            raise ActionParsingException(
+                                "delegate_final is only supported for single agent tool calls.",
+                                recoverable=True,
+                            )
+
+                if len(tools_data) == 1:
+                    self.log_reasoning(
+                        thought,
+                        tools_data[0].get("name", "unknown_tool"),
+                        tools_data[0].get("input", {}),
+                        loop_num,
+                    )
+                else:
+                    self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
+
+                tools_data_for_streaming = [
+                    {
+                        "name": tool.get("name", ""),
+                        "type": self.tool_by_names.get(tool.get("name", "")).type,
+                    }
+                    for tool in tools_data
+                    if tool.get("name", "") and self.tool_by_names.get(tool.get("name", ""))
+                ]
+
+                self.stream_reasoning(
+                    {
+                        "thought": thought,
+                        "tools": tools_data_for_streaming,
+                        "loop_num": loop_num,
+                    },
+                    config,
+                    **kwargs,
+                )
+                return thought, action, tools_data
+
+            except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
+                self._append_recovery_instruction(
+                    error_label=type(e).__name__,
+                    error_detail=str(e),
+                    llm_generated_output=llm_generated_output,
+                    extra_guidance=(
+                        "Return <thought> with the resolved plan and list tool calls inside <tools>, "
+                        "or mark the run as final with <answer>."
+                    ),
+                )
+                return None, None, None
+        else:
+            try:
+                parsed_data = XMLParser.parse(
+                    llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
+                )
+                thought = parsed_data.get("thought")
+                final_answer = parsed_data.get("answer")
+                self.log_final_output(thought, final_answer, loop_num)
+                return thought, "final_answer", final_answer
+
+            except TagNotFoundError:
+                logger.debug("XMLParser: Not a final answer structure, trying action structure.")
+                try:
+                    parsed_data = XMLParser.parse(
+                        llm_generated_output,
+                        required_tags=["thought", "action", "action_input"],
+                        optional_tags=["output"],
+                        json_fields=["action_input"],
+                    )
+                    thought = parsed_data.get("thought")
+                    action = parsed_data.get("action")
+                    action_input = parsed_data.get("action_input")
+                    self.log_reasoning(thought, action, action_input, loop_num)
+                    return thought, action, action_input
+                except ParsingError as e:
+                    logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
+                    raise ActionParsingException(
+                        "The previous response was empty or invalid. "
+                        "Provide <thought> with either <action>/<action_input> or <answer>.",
+                        recoverable=True,
+                    )
+
+            except ParsingError as e:
+                logger.error(f"XMLParser: Empty or invalid XML response: {e}")
+                raise ActionParsingException(
+                    "The previous response was empty or invalid. " "Please provide the required XML tags.",
+                    recoverable=True,
+                )
+
+    def _setup_prompt_and_stop_sequences(
+        self,
+        input_message: Message | VisionMessage,
+        history_messages: list[Message] | None = None,
+    ) -> int:
+        """Setup the prompt with system message, history, and configure stop sequences.
+
+        Args:
+            input_message: The user's input message
+            history_messages: Optional conversation history
+
+        Returns:
+            int: The summary offset (position where history starts)
+        """
+        system_message = Message(
+            role=MessageRole.SYSTEM,
+            content=self.generate_prompt(
+                tools_name=self.tool_names,
+                input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
+                **self.system_prompt_manager.build_delegation_variables(self.delegation_allowed),
+            ),
+            static=True,
         )
 
-        summary_messages = [
-            Message(content=HISTORY_SUMMARIZATION_PROMPT, role=MessageRole.SYSTEM, static=True),
-            input_message,
-            Message(content=messages_history, role=MessageRole.USER, static=True),
-        ]
+        if history_messages:
+            self._prompt.messages = [system_message, *history_messages, input_message]
+        else:
+            self._prompt.messages = [system_message, input_message]
 
-        summary_tags = [f"tool_output{index}" for index in summary_sections]
+        summary_offset = self._history_offset = len(self._prompt.messages)
 
-        for _ in range(self.max_loops):
-            llm_result = self._run_llm(
-                messages=summary_messages,
+        # Configure stop sequences based on inference mode
+        stop_sequences = []
+        if self.inference_mode == InferenceMode.DEFAULT:
+            stop_sequences.extend(["Observation: ", "\nObservation:"])
+        elif self.inference_mode == InferenceMode.XML:
+            stop_sequences.extend(
+                [
+                    "\nObservation:",
+                    "Observation:",
+                    "</output>\n<",
+                    "</output><",
+                ]
+            )
+        self.llm.stop = stop_sequences
+
+        return summary_offset
+
+    def _setup_streaming_callback(
+        self, config: RunnableConfig, loop_num: int, **kwargs
+    ) -> tuple[AgentStreamingParserCallback | None, RunnableConfig, bool]:
+        """Setup streaming callback and modify LLM config if agent streaming is enabled.
+
+        Args:
+            config: The runnable configuration
+            loop_num: Current loop iteration number
+            **kwargs: Additional parameters
+
+        Returns:
+            tuple: (streaming_callback, modified_config, original_streaming_enabled)
+        """
+        streaming_callback = None
+        original_streaming_enabled = self.llm.streaming.enabled
+
+        if self.streaming.enabled:
+            streaming_callback = AgentStreamingParserCallback(
+                agent=self,
+                config=config,
+                loop_num=loop_num,
+                **kwargs,
+            )
+
+            if not original_streaming_enabled:
+                self.llm.streaming.enabled = True
+
+            llm_config = config.model_copy(deep=False)
+            llm_config.callbacks = [
+                callback for callback in llm_config.callbacks if not isinstance(callback, StreamingQueueCallbackHandler)
+            ]
+            llm_config.callbacks.append(streaming_callback)
+        else:
+            llm_config = config
+
+        return streaming_callback, llm_config, original_streaming_enabled
+
+    def _execute_single_tool(
+        self, action: str, action_input: Any, thought: str, loop_num: int, config: RunnableConfig, **kwargs
+    ) -> tuple[Any, dict, Any] | tuple[str, Any, Any]:
+        """Execute a single tool with caching support."""
+        tool = self.tool_by_names.get(self.sanitize_tool_name(action))
+        if not tool:
+            raise AgentUnknownToolException(
+                f"Unknown tool: {action}. Use only available tools and provide only the tool's name in the "
+                "action field. Do not include any additional reasoning. "
+                "Please correct the action field or state that you cannot answer the question."
+            )
+
+        self.stream_reasoning(
+            {
+                "thought": thought,
+                "action": action,
+                "tool": {"name": tool.name, "type": tool.type},
+                "action_input": action_input,
+                "loop_num": loop_num,
+            },
+            config,
+            **kwargs,
+        )
+
+        tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
+        tool_result = self._tool_cache.get(tool_cache_entry, None)
+        delegate_final = self._should_delegate_final(tool, action_input)
+
+        if not tool_result:
+            tool_result, tool_files = self._run_tool(
+                tool, action_input, config, delegate_final=delegate_final, **kwargs
+            )
+        else:
+            logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
+            tool_files = {}
+
+        if delegate_final:
+            self.log_final_output(thought, tool_result, loop_num)
+            if self.streaming.enabled:
+                self.stream_content(
+                    content=tool_result,
+                    source=tool.name,
+                    step="answer",
+                    config=config,
+                    **kwargs,
+                )
+            return "DELEGATED", tool_result, tool
+
+        return tool_result, tool_files, tool
+
+    def _add_observation_and_stream(
+        self,
+        tool_result: Any,
+        tool_files: dict,
+        tool: Any,
+        action: Any,
+        action_input: Any,
+        config: RunnableConfig,
+        **kwargs,
+    ) -> None:
+        """Add observation to prompt and stream tool result if enabled."""
+        observation = f"\nObservation: {tool_result}\n"
+        self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
+
+        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
+            if tool is not None:
+                source_name = tool_name = tool.name
+            elif isinstance(action, list):
+                tool_names = [
+                    tool_data["name"] if isinstance(tool_data, dict) and "name" in tool_data else UNKNOWN_TOOL_NAME
+                    for tool_data in action
+                ]
+
+                if len(tool_names) == 1:
+                    source_name = tool_name = tool_names[0]
+                else:
+                    unique_tools = list(set(tool_names))
+                    if len(unique_tools) == 1:
+                        source_name = tool_name = f"{unique_tools[0]} (parallel)"
+                    else:
+                        source_name = tool_name = " + ".join(unique_tools)
+            else:
+                source_name = tool_name = str(action)
+
+            self.stream_content(
+                content={
+                    "name": tool_name,
+                    "input": action_input,
+                    "result": tool_result,
+                    "files": tool_files,
+                },
+                source=source_name,
+                step="tool",
                 config=config,
                 **kwargs,
             )
 
-            output = llm_result.output["content"]
-            summary_messages.append(Message(content=output, role=MessageRole.ASSISTANT, static=True))
+    def _execute_tools_and_update_prompt(
+        self,
+        action: str | None,
+        action_input: Any,
+        thought: str | None,
+        loop_num: int,
+        config: RunnableConfig,
+        **kwargs,
+    ) -> str | None:
+        """Execute tools based on action and update prompt with observations.
+
+        Args:
+            action: The action/tool name to execute
+            action_input: Input parameters for the tool
+            thought: The agent's reasoning
+            loop_num: Current loop iteration number
+            config: Runnable configuration
+            **kwargs: Additional parameters
+
+        Returns:
+            str | None: Final answer if delegation occurred, None to continue loop
+        """
+        if action and self.tools:
+            tool_result = None
+            tool_files: Any = []
+            tool = None
+
             try:
-                parsed_data = XMLParser.parse(
-                    f"<root>{output}</root>",
-                    required_tags=summary_tags,
-                    optional_tags=[],
-                )
-            except ParsingError as e:
-                logger.error(f"Error: {e}. Make sure you have provided all tags at once: {summary_tags}")
-                summary_messages.append(Message(content=str(e), role=MessageRole.USER, static=True))
-                continue
+                # Handle XML parallel mode
+                if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled:
+                    tools_data = action_input if isinstance(action_input, list) else [action_input]
+                    execution_output = self._execute_tools(tools_data, config, **kwargs)
+                    tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
+                else:
+                    result = self._execute_single_tool(action, action_input, thought, loop_num, config, **kwargs)
+                    if isinstance(result, tuple) and len(result) == 3 and result[0] == "DELEGATED":
+                        return result[1]
+                    tool_result, tool_files, tool = result
 
-            for summary_index, message_index in enumerate(summary_sections[:-1]):
-                self._prompt.messages[message_index].content = (
-                    f"Observation (shortened): \n{parsed_data.get(summary_tags[summary_index])}"
-                )
+            except RecoverableAgentException as e:
+                tool_result = f"{type(e).__name__}: {e}"
 
-            if self.is_token_limit_exceeded():
-                self._prompt.messages[summary_sections[-1]].content = (
-                    f"Observation (shortened): \n{parsed_data.get(summary_tags[-1])}"
-                )
-                summary_offset = len(self._prompt.messages)
-            else:
-                summary_offset = len(self._prompt.messages) - 2
+            # Apply context manager effects if needed
+            if isinstance(tool, ContextManagerTool):
+                _apply_context_manager_tool_effect(self._prompt, tool_result, self._history_offset)
 
-            logger.info(f"Agent {self.name} - {self.id}: Summarization of tool output finished.")
-            return summary_offset
+            # Add observation and stream result
+            self._add_observation_and_stream(tool_result, tool_files, tool, action, action_input, config, **kwargs)
 
-    def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
-        base = super().get_clone_attr_initializers()
-        base.update(
-            {
-                "_tool_cache": lambda _: {},
-            }
-        )
-        return base
+        else:
+            # No action or no tools available
+            self.stream_reasoning(
+                {
+                    "thought": thought,
+                    "action": action,
+                    "action_input": action_input,
+                    "loop_num": loop_num,
+                },
+                config,
+                **kwargs,
+            )
+
+        return None
 
     def _run_agent(
         self,
@@ -1109,63 +764,20 @@ class Agent(BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
-        system_message = Message(
-            role=MessageRole.SYSTEM,
-            content=self.generate_prompt(
-                tools_name=self.tool_names, input_formats=self.generate_input_formats(self.tools)
-            ),
-            static=True,
-        )
-
-        if history_messages:
-            self._prompt.messages = [system_message, *history_messages, input_message]
-        else:
-            self._prompt.messages = [system_message, input_message]
-
-        summary_offset = self._history_offset = len(self._prompt.messages)
-
-        stop_sequences = []
-        if self.inference_mode == InferenceMode.DEFAULT:
-            stop_sequences.extend(["Observation: ", "\nObservation:"])
-        elif self.inference_mode == InferenceMode.XML:
-            stop_sequences.extend([
-                "\nObservation:",
-                "Observation:",
-                "</output>\n<",
-                "</output><",
-            ])
-        self.llm.stop = stop_sequences
+        summary_offset = self._setup_prompt_and_stop_sequences(input_message, history_messages)
 
         for loop_num in range(1, self.max_loops + 1):
             try:
-                streaming_callback = None
-                original_streaming_enabled = self.llm.streaming.enabled
-
-                if self.streaming.enabled:
-                    streaming_callback = AgentStreamingParserCallback(
-                        agent=self,
-                        config=config,
-                        loop_num=loop_num,
-                        **kwargs,
-                    )
-
-                    if not original_streaming_enabled:
-                        self.llm.streaming.enabled = True
-
-                    llm_config = config.model_copy(deep=False)
-                    llm_config.callbacks = [
-                        callback
-                        for callback in llm_config.callbacks
-                        if not isinstance(callback, StreamingQueueCallbackHandler)
-                    ]
-                    llm_config.callbacks.append(streaming_callback)
+                streaming_callback, llm_config, original_streaming_enabled = self._setup_streaming_callback(
+                    config, loop_num, **kwargs
+                )
 
                 try:
                     llm_result = self._run_llm(
                         messages=self._prompt.messages,
                         tools=self._tools,
                         response_format=self._response_format,
-                        config=(llm_config if streaming_callback else config),
+                        config=llm_config,
                         **kwargs,
                     )
                 finally:
@@ -1190,454 +802,38 @@ class Agent(BaseAgent):
                 )
                 logger.info(f"Agent {self.name} - {self.id}: Loop {loop_num}, " f"reasoning:\n{llm_reasoning}...")
 
+                # Append assistant message to conversation history BEFORE parsing
+                # This ensures the LLM can see its own output during error recovery
+                self._append_assistant_message(llm_result, llm_generated_output)
+
+                # Parse LLM output based on inference mode
                 match self.inference_mode:
                     case InferenceMode.DEFAULT:
-
-                        self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
-
-                        if not llm_generated_output or not llm_generated_output.strip():
-                            self._append_recovery_instruction(
-                                error_label="EmptyResponse",
-                                error_detail="The model returned an empty reply while using the Thought/Action format.",
-                                llm_generated_output=llm_generated_output,
-                                extra_guidance=(
-                                    "Re-evaluate the latest observation and respond with 'Thought:' followed by either "
-                                    "an 'Action:' plus JSON 'Action Input:' or a final 'Answer:' section."
-                                ),
-                            )
-                            continue
-
-                        if "Answer:" in llm_generated_output:
-                            thought, final_answer = self._extract_final_answer(llm_generated_output)
-
-                            self.log_final_output(thought, final_answer, loop_num)
-                            self.tracing_final(loop_num, final_answer, config, kwargs)
-                            return final_answer
-
-                        thought, action, action_input = self._parse_action(llm_generated_output)
-                        self.log_reasoning(thought, action, action_input, loop_num)
-
+                        result = self._handle_default_mode(llm_generated_output, loop_num)
                     case InferenceMode.FUNCTION_CALLING:
-                        if self.verbose:
-                            logger.info(f"Agent {self.name} - {self.id}: using function calling inference mode")
-                        if "tool_calls" not in dict(llm_result.output):
-                            logger.error("Error: No function called.")
-                            raise ActionParsingException(
-                                "Error: No function called, you need to call the correct function."
-                            )
-
-                        action = list(llm_result.output["tool_calls"].values())[0]["function"]["name"].strip()
-                        llm_generated_output_json = list(llm_result.output["tool_calls"].values())[0]["function"][
-                            "arguments"
-                        ]
-
-                        llm_generated_output = json.dumps(llm_generated_output_json)
-
-                        self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
-                        thought = llm_generated_output_json["thought"]
-                        if action == "provide_final_answer":
-                            final_answer = llm_generated_output_json["answer"]
-                            self.log_final_output(thought, final_answer, loop_num)
-                            self.tracing_final(loop_num, final_answer, config, kwargs)
-                            return final_answer
-
-                        action_input = llm_generated_output_json["action_input"]
-
-                        if isinstance(action_input, str):
-                            try:
-                                action_input = json.loads(action_input)
-                            except json.JSONDecodeError as e:
-                                raise ActionParsingException(
-                                    f"Error parsing action_input string. {e}", recoverable=True
-                                )
-
-                        self.log_reasoning(thought, action, action_input, loop_num)
-
+                        result = self._handle_function_calling_mode(llm_result, loop_num)
                     case InferenceMode.STRUCTURED_OUTPUT:
-                        if self.verbose:
-                            logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
-
-                        self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
-                        try:
-                            if isinstance(llm_generated_output, str):
-                                llm_generated_output_json = json.loads(llm_generated_output)
-                            else:
-                                llm_generated_output_json = llm_generated_output
-                        except json.JSONDecodeError as e:
-                            raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
-
-                        if "action" not in llm_generated_output_json or "thought" not in llm_generated_output_json:
-                            raise ActionParsingException("No action or thought provided.", recoverable=True)
-
-                        thought = llm_generated_output_json["thought"]
-                        action = llm_generated_output_json["action"]
-                        action_input = llm_generated_output_json["action_input"]
-
-                        if action == "finish":
-                            self.log_final_output(thought, action_input, loop_num)
-                            self.tracing_final(loop_num, action_input, config, kwargs)
-                            return action_input
-
-                        try:
-                            if isinstance(action_input, str):
-                                action_input = json.loads(action_input)
-                        except json.JSONDecodeError as e:
-                            raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
-
-                        self.log_reasoning(thought, action, action_input, loop_num)
-
+                        result = self._handle_structured_output_mode(llm_generated_output, loop_num)
                     case InferenceMode.XML:
-                        if self.verbose:
-                            logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
+                        result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
+                # Handle final answer
+                if result[1] == "final_answer":
+                    return result[2]
 
-                        self.tracing_intermediate(loop_num, self._prompt.messages, llm_generated_output)
+                # Handle recovery (for modes that support it)
+                # Check if both thought and action are None, which indicates (None, None, None) recovery
+                if result[0] is None and result[1] is None:
+                    continue
 
-                        if not llm_generated_output or not llm_generated_output.strip():
-                            self._append_recovery_instruction(
-                                error_label="EmptyResponse",
-                                error_detail="The model returned an empty reply while XML format was required.",
-                                llm_generated_output=llm_generated_output,
-                                extra_guidance=(
-                                    "Respond with <thought>...</thought> and "
-                                    "either <action>/<action_input> or <answer> tags, "
-                                    "making sure to address the latest observation."
-                                ),
-                            )
-                            continue
+                thought, action, action_input = result
 
-                        if self.parallel_tool_calls_enabled:
-                            try:
-                                parsed_result = XMLParser.parse_unified_xml_format(llm_generated_output)
-
-                                thought = parsed_result.get("thought", "")
-
-                                if parsed_result.get("is_final", False):
-                                    final_answer = parsed_result.get("answer", "")
-                                    self.log_final_output(thought, final_answer, loop_num)
-                                    self.tracing_final(loop_num, final_answer, config, kwargs)
-                                    return final_answer
-
-                                tools_data = parsed_result.get("tools", [])
-                                action = tools_data
-
-                                if len(tools_data) > 1:
-                                    for tool_payload in tools_data:
-                                        if isinstance(tool_payload.get("input"), dict) and tool_payload["input"].get(
-                                            "delegate_final"
-                                        ):
-                                            raise ActionParsingException(
-                                                "delegate_final is only supported for single agent tool calls.",
-                                                recoverable=True,
-                                            )
-
-                                if len(tools_data) == 1:
-                                    self.log_reasoning(
-                                        thought,
-                                        tools_data[0].get("name", "unknown_tool"),
-                                        tools_data[0].get("input", {}),
-                                        loop_num,
-                                    )
-                                else:
-                                    self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
-
-                                tools_data_for_streaming = [
-                                    {
-                                        "name": tool.get("name", ""),
-                                        "type": self.tool_by_names.get(tool.get("name", "")).type,
-                                    }
-                                    for tool in tools_data
-                                    if tool.get("name", "") and self.tool_by_names.get(tool.get("name", ""))
-                                ]
-
-                                self.stream_reasoning(
-                                    {
-                                        "thought": thought,
-                                        "tools": tools_data_for_streaming,
-                                        "loop_num": loop_num,
-                                    },
-                                    config,
-                                    **kwargs,
-                                )
-
-                            except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
-                                self._append_recovery_instruction(
-                                    error_label=type(e).__name__,
-                                    error_detail=str(e),
-                                    llm_generated_output=llm_generated_output,
-                                    extra_guidance=(
-                                        "Return <thought> with the resolved plan and list tool calls inside <tools>, "
-                                        "or mark the run as final with <answer>."
-                                    ),
-                                )
-                                continue
-                        else:
-                            try:
-                                parsed_data = XMLParser.parse(
-                                    llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
-                                )
-                                thought = parsed_data.get("thought")
-                                final_answer = parsed_data.get("answer")
-                                self.log_final_output(thought, final_answer, loop_num)
-                                self.tracing_final(loop_num, final_answer, config, kwargs)
-                                return final_answer
-
-                            except TagNotFoundError:
-                                logger.debug("XMLParser: Not a final answer structure, trying action structure.")
-                                try:
-                                    parsed_data = XMLParser.parse(
-                                        llm_generated_output,
-                                        required_tags=["thought", "action", "action_input"],
-                                        optional_tags=["output"],
-                                        json_fields=["action_input"],
-                                    )
-                                    thought = parsed_data.get("thought")
-                                    action = parsed_data.get("action")
-                                    action_input = parsed_data.get("action_input")
-                                    self.log_reasoning(thought, action, action_input, loop_num)
-                                except ParsingError as e:
-                                    logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
-                                    raise ActionParsingException(
-                                        "The previous response was empty or invalid. "
-                                        "Provide <thought> with either <action>/<action_input> or <answer>.",
-                                        recoverable=True,
-                                    )
-                                except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
-                                    logger.error(f"XMLParser: Failed to parse XML for action or answer: {e}")
-                                    raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
-
-                            except ParsingError as e:
-                                logger.error(f"XMLParser: Empty or invalid XML response: {e}")
-                                raise ActionParsingException(
-                                    "The previous response was empty or invalid. "
-                                    "Please provide the required XML tags.",
-                                    recoverable=True,
-                                )
-
-                            except (XMLParsingError, JSONParsingError) as e:
-                                logger.error(f"XMLParser: Error parsing potential final answer XML: {e}")
-                                raise ActionParsingException(f"Error parsing LLM output: {e}", recoverable=True)
-
-                self._prompt.messages.append(
-                    Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True)
+                final_answer = self._execute_tools_and_update_prompt(
+                    action, action_input, thought, loop_num, config, **kwargs
                 )
 
-                if action and self.tools:
-                    tool_result = None
-                    tool_files: Any = []
-                    tool = None
-                    delegate_final = False
+                if final_answer is not None:
+                    return final_answer
 
-                    if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled:
-                        execution_output = self._execute_tools(tools_data, config, **kwargs)
-                        tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
-
-                    elif self.inference_mode == InferenceMode.DEFAULT and self.parallel_tool_calls_enabled:
-                        if action == "multiple_tools":
-                            tools_data = []
-                            for tool_call in action_input:
-                                if (
-                                    not isinstance(tool_call, dict)
-                                    or "tool_name" not in tool_call
-                                    or "tool_input" not in tool_call
-                                ):
-                                    raise ActionParsingException(
-                                        "Invalid tool call format. "
-                                        "Each tool call must have 'tool_name' and 'tool_input'.",
-                                        recoverable=True,
-                                    )
-
-                                if isinstance(tool_call.get("tool_input"), dict) and tool_call["tool_input"].get(
-                                    "delegate_final"
-                                ):
-                                    raise ActionParsingException(
-                                        "delegate_final is only supported for single agent tool calls.",
-                                        recoverable=True,
-                                    )
-
-                                tools_data.append({"name": tool_call["tool_name"], "input": tool_call["tool_input"]})
-
-                            self.stream_reasoning(
-                                {
-                                    "thought": thought,
-                                    "action": "multiple_tools",
-                                    "tools": tools_data,
-                                    "loop_num": loop_num,
-                                },
-                                config,
-                                **kwargs,
-                            )
-
-                            execution_output = self._execute_tools(tools_data, config, **kwargs)
-                            tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
-
-                            action_input_json = json.dumps(action_input)
-
-                            step_observation = AgentIntermediateStepModelObservation(
-                                tool_using="multiple_tools",
-                                tool_input=str(action_input_json),
-                                tool_output=str(tool_result),
-                                updated=llm_generated_output,
-                            )
-
-                            self._intermediate_steps[loop_num]["model_observation"].update(
-                                step_observation.model_dump()
-                            )
-                        else:
-                            try:
-                                tool = self.tool_by_names.get(self.sanitize_tool_name(action))
-                                if not tool:
-                                    raise AgentUnknownToolException(
-                                        f"Unknown tool: {action}."
-                                        "Use only available tools and provide "
-                                        "only the tool's name in the action field. "
-                                        "Do not include any additional reasoning. "
-                                        "Please correct the action field or state that you cannot answer the question. "
-                                    )
-
-                                self.stream_reasoning(
-                                    {
-                                        "thought": thought,
-                                        "action": action,
-                                        "tool": {"name": tool.name, "type": tool.type},
-                                        "action_input": action_input,
-                                        "loop_num": loop_num,
-                                    },
-                                    config,
-                                    **kwargs,
-                                )
-
-                                delegate_final = self._should_delegate_final(tool, action_input)
-                                tool_result, tool_files = self._run_tool(
-                                    tool, action_input, config, delegate_final=delegate_final, **kwargs
-                                )
-
-                                if delegate_final:
-                                    self.log_final_output(thought, tool_result, loop_num)
-                                    self.tracing_final(loop_num, tool_result, config, kwargs)
-                                    if self.streaming.enabled:
-                                        self.stream_content(
-                                            content=tool_result,
-                                            source=tool.name,
-                                            step="answer",
-                                            config=config,
-                                            **kwargs,
-                                        )
-                                    return tool_result
-
-                            except RecoverableAgentException as e:
-                                tool_result = f"{type(e).__name__}: {e}"
-                    else:
-                        try:
-                            tool = self.tool_by_names.get(self.sanitize_tool_name(action))
-                            if not tool:
-                                raise AgentUnknownToolException(
-                                    f"Unknown tool: {action}."
-                                    "Use only available tools and provide only the tool's name in the action field. "
-                                    "Do not include any additional reasoning. "
-                                    "Please correct the action field or state that you cannot answer the question."
-                                )
-
-                            self.stream_reasoning(
-                                {
-                                    "thought": thought,
-                                    "action": action,
-                                    "tool": {"name": tool.name, "type": tool.type},
-                                    "action_input": action_input,
-                                    "loop_num": loop_num,
-                                },
-                                config,
-                                **kwargs,
-                            )
-
-                            tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
-                            tool_result = self._tool_cache.get(tool_cache_entry, None)
-                            delegate_final = self._should_delegate_final(tool, action_input)
-                            if not tool_result:
-                                tool_result, tool_files = self._run_tool(
-                                    tool, action_input, config, delegate_final=delegate_final, **kwargs
-                                )
-
-                            else:
-                                logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
-
-                            if delegate_final:
-                                self.log_final_output(thought, tool_result, loop_num)
-                                self.tracing_final(loop_num, tool_result, config, kwargs)
-                                if self.streaming.enabled:
-                                    self.stream_content(
-                                        content=tool_result,
-                                        source=tool.name,
-                                        step="answer",
-                                        config=config,
-                                        **kwargs,
-                                    )
-                                return tool_result
-
-                        except RecoverableAgentException as e:
-                            tool_result = f"{type(e).__name__}: {e}"
-
-                    if isinstance(tool, ContextManagerTool):
-                        _apply_context_manager_tool_effect(self._prompt, tool_result, self._history_offset)
-
-                    observation = f"\nObservation: {tool_result}\n"
-                    self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
-
-                    if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-                        if tool is not None:
-                            source_name = tool_name = tool.name
-                        elif isinstance(action, list):
-                            tool_names = [
-                                (
-                                    tool_data["name"]
-                                    if isinstance(tool_data, dict) and "name" in tool_data
-                                    else UNKNOWN_TOOL_NAME
-                                )
-                                for tool_data in action
-                            ]
-
-                            if len(tool_names) == 1:
-                                source_name = tool_name = tool_names[0]
-                            else:
-                                unique_tools = list(set(tool_names))
-                                if len(unique_tools) == 1:
-                                    source_name = tool_name = f"{unique_tools[0]} (parallel)"
-                                else:
-                                    source_name = tool_name = " + ".join(unique_tools)
-                        else:
-                            source_name = tool_name = str(action)
-
-                        self.stream_content(
-                            content={
-                                "name": tool_name,
-                                "input": action_input,
-                                "result": tool_result,
-                                "files": tool_files,
-                            },
-                            source=source_name,
-                            step="tool",
-                            config=config,
-                            **kwargs,
-                        )
-
-                    step_observation = AgentIntermediateStepModelObservation(
-                        tool_using=action,
-                        tool_input=action_input,
-                        tool_output=tool_result,
-                        updated=llm_generated_output,
-                    )
-
-                    self._intermediate_steps[loop_num]["model_observation"].update(step_observation.model_dump())
-                else:
-                    self.stream_reasoning(
-                        {
-                            "thought": thought,
-                            "action": action,
-                            "action_input": action_input,
-                            "loop_num": loop_num,
-                        },
-                        config,
-                        **kwargs,
-                    )
             except ActionParsingException as e:
                 extra_guidance = None
                 if self.inference_mode == InferenceMode.XML:
@@ -1660,9 +856,9 @@ class Agent(BaseAgent):
                 )
                 continue
 
-            if self.summarization_config.enabled:
-                if self.is_token_limit_exceeded():
-                    summary_offset = self.summarize_history(input_message, summary_offset, config=config, **kwargs)
+            summary_offset = self._try_summarize_history(
+                input_message=input_message, summary_offset=summary_offset, config=config, **kwargs
+            )
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
@@ -1686,31 +882,37 @@ class Agent(BaseAgent):
                 )
             return max_loop_final_answer
 
-    def aggregate_history(self, messages: list[Message, VisionMessage]) -> str:
+    def _try_summarize_history(
+        self,
+        input_message: Message | VisionMessage,
+        summary_offset: int,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> int:
         """
-        Concatenates multiple history messages into one unified string.
+        Check if summarization is needed and perform it if token limit is exceeded.
 
         Args:
-            messages (list[Message, VisionMessage]): List of messages to aggregate.
+            input_message: User request message
+            summary_offset: Current summary offset
+            config: Configuration for the agent run
+            **kwargs: Additional parameters for running the agent
 
         Returns:
-            str: Aggregated content.
+            int: Updated summary offset after summarization (or unchanged if not needed)
         """
+        if not self.summarization_config.enabled:
+            return summary_offset
 
-        history = ""
+        if self.is_token_limit_exceeded():
+            return self.summarize_history(
+                input_message=input_message,
+                summary_offset=summary_offset,
+                config=config,
+                **kwargs,
+            )
 
-        for message in messages:
-            if isinstance(message, VisionMessage):
-                for content in message.content:
-                    if isinstance(content, VisionMessageTextContent):
-                        history += content.text
-            else:
-                if message.role == MessageRole.ASSISTANT:
-                    history += f"-TOOL DESCRIPTION START-\n{message.content}\n-TOOL DESCRIPTION END-\n"
-                elif message.role == MessageRole.USER:
-                    history += f"-TOOL OUTPUT START-\n{message.content}\n-TOOL OUTPUT END-\n"
-
-        return history
+        return summary_offset
 
     def _handle_max_loops_exceeded(
         self, input_message: Message | VisionMessage, config: RunnableConfig | None = None, **kwargs
@@ -1727,7 +929,10 @@ class Agent(BaseAgent):
         Returns:
             str: Final answer provided by the agent.
         """
-        system_message = Message(content=REACT_MAX_LOOPS_PROMPT, role=MessageRole.SYSTEM, static=True)
+        # Use model-specific max loops prompt from prompt manager
+        max_loops_prompt = self.system_prompt_manager.max_loops_prompt
+
+        system_message = Message(content=max_loops_prompt, role=MessageRole.SYSTEM, static=True)
         conversation_history = Message(
             content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True
         )
@@ -1755,259 +960,40 @@ class Agent(BaseAgent):
 
         return f"{final_answer}"
 
-    def generate_input_formats(self, tools: list[Node]) -> str:
-        """Generate formatted input descriptions for each tool."""
-        input_formats = []
-        for tool in tools:
-            params = []
-            for name, field in tool.input_schema.model_fields.items():
-                if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
-                    if get_origin(field.annotation) in (Union, types.UnionType):
-                        type_str = str(field.annotation)
-                    else:
-                        type_str = getattr(field.annotation, "__name__", str(field.annotation))
-
-                    if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
-                        type_str = "tuple[str, ...]"
-
-                    description = field.description or "No description"
-                    params.append(f"{name} ({type_str}): {description}")
-            if params:
-                input_formats.append(f" - {self.sanitize_tool_name(tool.name)}\n \t* " + "\n\t* ".join(params))
-        return "\n".join(input_formats)
-
-    def generate_structured_output_schemas(self):
-        tool_names = [self.sanitize_tool_name(tool.name) for tool in self.tools]
-
-        schema = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "plan_next_action",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "required": ["thought", "action", "action_input"],
-                    "properties": {
-                        "thought": {
-                            "type": "string",
-                            "description": "Your reasoning about the next step.",
-                        },
-                        "action": {
-                            "type": "string",
-                            "description": f"Next action to make (choose from [{tool_names}, finish]).",
-                        },
-                        "action_input": {
-                            "type": "string",
-                            "description": "Input for chosen action.",
-                        },
-                    },
-                    "additionalProperties": False,
-                },
-            },
-        }
-
-        self._response_format = schema
-
-    def _build_delegation_variables(self) -> dict[str, str]:
-        """Provide prompt snippets for delegate_final guidance when enabled."""
-        if not self.delegation_allowed:
-            return {"delegation_instructions": "", "delegation_instructions_xml": ""}
-
-        return {
-            "delegation_instructions": DELEGATION_INSTRUCTIONS,
-            "delegation_instructions_xml": DELEGATION_INSTRUCTIONS_XML,
-        }
-
-    @staticmethod
-    def filter_format_type(param_annotation: Any) -> list[str]:
-        """
-        Filters proper type for a function calling schema.
-
-        Args:
-            param_annotation (Any): Parameter annotation.
-        Returns:
-            list[str]: List of parameter types that describe provided annotation.
-        """
-
-        if get_origin(param_annotation) in (Union, types.UnionType):
-            return get_args(param_annotation)
-
-        return [param_annotation]
-
-    def generate_property_schema(self, properties, name, field):
-        if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
-            description = field.description or "No description."
-
-            description += f" Defaults to: {field.default}." if field.default and not field.is_required() else ""
-            params = self.filter_format_type(field.annotation)
-
-            properties[name] = {"description": description}
-            types = []
-
-            for param in params:
-                if param is type(None):
-                    types.append("null")
-
-                elif param_type := TYPE_MAPPING.get(param):
-                    types.append(param_type)
-
-                elif issubclass(param, Enum):
-                    element_type = TYPE_MAPPING.get(
-                        self.filter_format_type(type(list(param.__members__.values())[0].value))[0]
-                    )
-                    types.append(element_type)
-                    properties[name]["enum"] = [field.value for field in param.__members__.values()]
-
-                elif getattr(param, "__origin__", None) is list:
-                    types.append("array")
-                    properties[name]["items"] = {"type": TYPE_MAPPING.get(param.__args__[0])}
-
-                elif getattr(param, "__origin__", None) is dict:
-                    types.append("object")
-
-            if len(types) == 1:
-                properties[name]["type"] = types[0]
-            elif len(types) > 1:
-                properties[name]["type"] = types
-            else:
-                properties[name]["type"] = "string"
-
-    def generate_function_calling_schemas(self):
-        """Generate schemas for function calling."""
-        self._tools.append(final_answer_function_schema)
-        for tool in self.tools:
-            # Agent tools: accept action_input as a JSON string to avoid nested schema issues.
-            if isinstance(tool, Agent):
-                agent_action_input_description = "JSON string containing the agent's inputs "
-                if self.delegation_allowed:
-                    agent_action_input_description += '(e.g., {"input": "<subtask>", "delegate_final": true}).'
-                else:
-                    agent_action_input_description += '(e.g., {"input": "<subtask>"}).'
-
-                schema = {
-                    "type": "function",
-                    "function": {
-                        "name": self.sanitize_tool_name(tool.name),
-                        "description": tool.description[:1024],
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "thought": {
-                                    "type": "string",
-                                    "description": "Your reasoning about using this tool.",
-                                },
-                                "action_input": {
-                                    "type": "string",
-                                    "description": agent_action_input_description,
-                                },
-                            },
-                            "additionalProperties": False,
-                            "required": ["thought", "action_input"],
-                        },
-                        "strict": True,
-                    },
-                }
-
-                self._tools.append(schema)
-                continue
-
-            properties = {}
-            input_params = tool.input_schema.model_fields.items()
-            if list(input_params) and not isinstance(self.llm, Gemini):
-                for name, field in tool.input_schema.model_fields.items():
-                    self.generate_property_schema(properties, name, field)
-
-                schema = {
-                    "type": "function",
-                    "function": {
-                        "name": self.sanitize_tool_name(tool.name),
-                        "description": tool.description[:1024],
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "thought": {
-                                    "type": "string",
-                                    "description": "Your reasoning about using this tool.",
-                                },
-                                "action_input": {
-                                    "type": "object",
-                                    "description": "Input for the selected tool",
-                                    "properties": properties,
-                                    "required": list(properties.keys()),
-                                    "additionalProperties": False,
-                                },
-                            },
-                            "additionalProperties": False,
-                            "required": ["thought", "action_input"],
-                        },
-                        "strict": True,
-                    },
-                }
-
-                self._tools.append(schema)
-
-            else:
-                schema = {
-                    "type": "function",
-                    "function": {
-                        "name": self.sanitize_tool_name(tool.name),
-                        "description": tool.description[:1024],
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "thought": {
-                                    "type": "string",
-                                    "description": "Your reasoning about using this tool.",
-                                },
-                                "action_input": {
-                                    "type": "string",
-                                    "description": "Input for the selected tool in JSON string format.",
-                                },
-                            },
-                            "additionalProperties": False,
-                            "required": ["thought", "action_input"],
-                        },
-                        "strict": True,
-                    },
-                }
-
-                self._tools.append(schema)
-
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
-        self._prompt_variables.update(self._build_delegation_variables())
+        # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
+        self.system_prompt_manager.update_variables(
+            self.system_prompt_manager.build_delegation_variables(self.delegation_allowed)
+        )
 
-        if self.parallel_tool_calls_enabled:
-            instructions_default = REACT_BLOCK_INSTRUCTIONS_MULTI
-            instructions_xml = REACT_BLOCK_XML_INSTRUCTIONS_MULTI
-        else:
-            instructions_default = REACT_BLOCK_INSTRUCTIONS_SINGLE
-            instructions_xml = REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
+        # Handle function calling schema generation first
+        if self.inference_mode == InferenceMode.FUNCTION_CALLING:
+            self._tools = schema_generator.generate_function_calling_schemas(
+                self.tools, self.delegation_allowed, self.sanitize_tool_name, self.llm
+            )
+        elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
+            self._response_format = schema_generator.generate_structured_output_schemas(
+                self.tools, self.sanitize_tool_name, self.delegation_allowed
+            )
 
-        prompt_blocks = {
-            "tools": "" if not self.tools else REACT_BLOCK_TOOLS,
-            "instructions": REACT_BLOCK_INSTRUCTIONS_NO_TOOLS if not self.tools else instructions_default,
-            "output_format": REACT_BLOCK_OUTPUT_FORMAT,
-        }
+        # Setup ReAct-specific prompts via prompt manager
+        self.system_prompt_manager.setup_for_react_agent(
+            inference_mode=self.inference_mode,
+            parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
+            has_tools=bool(self.tools),
+        )
 
-        match self.inference_mode:
-            case InferenceMode.FUNCTION_CALLING:
-                self.generate_function_calling_schemas()
-                prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING
-                if self.tools:
-                    prompt_blocks["tools"] = REACT_BLOCK_TOOLS_NO_FORMATS
-
-            case InferenceMode.STRUCTURED_OUTPUT:
-                self.generate_structured_output_schemas()
-                prompt_blocks["instructions"] = REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT
-
-            case InferenceMode.XML:
-                prompt_blocks["instructions"] = (
-                    REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS if not self.tools else instructions_xml
-                )
-
-        self._prompt_blocks.update(prompt_blocks)
+        # Only auto-wrap the entire role in a raw block if the user did not
+        # provide explicit raw/endraw markers. This allows roles to mix
+        # literal sections (via raw) with Jinja variables like {{ input }}
+        # without creating nested raw blocks.
+        if self.role:
+            if ("{% raw %}" in self.role) or ("{% endraw %}" in self.role):
+                self.system_prompt_manager.set_block("role", self.role)
+            else:
+                self.system_prompt_manager.set_block("role", f"{{% raw %}}{self.role}{{% endraw %}}")
 
     @staticmethod
     def _build_unique_file_key(files_map: dict[str, Any], base: str) -> str:
