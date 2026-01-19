@@ -305,7 +305,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         with conn.cursor() as cur:
             result = self._execute_sql_query(query, (self.schema_name,), cursor=cur).fetchone()
-            return bool(result["exists"])
+            return bool(result["exists"]) if isinstance(result, dict) else bool(result[0])
 
     def _check_if_table_exists(self, conn: psycopg.Connection) -> bool:
         """
@@ -331,7 +331,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         with conn.cursor() as cur:
             result = self._execute_sql_query(query, (self.schema_name, self.table_name), cursor=cur).fetchone()
-            return bool(result["exists"])
+            return bool(result["exists"]) if isinstance(result, dict) else bool(result[0])
 
     def _execute_sql_query(self, sql_query: Any, params: tuple | None = None, cursor: Cursor | None = None) -> Cursor:
         """
@@ -655,7 +655,10 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                     schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name)
                 )
                 result = self._execute_sql_query(query, cursor=cur)
-                return result.fetchone()[0]
+                row = result.fetchone()
+                if row is None:
+                    return 0
+                return row[0] if isinstance(row, (tuple, list)) else row.get("count", 0)
 
     def write_documents(
         self, documents: list[Document], content_key: str | None = None, embedding_key: str | None = None
