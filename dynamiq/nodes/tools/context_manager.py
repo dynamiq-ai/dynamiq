@@ -96,6 +96,26 @@ class ContextManagerTool(Node):
         """Reset the intermediate steps (run_depends) of the node."""
         self._run_depends = []
 
+    @property
+    def to_dict_exclude_params(self):
+        """
+        Property to define which parameters should be excluded when converting the class instance to a dictionary.
+
+        Returns:
+            dict: A dictionary defining the parameters to exclude.
+        """
+        return super().to_dict_exclude_params | {"llm": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary.
+
+        Returns:
+            dict: A dictionary representation of the instance.
+        """
+        data = super().to_dict(**kwargs)
+        data["llm"] = self.llm.to_dict(**kwargs)
+        return data
+
     def _summarize_replace_history(
         self,
         messages: list[Message | VisionMessage],
@@ -119,7 +139,6 @@ class ContextManagerTool(Node):
 
         # Get conversation history messages to be summarized (starting from summary_offset)
         conversation_history_messages = messages[summary_offset:] if summary_offset > 0 else messages
-        logger.info("message - 1 -")
         # Build summary request messages with constant prompt
         summary_messages = conversation_history_messages + [
             Message(
@@ -129,12 +148,8 @@ class ContextManagerTool(Node):
             ),
         ]
 
-        logger.info("message - 0 -")
-
         # Attempt to generate and extract summary
         for attempt in range(self.max_attempts):
-
-            logger.info("message - 3122 -123123123 -")
             llm_result = self.llm.run(
                 input_data={},
                 prompt=Prompt(messages=summary_messages),

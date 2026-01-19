@@ -301,9 +301,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
-        thought, action, action_input = parser.parse_default_action(
-            llm_generated_output, self.parallel_tool_calls_enabled
-        )
+        thought, action, action_input = parser.parse_default_action(llm_generated_output)
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
 
@@ -847,7 +845,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Handle recovery (for modes that support it)
                 # Check if both thought and action are None, which indicates (None, None, None) recovery
-                if result[0] is None and result[1] is None:
+                if result[1] is None:
                     continue
 
                 thought, action, action_input = result
