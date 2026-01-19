@@ -729,8 +729,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
             tool = None
 
             try:
-                # Handle XML parallel mode
-                if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled:
+                # Check if this is a ContextManagerTool invocation (always use single tool path)
+                is_context_manager = any(
+                    isinstance(t, ContextManagerTool) and self.sanitize_tool_name(t.name) == action for t in self.tools
+                )
+
+                # Handle XML parallel mode (but not for ContextManagerTool)
+                if (
+                    self.inference_mode == InferenceMode.XML
+                    and self.parallel_tool_calls_enabled
+                    and not is_context_manager
+                ):
                     tools_data = action_input if isinstance(action_input, list) else [action_input]
                     execution_output = self._execute_tools(tools_data, config, **kwargs)
 

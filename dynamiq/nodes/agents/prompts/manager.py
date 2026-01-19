@@ -11,7 +11,6 @@ from dynamiq.nodes.agents.prompts.react import (
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
     REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING,
-    REACT_BLOCK_INSTRUCTIONS_MULTI,
     REACT_BLOCK_INSTRUCTIONS_NO_TOOLS,
     REACT_BLOCK_INSTRUCTIONS_SINGLE,
     REACT_BLOCK_INSTRUCTIONS_STRUCTURED_OUTPUT,
@@ -277,27 +276,24 @@ def get_model_specific_prompts(
     if agent_template != AGENT_PROMPT_TEMPLATE:
         logger.debug(f"Using model-specific AGENT_PROMPT_TEMPLATE for '{model_name}'")
 
-    # Get base instructions based on parallel tool calls setting
+    # DEFAULT mode always uses single-tool instructions (parallel not supported)
+    instructions_default = get_prompt_constant(
+        model_name, "REACT_BLOCK_INSTRUCTIONS_SINGLE", REACT_BLOCK_INSTRUCTIONS_SINGLE
+    )
+    if instructions_default != REACT_BLOCK_INSTRUCTIONS_SINGLE:
+        logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_SINGLE for '{model_name}'")
+
+    # XML mode supports parallel tool calls
     if parallel_tool_calls_enabled:
-        instructions_default = get_prompt_constant(
-            model_name, "REACT_BLOCK_INSTRUCTIONS_MULTI", REACT_BLOCK_INSTRUCTIONS_MULTI
-        )
         instructions_xml = get_prompt_constant(
             model_name, "REACT_BLOCK_XML_INSTRUCTIONS_MULTI", REACT_BLOCK_XML_INSTRUCTIONS_MULTI
         )
-        if instructions_default != REACT_BLOCK_INSTRUCTIONS_MULTI:
-            logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_MULTI for '{model_name}'")
         if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_MULTI:
             logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_MULTI for '{model_name}'")
     else:
-        instructions_default = get_prompt_constant(
-            model_name, "REACT_BLOCK_INSTRUCTIONS_SINGLE", REACT_BLOCK_INSTRUCTIONS_SINGLE
-        )
         instructions_xml = get_prompt_constant(
             model_name, "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
         )
-        if instructions_default != REACT_BLOCK_INSTRUCTIONS_SINGLE:
-            logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_SINGLE for '{model_name}'")
         if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_SINGLE:
             logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
 
