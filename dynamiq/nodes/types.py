@@ -39,6 +39,24 @@ class InferenceMode(str, Enum):
     STRUCTURED_OUTPUT = "STRUCTURED_OUTPUT"
 
 
+class ActionType(str, Enum):
+    """
+    Enumeration of action types for tools and nodes used as tools.
+    Classifies what kind of action is performed.
+
+    Note: This is distinct from NodeGroup which classifies the node category.
+    ActionType indicates the behavior/action being performed.
+    """
+
+    WEB_SEARCH = "web_search"
+    WEB_SCRAPE = "web_scrape"
+    CODE_EXECUTION = "code_execution"
+    FILE_OPERATION = "file_operation"
+    DATA_QUERY = "data_query"
+    COMPUTER_USE = "computer_use"
+    SEMANTIC_SEARCH = "semantic_search"
+
+
 class Behavior(str, Enum):
     RAISE = "raise"
     RETURN = "return"

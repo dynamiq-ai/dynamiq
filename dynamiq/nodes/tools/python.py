@@ -13,6 +13,7 @@ from RestrictedPython.transformer import INSPECT_ATTRIBUTES, RestrictingNodeTran
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils import format_value
 from dynamiq.utils.logger import logger
@@ -277,6 +278,7 @@ class Python(Node):
         -If False, it is passed as a single dictionary with all parameters as keys.
     """
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.CODE_EXECUTION
     name: str = "Python Code Executor Tool"
     description: str = """Executes Python code in a secure sandbox with restricted imports for calculations,
     data processing, and API interactions."""  # noqa: E501
