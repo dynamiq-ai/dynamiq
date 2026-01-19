@@ -62,7 +62,7 @@ def parse_default_action(
 
             # Find the last "Action:" before this "Action Input:"
             # Match action name up to newline or end of string
-            all_actions = list(re.finditer(r"Action:\s*(.+?)(?=\n|$)", preceding_text))
+            all_actions = list(re.finditer(r"Action:\s*(.+?)(?=\n|$|Action)", preceding_text))
 
             if not all_actions:
                 continue
@@ -124,6 +124,14 @@ def parse_default_action(
                         f"Invalid JSON in Action Input for {action_name}: {str(e)} : {raw_input}",
                         recoverable=True,
                     )
+            else:
+                # Brace counting failed - no valid JSON structure found
+                raise ActionParsingException(
+                    f"Could not parse JSON structure in Action Input for {action_name}. "
+                    f"Expected JSON object starting with '{{' but found: "
+                    f"{json_str_candidate[:100]}{'...' if len(json_str_candidate) > 100 else ''}",
+                    recoverable=True,
+                )
 
         if not actions:
             logger.info("No valid Action and Action Input pairs found in the output ")
