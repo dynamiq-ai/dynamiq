@@ -303,7 +303,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             """
         )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             result = self._execute_sql_query(query, (self.schema_name,), cursor=cur).fetchone()
             return bool(result["exists"]) if isinstance(result, dict) else bool(result[0])
 
@@ -329,7 +329,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             """
         )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             result = self._execute_sql_query(query, (self.schema_name, self.table_name), cursor=cur).fetchone()
             return bool(result["exists"]) if isinstance(result, dict) else bool(result[0])
 
@@ -426,7 +426,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             dimension=self.dimension,
         )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             self._execute_sql_query(query, cursor=cur)
             conn.commit()
 
@@ -447,7 +447,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             table_name=Identifier(self.table_name),
         )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             self._execute_sql_query(query, cursor=cur)
             conn.commit()
 
@@ -520,7 +520,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             # EXACT search
             return
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             self._execute_sql_query(query, cursor=cur)
             conn.commit()
 
@@ -554,7 +554,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             language=SQLLiteral(self.language),
         )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             self._execute_sql_query(create_keyword_index_query, cursor=cur)
             conn.commit()
 
@@ -581,7 +581,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             index_name=Identifier(f"{self.table_name}_{self.index_method}_index"),
         )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             self._execute_sql_query(query, cursor=cur)
             conn.commit()
 
@@ -601,7 +601,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             schema_name=Identifier(self.schema_name),
         )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             self._execute_sql_query(query, cursor=cur)
             conn.commit()
 
@@ -621,7 +621,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             schema_name=Identifier(self.schema_name),
         )
 
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=dict_row) as cur:
             self._execute_sql_query(query, cursor=cur)
             conn.commit()
 
@@ -650,7 +650,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         """
 
         with self._get_connection() as conn:
-            with conn.cursor() as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 query = SQL("SELECT COUNT(*) FROM {schema_name}.{table_name}").format(
                     schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name)
                 )
@@ -716,7 +716,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         )
 
         with self._get_connection() as conn:
-            with conn.cursor() as cur:
+            with conn.cursor(row_factory=dict_row) as cur:
                 cur.executemany(query, batch_data)
                 conn.commit()
 
@@ -733,7 +733,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         """
         if filters:
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     sql_where_clause, params = self._prepare_filters(filters)
                     query = SQL("DELETE FROM {schema_name}.{table_name}").format(
                         schema_name=Identifier(self.schema_name),
@@ -789,7 +789,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         """
         if delete_all:
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     query = SQL("DELETE FROM {schema_name}.{table_name}").format(
                         schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name)
                     )
@@ -800,7 +800,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 logger.warning("No document IDs provided. No documents will be deleted.")
             else:
                 with self._get_connection() as conn:
-                    with conn.cursor() as cur:
+                    with conn.cursor(row_factory=dict_row) as cur:
                         query = SQL("DELETE FROM {schema_name}.{table_name} WHERE id = ANY(%s::text[])").format(
                             schema_name=Identifier(self.schema_name), table_name=Identifier(self.table_name)
                         )
