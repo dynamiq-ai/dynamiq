@@ -431,6 +431,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     {
                         "name": tool.get("name", ""),
                         "type": self.tool_by_names.get(tool.get("name", "")).type,
+                        "action_type": self.tool_by_names.get(tool.get("name", "")).group.value,
                     }
                     for tool in tools_data
                     if tool.get("name", "") and self.tool_by_names.get(tool.get("name", ""))
@@ -597,9 +598,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self.stream_reasoning(
             {
                 "thought": thought,
-                "action": action,
-                "tool": {"name": tool.name, "type": tool.type},
-                "action_input": action_input,
+                "tools": [{"name": tool.name, "type": tool.type, "action_type": tool.group.value}],
                 "loop_num": loop_num,
             },
             config,
