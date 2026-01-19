@@ -1,32 +1,12 @@
 import pytest
 
-from dynamiq.connections import BaseConnection
-from dynamiq.nodes.agents.agent import Agent
-from dynamiq.nodes.llms.base import BaseLLM
+from dynamiq.nodes.agents.components import parser
+from dynamiq.nodes.agents.exceptions import ActionParsingException
 
 
-class MockConnection(BaseConnection):
-    def connect(self):
-        pass
-
-
-class MockLLM(BaseLLM):
-    def __init__(self):
-        super().__init__(model="mock-model", connection=MockConnection(), name="MockLLM")
-
-
-class TestAgentParsing:
-    @pytest.fixture
-    def agent(self):
-        llm = MockLLM()
-        # Agent requires tools usually, but for parsing logic it might be optional or empty list is fine
-        agent = Agent(llm=llm, name="TestAgent", tools=[])
-        return agent
-
-    def test_parse_action_deepseek_format(self, agent):
-        """Test parsing of DeepSeek-style output with extra newlines and nested JSON."""
-        # Use raw string to prevent python from interpreting \n as newline char
-        output = r"""Thought: I need to calculate something.
+def test_parse_default_action_extra_newlines():
+    """Test parsing of output with extra newlines and nested JSON."""
+    output = r"""Thought: I need to calculate something.
 
 Action: Calculator Tool
 
@@ -34,43 +14,201 @@ Action Input: {
     "code": "print('Hello World')\nprint({'nested': 'dict'})"
 }"""
 
-        thought, action, action_input = agent._parse_action(output)
+    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
 
-        assert thought == "I need to calculate something."
-        assert action == "Calculator Tool"
-        assert action_input == {"code": "print('Hello World')\nprint({'nested': 'dict'})"}
+    assert thought == "I need to calculate something."
+    assert action == "Calculator Tool"
+    assert action_input == {"code": "print('Hello World')\nprint({'nested': 'dict'})"}
 
-    def test_parse_action_standard_format(self, agent):
-        """Test parsing of standard strict format."""
-        output = 'Thought: thinking\nAction: Tool\nAction Input: {"key": "value"}'
 
-        thought, action, action_input = agent._parse_action(output)
+def test_parse_default_action_standard_format():
+    """Test parsing of standard strict format."""
+    output = 'Thought: thinking\nAction: Tool\nAction Input: {"key": "value"}'
 
-        assert thought == "thinking"
-        assert action == "Tool"
-        assert action_input == {"key": "value"}
+    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
 
-    def test_parse_action_multiple_newlines(self, agent):
-        """Test parsing with multiple newlines between Action and Input."""
-        output = """Thought: thinking
+    assert thought == "thinking"
+    assert action == "Tool"
+    assert action_input == {"key": "value"}
+
+
+def test_parse_default_action_multiple_newlines():
+    """Test parsing with multiple newlines between Action and Input."""
+    output = """Thought: thinking
 
 Action: Tool Name
 
 
 Action Input: {"key": "value"}"""
 
-        thought, action, action_input = agent._parse_action(output)
+    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
 
-        assert action == "Tool Name"
-        assert action_input == {"key": "value"}
+    assert thought == "thinking"
+    assert action == "Tool Name"
+    assert action_input == {"key": "value"}
 
-    def test_parse_action_with_json_markdown(self, agent):
-        """Test parsing when JSON is wrapped in markdown blocks."""
-        output = """Thought: thinking
+
+def test_parse_default_action_with_json_markdown():
+    """Test parsing when JSON is wrapped in markdown blocks."""
+    output = """Thought: thinking
 Action: Tool
 Action Input: ```json
 {"key": "value"}
 ```"""
-        thought, action, action_input = agent._parse_action(output)
-        assert action == "Tool"
-        assert action_input == {"key": "value"}
+    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+
+    assert thought == "thinking"
+    assert action == "Tool"
+    assert action_input == {"key": "value"}
+
+
+def test_parse_default_action_parallel_tools():
+    """Test parsing multiple sequential tool calls when parallel_tool_calls_enabled=True."""
+    output = """Thought: I need to gather information from multiple sources.
+
+Action: Search Tool
+Action Input: {"query": "latest news"}
+
+Action: Weather Tool
+Action Input: {"location": "San Francisco"}"""
+
+    thought, action_type, actions_data = parser.parse_default_action(output, parallel_tool_calls_enabled=True)
+
+    assert thought == "I need to gather information from multiple sources."
+    assert isinstance(actions_data, list)
+    assert len(actions_data) == 2
+    assert actions_data[0]["tool_name"] == "Search Tool"
+    assert actions_data[0]["tool_input"] == {"query": "latest news"}
+    assert actions_data[1]["tool_name"] == "Weather Tool"
+    assert actions_data[1]["tool_input"] == {"location": "San Francisco"}
+    assert action_type == "multiple_tools"
+    assert isinstance(actions_data, list)
+    assert len(actions_data) == 2
+    assert actions_data[0]["tool_name"] == "Search Tool"
+    assert actions_data[0]["tool_input"] == {"query": "latest news"}
+    assert actions_data[1]["tool_name"] == "Weather Tool"
+    assert actions_data[1]["tool_input"] == {"location": "San Francisco"}
+
+
+def test_parse_default_action_single_tool_with_parallel_enabled():
+    """Test parsing single tool call when parallel_tool_calls_enabled=True."""
+    output = """Thought: I need to search for information.
+Action: Search Tool
+Action Input: {"query": "test query"}"""
+
+    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=True)
+
+    assert thought == "I need to search for information."
+    assert action == "Search Tool"
+    assert action_input == {"query": "test query"}
+
+
+def test_parse_default_action_nested_json():
+    """Test parsing with deeply nested JSON structures."""
+    output = """Thought: Complex data structure
+Action: API Call
+Action Input: {"params": {"nested": {"deeply": {"key": "value"}}, "list": [1, 2, 3]}}"""
+
+    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+
+    assert thought == "Complex data structure"
+    assert action == "API Call"
+    assert action_input == {"params": {"nested": {"deeply": {"key": "value"}}, "list": [1, 2, 3]}}
+
+
+def test_parse_default_action_json_with_list():
+    """Test parsing with a list."""
+    output = """Thought: Complex data structure
+Action: API Call
+Action Input: {"params": {"nested": {"deeply": {"key": "value"}}, "list": [1, 2, 3]}}"""
+
+    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+
+    assert thought == "Complex data structure"
+    assert action == "API Call"
+    assert action_input == {"params": {"nested": {"deeply": {"key": "value"}}, "list": [1, 2, 3]}}
+
+
+def test_parse_default_action_json_with_escaped_quotes():
+    """Test parsing JSON containing escaped quotes."""
+    output = """Thought: thinking
+Action: Tool
+Action Input: {"message": "He said \\"hello\\" to me"}"""
+
+    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+
+    assert thought == "thinking"
+    assert action == "Tool"
+    assert action_input == {"message": 'He said "hello" to me'}
+
+
+def test_parse_default_action_invalid_json():
+    """Test that invalid JSON raises ActionParsingException."""
+    output = """Thought: thinking
+Action: Tool
+Action Input: {invalid json}"""
+
+    with pytest.raises(ActionParsingException) as excinfo:
+        parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+
+    assert excinfo.value.recoverable
+
+
+def test_parse_default_action_missing_action():
+    """Test that missing Action raises ActionParsingException."""
+    output = """Thought: thinking
+Action Input: {"key": "value"}"""
+
+    with pytest.raises(ActionParsingException) as excinfo:
+        parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+
+    assert excinfo.value.recoverable
+
+
+def test_parse_default_thought():
+    """Test extraction of thought from output."""
+    output = """Thought: I need to think about this carefully
+Action: Tool
+Action Input: {"key": "value"}"""
+
+    thought = parser.parse_default_thought(output)
+    assert thought == "I need to think about this carefully"
+
+
+def test_parse_default_thought_multiline():
+    """Test extraction of multiline thought."""
+    output = """Thought: I need to think about this carefully
+and consider multiple factors
+before deciding
+Action: Tool
+Action Input: {"key": "value"}"""
+
+    thought = parser.parse_default_thought(output)
+    assert "I need to think about this carefully" in thought
+    assert "and consider multiple factors" in thought
+    assert "before deciding" in thought
+
+
+def test_extract_default_final_answer():
+    """Test extraction of final answer."""
+    output = """Thought: I have all the information I need
+Answer: The final answer is 42"""
+
+    thought, answer = parser.extract_default_final_answer(output)
+    assert thought == "I have all the information I need"
+    assert answer == "The final answer is 42"
+
+
+def test_extract_default_final_answer_multiline():
+    """Test extraction of multiline final answer."""
+    output = """Thought: I have all the information I need
+Answer: The final answer is:
+1. First point
+2. Second point
+3. Third point"""
+
+    thought, answer = parser.extract_default_final_answer(output)
+    assert thought == "I have all the information I need"
+    assert "The final answer is:" in answer
+    assert "1. First point" in answer
+    assert "3. Third point" in answer
