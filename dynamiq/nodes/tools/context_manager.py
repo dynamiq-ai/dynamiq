@@ -4,109 +4,85 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.llms import BaseLLM
-from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.prompts import Message, Prompt
-from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.nodes.agents.exceptions import ParsingError
+from dynamiq.nodes.agents.prompts.react.instructions import HISTORY_SUMMARIZATION_PROMPT_REPLACE
+from dynamiq.nodes.agents.utils import SummarizationConfig, XMLParser
+from dynamiq.nodes.node import ensure_config
+from dynamiq.prompts import Message, MessageRole
+from dynamiq.prompts.prompts import Prompt, VisionMessage
+from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
-
-CONTEXT_MANAGER_PROMPT_TEMPLATE = """
-You are a context compression assistant for an AI agent.
-
-IMPORTANT: The agent will delete previous message history after this step. You MUST preserve all
-essential information needed to continue the task successfully.
-
-Task:
-- Produce a detailed summary that replaces the prior message history.
-- Keep only what is necessary to proceed: reasoning overview, current subtasks, saved information and files, next steps,
- additional notes.
-- Omit chit-chat and non-essential details. Use clear, structured formatting.
-
-History to compress:
-{history}
-
-Output strictly in this structure:
-
-## Reasoning overview of what is reasoning flow
-
-## Current Subtasks
-- [ordered bullets: subtask -> status]
-
-## Saved information and files
-- Inform about filesystem state and files that are saved (if available)
-
-## Next Steps
-- [ordered bullets: next step -> status]
-
-## Additional Notes:
-Any other information that is important to keep in mind and not lost.
-
-"""
 
 
 class ContextManagerInputSchema(BaseModel):
     """Input for ContextManagerTool.
 
-    - history: The recent conversation/messages to compress. Can be a single string or list of strings.
-    - is_history_preserved: Preserve the history with summarization. If False, the history will not be preserved,
-     only notes will.
-    - notes: Verbatim content that must be preserved as-is (not processed by LLM) and prepended to the result.
+    - notes: Verbatim content that must be preserved as-is and prepended to the summary.
+    - messages: List of messages to summarize.
+    - summary_offset: Offset to the position of the first message that was not summarized.
+    - history_offset: Offset for history (system messages, initial user message).
     """
-
-    history: list[Message] | None = Field(
-        ..., description="Conversation history to be summarized and used to replace prior messages"
-    )
-
-    is_history_preserved: bool = Field(
-        default=True,
-        description="Preserve the history with summarization. If False, the history will not be preserved,"
-        " only notes will.",
-    )
 
     notes: str | None = Field(
         default=None,
         description=(
-            "Verbatim content to preserve as-is (e.g., IDs, filenames, critical details). "
-            "This will be prepended unchanged to the output and NOT sent to the LLM."
+            "Optional notes to preserve verbatim (e.g., IDs, filenames, critical details). "
+            "This will be prepended to the automatic summary."
         ),
+    )
+
+    messages: list[Message] = Field(
+        default=[],
+        description="List of messages to summarize (conversation history).",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+
+    summary_offset: int = Field(
+        default=0,
+        description="Offset to the position of the first message in prompt that was not summarized.",
+        json_schema_extra={"is_accessible_to_agent": False},
+    )
+
+    history_offset: int = Field(
+        default=0,
+        description="Offset for history (system messages, initial user message).",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
 
 class ContextManagerTool(Node):
     """
-    A tool to prune previous message history and replace it with a concise summary.
+    A tool that generates a conversation summary.
 
-    IMPORTANT: Before calling this tool, ensure any necessary details are explicitly saved
-    (e.g., files, pinned notes, or artifacts). This tool is intended to remove previous messages
-    and keep only a structured summary to tighten context and focus on the active subtask.
+    When called by the agent, this tool:
+    1. Generates a summary of the conversation using its own LLM
+    2. Returns the summary as tool result
+    3. Agent then decides how to apply the summary.
+
+    The tool doesn't modify the agent's state - it just generates and returns the summary.
 
     Attributes:
         group (Literal[NodeGroup.TOOLS]): The group this node belongs to.
         name (str): The name of the tool.
         description (str): Tool description with usage warning.
-        llm (BaseLLM): The LLM used to produce the compressed summary.
         error_handling (ErrorHandling): Configuration for error handling.
-        prompt_template (str): Prompt template guiding the summarization.
+        llm (Node): LLM instance for generating summaries.
+        max_attempts (int): Maximum retry attempts for summary extraction.
+        summarization_config (Any): Summarization configuration from agent (includes system_prompt).
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Context Manager Tool"
     description: str = (
-        "Cleans prior message history and replaces it with a concise, self-contained summary.\n\n"
-        "WARNING: Before calling this tool, the agent must save any necessary information (f.e in FileStore),\n"
-        "because previous messages will be removed and replaced by the summary. "
-        "You can also provide notes to the tool to preserve important information without being processed by the LLM. "
-        "Make sure to provide all necessary information for the agent to stay on track and"
-        " not lose any important details. "
-        "You can also disable history preservation, only notes will be preserved. "
-        "Disable history when you don't care about the history and only want to preserve notes."
+        "Generates a conversation summary to help manage context.\n\n"
+        "WARNING: This tool will trigger context compression. Before calling it,\n"
+        "save any necessary information because previous messages will be removed.\n"
     )
 
-    llm: BaseLLM = Field(..., description="LLM used to produce the compressed context summary")
-    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
-    prompt_template: str = Field(
-        default=CONTEXT_MANAGER_PROMPT_TEMPLATE, description="Prompt template for context compression"
-    )
+    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=60))
+    llm: Any = Field(default=None, description="LLM instance for generating summaries")
+    max_attempts: int = Field(default=3, description="Maximum retry attempts for summary extraction")
+    summarization_config: SummarizationConfig = Field(..., description="Summarization configuration from agent")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ContextManagerInputSchema]] = ContextManagerInputSchema
@@ -115,88 +91,147 @@ class ContextManagerTool(Node):
         """Initialize components for the tool."""
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
-        if self.llm.is_postponed_component_init:
-            self.llm.init_components(connection_manager)
 
     def reset_run_state(self):
         """Reset the intermediate steps (run_depends) of the node."""
         self._run_depends = []
 
-    @property
-    def to_dict_exclude_params(self) -> dict:
-        """Exclude LLM object during serialization."""
-        return super().to_dict_exclude_params | {"llm": True}
+    def _summarize_replace_history(
+        self,
+        messages: list[Message | VisionMessage],
+        summary_offset: int,
+        config: RunnableConfig | None = None,
+        **kwargs,
+    ) -> str:
+        """
+        Generate a complete summary of the conversation (replace mode).
 
-    def to_dict(self, **kwargs) -> dict:
-        data = super().to_dict(**kwargs)
-        data["llm"] = self.llm.to_dict(**kwargs)
-        return data
+        Args:
+            messages: List of messages to summarize
+            summary_offset: Starting index for messages to include in summarization
+            config: Configuration for the run
+            **kwargs: Additional parameters
 
-    def _build_prompt(self, history: list[Message]) -> str:
-        formatted_history = "\n\n---\n\n".join([f"{m.role}: {str(m.content)}" for m in history])
-        return self.prompt_template.format(history=formatted_history)
+        Returns:
+            str: The generated summary
+        """
+        logger.info(f"Context Manager Tool: Generating summary (replace mode) from offset {summary_offset}.")
 
-    def _summarize_history(self, history: list[Message], config: RunnableConfig, **kwargs) -> str:
-        prompt_content = self._build_prompt(history)
+        # Get conversation history messages to be summarized (starting from summary_offset)
+        conversation_history_messages = messages[summary_offset:] if summary_offset > 0 else messages
+        logger.info("message - 1 -")
+        # Build summary request messages with constant prompt
+        summary_messages = conversation_history_messages + [
+            Message(
+                content=HISTORY_SUMMARIZATION_PROMPT_REPLACE,
+                role=MessageRole.USER,
+                static=True,
+            ),
+        ]
 
-        result = self.llm.run(
-            input_data={},
-            prompt=Prompt(messages=[Message(role="user", content=prompt_content, static=True)]),
-            config=config,
-            **(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []}),
+        logger.info("message - 0 -")
+
+        # Attempt to generate and extract summary
+        for attempt in range(self.max_attempts):
+
+            logger.info("message - 3122 -123123123 -")
+            llm_result = self.llm.run(
+                input_data={},
+                prompt=Prompt(messages=summary_messages),
+                config=config,
+            )
+
+            output = llm_result.output["content"]
+
+            try:
+                # Try to extract summary from XML tags
+                summary = XMLParser.extract_first_tag_regex(output, ["summary"])
+
+                if summary:
+                    logger.info(f"Context Manager Tool: Summary generated successfully. Length: {len(summary)}")
+                    return summary
+                else:
+                    # Try alternative parsing
+                    parsed_data = XMLParser.parse(
+                        f"<root>{output}</root>",
+                        required_tags=["summary"],
+                        optional_tags=[],
+                    )
+                    summary = parsed_data.get("summary", "")
+                    if summary:
+                        logger.info(f"Context Manager Tool: Summary generated successfully. Length: {len(summary)}")
+                        return summary
+
+            except ParsingError as e:
+                logger.warning(f"Context Manager Tool: Failed to extract summary on attempt {attempt + 1}: {e}")
+                # Add feedback for next attempt
+                summary_messages.append(Message(content=output, role=MessageRole.ASSISTANT, static=True))
+                summary_messages.append(
+                    Message(
+                        content=(
+                            f"Error: {e}. Please provide the summary wrapped in <summary></summary> tags. "
+                            "Ensure the tags are properly formatted."
+                        ),
+                        role=MessageRole.USER,
+                        static=True,
+                    )
+                )
+                continue
+
+        # If all attempts failed, use raw output
+        logger.warning(
+            f"Context Manager Tool: Could not extract summary after {self.max_attempts} attempts. Using raw output."
         )
-
-        self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
-
-        if result.status != RunnableStatus.SUCCESS:
-            raise ValueError("LLM execution failed during context compression")
-
-        return result.output.get("content", "").strip()
+        return output
 
     def execute(
         self, input_data: ContextManagerInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         """
-        Summarize the provided history and emit an instruction to replace prior messages with the summary.
+        Generate conversation summary from provided messages.
 
         Returns:
             dict[str, Any]:
-                - content: human-readable status message
-                - summary: the compressed summary text
-                - keep_last_n: advisory hint for UI/agent to keep last N messages
-                - replacement_message: suggested system message to insert as new context root
-                - instructions_for_agent: explicit instructions for applying the change
+                - content: The generated summary
+                - notes: Optional notes to preserve
         """
         config = ensure_config(config)
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        summary = ""
+        if not self.llm:
+            error_msg = "Context Manager Tool: No LLM configured."
+            logger.error(error_msg)
+            return {"content": error_msg}
 
-        if input_data.is_history_preserved:
-            summary = self._summarize_history(input_data.history, config, **kwargs)
-            summary = f"\nContext compressed; Summary:\n {summary}"
+        if not input_data.messages:
+            error_msg = "Context Manager Tool: No messages provided to summarize."
+            logger.error(error_msg)
+            return {"content": error_msg}
 
-        if input_data.notes:
-            summary = f"Notes: {input_data.notes}\n\n{summary}"
+        logger.info(
+            f"Context Manager Tool: Generating summary for {len(input_data.messages)} messages "
+            f"from offset {input_data.summary_offset}."
+        )
 
-        logger.debug(f"Tool {self.name} - {self.id}: context compression completed, summary length: {len(summary)}")
+        try:
+            # Generate summary
+            summary_result = self._summarize_replace_history(
+                input_data.messages,
+                input_data.summary_offset,
+                config,
+            )
 
-        return {"content": summary}
+            # Return summary with optional notes
+            result_content = summary_result
+            if input_data.notes:
+                result_content = f"Notes: {input_data.notes}\n\n{summary_result}"
 
+            return {
+                "content": result_content,
+            }
 
-def _apply_context_manager_tool_effect(prompt: Prompt, tool_result: Any, history_offset: int) -> None:
-    """Apply context cleaning effect after ContextManagerTool call.
-
-    Keeps default prefix (up to history_offset), replaces the rest with a copy of the last prefix message,
-    and appends an observation with the tool_result summary.
-    """
-
-    try:
-        new_messages = prompt.messages[:history_offset]
-        if new_messages:
-            new_messages.append(prompt.messages[-1].copy())
-        prompt.messages = new_messages
-
-    except Exception as e:
-        logger.error(f"Error applying context manager tool effect: {e}")
+        except Exception as e:
+            error_msg = f"Context Manager Tool: Error generating summary: {e}"
+            logger.error(error_msg)
+            return {"content": error_msg}

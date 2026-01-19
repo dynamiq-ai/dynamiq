@@ -10,7 +10,6 @@ from jinja2 import Template
 from dynamiq.nodes.agents.prompts.react import (
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
-    HISTORY_SUMMARIZATION_PROMPT,
     REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING,
     REACT_BLOCK_INSTRUCTIONS_MULTI,
     REACT_BLOCK_INSTRUCTIONS_NO_TOOLS,
@@ -55,7 +54,6 @@ class AgentPromptManager:
         self.model_name = model_name
 
         # Runtime prompts (used during agent execution)
-        self.history_prompt: str = HISTORY_SUMMARIZATION_PROMPT
         self.max_loops_prompt: str = REACT_MAX_LOOPS_PROMPT
 
         # Template
@@ -229,9 +227,6 @@ class AgentPromptManager:
             self.agent_template = agent_template
 
         # Store runtime prompts
-        self.history_prompt = get_prompt_constant(
-            self.model_name, "HISTORY_SUMMARIZATION_PROMPT", HISTORY_SUMMARIZATION_PROMPT
-        )
         self.max_loops_prompt = get_prompt_constant(self.model_name, "REACT_MAX_LOOPS_PROMPT", REACT_MAX_LOOPS_PROMPT)
 
         # Log only if model-specific prompts were actually applied

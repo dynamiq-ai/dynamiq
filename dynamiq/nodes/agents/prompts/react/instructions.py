@@ -589,7 +589,7 @@ Your response should be clear, concise, and professional.
 </answer>
 """  # noqa: E501
 
-HISTORY_SUMMARIZATION_PROMPT = """
+HISTORY_SUMMARIZATION_PROMPT_PRESERVE = """
 Task: Extract valuable information from tool outputs and wrap each in numbered tags.
 
 Format:
@@ -612,3 +612,13 @@ Guidelines:
 
 Input request:
 """
+
+
+HISTORY_SUMMARIZATION_PROMPT_REPLACE = """
+    Please provide a concise summary of the conversation history.
+    Focus on key decisions, important information, and tool outputs.
+    Wrap your summary in <summary></summary> tags.
+"""
+
+
+PROMPT_AUTO_CLEAN_CONTEXT = "Automatically cleaning the context with Context Manager Tool..."
