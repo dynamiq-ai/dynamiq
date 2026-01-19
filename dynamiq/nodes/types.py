@@ -52,7 +52,7 @@ class ActionType(str, Enum):
     WEB_SCRAPE = "web_scrape"
     CODE_EXECUTION = "code_execution"
     FILE_OPERATION = "file_operation"
-    DATA_QUERY = "data_query"
+    DATABASE_QUERY = "database_query"
     COMPUTER_USE = "computer_use"
     SEMANTIC_SEARCH = "semantic_search"
 
