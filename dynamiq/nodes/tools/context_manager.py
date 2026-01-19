@@ -80,8 +80,8 @@ class ContextManagerTool(Node):
     )
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=60))
-    llm: Any = Field(default=None, description="LLM instance for generating summaries")
-    max_attempts: int = Field(default=3, description="Maximum retry attempts for summary extraction")
+    llm: Any = Field(..., description="LLM instance for generating summaries")
+    max_attempts: int = Field(default=3, ge=1, description="Maximum retry attempts for summary extraction")
     summarization_config: SummarizationConfig = Field(..., description="Summarization configuration from agent")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -149,6 +149,7 @@ class ContextManagerTool(Node):
         ]
 
         # Attempt to generate and extract summary
+        output = ""  # Default in case loop doesn't execute
         for attempt in range(self.max_attempts):
             llm_result = self.llm.run(
                 input_data={},
