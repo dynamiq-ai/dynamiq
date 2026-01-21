@@ -615,10 +615,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         # For Context Manager Tool, prepare messages
         if isinstance(tool, ContextManagerTool):
             messages_to_summarize = self._prompt.messages[self._history_offset :]
-            action_input = {
-                "messages": messages_to_summarize,
-                **action_input,
-            }
+            action_input = {**action_input, "messages": messages_to_summarize}
             # Don't cache ContextManagerTool results - they should always be regenerated
             tool_result = None
         else:
@@ -972,6 +969,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             # Find the Context Manager Tool (guaranteed to exist via _ensure_context_manager_tool validator)
             context_tool = next(t for t in self.tools if isinstance(t, ContextManagerTool))
+
+            if context_tool is None:
+                logger.error(f"Agent {self.name} - {self.id}: Context Manager Tool not found.")
+                return
+
             action = self.sanitize_tool_name(context_tool.name)
             action_input = {
                 "messages": self._prompt.messages[self._history_offset :],

@@ -19,8 +19,6 @@ class ContextManagerInputSchema(BaseModel):
 
     - notes: Verbatim content that must be preserved as-is and prepended to the summary.
     - messages: List of messages to summarize.
-    - summary_offset: Offset to the position of the first message that was not summarized.
-    - history_offset: Offset for history (system messages, initial user message).
     """
 
     notes: str | None = Field(
@@ -34,18 +32,6 @@ class ContextManagerInputSchema(BaseModel):
     messages: list[Message] = Field(
         default=[],
         description="List of messages to summarize (conversation history).",
-        json_schema_extra={"is_accessible_to_agent": False},
-    )
-
-    summary_offset: int = Field(
-        default=0,
-        description="Offset to the position of the first message in prompt that was not summarized.",
-        json_schema_extra={"is_accessible_to_agent": False},
-    )
-
-    history_offset: int = Field(
-        default=0,
-        description="Offset for history (system messages, initial user message).",
         json_schema_extra={"is_accessible_to_agent": False},
     )
 
@@ -80,7 +66,7 @@ class ContextManagerTool(Node):
     )
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=60))
-    llm: Any = Field(..., description="LLM instance for generating summaries")
+    llm: Node = Field(..., description="LLM instance for generating summaries")
     max_summarization_retries: int = Field(default=3, ge=1, description="Maximum retry attempts for summary extraction")
     summarization_config: SummarizationConfig = Field(..., description="Summarization configuration from agent")
 
@@ -91,6 +77,9 @@ class ContextManagerTool(Node):
         """Initialize components for the tool."""
         connection_manager = connection_manager or ConnectionManager()
         super().init_components(connection_manager)
+        # Initialize the LLM if it is a postponed component
+        if self.llm.is_postponed_component_init:
+            self.llm.init_components(connection_manager)
 
     def reset_run_state(self):
         """Reset the intermediate steps (run_depends) of the node."""
@@ -119,7 +108,6 @@ class ContextManagerTool(Node):
     def _summarize_replace_history(
         self,
         messages: list[Message | VisionMessage],
-        summary_offset: int,
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> str:
@@ -128,19 +116,16 @@ class ContextManagerTool(Node):
 
         Args:
             messages: List of messages to summarize
-            summary_offset: Starting index for messages to include in summarization
             config: Configuration for the run
             **kwargs: Additional parameters
 
         Returns:
             str: The generated summary
         """
-        logger.info(f"Context Manager Tool: Generating summary (replace mode) from offset {summary_offset}.")
+        logger.info("Context Manager Tool: Generating summary (replace mode).")
 
-        # Get conversation history messages to be summarized (starting from summary_offset)
-        conversation_history_messages = messages[summary_offset:] if summary_offset > 0 else messages
         # Build summary request messages with constant prompt
-        summary_messages = conversation_history_messages + [
+        summary_messages = messages + [
             Message(
                 content=HISTORY_SUMMARIZATION_PROMPT_REPLACE,
                 role=MessageRole.USER,
@@ -228,14 +213,12 @@ class ContextManagerTool(Node):
 
         logger.info(
             f"Context Manager Tool: Generating summary for {len(input_data.messages)} messages "
-            f"from offset {input_data.summary_offset}."
         )
 
         try:
             # Generate summary
             summary_result = self._summarize_replace_history(
                 input_data.messages,
-                input_data.summary_offset,
                 config,
             )
 
