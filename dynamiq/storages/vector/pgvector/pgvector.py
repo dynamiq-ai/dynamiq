@@ -1077,8 +1077,8 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         if filters:
             filter_str = filter_clause.as_string(None)
             if filter_str.strip().startswith("WHERE"):
-                # Remove "WHERE" prefix and convert to AND for keyword search
-                where_clause = SQL(" AND " + filter_str[5:])
+                # Replace "WHERE" with "AND" for keyword search
+                where_clause = SQL(filter_str.replace(" WHERE ", " AND ", 1))
             else:
                 where_clause = filter_clause
         else:
@@ -1193,6 +1193,10 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         # Apply filters to avoid duplication
         base_where_clause, params = self._prepare_filters(filters)
+        # Convert WHERE to AND for subqueries that already have WHERE clauses
+        if filters:
+            where_str = base_where_clause.as_string(None)
+            base_where_clause = SQL(where_str.replace(" WHERE ", " AND ", 1))
 
         embedding_select = SQL("") if exclude_document_embeddings else SQL(f", {embedding_key}")
         semantic_search_query = SQL(
