@@ -67,7 +67,7 @@ class ContextManagerTool(Node):
         description (str): Tool description with usage warning.
         error_handling (ErrorHandling): Configuration for error handling.
         llm (Node): LLM instance for generating summaries.
-        max_attempts (int): Maximum retry attempts for summary extraction.
+        max_summarization_retries (int): Maximum retry attempts for summary extraction.
         summarization_config (Any): Summarization configuration from agent (includes system_prompt).
     """
 
@@ -81,7 +81,7 @@ class ContextManagerTool(Node):
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=60))
     llm: Any = Field(..., description="LLM instance for generating summaries")
-    max_attempts: int = Field(default=3, ge=1, description="Maximum retry attempts for summary extraction")
+    max_summarization_retries: int = Field(default=3, ge=1, description="Maximum retry attempts for summary extraction")
     summarization_config: SummarizationConfig = Field(..., description="Summarization configuration from agent")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -150,7 +150,7 @@ class ContextManagerTool(Node):
 
         # Attempt to generate and extract summary
         output = ""  # Default in case loop doesn't execute
-        for attempt in range(self.max_attempts):
+        for attempt in range(self.max_summarization_retries):
             llm_result = self.llm.run(
                 input_data={},
                 prompt=Prompt(messages=summary_messages),
@@ -196,7 +196,8 @@ class ContextManagerTool(Node):
 
         # If all attempts failed, use raw output
         logger.warning(
-            f"Context Manager Tool: Could not extract summary after {self.max_attempts} attempts. Using raw output."
+            f"Context Manager Tool: Could not extract summary after {self.max_summarization_retries} attempts."
+            "Using raw output."
         )
         return output
 

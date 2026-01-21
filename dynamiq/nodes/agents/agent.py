@@ -187,12 +187,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if self.summarization_config.enabled:
                 has_context_tool = any(isinstance(t, ContextManagerTool) for t in self.tools)
                 if not has_context_tool:
-                    # Add with same LLM, max_attempts, and summarization_config
+                    # Add with same LLM, max_summarization_retries, and summarization_config
                     # system_prompt is now included in summarization_config
                     self.tools.append(
                         ContextManagerTool(
                             llm=self.llm,
-                            max_attempts=self.summarization_config.max_attempts,
+                            max_summarization_retries=self.summarization_config.max_summarization_retries,
                             summarization_config=self.summarization_config,
                             name="context-manager",
                         )
@@ -629,7 +629,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         delegate_final = self._should_delegate_final(tool, action_input)
 
         if not tool_result:
-            # Prepare kwargs for tool execution
             tool_kwargs = kwargs.copy()
 
             tool_result, tool_files = self._run_tool(
@@ -651,6 +650,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     **kwargs,
                 )
             return "DELEGATED", tool_result, tool
+
+        if isinstance(tool, ContextManagerTool):
+            self._compact_history()
 
         return tool_result, tool_files, tool
 
@@ -701,6 +703,45 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **kwargs,
             )
 
+    def _should_skip_parallel_mode(self, action: str | None, action_input: Any) -> tuple[bool, str | None, Any]:
+        """Check if parallel mode should be skipped for ContextManagerTool.
+
+        When ContextManagerTool is detected in a parallel tool list, we filter
+        to only execute that tool to ensure safe context modification.
+
+        Args:
+            action: The action to execute
+            action_input: The action input (list for parallel mode)
+
+        Returns:
+            tuple: (skip_parallel, action_name, action_input)
+                - skip_parallel: True if parallel mode should be skipped
+                - action_name: The tool name to execute
+                - action_input: The tool input to use
+        """
+        # Get ContextManagerTool names
+        context_manager_names = {
+            self.sanitize_tool_name(t.name) for t in self.tools if isinstance(t, ContextManagerTool)
+        }
+
+        # Check if ContextManagerTool is in a parallel tool list
+        if isinstance(action_input, list):
+            for tool_data in action_input:
+                if isinstance(tool_data, dict):
+                    tool_name = self.sanitize_tool_name(tool_data.get("name", ""))
+                    if tool_name in context_manager_names:
+                        # Found ContextManagerTool - skip parallel, execute only this tool
+                        logger.info(
+                            f"Agent {self.name} - {self.id}: ContextManagerTool detected in parallel call. "
+                            "Filtering to execute only ContextManagerTool."
+                        )
+                        return True, tool_data.get("name", ""), tool_data.get("input", {})
+        elif isinstance(action, str) and self.sanitize_tool_name(action) in context_manager_names:
+            # Single tool mode - ContextManagerTool detected
+            return True, action, action_input
+
+        return False, action, action_input
+
     def _execute_tools_and_update_prompt(
         self,
         action: str | None,
@@ -729,25 +770,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
             tool = None
 
             try:
-                # Check if this is a ContextManagerTool invocation (always use single tool path)
-                is_context_manager = any(
-                    isinstance(t, ContextManagerTool) and self.sanitize_tool_name(t.name) == action for t in self.tools
-                )
+                # Check if ContextManagerTool is in the action - if so, skip parallel mode
+                skip_parallel, action, action_input = self._should_skip_parallel_mode(action, action_input)
 
                 # Handle XML parallel mode (but not for ContextManagerTool)
-                if (
-                    self.inference_mode == InferenceMode.XML
-                    and self.parallel_tool_calls_enabled
-                    and not is_context_manager
-                ):
+                if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled and not skip_parallel:
                     tools_data = action_input if isinstance(action_input, list) else [action_input]
                     execution_output = self._execute_tools(tools_data, config, **kwargs)
 
                     tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
                 else:
                     result = self._execute_single_tool(action, action_input, thought, loop_num, config, **kwargs)
-                    if isinstance(result[2], ContextManagerTool):
-                        self._apply_context_manager_effect()
 
                     if isinstance(result, tuple) and len(result) == 3 and result[0] == "DELEGATED":
                         return result[1]
@@ -853,7 +886,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     return result[2]
 
                 # Handle recovery (for modes that support it)
-                # Check if both thought and action are None, which indicates (None, None, None) recovery
+                # Check if action is None, which indicates (None, None, None) recovery
                 if result[1] is None:
                     continue
 
@@ -937,21 +970,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 f"Agent {self.name} - {self.id}: Token limit exceeded. Automatically invoking Context Manager Tool."
             )
 
-            # Find the Context Manager Tool
-            context_tool_name = None
-            for tool in self.tools:
-                if isinstance(tool, ContextManagerTool):
-                    context_tool_name = self.sanitize_tool_name(tool.name)
-                    break
-
-            if not context_tool_name:
-                logger.warning(
-                    f"Agent {self.name} - {self.id}: Context Manager Tool not found. Skipping automatic summarization."
-                )
-                return
-
-            # Prepare action and action_input for the Context Manager Tool
-            action = context_tool_name
+            # Find the Context Manager Tool (guaranteed to exist via _ensure_context_manager_tool validator)
+            context_tool = next(t for t in self.tools if isinstance(t, ContextManagerTool))
+            action = self.sanitize_tool_name(context_tool.name)
             action_input = {
                 "messages": self._prompt.messages[self._history_offset :],
             }
