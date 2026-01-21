@@ -1201,7 +1201,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             where_str = base_where_clause.as_string(None)
             keyword_where_clause = SQL(where_str.replace(" WHERE ", " AND ", 1))
 
-        embedding_select = SQL("") if exclude_document_embeddings else SQL(f", {embedding_key}")
+        embedding_select = SQL("") if exclude_document_embeddings else SQL(", ") + Identifier(embedding_key)
         semantic_search_query = SQL(
             """
             WITH semantic_search AS (
