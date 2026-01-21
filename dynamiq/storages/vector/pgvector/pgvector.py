@@ -271,6 +271,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             if not self.connection_string:
                 raise VectorStoreException("Connection is closed and no connection string available for reconnection")
             self._conn = psycopg.connect(self.connection_string)
+            register_vector(self._conn)
             self.client = self._conn
         try:
             yield self._conn
@@ -1193,10 +1194,12 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         # Apply filters to avoid duplication
         base_where_clause, params = self._prepare_filters(filters)
-        # Convert WHERE to AND for subqueries that already have WHERE clauses
+        # Create separate where clauses for each subquery
+        semantic_where_clause = base_where_clause  # semantic search has no WHERE
+        keyword_where_clause = base_where_clause  # keyword search has WHERE
         if filters:
             where_str = base_where_clause.as_string(None)
-            base_where_clause = SQL(where_str.replace(" WHERE ", " AND ", 1))
+            keyword_where_clause = SQL(where_str.replace(" WHERE ", " AND ", 1))
 
         embedding_select = SQL("") if exclude_document_embeddings else SQL(f", {embedding_key}")
         semantic_search_query = SQL(
@@ -1215,7 +1218,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             score_definition=SQL(score_definition),
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
-            where_clause=base_where_clause,
+            where_clause=semantic_where_clause,
             subquery_limit=SQLLiteral(subquery_limit),
             sort_order=SQL(sort_order),
         )
@@ -1238,7 +1241,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             table_name=Identifier(self.table_name),
             language=SQLLiteral(self.language),
             query=SQLLiteral(query),
-            where_clause=base_where_clause,
+            where_clause=keyword_where_clause,
             subquery_limit=SQLLiteral(subquery_limit),
         )
 
