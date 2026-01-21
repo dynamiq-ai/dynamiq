@@ -718,8 +718,33 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         with self._get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
-                cur.executemany(query, batch_data)
-                conn.commit()
+                try:
+                    cur.executemany(query, batch_data)
+                    conn.commit()
+                except psycopg_errors.OperationalError as e:
+                    # Connection issues
+                    sanitized_error = self._sanitize_error_message(str(e))
+                    logger.warning(f"Database connection error: {sanitized_error}")
+                    raise VectorStoreException("Database connection error") from e
+                except psycopg_errors.UniqueViolation as e:
+                    # Duplicate key
+                    sanitized_error = self._sanitize_error_message(str(e))
+                    logger.debug(f"Duplicate key violation: {sanitized_error}")
+                    raise VectorStoreException("Document already exists") from e
+                except psycopg_errors.DataError as e:
+                    # Invalid data (e.g., wrong vector dimension, invalid JSON)
+                    sanitized_error = self._sanitize_error_message(str(e))
+                    logger.error(f"Data validation error: {sanitized_error}")
+                    raise ValueError("Invalid document data provided") from e
+                except psycopg_errors.InsufficientPrivilege as e:
+                    # Permission error
+                    sanitized_error = self._sanitize_error_message(str(e))
+                    logger.error(f"Insufficient privileges: {sanitized_error}")
+                    raise VectorStoreException("Insufficient database privileges") from e
+                except Exception as e:
+                    sanitized_error = self._sanitize_error_message(str(e))
+                    logger.error(f"Unexpected database error during batch insert: {sanitized_error}", exc_info=True)
+                    raise VectorStoreException("Unexpected database error") from e
 
         self._track_documents(document_ids)
         return len(documents)
