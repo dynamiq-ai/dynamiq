@@ -23,6 +23,7 @@ from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CO
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
+from dynamiq.nodes.tools.todo_tools import TodoReadTool, TodoWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
@@ -199,6 +200,37 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     )
         except Exception as e:
             logger.error(f"Failed to ensure ContextManagerTool: {e}")
+        return self
+
+    @model_validator(mode="after")
+    def _ensure_todo_tools(self):
+        """Automatically add TodoReadTool and TodoWriteTool when todo is enabled in file_store config."""
+        try:
+            if self.file_store.enabled and self.file_store.todo_enabled:
+                has_todo_read = any(isinstance(t, TodoReadTool) for t in self.tools)
+                has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
+
+                file_store_backend = self.file_store.backend
+
+                if not has_todo_read:
+                    self.tools.append(
+                        TodoReadTool(
+                            name="todo-read",
+                            file_store=file_store_backend,
+                        )
+                    )
+                    logger.info("Agent: Added TodoReadTool")
+
+                if not has_todo_write:
+                    self.tools.append(
+                        TodoWriteTool(
+                            name="todo-write",
+                            file_store=file_store_backend,
+                        )
+                    )
+                    logger.info("Agent: Added TodoWriteTool")
+        except Exception as e:
+            logger.error(f"Failed to ensure TodoTools: {e}")
         return self
 
     def _append_recovery_instruction(
@@ -629,7 +661,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         delegate_final = self._should_delegate_final(tool, action_input)
 
         if not tool_result:
-            # Prepare kwargs for tool execution
             tool_kwargs = kwargs.copy()
 
             tool_result, tool_files = self._run_tool(
