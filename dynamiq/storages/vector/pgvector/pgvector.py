@@ -137,7 +137,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         if index_method is not None and index_method not in PGVectorIndexMethod:
             raise ValueError(f"index_method must be one of {list(PGVectorIndexMethod)}")
 
-        if client is None:
+        if client is None or (hasattr(client, "closed") and client.closed):
             if isinstance(connection, str):
                 self.connection_string = connection
                 self._conn = psycopg.connect(self.connection_string)
