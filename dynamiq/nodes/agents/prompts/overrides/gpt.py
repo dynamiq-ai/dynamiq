@@ -47,7 +47,7 @@ FILE HANDLING:
 - Files are automatically collected and will be returned with your final answer
 - Mention created files in your final answer so users know what was generated
 
-{{ delegation_instructions }}
+{{ additional_instructions }}
 """  # noqa: E501
 
 
@@ -126,5 +126,5 @@ FILE HANDLING:
 - Generated files are automatically collected and returned with your final answer
 - File operations are handled transparently - focus on the task, not file management
 
-{{ delegation_instructions_xml }}
+{{ additional_instructions_xml }}
 """  # noqa: E501

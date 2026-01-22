@@ -2,6 +2,7 @@ import io
 
 from dynamiq.connections import E2B, Firecrawl, ScaleSerp
 from dynamiq.nodes.agents import Agent
+from dynamiq.nodes.agents.agent import FileStoreConfig
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
@@ -66,6 +67,7 @@ def create_agent():
         max_loops=30,
         inference_mode=InferenceMode.XML,
         behaviour_on_max_loops=Behavior.RETURN,
+        file_store=FileStoreConfig(enabled=True, todo_enabled=True),
     )
 
     return agent_software

@@ -2,12 +2,14 @@
 
 import re
 import textwrap
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from jinja2 import Template
 
 from dynamiq.nodes.agents.prompts.react import (
+    CONTEXT_MANAGER_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
     REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING,
@@ -21,11 +23,29 @@ from dynamiq.nodes.agents.prompts.react import (
     REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS,
     REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
     REACT_MAX_LOOPS_PROMPT,
+    TODO_TOOLS_INSTRUCTIONS,
 )
 from dynamiq.nodes.agents.prompts.registry import get_prompt_constant
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
+
+
+@dataclass
+class AdditionalInstructionsConfig:
+    """Configuration for additional agent instructions (capabilities).
+
+    Attributes:
+        delegation_enabled: Whether delegation to sub-agents is enabled
+        context_compaction_enabled: Whether context compaction/summarization is enabled
+            (requires ContextManagerTool to be available)
+        todo_management_enabled: Whether todo management capabilities are enabled
+            (requires TodoWriteTool to be available)
+    """
+
+    delegation_enabled: bool = False
+    context_compaction_enabled: bool = False
+    todo_management_enabled: bool = False
 
 
 class AgentPromptManager:
@@ -145,7 +165,8 @@ class AgentPromptManager:
                 if content:
                     formatted_prompt_blocks[block] = formatted_content
 
-        prompt = Template(self.agent_template).render(formatted_prompt_blocks).strip()
+        render_context = {**formatted_prompt_blocks, **temp_variables}
+        prompt = Template(self.agent_template).render(**render_context).strip()
         prompt = self._clean_prompt(prompt)
         return textwrap.dedent(prompt)
 
@@ -234,22 +255,46 @@ class AgentPromptManager:
         else:
             logger.debug(f"Using default prompts for model '{self.model_name}'")
 
-    def build_delegation_variables(self, delegation_allowed: bool = False) -> dict[str, str]:
+    def build_additional_instructions(
+        self,
+        config: AdditionalInstructionsConfig,
+    ) -> dict[str, str]:
         """
-        Provide prompt snippets for delegate_final guidance when enabled.
+        Build unified additional instructions based on enabled features.
 
         Args:
-            delegation_allowed: Whether delegation is allowed for the agent
+            config: Configuration specifying which features are enabled
 
         Returns:
-            Dictionary containing delegation instructions for both standard and XML formats
+            Dictionary containing additional_instructions and additional_instructions_xml
         """
-        if not delegation_allowed:
-            return {"delegation_instructions": "", "delegation_instructions_xml": ""}
+        instructions_parts = []
+        instructions_xml_parts = []
+
+        # Add delegation instructions if enabled
+        if config.delegation_enabled:
+            instructions_parts.append(DELEGATION_INSTRUCTIONS)
+            instructions_xml_parts.append(DELEGATION_INSTRUCTIONS_XML)
+
+        # Add context compaction instructions if enabled
+        if config.context_compaction_enabled:
+            instructions_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
+            instructions_xml_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
+
+        # Add todo management instructions if enabled
+        if config.todo_management_enabled:
+            instructions_parts.append(TODO_TOOLS_INSTRUCTIONS)
+            instructions_xml_parts.append(TODO_TOOLS_INSTRUCTIONS)
+
+        # Combine all instructions
+        additional_instructions = "\n\n".join(instructions_parts) if instructions_parts else ""
+        additional_instructions_xml = "\n\n".join(instructions_xml_parts) if instructions_xml_parts else ""
 
         return {
-            "delegation_instructions": DELEGATION_INSTRUCTIONS,
-            "delegation_instructions_xml": DELEGATION_INSTRUCTIONS_XML,
+            "additional_instructions": additional_instructions,
+            # Contains delegation + context manager + todos when enabled
+            "additional_instructions_xml": additional_instructions_xml,
+            # Contains delegation + context manager + todos when enabled
         }
 
 

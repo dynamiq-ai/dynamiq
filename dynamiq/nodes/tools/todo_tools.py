@@ -166,11 +166,12 @@ class TodoWriteTool(Node):
     description: str = """Save or update the todo list.
 
 Each todo item needs: 'id', 'content', 'status' (pending/in_progress/completed).
-Use merge=true to update existing todos by id, merge=false to replace all.
 
-Usage:
-- Add/update todos: {"todos": [{"id": "1", "content": "Task description", "status": "pending"}], "merge": true}
-- Replace all: {"todos": [...], "merge": false}
+RULES:
+- When creating initial list: first task "in_progress", rest "pending"
+- After initial creation, ONLY update status via merge=true - do not restructure the plan
+- Use merge=true to update existing todos by id
+- Only use merge=false for initial list creation
 """
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=30))

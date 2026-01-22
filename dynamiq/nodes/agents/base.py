@@ -373,7 +373,12 @@ class Agent(Node):
 
         self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
         self.system_prompt_manager.setup_for_base_agent()
-        self.system_prompt_manager.update_variables({"delegation_instructions": "", "delegation_instructions_xml": ""})
+        self.system_prompt_manager.update_variables(
+            {
+                "additional_instructions": "",
+                "additional_instructions_xml": "",
+            }
+        )
 
     def set_block(self, block_name: str, content: str):
         """Adds or updates a prompt block."""

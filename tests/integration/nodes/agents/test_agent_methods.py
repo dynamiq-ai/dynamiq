@@ -463,3 +463,32 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
         assert "name" in schema["function"]
         assert "parameters" in schema["function"]
         assert "properties" in schema["function"]["parameters"]
+
+
+def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
+    """Test that todo tools are added and instructions included when file_store.todo_enabled is True."""
+    from dynamiq.nodes.agents.agent import FileStoreConfig
+    from dynamiq.nodes.tools import TodoWriteTool
+
+    file_store_config = FileStoreConfig(enabled=True, todo_enabled=True)
+    agent = Agent(
+        name="Todo Agent",
+        llm=openai_node,
+        tools=[],
+        file_store=file_store_config,
+        inference_mode=InferenceMode.DEFAULT,
+    )
+
+    # Check that TodoWriteTool was automatically added
+    todo_tools = [t for t in agent.tools if isinstance(t, TodoWriteTool)]
+    assert len(todo_tools) == 1, "TodoWriteTool should be automatically added"
+
+    # Check that todo instructions are in the prompt
+    prompt = agent.generate_prompt()
+    assert "TODO MANAGEMENT" in prompt, "TODO instructions should be in system prompt"
+    assert "todo-write" in prompt, "todo-write tool should be mentioned in prompt"
+
+    # Check that agent state section is rendered (when state is provided)
+    prompt_with_state = agent.generate_prompt(agent_state="Progress: Loop 1/10")
+    assert "AGENT STATE" in prompt_with_state, "AGENT STATE section should be in system prompt"
+    assert "Progress: Loop 1/10" in prompt_with_state, "Loop progress should be shown in state"

@@ -1,5 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
@@ -19,17 +20,83 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
+from dynamiq.nodes.agents.prompts.manager import AdditionalInstructionsConfig
 from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
-from dynamiq.nodes.tools.todo_tools import TodoReadTool, TodoWriteTool
+from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
+
+
+@dataclass
+class AgentState:
+    """
+    Encapsulates the dynamic state of an agent during execution.
+
+    Tracks loop progress, files, and todos. Provides its own serialization
+    to string for injection into system prompts.
+    """
+
+    current_loop: int = 0
+    max_loops: int = 0
+    files: list[str] = field(default_factory=list)
+    todos: list[dict] = field(default_factory=list)
+
+    def reset(self, max_loops: int = 0) -> None:
+        """Reset state for a new execution."""
+        self.current_loop = 0
+        self.max_loops = max_loops
+        self.files = []
+        self.todos = []
+
+    def update_loop(self, current: int) -> None:
+        """Update current loop number."""
+        self.current_loop = current
+
+    def update_files(self, files: list[str]) -> None:
+        """Update file list."""
+        self.files = files
+
+    def update_todos(self, todos: list[dict]) -> None:
+        """Update todo list."""
+        self.todos = todos
+
+    def to_prompt_string(self) -> str:
+        """
+        Serialize state to a string for system prompt injection.
+
+        Returns:
+            str: Formatted state string, or empty string if no state to show.
+        """
+        sections = []
+
+        # Loop progress
+        if self.current_loop > 0:
+            sections.append(f"Progress: Loop {self.current_loop}/{self.max_loops}")
+
+        # File state
+        if self.files:
+            file_preview = ", ".join(self.files[:5])
+            suffix = "..." if len(self.files) > 5 else ""
+            sections.append(f"Files: {len(self.files)} stored ({file_preview}{suffix})")
+
+        # Todos
+        if self.todos:
+            todo_lines = []
+            for t in self.todos:
+                status = t.get("status", "pending")
+                icon = {"pending": "[ ]", "in_progress": "[~]", "completed": "[+]"}.get(status, "[ ]")
+                todo_lines.append(f"{icon} {t.get('id', '?')}: {t.get('content', '')}")
+            sections.append("Todos:\n" + "\n".join(todo_lines))
+
+        return "\n".join(sections) if sections else ""
+
 
 final_answer_function_schema = {
     "type": "function",
@@ -86,6 +153,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
+    state: AgentState = Field(default_factory=AgentState, exclude=True)
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
@@ -107,6 +175,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             }
         )
         return base
+
+    def reset_run_state(self):
+        """Resets the agent's run state including AgentState."""
+        super().reset_run_state()
+        self.state.reset()
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -204,28 +277,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     @model_validator(mode="after")
     def _ensure_todo_tools(self):
-        """Automatically add TodoReadTool and TodoWriteTool when todo is enabled in file_store config."""
+        """Automatically add TodoWriteTool when todo is enabled in file_store config."""
         try:
             if self.file_store.enabled and self.file_store.todo_enabled:
-                has_todo_read = any(isinstance(t, TodoReadTool) for t in self.tools)
                 has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
-
-                file_store_backend = self.file_store.backend
-
-                if not has_todo_read:
-                    self.tools.append(
-                        TodoReadTool(
-                            name="todo-read",
-                            file_store=file_store_backend,
-                        )
-                    )
-                    logger.info("Agent: Added TodoReadTool")
 
                 if not has_todo_write:
                     self.tools.append(
                         TodoWriteTool(
                             name="todo-write",
-                            file_store=file_store_backend,
+                            file_store=self.file_store.backend,
                         )
                     )
                     logger.info("Agent: Added TodoWriteTool")
@@ -551,11 +612,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         system_message = Message(
             role=MessageRole.SYSTEM,
-            content=self.generate_prompt(
-                tools_name=self.tool_names,
-                input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
-                **self.system_prompt_manager.build_delegation_variables(self.delegation_allowed),
-            ),
+            content=self._generate_system_prompt_content(),
             static=True,
         )
 
@@ -826,9 +883,19 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
+        # Set max_loops for state display (state is reset in reset_run_state)
+        self.state.max_loops = self.max_loops
+
         summary_offset = self._setup_prompt_and_stop_sequences(input_message, history_messages)
 
         for loop_num in range(1, self.max_loops + 1):
+            # Update agent state
+            self._refresh_agent_state(loop_num)
+
+            # Refresh system message with latest state (for subsequent iterations)
+            if loop_num > 1 and self._prompt.messages:
+                self._prompt.messages[0].content = self._generate_system_prompt_content()
+
             try:
                 streaming_callback, llm_config, original_streaming_enabled = self._setup_streaming_callback(
                     config, loop_num, **kwargs
@@ -1047,12 +1114,91 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return f"{final_answer}"
 
+    def _generate_system_prompt_content(self) -> str:
+        """
+        Generate the system prompt content with current state.
+
+        Returns:
+            str: The rendered system prompt including tools, instructions, and agent state.
+        """
+        instructions_config = self._get_additional_instructions_config()
+
+        # Get state string from AgentState object
+        agent_state = self.state.to_prompt_string()
+
+        return self.generate_prompt(
+            tools_name=self.tool_names,
+            input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
+            agent_state=agent_state,
+            **self.system_prompt_manager.build_additional_instructions(instructions_config),
+        )
+
+    def _refresh_agent_state(self, loop_num: int) -> None:
+        """
+        Refresh the agent state with current values.
+
+        Args:
+            loop_num: Current loop iteration number.
+        """
+        self.state.update_loop(loop_num)
+
+        # Update files
+        if self.file_store.enabled and self.file_store.backend:
+            try:
+                from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
+
+                files = self.file_store.backend.list_files()
+                user_files = [f for f in files if f != TODOS_FILE_PATH]
+                self.state.update_files(user_files)
+            except Exception:
+                logger.error("Failed to get file state")
+
+        # Update todos
+        if self.file_store.enabled and self.file_store.todo_enabled:
+            try:
+                from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
+
+                file_store = self.file_store.backend
+                if file_store.exists(TODOS_FILE_PATH):
+                    content = file_store.retrieve(TODOS_FILE_PATH)
+                    data = json.loads(content)
+                    self.state.update_todos(data.get("todos", []))
+            except Exception:
+                logger.error("Failed to get todo state")
+
+    def _get_additional_instructions_config(self) -> AdditionalInstructionsConfig:
+        """
+        Get configuration for additional instructions (capabilities) based on agent settings.
+
+        Checks both the configuration (source of truth) and verifies that the corresponding
+        tools are actually present in the tools list. This ensures instructions are only
+        included when both the feature is enabled AND the tools are available.
+
+        Returns:
+            AdditionalInstructionsConfig with capability flags for:
+                - delegation_enabled: Whether delegation is enabled (config only)
+                - context_compaction_enabled: Whether context compaction is enabled
+                    (summarization_config) AND ContextManagerTool is present
+                - todo_management_enabled: Whether todo management is enabled
+                    (file_store config) AND TodoWriteTool is present
+        """
+        return AdditionalInstructionsConfig(
+            delegation_enabled=self.delegation_allowed,
+            context_compaction_enabled=self.summarization_config.enabled
+            and any(isinstance(t, ContextManagerTool) for t in self.tools),
+            todo_management_enabled=self.file_store.enabled
+            and self.file_store.todo_enabled
+            and any(isinstance(t, TodoWriteTool) for t in self.tools),
+        )
+
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
-        # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
+        # Get configuration for additional instructions and update prompt variables
+        instructions_config = self._get_additional_instructions_config()
+        # Additional instructions (delegation, context management, todos) are rendered via prompt variables
         self.system_prompt_manager.update_variables(
-            self.system_prompt_manager.build_delegation_variables(self.delegation_allowed)
+            self.system_prompt_manager.build_additional_instructions(instructions_config)
         )
 
         # Handle function calling schema generation first
