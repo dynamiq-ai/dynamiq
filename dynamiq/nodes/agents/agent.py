@@ -952,8 +952,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 f"Agent {self.name} - {self.id}: Token limit exceeded. Automatically invoking Context Manager Tool."
             )
 
-            # Find the Context Manager Tool (guaranteed to exist via _ensure_context_manager_tool validator)
-            context_tool = next(t for t in self.tools if isinstance(t, ContextManagerTool))
+            # Find the Context Manager Tool
+            context_tool = next((t for t in self.tools if isinstance(t, ContextManagerTool)), None)
 
             if context_tool is None:
                 logger.error(f"Agent {self.name} - {self.id}: Context Manager Tool not found.")

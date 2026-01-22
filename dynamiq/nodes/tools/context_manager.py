@@ -10,7 +10,7 @@ from dynamiq.nodes.agents.utils import SummarizationConfig, XMLParser
 from dynamiq.nodes.node import ensure_config
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.prompts.prompts import Prompt, VisionMessage
-from dynamiq.runnables import RunnableConfig
+from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.utils.logger import logger
 
 
@@ -142,7 +142,12 @@ class ContextManagerTool(Node):
                 config=config,
             )
 
-            output = llm_result.output["content"]
+            if llm_result.status != RunnableStatus.SUCCESS:
+                error_msg = llm_result.error.message if llm_result.error else "Unknown error"
+                logger.warning(f"Context Manager Tool: LLM call failed on attempt {attempt + 1}: {error_msg}")
+                continue
+
+            output = llm_result.output.get("content", "")
 
             try:
                 # Try to extract summary from XML tags
@@ -181,7 +186,7 @@ class ContextManagerTool(Node):
 
         # If all attempts failed, use raw output
         logger.warning(
-            f"Context Manager Tool: Could not extract summary after {self.max_summarization_retries} attempts."
+            f"Context Manager Tool: Could not extract summary after {self.max_summarization_retries} attempts. "
             "Using raw output."
         )
         return output
