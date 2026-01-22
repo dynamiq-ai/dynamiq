@@ -8,6 +8,7 @@ from dynamiq.connections import Exa
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -319,9 +320,9 @@ class ExaTool(ConnectionNode):
     with options for filtering by date, domain, and content.
 
     Attributes:
-        group (Literal[NodeGroup.TOOLS]): The group to which this tool belongs.
         name (str): The name of the tool.
         description (str): A brief description of the tool.
+        action_type (ActionType): The type of action this tool performs.
         connection (Exa): The connection instance for the Exa API.
         include_full_content (bool): If true, retrieve full content, highlights, and summaries.
         use_autoprompt (bool): If true, query will be converted to a Exa query.
@@ -344,6 +345,7 @@ class ExaTool(ConnectionNode):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "Exa Search Tool"
     description: str = DESCRIPTION_EXA
+    action_type: ActionType = ActionType.WEB_SEARCH
     connection: Exa
 
     include_full_content: bool = Field(

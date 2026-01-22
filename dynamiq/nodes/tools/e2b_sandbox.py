@@ -13,6 +13,7 @@ from dynamiq.connections import E2B as E2BConnection
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileInfo
 from dynamiq.utils.logger import logger
@@ -297,6 +298,7 @@ class E2BInterpreterTool(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.CODE_EXECUTION
     name: str = "E2b Code Interpreter Tool"
     description: str = DESCRIPTION_E2B
     connection: E2BConnection
