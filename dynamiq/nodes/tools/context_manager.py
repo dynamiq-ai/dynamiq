@@ -4,9 +4,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
-from dynamiq.nodes.agents.exceptions import ParsingError
 from dynamiq.nodes.agents.prompts.react.instructions import HISTORY_SUMMARIZATION_PROMPT_REPLACE
-from dynamiq.nodes.agents.utils import SummarizationConfig, XMLParser
+from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.node import ensure_config
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.prompts.prompts import Prompt, VisionMessage
@@ -29,7 +28,7 @@ class ContextManagerInputSchema(BaseModel):
         ),
     )
 
-    messages: list[Message] = Field(
+    messages: list[Message | VisionMessage] = Field(
         default=[],
         description="List of messages to summarize (conversation history).",
         json_schema_extra={"is_accessible_to_agent": False},
@@ -53,8 +52,7 @@ class ContextManagerTool(Node):
         description (str): Tool description with usage warning.
         error_handling (ErrorHandling): Configuration for error handling.
         llm (Node): LLM instance for generating summaries.
-        max_summarization_retries (int): Maximum retry attempts for summary extraction.
-        summarization_config (Any): Summarization configuration from agent (includes system_prompt).
+        summarization_config (SummarizationConfig): Summarization configuration from agent.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -67,7 +65,6 @@ class ContextManagerTool(Node):
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=60))
     llm: Node = Field(..., description="LLM instance for generating summaries")
-    max_summarization_retries: int = Field(default=3, ge=1, description="Maximum retry attempts for summary extraction")
     summarization_config: SummarizationConfig = Field(..., description="Summarization configuration from agent")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -124,7 +121,7 @@ class ContextManagerTool(Node):
         """
         logger.info("Context Manager Tool: Generating summary (replace mode).")
 
-        # Build summary request messages with constant prompt
+        # Build summary request messages
         summary_messages = messages + [
             Message(
                 content=HISTORY_SUMMARIZATION_PROMPT_REPLACE,
@@ -133,63 +130,23 @@ class ContextManagerTool(Node):
             ),
         ]
 
-        # Attempt to generate and extract summary
-        output = ""  # Default in case loop doesn't execute
-        for attempt in range(self.max_summarization_retries):
-            llm_result = self.llm.run(
-                input_data={},
-                prompt=Prompt(messages=summary_messages),
-                config=config,
-            )
-
-            if llm_result.status != RunnableStatus.SUCCESS:
-                error_msg = llm_result.error.message if llm_result.error else "Unknown error"
-                logger.warning(f"Context Manager Tool: LLM call failed on attempt {attempt + 1}: {error_msg}")
-                continue
-
-            output = llm_result.output.get("content", "")
-
-            try:
-                # Try to extract summary from XML tags
-                summary = XMLParser.extract_first_tag_regex(output, ["summary"])
-
-                if summary:
-                    logger.info(f"Context Manager Tool: Summary generated successfully. Length: {len(summary)}")
-                    return summary
-                else:
-                    # Try alternative parsing
-                    parsed_data = XMLParser.parse(
-                        f"<root>{output}</root>",
-                        required_tags=["summary"],
-                        optional_tags=[],
-                    )
-                    summary = parsed_data.get("summary", "")
-                    if summary:
-                        logger.info(f"Context Manager Tool: Summary generated successfully. Length: {len(summary)}")
-                        return summary
-
-            except ParsingError as e:
-                logger.warning(f"Context Manager Tool: Failed to extract summary on attempt {attempt + 1}: {e}")
-                # Add feedback for next attempt
-                summary_messages.append(Message(content=output, role=MessageRole.ASSISTANT, static=True))
-                summary_messages.append(
-                    Message(
-                        content=(
-                            f"Error: {e}. Please provide the summary wrapped in <summary></summary> tags. "
-                            "Ensure the tags are properly formatted."
-                        ),
-                        role=MessageRole.USER,
-                        static=True,
-                    )
-                )
-                continue
-
-        # If all attempts failed, use raw output
-        logger.warning(
-            f"Context Manager Tool: Could not extract summary after {self.max_summarization_retries} attempts. "
-            "Using raw output."
+        llm_result = self.llm.run(
+            input_data={},
+            prompt=Prompt(messages=summary_messages),
+            config=config,
+            **kwargs,
         )
-        return output
+
+        if llm_result.status != RunnableStatus.SUCCESS:
+            error_msg = llm_result.error.message if llm_result.error else "Unknown error"
+            raise ValueError(f"Context Manager Tool: LLM failed to generate summary: {error_msg}")
+
+        summary = llm_result.output.get("content", "")
+        if not summary:
+            raise ValueError("Context Manager Tool: LLM returned empty summary.")
+
+        logger.info(f"Context Manager Tool: Summary generated successfully. Length: {len(summary)}")
+        return summary
 
     def execute(
         self, input_data: ContextManagerInputSchema, config: RunnableConfig | None = None, **kwargs
@@ -207,36 +164,27 @@ class ContextManagerTool(Node):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         if not self.llm:
-            error_msg = "Context Manager Tool: No LLM configured."
-            logger.error(error_msg)
-            return {"content": error_msg}
+            raise ValueError("Context Manager Tool: No LLM configured.")
 
         if not input_data.messages:
-            error_msg = "Context Manager Tool: No messages provided to summarize."
-            logger.error(error_msg)
-            return {"content": error_msg}
+            raise ValueError("Context Manager Tool: No messages provided to summarize.")
 
         logger.info(
             f"Context Manager Tool: Generating summary for {len(input_data.messages)} messages "
         )
 
-        try:
-            # Generate summary
-            summary_result = self._summarize_replace_history(
-                input_data.messages,
-                config,
-            )
+        # Generate summary (let exceptions propagate to prevent history wipe on failure)
+        summary_result = self._summarize_replace_history(
+            input_data.messages,
+            config,
+            **kwargs,
+        )
 
-            # Return summary with optional notes
-            result_content = summary_result
-            if input_data.notes:
-                result_content = f"Notes: {input_data.notes}\n\n{summary_result}"
+        # Return summary with optional notes
+        result_content = summary_result
+        if input_data.notes:
+            result_content = f"Notes: {input_data.notes}\n\n{summary_result}"
 
-            return {
-                "content": result_content,
-            }
-
-        except Exception as e:
-            error_msg = f"Context Manager Tool: Error generating summary: {e}"
-            logger.error(error_msg)
-            return {"content": error_msg}
+        return {
+            "content": result_content,
+        }

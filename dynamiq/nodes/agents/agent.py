@@ -187,12 +187,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if self.summarization_config.enabled:
                 has_context_tool = any(isinstance(t, ContextManagerTool) for t in self.tools)
                 if not has_context_tool:
-                    # Add with same LLM, max_summarization_retries, and summarization_config
-                    # system_prompt is now included in summarization_config
                     self.tools.append(
                         ContextManagerTool(
                             llm=self.llm,
-                            max_summarization_retries=self.summarization_config.max_summarization_retries,
                             summarization_config=self.summarization_config,
                             name="context-manager",
                         )
@@ -598,9 +595,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             **kwargs,
         )
 
-        # For Context Manager Tool, prepare messages
+        # For Context Manager Tool, prepare messages from current history
+        # Exclude the last message (the agent's tool call) so it's preserved, not summarized
         if isinstance(tool, ContextManagerTool):
             messages_to_summarize = self._prompt.messages[self._history_offset :]
+            # Exclude the last message (the agent's tool call) so it's preserved, not summarized
             action_input = {**action_input, "messages": messages_to_summarize}
             # Don't cache ContextManagerTool results - they should always be regenerated
             tool_result = None
@@ -960,18 +959,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 return
 
             action = self.sanitize_tool_name(context_tool.name)
-            action_input = {
-                "messages": self._prompt.messages[self._history_offset :],
-            }
 
             self._prompt.messages.append(
                 Message(role=MessageRole.ASSISTANT, content=PROMPT_AUTO_CLEAN_CONTEXT, static=True)
             )
 
-            # Execute the tool automatically (like a manual invocation)
+            # Execute the tool automatically
+            # Note: messages are prepared in _execute_single_tool
             self._execute_tools_and_update_prompt(
                 action=action,
-                action_input=action_input,
+                action_input={},
                 thought=None,
                 loop_num=0,  # Use 0 for automatic invocation
                 config=config,
