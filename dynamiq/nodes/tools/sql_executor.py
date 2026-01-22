@@ -6,6 +6,7 @@ from dynamiq.connections import AWSRedshift, DatabricksSQL, MySQL, PostgreSQL, S
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -54,6 +55,7 @@ class SQLExecutor(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.DATABASE_QUERY
     name: str = "SQL Executor Tool"
     description: str = DESCRIPTION_SQL
     connection: PostgreSQL | MySQL | Snowflake | AWSRedshift | DatabricksSQL
