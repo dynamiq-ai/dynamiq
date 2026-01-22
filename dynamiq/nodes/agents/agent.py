@@ -486,15 +486,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self,
         input_message: Message | VisionMessage,
         history_messages: list[Message] | None = None,
-    ) -> int:
+    ) -> None:
         """Setup the prompt with system message, history, and configure stop sequences.
 
         Args:
             input_message: The user's input message
             history_messages: Optional conversation history
-
-        Returns:
-            int: The summary offset (position where history starts)
         """
         system_message = Message(
             role=MessageRole.SYSTEM,
@@ -511,7 +508,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         else:
             self._prompt.messages = [system_message, input_message]
 
-        summary_offset = self._history_offset = len(self._prompt.messages)
+        self._history_offset = len(self._prompt.messages)
 
         # Configure stop sequences based on inference mode
         stop_sequences = []
@@ -527,8 +524,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 ]
             )
         self.llm.stop = stop_sequences
-
-        return summary_offset
 
     def _setup_streaming_callback(
         self, config: RunnableConfig, loop_num: int, **kwargs
@@ -595,13 +590,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             **kwargs,
         )
 
-        # For Context Manager Tool, prepare messages from current history
-        # Exclude the last message (the agent's tool call) so it's preserved, not summarized
+        # Don't cache ContextManagerTool results - they should always be regenerated
+        # (messages are injected in _run_tool in base.py)
         if isinstance(tool, ContextManagerTool):
-            messages_to_summarize = self._prompt.messages[self._history_offset :]
-            # Exclude the last message (the agent's tool call) so it's preserved, not summarized
-            action_input = {**action_input, "messages": messages_to_summarize}
-            # Don't cache ContextManagerTool results - they should always be regenerated
             tool_result = None
         else:
             # For other tools, check cache for previously computed results
@@ -809,7 +800,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
-        summary_offset = self._setup_prompt_and_stop_sequences(input_message, history_messages)
+        self._setup_prompt_and_stop_sequences(input_message, history_messages)
 
         for loop_num in range(1, self.max_loops + 1):
             try:
@@ -903,7 +894,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 continue
 
             # Inject automatic summarization if token limit exceeded (like Context Manager Tool)
-            self._try_summarize_history(summary_offset, config=config, **kwargs)
+            self._try_summarize_history(config=config, **kwargs)
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
@@ -929,7 +920,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _try_summarize_history(
         self,
-        summary_offset: int,
         config: RunnableConfig | None = None,
         **kwargs,
     ) -> None:
@@ -939,7 +929,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         Works like an automatic Context Manager Tool invocation.
 
         Args:
-            summary_offset: Offset to the position of the first message in prompt that was not summarized
             config: Configuration for the agent run
             **kwargs: Additional parameters for running the agent
         """
