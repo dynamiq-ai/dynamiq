@@ -83,7 +83,7 @@ class ContextManagerTool(Node):
         self._run_depends = []
 
     @property
-    def to_dict_exclude_params(self):
+    def to_dict_exclude_params(self) -> dict:
         """
         Property to define which parameters should be excluded when converting the class instance to a dictionary.
 
