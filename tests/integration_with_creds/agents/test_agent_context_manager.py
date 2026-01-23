@@ -83,9 +83,9 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
     input_data = {
         "input": (
             "Results is exactly what word-generator tool returns. Please do the following:\n"
-            "1. Use the word-generator tool to generate some content.\n"
-            "2. Clean the context with a tool."
-            "3. Finish execution with result of what word was returned."
+            "1. Use the word-generator tool to generate some content, generate word only once.\n"
+            "2. Clean the context with a tool. Call this tool only once."
+            "3. Finish execution with result of what word was generated based on summary."
         )
     }
 

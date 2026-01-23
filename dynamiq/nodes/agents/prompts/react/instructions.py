@@ -623,11 +623,8 @@ Input request:
 """
 
 
-HISTORY_SUMMARIZATION_PROMPT_REPLACE = """
-    Please provide a concise summary of the conversation history.
-    Focus on key decisions, important information, and tool outputs.
-    Wrap your summary in <summary></summary> tags.
-"""
+HISTORY_SUMMARIZATION_PROMPT_REPLACE = """Provide a concise summary of the conversation history above.
+ Focus on key decisions, important information, and tool outputs."""
 
 
 PROMPT_AUTO_CLEAN_CONTEXT = "Automatically cleaning the context with Context Manager Tool..."

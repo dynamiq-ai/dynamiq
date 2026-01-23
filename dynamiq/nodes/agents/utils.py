@@ -902,10 +902,8 @@ class SummarizationConfig(BaseModel):
         max_token_context_length (int | None): Maximum number of tokens in prompt after
           which summarization will be applied. Defaults to None.
         context_usage_ratio (float): Relative percentage of tokens in prompt after which summarization will be applied.
-        max_attempts (int): Maximum number of attempts to generate a summary.
     """
 
     enabled: bool = False
     max_token_context_length: int | None = None
     context_usage_ratio: float = Field(default=0.8, gt=0, le=1)
-    max_attempts: int = Field(default=3, ge=1)

@@ -30,18 +30,12 @@ class HistoryManagerMixin:
             and prompt_tokens > self.summarization_config.max_token_context_length
         ) or (prompt_tokens / self.llm.get_token_limit() > self.summarization_config.context_usage_ratio)
 
-    def _apply_context_manager_effect(self) -> None:
+    def _compact_history(self) -> None:
         """
-        Apply context cleaning effect - replaces history with summary.
-
-        Args:
-            summary: The summarization result
+        Compact conversation history.
         """
         try:
-
-            logger.info(
-                f"Agent {self.name} - {self.id}: Context Manager Tool completed. " f"Applying context cleaning effect."
-            )
+            logger.info(f"Agent {self.name} - {self.id}: Compacting history.")
 
             # Keep messages up to history offset (system messages, initial user message)
             new_messages = self._prompt.messages[: self._history_offset]
@@ -59,7 +53,7 @@ class HistoryManagerMixin:
             )
 
         except Exception as e:
-            logger.error(f"Agent {self.name} - {self.id}: Error applying context manager effect: {e}")
+            logger.error(f"Agent {self.name} - {self.id}: Error during history compaction: {e}")
             raise e
 
     @staticmethod
