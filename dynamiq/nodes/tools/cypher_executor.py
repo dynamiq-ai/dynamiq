@@ -9,6 +9,7 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.graph.age import ApacheAgeGraphStore
 from dynamiq.storages.graph.base import BaseGraphStore
@@ -160,6 +161,7 @@ class CypherExecutor(ConnectionNode):
     input_schema: ClassVar[type[CypherInputSchema]] = CypherInputSchema
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.DATABASE_QUERY
     name: str = "Cypher Executor"
     description: str = BASE_CYPHER_DESCRIPTION
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))

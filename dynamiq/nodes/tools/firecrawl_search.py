@@ -8,6 +8,7 @@ from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -98,6 +99,7 @@ class FirecrawlSearchTool(ConnectionNode):
     """A tool for performing Firecrawl searches."""
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.WEB_SEARCH
     name: str = "Firecrawl Search Tool"
     description: str = DESCRIPTION_FIRECRAWL_SEARCH
     connection: Firecrawl

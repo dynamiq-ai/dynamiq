@@ -10,6 +10,7 @@ from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.embedders.base import TextEmbedder
 from dynamiq.nodes.node import NodeDependency, NodeGroup, ensure_config
 from dynamiq.nodes.retrievers.base import Retriever
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types import Document
 from dynamiq.utils.logger import logger
@@ -46,6 +47,7 @@ class VectorStoreRetriever(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.SEMANTIC_SEARCH
     name: str = "VectorStore Retriever"
     description: str = "A node for retrieving relevant documents based on a query."
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
