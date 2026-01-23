@@ -1,5 +1,3 @@
-"""Integration tests for VectorStoreRetriever with ranker functionality."""
-
 import uuid
 from unittest.mock import MagicMock, Mock, patch
 
@@ -74,7 +72,6 @@ def test_vectorstore_retriever_with_cohere_ranker(
     mock_weaviate_vector_store,
 ):
     """Test VectorStoreRetriever with CohereReranker."""
-    # Setup mock return values
     mock_embedder_run.return_value = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input={},
@@ -86,7 +83,6 @@ def test_vectorstore_retriever_with_cohere_ranker(
         output={"documents": mock_retriever_documents},
     )
 
-    # Setup connections
     openai_connection = connections.OpenAI(
         id=str(uuid.uuid4()),
         api_key="test_api_key",
@@ -96,7 +92,6 @@ def test_vectorstore_retriever_with_cohere_ranker(
         api_key="test_api_key",
     )
 
-    # Setup components
     text_embedder = OpenAITextEmbedder(
         connection=openai_connection,
         model="text-embedding-3-small",
@@ -115,7 +110,6 @@ def test_vectorstore_retriever_with_cohere_ranker(
         threshold=0.7,
     )
 
-    # Create VectorStoreRetriever with ranker
     retriever = VectorStoreRetriever(
         name="Test Retriever with Ranker",
         text_embedder=text_embedder,
@@ -123,34 +117,28 @@ def test_vectorstore_retriever_with_cohere_ranker(
         ranker=ranker,
     )
 
-    # Create workflow
     wf = Workflow(
         id=str(uuid.uuid4()),
         flow=Flow(nodes=[retriever]),
     )
 
-    # Run workflow
     input_data = {"query": "What is machine learning?"}
     result = wf.run(
         input_data=input_data,
         config=RunnableConfig(callbacks=[TracingCallbackHandler()]),
     )
 
-    # Assertions
     assert result.status == RunnableStatus.SUCCESS
     output = result.output[retriever.id]["output"]
     assert "documents" in output
     assert "content" in output
 
-    # Verify that documents were reranked (should have 3 or fewer due to top_k=3)
     reranked_docs = output["documents"]
     assert len(reranked_docs) <= 3
-    # Documents may be Document objects or dicts depending on ranker output
     for doc in reranked_docs:
         score = doc.score if hasattr(doc, "score") else doc.get("score", 0)
-        assert score >= 0.7  # threshold check
+        assert score >= 0.7
 
-    # Verify rerank was called
     mock_rerank_executor.assert_called_once()
     call_kwargs = mock_rerank_executor.call_args[1]
     assert call_kwargs["model"] == "cohere/rerank-v3.5"
@@ -168,7 +156,6 @@ def test_vectorstore_retriever_without_ranker(
     mock_weaviate_vector_store,
 ):
     """Test VectorStoreRetriever without ranker (standard behavior)."""
-    # Setup mock return values
     mock_embedder_run.return_value = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input={},
@@ -180,13 +167,11 @@ def test_vectorstore_retriever_without_ranker(
         output={"documents": mock_retriever_documents},
     )
 
-    # Setup connections
     openai_connection = connections.OpenAI(
         id=str(uuid.uuid4()),
         api_key="test_api_key",
     )
 
-    # Setup components
     text_embedder = OpenAITextEmbedder(
         connection=openai_connection,
         model="text-embedding-3-small",
@@ -198,34 +183,29 @@ def test_vectorstore_retriever_without_ranker(
         top_k=5,
     )
 
-    # Create VectorStoreRetriever without ranker
     retriever = VectorStoreRetriever(
         name="Test Retriever without Ranker",
         text_embedder=text_embedder,
         document_retriever=document_retriever,
-        ranker=None,  # No ranker
+        ranker=None,
     )
 
-    # Create workflow
     wf = Workflow(
         id=str(uuid.uuid4()),
         flow=Flow(nodes=[retriever]),
     )
 
-    # Run workflow
     input_data = {"query": "What is machine learning?"}
     result = wf.run(
         input_data=input_data,
         config=RunnableConfig(callbacks=[TracingCallbackHandler()]),
     )
 
-    # Assertions
     assert result.status == RunnableStatus.SUCCESS
     output = result.output[retriever.id]["output"]
     assert "documents" in output
     assert "content" in output
 
-    # Verify all original documents are returned (no reranking)
     retrieved_docs = output["documents"]
     assert len(retrieved_docs) == len(mock_retriever_documents)
 
@@ -244,7 +224,6 @@ def test_vectorstore_retriever_with_llm_ranker(
     """Test VectorStoreRetriever with LLMDocumentRanker."""
     from dynamiq.nodes.llms import OpenAI
 
-    # Setup mock return values
     mock_embedder_run.return_value = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input={},
@@ -255,7 +234,6 @@ def test_vectorstore_retriever_with_llm_ranker(
         input={},
         output={"documents": mock_retriever_documents},
     )
-    # Mock LLM ranker output - returns filtered/reranked documents
     mock_ranker_run.return_value = RunnableResult(
         status=RunnableStatus.SUCCESS,
         input={},
@@ -268,13 +246,11 @@ def test_vectorstore_retriever_with_llm_ranker(
         },
     )
 
-    # Setup connections
     openai_connection = connections.OpenAI(
         id=str(uuid.uuid4()),
         api_key="test_api_key",
     )
 
-    # Setup components
     text_embedder = OpenAITextEmbedder(
         connection=openai_connection,
         model="text-embedding-3-small",
@@ -296,7 +272,6 @@ def test_vectorstore_retriever_with_llm_ranker(
         top_k=3,
     )
 
-    # Create VectorStoreRetriever with LLM ranker
     retriever = VectorStoreRetriever(
         name="Test Retriever with LLM Ranker",
         text_embedder=text_embedder,
@@ -304,27 +279,23 @@ def test_vectorstore_retriever_with_llm_ranker(
         ranker=ranker,
     )
 
-    # Create workflow
     wf = Workflow(
         id=str(uuid.uuid4()),
         flow=Flow(nodes=[retriever]),
     )
 
-    # Run workflow
     input_data = {"query": "What is machine learning?"}
     result = wf.run(
         input_data=input_data,
         config=RunnableConfig(callbacks=[TracingCallbackHandler()]),
     )
 
-    # Assertions
     assert result.status == RunnableStatus.SUCCESS
     output = result.output[retriever.id]["output"]
     assert "documents" in output
 
-    # LLM ranker should only keep documents marked as relevant
     reranked_docs = output["documents"]
-    assert len(reranked_docs) <= 3  # top_k is 3
+    assert len(reranked_docs) <= 3
 
 
 def test_vectorstore_retriever_ranker_serialization(mock_weaviate_vector_store):
@@ -360,7 +331,6 @@ def test_vectorstore_retriever_ranker_serialization(mock_weaviate_vector_store):
         ranker=ranker,
     )
 
-    # Test serialization
     retriever_dict = retriever.to_dict()
 
     assert "text_embedder" in retriever_dict
@@ -405,10 +375,8 @@ def test_vectorstore_retriever_ranker_init_components(mock_weaviate_vector_store
         ranker=ranker,
     )
 
-    # Initialize components
     cm = ConnectionManager()
     retriever.init_components(cm)
 
-    # Verify ranker is initialized
     assert retriever.ranker is not None
     assert retriever.ranker == ranker
