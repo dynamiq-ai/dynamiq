@@ -26,7 +26,7 @@ from dynamiq.nodes.exceptions import (
     NodeFailedException,
     NodeSkippedException,
 )
-from dynamiq.nodes.types import Behavior, ChoiceCondition, NodeGroup
+from dynamiq.nodes.types import ActionType, Behavior, ChoiceCondition, NodeGroup
 from dynamiq.runnables import Runnable, RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.runnables.base import RunnableResultError
 from dynamiq.storages.vector.base import BaseVectorStoreParams
@@ -253,6 +253,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
     is_postponed_component_init: bool = False
     is_optimized_for_agents: bool = False
     is_files_allowed: bool = Field(default=False, description="Whether the node is permitted to access files.")
+    action_type: ActionType | None = Field(default=None, description="Action type classification for streaming.")
 
     _output_references: NodeOutputReferences = PrivateAttr()
 

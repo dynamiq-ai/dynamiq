@@ -9,6 +9,7 @@ from dynamiq.connections import Tavily
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -133,6 +134,7 @@ class TavilyTool(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.WEB_SEARCH
     name: str = "Tavily Search Tool"
     description: str = DESCRIPTION_TAVILY
     connection: Tavily

@@ -526,24 +526,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 else:
                     self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
 
-                tools_data_for_streaming = [
-                    {
-                        "name": tool.get("name", ""),
-                        "type": self.tool_by_names.get(tool.get("name", "")).type,
-                    }
-                    for tool in tools_data
-                    if tool.get("name", "") and self.tool_by_names.get(tool.get("name", ""))
-                ]
-
-                self.stream_reasoning(
-                    {
-                        "thought": thought,
-                        "tools": tools_data_for_streaming,
-                        "loop_num": loop_num,
-                    },
-                    config,
-                    **kwargs,
-                )
                 return thought, action, tools_data
 
             except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
@@ -693,7 +675,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             {
                 "thought": thought,
                 "action": action,
-                "tool": {"name": tool.name, "type": tool.type},
+                "tool": {
+                    "name": tool.name,
+                    "type": tool.type,
+                    "action_type": tool.action_type.value if tool.action_type else None,
+                },
                 "action_input": action_input,
                 "loop_num": loop_num,
             },
@@ -829,8 +815,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     and not is_context_manager
                 ):
                     tools_data = action_input if isinstance(action_input, list) else [action_input]
-                    execution_output = self._execute_tools(tools_data, config, **kwargs)
-
+                    execution_output = self._execute_tools(tools_data, thought, loop_num, config, **kwargs)
                     tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
                 else:
                     result = self._execute_single_tool(action, action_input, thought, loop_num, config, **kwargs)
@@ -1351,13 +1336,20 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 logger.error(f"Streaming error for tool {result.get('tool_name')}: {stream_err}")
 
     def _execute_tools(
-        self, tools_data: list[dict[str, Any]], config: RunnableConfig, **kwargs
+        self,
+        tools_data: list[dict[str, Any]],
+        thought: str | None,
+        loop_num: int,
+        config: RunnableConfig,
+        **kwargs,
     ) -> str | dict[str, Any]:
         """
         Execute one or more tools and gather their results.
 
         Args:
             tools_data (list): List of dictionaries containing name and input for each tool
+            thought: The agent's reasoning
+            loop_num: Current loop iteration number
             config (RunnableConfig): Configuration for the runnable
             **kwargs: Additional arguments for tool execution
 
@@ -1368,6 +1360,31 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         if not tools_data:
             return ""
+
+        # Stream reasoning with tools info
+        tools_data_for_streaming = []
+        for tool_data in tools_data:
+            tool_name = tool_data.get("name", "")
+            tool = self.tool_by_names.get(tool_name)
+            if tool_name and tool:
+                tools_data_for_streaming.append(
+                    {
+                        "name": tool_name,
+                        "type": tool.type,
+                        "action_type": tool.action_type.value if tool.action_type else None,
+                    }
+                )
+
+        if tools_data_for_streaming:
+            self.stream_reasoning(
+                {
+                    "thought": thought,
+                    "tools": tools_data_for_streaming,
+                    "loop_num": loop_num,
+                },
+                config,
+                **kwargs,
+            )
 
         prepared_tools: list[dict[str, Any]] = []
 
