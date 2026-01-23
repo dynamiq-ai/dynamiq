@@ -589,30 +589,6 @@ Your response should be clear, concise, and professional.
 </answer>
 """  # noqa: E501
 
-HISTORY_SUMMARIZATION_PROMPT_PRESERVE = """
-Task: Extract valuable information from tool outputs and wrap each in numbered tags.
-
-Format:
-Each tool output is marked as: === TOOL_OUTPUT [tool_number] ===
-
-Instructions:
-1. Extract relevant information from each marked section
-2. Wrap in tags: <tool_outputX>...content...</tool_outputX> (where X = tool number)
-3. Example: <tool_output4>extracted content</tool_output4>
-
-Guidelines:
-* Always include all required tags for every tool output.
-* If the tool output is irrelevant, provide only a general summary of it.
-* In output provide only tags and extracted information inside.
-* Try to keep information which responds for initial user request and is consistent with previous extracted information.
-* Preserve as much important details as possible.
-* Do not merge or combine content from different sections.
-* Maintain the numbering to match the original section order.
-* Do not leave tag empty.
-
-Input request:
-"""
-
 
 HISTORY_SUMMARIZATION_PROMPT_REPLACE = """Provide a concise summary of the conversation history above.
  Focus on key decisions, important information, and tool outputs."""
