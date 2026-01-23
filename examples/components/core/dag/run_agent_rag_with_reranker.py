@@ -95,13 +95,14 @@ def run_agent_rag_with_reranking(
                     if hasattr(run, "name") and "Tool" in run.name:
                         logger.info(f"\nTool: {run.name}")
                         logger.info(f"  Input: {run.input}")
-                        if "documents" in run.output:
+                        if run.output and "documents" in run.output:
                             docs = run.output["documents"]
                             logger.info(f"  Retrieved documents: {len(docs)}")
                             for idx, doc in enumerate(docs, 1):
                                 score = getattr(doc, "score", None)
                                 content_preview = doc.content[:100] if hasattr(doc, "content") else ""
-                                logger.info(f"    Doc {idx}: Score={score:.4f}, Preview={content_preview}...")
+                                score_str = f"{score:.4f}" if score is not None else "N/A"
+                                logger.info(f"    Doc {idx}: Score={score_str}, Preview={content_preview}...")
 
         logger.info("\n" + "=" * 80)
 
