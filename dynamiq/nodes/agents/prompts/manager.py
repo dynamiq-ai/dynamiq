@@ -2,11 +2,11 @@
 
 import re
 import textwrap
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from jinja2 import Template
+from pydantic import BaseModel
 
 from dynamiq.nodes.agents.prompts.react import (
     CONTEXT_MANAGER_INSTRUCTIONS,
@@ -31,8 +31,7 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
 
 
-@dataclass
-class AdditionalInstructionsConfig:
+class AdditionalInstructionsConfig(BaseModel):
     """Configuration for additional agent instructions (capabilities).
 
     Attributes:

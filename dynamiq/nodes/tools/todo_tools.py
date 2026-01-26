@@ -117,6 +117,8 @@ Usage:
     def execute(
         self, input_data: TodoReadInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
+        logger.info(f"TodoReadTool: Executing with input data: {input_data.model_dump()}")
+
         config = ensure_config(config)
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)

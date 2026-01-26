@@ -492,3 +492,42 @@ def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
     prompt_with_state = agent.generate_prompt(agent_state="Progress: Loop 1/10")
     assert "AGENT STATE" in prompt_with_state, "AGENT STATE section should be in system prompt"
     assert "Progress: Loop 1/10" in prompt_with_state, "Loop progress should be shown in state"
+
+
+def test_agent_state_updates_with_todos(openai_node):
+    """Test that AgentState correctly updates and serializes todo state."""
+    from dynamiq.nodes.agents.agent import AgentState, TodoItem
+
+    state = AgentState()
+
+    # Initial state should be empty
+    assert state.to_prompt_string() == ""
+
+    # Update with loop progress
+    state.max_loops = 15
+    state.update_loop(3)
+    prompt_str = state.to_prompt_string()
+    assert "Progress: Loop 3/15" in prompt_str
+
+    # Update with todos (accepts both dicts and TodoItem objects)
+    state.update_todos(
+        [
+            TodoItem(id="1", content="First task", status="completed"),
+            TodoItem(id="2", content="Second task", status="in_progress"),
+            TodoItem(id="3", content="Third task", status="pending"),
+        ]
+    )
+    prompt_str = state.to_prompt_string()
+    assert "[+] 1: First task" in prompt_str, "Completed todo should show [+]"
+    assert "[~] 2: Second task" in prompt_str, "In-progress todo should show [~]"
+    assert "[ ] 3: Third task" in prompt_str, "Pending todo should show [ ]"
+
+    # Verify todos are TodoItem instances
+    assert all(isinstance(t, TodoItem) for t in state.todos)
+
+    # Reset should clear state
+    state.reset(max_loops=10)
+    assert state.current_loop == 0
+    assert state.max_loops == 10
+    assert state.todos == []
+    assert state.files == []

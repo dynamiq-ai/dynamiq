@@ -1,10 +1,9 @@
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent as BaseAgent
@@ -34,8 +33,20 @@ from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 
-@dataclass
-class AgentState:
+class TodoItem(BaseModel):
+    """A single todo item in the agent's task list."""
+
+    id: str = ""
+    content: str = ""
+    status: str = "pending"  # pending, in_progress, completed
+
+    def to_display_string(self) -> str:
+        """Format todo item for display with status icon."""
+        icon = {"pending": "[ ]", "in_progress": "[~]", "completed": "[+]"}.get(self.status, "[ ]")
+        return f"{icon} {self.id}: {self.content}"
+
+
+class AgentState(BaseModel):
     """
     Encapsulates the dynamic state of an agent during execution.
 
@@ -45,8 +56,8 @@ class AgentState:
 
     current_loop: int = 0
     max_loops: int = 0
-    files: list[str] = field(default_factory=list)
-    todos: list[dict] = field(default_factory=list)
+    files: list[str] = Field(default_factory=list)
+    todos: list[TodoItem] = Field(default_factory=list)
 
     def reset(self, max_loops: int = 0) -> None:
         """Reset state for a new execution."""
@@ -63,9 +74,9 @@ class AgentState:
         """Update file list."""
         self.files = files
 
-    def update_todos(self, todos: list[dict]) -> None:
-        """Update todo list."""
-        self.todos = todos
+    def update_todos(self, todos: list[dict | TodoItem]) -> None:
+        """Update todo list from dicts or TodoItem objects."""
+        self.todos = [t if isinstance(t, TodoItem) else TodoItem(**t) for t in todos]
 
     def to_prompt_string(self) -> str:
         """
@@ -88,44 +99,11 @@ class AgentState:
 
         # Todos
         if self.todos:
-            todo_lines = []
-            for t in self.todos:
-                status = t.get("status", "pending")
-                icon = {"pending": "[ ]", "in_progress": "[~]", "completed": "[+]"}.get(status, "[ ]")
-                todo_lines.append(f"{icon} {t.get('id', '?')}: {t.get('content', '')}")
+            todo_lines = [t.to_display_string() for t in self.todos]
             sections.append("Todos:\n" + "\n".join(todo_lines))
 
         return "\n".join(sections) if sections else ""
 
-
-final_answer_function_schema = {
-    "type": "function",
-    "strict": True,
-    "function": {
-        "name": "provide_final_answer",
-        "description": "Function should be called when if you can answer the initial request"
-        " or if there is not request at all.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "thought": {
-                    "type": "string",
-                    "description": "Your reasoning about why you can answer original question.",
-                },
-                "answer": {"type": "string", "description": "Answer on initial request."},
-            },
-            "required": ["thought", "answer"],
-        },
-    },
-}
-
-TYPE_MAPPING = {
-    int: "integer",
-    float: "float",
-    bool: "boolean",
-    str: "string",
-    dict: "object",
-}
 
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
@@ -891,6 +869,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         self._setup_prompt_and_stop_sequences(input_message, history_messages)
 
+        # Initialize state with max_loops for progress tracking
+        self.state.max_loops = self.max_loops
+
         for loop_num in range(1, self.max_loops + 1):
             # Update agent state
             self._refresh_agent_state(loop_num)
@@ -1153,7 +1134,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 file_store = self.file_store.backend
                 if file_store.exists(TODOS_FILE_PATH):
                     content = file_store.retrieve(TODOS_FILE_PATH)
-                    data = json.loads(content)
+                    data = json.loads(content.decode("utf-8"))
                     self.state.update_todos(data.get("todos", []))
             except Exception:
                 logger.error("Failed to get todo state")
