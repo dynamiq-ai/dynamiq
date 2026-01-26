@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.prompts.react.instructions import HISTORY_SUMMARIZATION_PROMPT_REPLACE
-from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.node import NodeDependency, ensure_config
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.prompts.prompts import Prompt, VisionMessage
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -131,8 +131,11 @@ class ContextManagerTool(Node):
             input_data={},
             prompt=Prompt(messages=summary_messages),
             config=config,
-            **kwargs,
+            **(kwargs | {"parent_run_id": kwargs.get("run_id")}),
         )
+
+        # Track LLM dependency for tracing
+        self._run_depends = [NodeDependency(node=self.llm).to_dict(for_tracing=True)]
 
         if llm_result.status != RunnableStatus.SUCCESS:
             error_msg = llm_result.error.message if llm_result.error else "Unknown error"
