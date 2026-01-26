@@ -190,7 +190,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     self.tools.append(
                         ContextManagerTool(
                             llm=self.llm,
-                            summarization_config=self.summarization_config,
                             name="context-manager",
                         )
                     )
@@ -940,7 +939,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 f"Agent {self.name} - {self.id}: Token limit exceeded. Automatically invoking Context Manager Tool."
             )
 
-            # Find the Context Manager Tool
             context_tool = next((t for t in self.tools if isinstance(t, ContextManagerTool)), None)
 
             if context_tool is None:
@@ -953,8 +951,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 Message(role=MessageRole.ASSISTANT, content=PROMPT_AUTO_CLEAN_CONTEXT, static=True)
             )
 
-            # Execute the tool automatically
-            # Note: messages are prepared in _execute_single_tool
             self._execute_tools_and_update_prompt(
                 action=action,
                 action_input={},

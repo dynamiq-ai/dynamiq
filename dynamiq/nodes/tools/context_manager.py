@@ -5,7 +5,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.prompts.react.instructions import HISTORY_SUMMARIZATION_PROMPT_REPLACE
-from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.node import ensure_config
 from dynamiq.prompts import Message, MessageRole
 from dynamiq.prompts.prompts import Prompt, VisionMessage
@@ -52,7 +51,6 @@ class ContextManagerTool(Node):
         description (str): Tool description with usage warning.
         error_handling (ErrorHandling): Configuration for error handling.
         llm (Node): LLM instance for generating summaries.
-        summarization_config (SummarizationConfig): Summarization configuration from agent.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -65,7 +63,6 @@ class ContextManagerTool(Node):
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=60))
     llm: Node = Field(..., description="LLM instance for generating summaries")
-    summarization_config: SummarizationConfig = Field(..., description="Summarization configuration from agent")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ContextManagerInputSchema]] = ContextManagerInputSchema
