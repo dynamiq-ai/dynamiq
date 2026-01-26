@@ -271,7 +271,7 @@ class AWS(BaseConnection):
         default_factory=partial(get_env_var, "AWS_SECRET_ACCESS_KEY")
     )
     region: str = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_REGION"))
-    profile: str | None = None
+    profile: str | None = Field(default_factory=partial(get_env_var, "AWS_DEFAULT_PROFILE"))
 
     def connect(self):
         pass
