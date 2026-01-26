@@ -1121,7 +1121,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
 
                 files = self.file_store.backend.list_files()
-                user_files = [f for f in files if f != TODOS_FILE_PATH]
+                user_files = [f.path for f in files if f.path != TODOS_FILE_PATH]
                 self.state.update_files(user_files)
             except Exception:
                 logger.error("Failed to get file state")

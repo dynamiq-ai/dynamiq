@@ -35,11 +35,11 @@ def llm_instance():
 
 @pytest.fixture(scope="module")
 def python_tool():
-    """Create a Python tool for generating random word output."""
+    """Create a Python tool for generating random word output. You don't have to provide anything."""
     code = """
 def run(input_data):
     # Generate random word output to test summarization
-    return "apple"
+    return "Random generated word: apple"
 """
     return Python(
         name="word-generator",
@@ -131,7 +131,7 @@ def test_automatic_context_manager_auto_clean(llm_instance, python_tool, run_con
         inference_mode=InferenceMode.XML,
         summarization_config=SummarizationConfig(
             enabled=True,
-            max_token_context_length=1000,  # Low limit to trigger automatic summarization
+            max_token_context_length=700,
             context_usage_ratio=0.5,
         ),
     )
@@ -141,7 +141,7 @@ def test_automatic_context_manager_auto_clean(llm_instance, python_tool, run_con
         "input": (
             "Results is exactly what word-generator tool. Please do the following:\n"
             "1. Use the word-generator tool to generate one random word.\n"
-            "2. Finish execution right after summarization with result of what word was returned."
+            "2. Finish execution right after summarization. And return word that was generated before summarization."
         )
     }
 

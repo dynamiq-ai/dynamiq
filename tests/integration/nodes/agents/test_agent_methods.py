@@ -18,7 +18,10 @@ from dynamiq.nodes.agents.exceptions import (
 )
 from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.storages.file.base import FileStoreConfig
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
 @pytest.fixture
@@ -467,10 +470,8 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
 
 def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
     """Test that todo tools are added and instructions included when file_store.todo_enabled is True."""
-    from dynamiq.nodes.agents.agent import FileStoreConfig
-    from dynamiq.nodes.tools import TodoWriteTool
 
-    file_store_config = FileStoreConfig(enabled=True, todo_enabled=True)
+    file_store_config = FileStoreConfig(enabled=True, backend=InMemoryFileStore(), todo_enabled=True)
     agent = Agent(
         name="Todo Agent",
         llm=openai_node,
