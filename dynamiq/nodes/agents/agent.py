@@ -675,7 +675,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **kwargs,
             )
 
-    def _should_skip_parallel_mode(self, action: str | None, action_input: Any) -> tuple[bool, str | None, Any]:
+    def _should_skip_parallel_mode(
+        self, action: str | None, action_input: Any
+    ) -> tuple[bool, str | None, Any, list[str]]:
         """Check if parallel mode should be skipped for ContextManagerTool.
 
         When ContextManagerTool is detected in a parallel tool list, we filter
@@ -686,10 +688,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             action_input: The action input (list for parallel mode)
 
         Returns:
-            tuple: (skip_parallel, action_name, action_input)
+            tuple: (skip_parallel, action_name, action_input, skipped_tools)
                 - skip_parallel: True if parallel mode should be skipped
                 - action_name: The tool name to execute
                 - action_input: The tool input to use
+                - skipped_tools: List of tool names that were skipped
         """
         # Get ContextManagerTool names
         context_manager_names = {
@@ -702,17 +705,23 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 if isinstance(tool_data, dict):
                     tool_name = self.sanitize_tool_name(tool_data.get("name", ""))
                     if tool_name in context_manager_names:
-                        # Found ContextManagerTool - skip parallel, execute only this tool
+                        # Collect names of other tools that will be skipped
+                        skipped_tools = [
+                            td.get("name", "unknown")
+                            for td in action_input
+                            if isinstance(td, dict)
+                            and self.sanitize_tool_name(td.get("name", "")) not in context_manager_names
+                        ]
                         logger.info(
                             f"Agent {self.name} - {self.id}: ContextManagerTool detected in parallel call. "
-                            "Filtering to execute only ContextManagerTool."
+                            f"Filtering to execute only ContextManagerTool. Skipped tools: {skipped_tools}"
                         )
-                        return True, tool_data.get("name", ""), tool_data.get("input", {})
+                        return True, tool_data.get("name", ""), tool_data.get("input", {}), skipped_tools
         elif isinstance(action, str) and self.sanitize_tool_name(action) in context_manager_names:
-            # Single tool mode - ContextManagerTool detected
-            return True, action, action_input
+            # Single tool mode - ContextManagerTool detected, no tools skipped
+            return True, action, action_input, []
 
-        return False, action, action_input
+        return False, action, action_input, []
 
     def _execute_tools_and_update_prompt(
         self,
@@ -740,10 +749,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
             tool_result = None
             tool_files: Any = []
             tool = None
+            skipped_tools: list[str] = []
 
             try:
                 # Check if ContextManagerTool is in the action - if so, skip parallel mode
-                skip_parallel, action, action_input = self._should_skip_parallel_mode(action, action_input)
+                skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(
+                    action, action_input
+                )
 
                 # Handle XML parallel mode (but not for ContextManagerTool)
                 if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled and not skip_parallel:
@@ -759,6 +771,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             except RecoverableAgentException as e:
                 tool_result = f"{type(e).__name__}: {e}"
+
+            # Add feedback about skipped tools if any were filtered out
+            if skipped_tools:
+                skipped_notice = (
+                    f"\n\n[Note: The following tools were NOT executed because context-manager "
+                    f"must run alone: {', '.join(skipped_tools)}. Please call them separately after "
+                    f"context compression completes.]"
+                )
+                tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
             # Add observation and stream result (for regular tools)
             self._add_observation_and_stream(tool_result, tool_files, tool, action, action_input, config, **kwargs)
