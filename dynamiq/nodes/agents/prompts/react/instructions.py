@@ -109,6 +109,7 @@ CRITICAL XML FORMAT RULES:
 - Explain why this specific tool is the right choice
 - For tool use, include action and action_input tags
 - For direct answers, only include thought and answer tags
+- Tool names go as PLAIN TEXT inside <action> tags, NOT as XML tags.
 - JSON in <action_input> MUST be on single line with proper escaping
 - NO line breaks or control characters inside JSON strings
 - Use double quotes for JSON strings
@@ -624,21 +625,21 @@ Input request:
 
 
 HISTORY_SUMMARIZATION_PROMPT_REPLACE = """The messages above are being compacted.
- Write a summary that captures what happened.
+Write a summary that captures what happened.
 
 This summary will replace the conversation history and appear as a Context Manager Tool observation. Include:
 
 1. **Actions & Progress**:  What tools were called and what did they return? How far along is the task?
  Keep only the most important information.
 
-2. **Ongoing Goals**: Preserve any existing summaries' context. Track the overall objective and long-term
- progress across multiple summarizations.
+2. **Ongoing Goals**: Preserve any existing summaries' context.
+ Track the overall objective and long-term progress across multiple summarizations.
 
 3. **Key Details**: Names, IDs, values, configurations, or data that may be needed later.
- Don't omit anything that could be referenced.
+  Don't omit anything that could be referenced.
 
-Write as a factual record. Be thorough - preserve enough context to avoid repeating actions or
- losing critical information."""
+Write as a factual record. Be thorough - preserve enough context to avoid repeating actions
+ or losing critical information."""
 
 
 PROMPT_AUTO_CLEAN_CONTEXT = "Automatically cleaning the context with Context Manager Tool..."
