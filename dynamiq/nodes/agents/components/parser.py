@@ -29,9 +29,7 @@ def parse_default_thought(output: str) -> str:
     return ""
 
 
-def parse_default_action(
-    output: str, parallel_tool_calls_enabled: bool
-) -> tuple[str | None, str | None, dict | list | None]:
+def parse_default_action(output: str) -> tuple[str | None, str | None, dict | list | None]:
     """
     Parses the action(s), input(s), and thought from the output string in default inference mode format.
 
@@ -43,10 +41,10 @@ def parse_default_action(
         parallel_tool_calls_enabled: Whether parallel tool calls are enabled
 
     Returns:
-        tuple: (thought, action_type, actions_data) where:
+        tuple: (thought, action, action_input) where:
             - thought is the extracted reasoning
-            - action_type is either a tool name (for single tool) or "multiple_tools" (for multiple tools)
-            - actions_data is either a dict (for single tool) or a list of dicts (for multiple tools)
+            - action is the tool name (first action if multiple are found)
+            - action_input is the tool input dict
 
     Raises:
         ActionParsingException: If parsing fails or format is invalid
@@ -140,12 +138,9 @@ def parse_default_action(
                 recoverable=True,
             )
 
-        if not parallel_tool_calls_enabled or len(actions) == 1:
-            action = actions[0]["tool_name"]
-            action_input = actions[0]["tool_input"]
-            return thought, action, action_input
-        else:
-            return thought, "multiple_tools", actions
+        action = actions[0]["tool_name"]
+        action_input = actions[0]["tool_input"]
+        return thought, action, action_input
 
     except Exception as e:
         logger.error(f"Error: {e}")
@@ -154,8 +149,7 @@ def parse_default_action(
         raise ActionParsingException(
             f"Error parsing action(s): {str(e)}. "
             f"Please ensure the output follows the format 'Thought: <text> "
-            f"Action: <action> Action Input: <valid JSON>' "
-            f"{'with possible multiple Action/Action Input pairs.' if parallel_tool_calls_enabled else ''}",
+            f"Action: <action> Action Input: <valid JSON>' ",
             recoverable=True,
         )
 

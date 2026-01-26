@@ -8,6 +8,7 @@ from dynamiq.connections import Firecrawl
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -169,6 +170,7 @@ class FirecrawlInputSchema(BaseModel):
 class FirecrawlTool(ConnectionNode):
     """A tool for scraping web pages using the Firecrawl service."""
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.WEB_SCRAPE
     name: str = "Firecrawl Tool"
     description: str = DESCRIPTION_FIRECRAWL
     connection: Firecrawl

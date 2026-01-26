@@ -23,6 +23,7 @@ from dynamiq.nodes.tools.python import (
     guarded_write,
     make_safe_print,
 )
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileInfo, FileStore
 from dynamiq.utils import format_value
@@ -247,6 +248,7 @@ class PythonCodeExecutor(Node):
     """Execute ad-hoc Python code inside RestrictedPython with file store helpers."""
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.CODE_EXECUTION
     name: str = "PythonCodeExecutor"
     description: str = (
         "Runs dynamic Python code safely via RestrictedPython. "

@@ -8,6 +8,7 @@ from dynamiq.connections import ScaleSerp
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -98,6 +99,7 @@ class ScaleSerpTool(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.WEB_SEARCH
     name: str = "Scale Serp Search Tool"
     description: str = DESCRIPTION_SERP
     connection: ScaleSerp

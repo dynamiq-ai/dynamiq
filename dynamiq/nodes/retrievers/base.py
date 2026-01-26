@@ -4,6 +4,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, Field
 
 from dynamiq.nodes.node import NodeGroup, VectorStoreNode
+from dynamiq.nodes.types import ActionType
 
 
 class RetrieverInputSchema(BaseModel):
@@ -25,6 +26,7 @@ class RetrieverInputSchema(BaseModel):
 
 class Retriever(VectorStoreNode, ABC):
     group: Literal[NodeGroup.RETRIEVERS] = NodeGroup.RETRIEVERS
+    action_type: ActionType = ActionType.SEMANTIC_SEARCH
     filters: dict[str, Any] | None = None
     top_k: int = 10
     similarity_threshold: float | None = None
