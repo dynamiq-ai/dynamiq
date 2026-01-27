@@ -599,47 +599,9 @@ Your response should be clear, concise, and professional.
 </answer>
 """  # noqa: E501
 
-HISTORY_SUMMARIZATION_PROMPT_PRESERVE = """
-Task: Extract valuable information from tool outputs and wrap each in numbered tags.
 
-Format:
-Each tool output is marked as: === TOOL_OUTPUT [tool_number] ===
-
-Instructions:
-1. Extract relevant information from each marked section
-2. Wrap in tags: <tool_outputX>...content...</tool_outputX> (where X = tool number)
-3. Example: <tool_output4>extracted content</tool_output4>
-
-Guidelines:
-* Always include all required tags for every tool output.
-* If the tool output is irrelevant, provide only a general summary of it.
-* In output provide only tags and extracted information inside.
-* Try to keep information which responds for initial user request and is consistent with previous extracted information.
-* Preserve as much important details as possible.
-* Do not merge or combine content from different sections.
-* Maintain the numbering to match the original section order.
-* Do not leave tag empty.
-
-Input request:
-"""
-
-
-HISTORY_SUMMARIZATION_PROMPT_REPLACE = """The messages above are being compacted.
-Write a summary that captures what happened.
-
-This summary will replace the conversation history and appear as a Context Manager Tool observation. Include:
-
-1. **Actions & Progress**:  What tools were called and what did they return? How far along is the task?
- Keep only the most important information.
-
-2. **Ongoing Goals**: Preserve any existing summaries' context.
- Track the overall objective and long-term progress across multiple summarizations.
-
-3. **Key Details**: Names, IDs, values, configurations, or data that may be needed later.
-  Don't omit anything that could be referenced.
-
-Write as a factual record. Be thorough - preserve enough context to avoid repeating actions
- or losing critical information."""
+HISTORY_SUMMARIZATION_PROMPT_REPLACE = """Provide a concise summary of the conversation history above.
+ Focus on key decisions, important information, and tool outputs."""
 
 
 PROMPT_AUTO_CLEAN_CONTEXT = "Automatically cleaning the context with Context Manager Tool..."
