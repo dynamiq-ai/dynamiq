@@ -53,107 +53,17 @@ class TodoReadInputSchema(BaseModel):
 class TodoWriteInputSchema(BaseModel):
     """Input schema for writing todos."""
 
-    todos: list[dict[str, Any]] = Field(
+    todos: list[TodoItem] = Field(
         ...,
         description=(
-            "List of todo items to save. Each item should have: "
-            "'id' (string), 'content' (string), 'status' ('pending'|'in_progress'|'completed'). "
-            "This replaces the entire todo list."
+            "List of todo items. Each item MUST have: "
+            "'id' (required string), 'content' (string), 'status' ('pending'|'in_progress'|'completed')."
         ),
     )
     merge: bool = Field(
         default=True,
         description="If true, merge with existing todos (update by id). If false, replace all.",
     )
-
-
-class TodoReadTool(Node):
-    """
-    Read the current todo list from storage.
-
-    Returns the list of todos with their status and statistics.
-    """
-
-    group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "todo-read"
-    description: str = """Read the current todo list.
-
-Returns all todos with their id, content, and status (pending/in_progress/completed).
-Includes statistics: total count and counts per status.
-
-Usage:
-- Get all todos: {}
-- Filter by status: {"filter_status": "pending"}
-"""
-
-    error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=30))
-    file_store: FileStore = Field(..., description="File storage for todos")
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    input_schema: ClassVar[type[TodoReadInputSchema]] = TodoReadInputSchema
-
-    def init_components(self, connection_manager: ConnectionManager | None = None) -> None:
-        connection_manager = connection_manager or ConnectionManager()
-        super().init_components(connection_manager)
-
-    def reset_run_state(self):
-        self._run_depends = []
-
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"file_store": True}
-
-    def _load_todos(self) -> list[dict]:
-        """Load todos from file store."""
-        try:
-            if self.file_store.exists(TODOS_FILE_PATH):
-                content = self.file_store.retrieve(TODOS_FILE_PATH)
-                data = json.loads(content.decode("utf-8"))
-                return data.get("todos", [])
-        except Exception as e:
-            logger.warning(f"TodoReadTool: Failed to load todos: {e}")
-        return []
-
-    def execute(
-        self, input_data: TodoReadInputSchema, config: RunnableConfig | None = None, **kwargs
-    ) -> dict[str, Any]:
-        logger.info(f"TodoReadTool: Executing with input data: {input_data.model_dump()}")
-
-        config = ensure_config(config)
-        self.reset_run_state()
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        todos = self._load_todos()
-
-        # Filter if requested
-        if input_data.filter_status:
-            todos = [t for t in todos if t.get("status") == input_data.filter_status]
-
-        # Calculate stats
-        all_todos = self._load_todos()
-        stats = {
-            "total": len(all_todos),
-            "pending": sum(1 for t in all_todos if t.get("status") == "pending"),
-            "in_progress": sum(1 for t in all_todos if t.get("status") == "in_progress"),
-            "completed": sum(1 for t in all_todos if t.get("status") == "completed"),
-        }
-
-        # Format for agent
-        lines = ["📋 Todo List:"]
-        if todos:
-            for t in todos:
-                icon = {"pending": "⏳", "in_progress": "🔄", "completed": "✅"}.get(t.get("status", ""), "❓")
-                lines.append(f"  {icon} [{t.get('id')}] {t.get('content')} ({t.get('status')})")
-        else:
-            lines.append("  (No todos)")
-
-        lines.append("")
-        lines.append(
-            f"📊 Stats: {stats['total']} total | ⏳ {stats['pending']} pending |\
-                  🔄 {stats['in_progress']} in progress | ✅ {stats['completed']} completed"
-        )
-
-        return {"content": "\n".join(lines), "todos": all_todos}
 
 
 class TodoWriteTool(Node):
@@ -221,17 +131,17 @@ RULES:
         self.reset_run_state()
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        new_todos = input_data.todos
+        # Convert TodoItem objects to dicts for storage
+        new_todos = [todo.model_dump() for todo in input_data.todos]
 
         if input_data.merge:
             # Merge with existing todos
             existing = self._load_todos()
-            existing_by_id = {t.get("id"): t for t in existing}
+            existing_by_id = {t.get("id"): t for t in existing if t.get("id")}
 
+            # id is guaranteed by TodoItem validation
             for todo in new_todos:
-                todo_id = todo.get("id")
-                if todo_id:
-                    existing_by_id[todo_id] = todo
+                existing_by_id[todo["id"]] = todo
 
             final_todos = list(existing_by_id.values())
         else:
