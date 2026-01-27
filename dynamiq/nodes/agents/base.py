@@ -22,7 +22,7 @@ from dynamiq.nodes.agents.utils import (
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.nodes.tools import ContextManagerTool
+from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import (
     EXTRACTED_TEXT_SUFFIX,
     FileListTool,
@@ -813,7 +813,7 @@ class Agent(Node):
                 merged_input.pop("delegate_final", None)
 
         if isinstance(tool, ContextManagerTool):
-            merged_input["history"] = self._prompt.messages[self._history_offset :]
+            merged_input["messages"] = self._prompt.messages[self._history_offset :]
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
@@ -932,7 +932,8 @@ class Agent(Node):
             truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
         )
 
-        self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
+        if not isinstance(tool, ContextManagerTool):
+            self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
 
         output_files = tool_result.output.get("files", [])
         if collect_dependency:
