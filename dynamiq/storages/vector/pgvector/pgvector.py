@@ -54,6 +54,7 @@ VECTOR_FUNCTION_TO_SCORE_DEFINITION = {
     PGVectorVectorFunction.L1_DISTANCE: "{embedding_key} <+> {query_embedding}",
 }
 
+DEFAULT_TABLE_NAME = "default"
 DEFAULT_SCHEMA_NAME = "public"
 DEFAULT_LANGUAGE = "english"
 
@@ -66,7 +67,7 @@ DEFAULT_HNSW_EF_CONSTRUCTION = 64
 
 
 class PGVectorStoreParams(BaseVectorStoreParams):
-    table_name: str
+    table_name: str = DEFAULT_TABLE_NAME
     schema_name: str = DEFAULT_SCHEMA_NAME
     dimension: int = 1536
     vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY
@@ -88,7 +89,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
     def __init__(
         self,
-        table_name: str,
+        table_name: str = DEFAULT_TABLE_NAME,
         connection: PostgreSQL | str | None = None,
         client: Optional["PsycopgConnection"] = None,
         create_extension: bool = True,
@@ -115,7 +116,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             connection (PostgreSQL | str): PostgreSQL connection instance. Defaults to None.
             client (Optional[PostgreSQL]): PostgreSQL client instance. Defaults to None.
             create_extension (bool): Whether to create the vector extension (if it does not exist). Defaults to True.
-            table_name (str): Name of the table in the database.
+            table_name (str): Name of the table in the database. Defaults to "default".
             schema_name (str): Name of the schema in the database.
             dimension (int): Dimension of the embeddings. Defaults to 1536.
             vector_function (PGVectorVectorFunction): The vector function to use for similarity calculations.
@@ -166,8 +167,8 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         self.dimension = dimension
         self.index_method = index_method
         self.vector_function = vector_function
-        self.index_name = index_name or f"{table_name}_{index_method}_index"
-        self.keyword_index_name = keyword_index_name or f"{table_name}_keyword_index"
+        self.index_name = index_name or f"{self.table_name}_{self.index_method}_index"
+        self.keyword_index_name = keyword_index_name or f"{self.table_name}_keyword_index"
         self.language = language
         self.ivfflat_lists = ivfflat_lists
         self.hnsw_m = hnsw_m
