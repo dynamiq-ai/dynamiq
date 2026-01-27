@@ -1162,25 +1162,20 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         Get configuration for additional instructions (capabilities) based on agent settings.
 
-        Checks both the configuration (source of truth) and verifies that the corresponding
-        tools are actually present in the tools list. This ensures instructions are only
-        included when both the feature is enabled AND the tools are available.
+        Uses the configuration as the source of truth. Tools are automatically added by
+        model validators when the corresponding config is enabled, so we don't need to
+        check tool presence here.
 
         Returns:
             AdditionalInstructionsConfig with capability flags for:
-                - delegation_enabled: Whether delegation is enabled (config only)
+                - delegation_enabled: Whether delegation is enabled
                 - context_compaction_enabled: Whether context compaction is enabled
-                    (summarization_config) AND ContextManagerTool is present
                 - todo_management_enabled: Whether todo management is enabled
-                    (file_store config) AND TodoWriteTool is present
         """
         return AdditionalInstructionsConfig(
             delegation_enabled=self.delegation_allowed,
-            context_compaction_enabled=self.summarization_config.enabled
-            and any(isinstance(t, ContextManagerTool) for t in self.tools),
-            todo_management_enabled=self.file_store.enabled
-            and self.file_store.todo_enabled
-            and any(isinstance(t, TodoWriteTool) for t in self.tools),
+            context_compaction_enabled=self.summarization_config.enabled,
+            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
         )
 
     def _init_prompt_blocks(self):
