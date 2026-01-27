@@ -52,10 +52,6 @@ def run_agent_rag_with_reranking(
         logger.info(f"Agent: {agent_node.name}")
         logger.info(f"Agent tools: {[tool.name for tool in agent_node.tools]}")
 
-        for tool in agent_node.tools:
-            if hasattr(tool, "ranker") and tool.ranker:
-                logger.info(f"Tool '{tool.name}' has ranker: {tool.ranker.name}")
-
         logger.info("\n" + "=" * 80)
         logger.info("RUNNING WORKFLOW")
         logger.info("=" * 80)
