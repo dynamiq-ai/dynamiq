@@ -92,7 +92,7 @@ def test_parse_default_action_missing_action_input(default_react_agent):
     Action: search
     """
     with pytest.raises(ActionParsingException):
-        parse_default_action(output, parallel_tool_calls_enabled=False)
+        parse_default_action(output)
 
 
 def test_extract_default_final_answer(default_react_agent):

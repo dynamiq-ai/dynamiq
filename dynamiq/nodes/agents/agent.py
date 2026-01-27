@@ -19,10 +19,10 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
+from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
-from dynamiq.nodes.tools import ContextManagerTool
-from dynamiq.nodes.tools.context_manager import _apply_context_manager_tool_effect
+from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
@@ -187,8 +187,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if self.summarization_config.enabled:
                 has_context_tool = any(isinstance(t, ContextManagerTool) for t in self.tools)
                 if not has_context_tool:
-                    # Add with a stable name for addressing from the agent
-                    self.tools.append(ContextManagerTool(llm=self.llm, name="context-manager"))
+                    self.tools.append(
+                        ContextManagerTool(
+                            llm=self.llm,
+                            name="context-manager",
+                        )
+                    )
         except Exception as e:
             logger.error(f"Failed to ensure ContextManagerTool: {e}")
         return self
@@ -293,9 +297,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             self.log_final_output(thought, final_answer, loop_num)
             return thought, "final_answer", final_answer
 
-        thought, action, action_input = parser.parse_default_action(
-            llm_generated_output, self.parallel_tool_calls_enabled
-        )
+        thought, action, action_input = parser.parse_default_action(llm_generated_output)
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
 
@@ -483,15 +485,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self,
         input_message: Message | VisionMessage,
         history_messages: list[Message] | None = None,
-    ) -> int:
+    ) -> None:
         """Setup the prompt with system message, history, and configure stop sequences.
 
         Args:
             input_message: The user's input message
             history_messages: Optional conversation history
-
-        Returns:
-            int: The summary offset (position where history starts)
         """
         system_message = Message(
             role=MessageRole.SYSTEM,
@@ -508,7 +507,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         else:
             self._prompt.messages = [system_message, input_message]
 
-        summary_offset = self._history_offset = len(self._prompt.messages)
+        self._history_offset = len(self._prompt.messages)
 
         # Configure stop sequences based on inference mode
         stop_sequences = []
@@ -524,8 +523,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 ]
             )
         self.llm.stop = stop_sequences
-
-        return summary_offset
 
     def _setup_streaming_callback(
         self, config: RunnableConfig, loop_num: int, **kwargs
@@ -592,14 +589,24 @@ class Agent(HistoryManagerMixin, BaseAgent):
             **kwargs,
         )
 
-        tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
-        tool_result = self._tool_cache.get(tool_cache_entry, None)
+        # Don't cache ContextManagerTool results - they should always be regenerated
+        # (messages are injected in _run_tool in base.py)
+        if isinstance(tool, ContextManagerTool):
+            tool_result = None
+        else:
+            # For other tools, check cache for previously computed results
+            tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
+            tool_result = self._tool_cache.get(tool_cache_entry, None)
+
         delegate_final = self._should_delegate_final(tool, action_input)
 
         if not tool_result:
+            tool_kwargs = kwargs.copy()
+
             tool_result, tool_files = self._run_tool(
-                tool, action_input, config, delegate_final=delegate_final, **kwargs
+                tool, action_input, config, delegate_final=delegate_final, **tool_kwargs
             )
+
         else:
             logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
             tool_files = {}
@@ -615,6 +622,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     **kwargs,
                 )
             return "DELEGATED", tool_result, tool
+
+        if isinstance(tool, ContextManagerTool):
+            self._compact_history()
 
         return tool_result, tool_files, tool
 
@@ -665,6 +675,54 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **kwargs,
             )
 
+    def _should_skip_parallel_mode(
+        self, action: str | None, action_input: Any
+    ) -> tuple[bool, str | None, Any, list[str]]:
+        """Check if parallel mode should be skipped for ContextManagerTool.
+
+        When ContextManagerTool is detected in a parallel tool list, we filter
+        to only execute that tool to ensure safe context modification.
+
+        Args:
+            action: The action to execute
+            action_input: The action input (list for parallel mode)
+
+        Returns:
+            tuple: (skip_parallel, action_name, action_input, skipped_tools)
+                - skip_parallel: True if parallel mode should be skipped
+                - action_name: The tool name to execute
+                - action_input: The tool input to use
+                - skipped_tools: List of tool names that were skipped
+        """
+        # Get ContextManagerTool names
+        context_manager_names = {
+            self.sanitize_tool_name(t.name) for t in self.tools if isinstance(t, ContextManagerTool)
+        }
+
+        # Check if ContextManagerTool is in a parallel tool list
+        if isinstance(action_input, list):
+            for tool_data in action_input:
+                if isinstance(tool_data, dict):
+                    tool_name = self.sanitize_tool_name(tool_data.get("name", ""))
+                    if tool_name in context_manager_names:
+                        # Collect names of other tools that will be skipped
+                        skipped_tools = [
+                            td.get("name", "unknown")
+                            for td in action_input
+                            if isinstance(td, dict)
+                            and self.sanitize_tool_name(td.get("name", "")) not in context_manager_names
+                        ]
+                        logger.info(
+                            f"Agent {self.name} - {self.id}: ContextManagerTool detected in parallel call. "
+                            f"Filtering to execute only ContextManagerTool. Skipped tools: {skipped_tools}"
+                        )
+                        return True, tool_data.get("name", ""), tool_data.get("input", {}), skipped_tools
+        elif isinstance(action, str) and self.sanitize_tool_name(action) in context_manager_names:
+            # Single tool mode - ContextManagerTool detected, no tools skipped
+            return True, action, action_input, []
+
+        return False, action, action_input, []
+
     def _execute_tools_and_update_prompt(
         self,
         action: str | None,
@@ -691,15 +749,22 @@ class Agent(HistoryManagerMixin, BaseAgent):
             tool_result = None
             tool_files: Any = []
             tool = None
+            skipped_tools: list[str] = []
 
             try:
-                # Handle XML parallel mode
-                if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled:
+                # Check if ContextManagerTool is in the action - if so, skip parallel mode
+                skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(
+                    action, action_input
+                )
+
+                # Handle XML parallel mode (but not for ContextManagerTool)
+                if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled and not skip_parallel:
                     tools_data = action_input if isinstance(action_input, list) else [action_input]
                     execution_output = self._execute_tools(tools_data, thought, loop_num, config, **kwargs)
                     tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
                 else:
                     result = self._execute_single_tool(action, action_input, thought, loop_num, config, **kwargs)
+
                     if isinstance(result, tuple) and len(result) == 3 and result[0] == "DELEGATED":
                         return result[1]
                     tool_result, tool_files, tool = result
@@ -707,11 +772,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
             except RecoverableAgentException as e:
                 tool_result = f"{type(e).__name__}: {e}"
 
-            # Apply context manager effects if needed
-            if isinstance(tool, ContextManagerTool):
-                _apply_context_manager_tool_effect(self._prompt, tool_result, self._history_offset)
+            # Add feedback about skipped tools if any were filtered out
+            if skipped_tools:
+                skipped_notice = (
+                    f"\n\n[Note: The following tools were NOT executed because context-manager "
+                    f"must run alone: {', '.join(skipped_tools)}. Please call them separately after "
+                    f"context compression completes.]"
+                )
+                tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
-            # Add observation and stream result
+            # Add observation and stream result (for regular tools)
             self._add_observation_and_stream(tool_result, tool_files, tool, action, action_input, config, **kwargs)
 
         else:
@@ -750,7 +820,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
-        summary_offset = self._setup_prompt_and_stop_sequences(input_message, history_messages)
+        self._setup_prompt_and_stop_sequences(input_message, history_messages)
 
         for loop_num in range(1, self.max_loops + 1):
             try:
@@ -802,13 +872,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         result = self._handle_structured_output_mode(llm_generated_output, loop_num)
                     case InferenceMode.XML:
                         result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
+
                 # Handle final answer
                 if result[1] == "final_answer":
                     return result[2]
 
                 # Handle recovery (for modes that support it)
-                # Check if both thought and action are None, which indicates (None, None, None) recovery
-                if result[0] is None and result[1] is None:
+                # Check if action is None, which indicates (None, None, None) recovery
+                if result[1] is None:
                     continue
 
                 thought, action, action_input = result
@@ -842,9 +913,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 continue
 
-            summary_offset = self._try_summarize_history(
-                input_message=input_message, summary_offset=summary_offset, config=config, **kwargs
-            )
+            # Inject automatic summarization if token limit exceeded (like Context Manager Tool)
+            self._try_summarize_history(config=config, **kwargs)
 
         if self.behaviour_on_max_loops == Behavior.RAISE:
             error_message = (
@@ -870,35 +940,46 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _try_summarize_history(
         self,
-        input_message: Message | VisionMessage,
-        summary_offset: int,
         config: RunnableConfig | None = None,
         **kwargs,
-    ) -> int:
+    ) -> None:
         """
-        Check if summarization is needed and perform it if token limit is exceeded.
+        Check if summarization is needed and inject it automatically if token limit is exceeded.
+
+        Works like an automatic Context Manager Tool invocation.
 
         Args:
-            input_message: User request message
-            summary_offset: Current summary offset
             config: Configuration for the agent run
             **kwargs: Additional parameters for running the agent
-
-        Returns:
-            int: Updated summary offset after summarization (or unchanged if not needed)
         """
         if not self.summarization_config.enabled:
-            return summary_offset
+            return
 
         if self.is_token_limit_exceeded():
-            return self.summarize_history(
-                input_message=input_message,
-                summary_offset=summary_offset,
+            logger.info(
+                f"Agent {self.name} - {self.id}: Token limit exceeded. Automatically invoking Context Manager Tool."
+            )
+
+            context_tool = next((t for t in self.tools if isinstance(t, ContextManagerTool)), None)
+
+            if context_tool is None:
+                logger.error(f"Agent {self.name} - {self.id}: Context Manager Tool not found.")
+                return
+
+            action = self.sanitize_tool_name(context_tool.name)
+
+            self._prompt.messages.append(
+                Message(role=MessageRole.ASSISTANT, content=PROMPT_AUTO_CLEAN_CONTEXT, static=True)
+            )
+
+            self._execute_tools_and_update_prompt(
+                action=action,
+                action_input={},
+                thought=None,
+                loop_num=0,  # Use 0 for automatic invocation
                 config=config,
                 **kwargs,
             )
-
-        return summary_offset
 
     def _handle_max_loops_exceeded(
         self, input_message: Message | VisionMessage, config: RunnableConfig | None = None, **kwargs

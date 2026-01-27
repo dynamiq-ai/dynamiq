@@ -6,7 +6,7 @@ from typing import Any, Sequence
 
 import filetype
 from lxml import etree as LET  # nosec: B410
-from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from dynamiq.nodes.agents.exceptions import JSONParsingError, ParsingError, TagNotFoundError, XMLParsingError
 from dynamiq.prompts import (
@@ -898,14 +898,12 @@ class SummarizationConfig(BaseModel):
     """Configuration for agent history summarization.
 
     Attributes:
-        enabled (bool): Whether streaming is enabled. Defaults to False.
+        enabled (bool): Whether summarization is enabled. Defaults to False.
         max_token_context_length (int | None): Maximum number of tokens in prompt after
           which summarization will be applied. Defaults to None.
         context_usage_ratio (float): Relative percentage of tokens in prompt after which summarization will be applied.
-        context_history_length (int): Number of history messages that will be prepended.
     """
 
     enabled: bool = False
     max_token_context_length: int | None = None
-    context_usage_ratio: float = 0.8
-    context_history_length: int = 4
+    context_usage_ratio: float = Field(default=0.8, gt=0, le=1)
