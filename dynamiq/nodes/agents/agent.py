@@ -887,14 +887,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
+        # Initialize state before prompt setup so it's available in the first system message
+        self.state.max_loops = self.max_loops
+        self._refresh_agent_state(1)
+
         self._setup_prompt_and_stop_sequences(input_message, history_messages)
 
-        # Initialize state with max_loops for progress tracking
-        self.state.max_loops = self.max_loops
-
         for loop_num in range(1, self.max_loops + 1):
-            # Update agent state
-            self._refresh_agent_state(loop_num)
+            # Update agent state (skip first iteration as it was done above)
+            if loop_num > 1:
+                self._refresh_agent_state(loop_num)
 
             # Refresh system message with latest state (for subsequent iterations)
             if loop_num > 1 and self._prompt.messages:
