@@ -1,18 +1,5 @@
 """
 Todo Management Tools for Agents
-
-Simple todo list management that stores results in the agent's FileStore.
-Provides read and write tools for managing a list of tasks.
-
-Usage:
-    from dynamiq.nodes.tools.todo_tools import TodoReadTool, TodoWriteTool
-
-    # Todo tools use the agent's file_store
-    agent = Agent(
-        llm=llm,
-        tools=[...],
-        todo_config=TodoConfig(enabled=True),
-    )
 """
 
 import json
