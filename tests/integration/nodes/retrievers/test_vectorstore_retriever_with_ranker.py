@@ -114,7 +114,7 @@ def test_vectorstore_retriever_with_cohere_ranker(
         name="Test Retriever with Ranker",
         text_embedder=text_embedder,
         document_retriever=document_retriever,
-        ranker=ranker,
+        document_reranker=ranker,
     )
 
     wf = Workflow(
@@ -187,7 +187,7 @@ def test_vectorstore_retriever_without_ranker(
         name="Test Retriever without Ranker",
         text_embedder=text_embedder,
         document_retriever=document_retriever,
-        ranker=None,
+        document_reranker=None,
     )
 
     wf = Workflow(
@@ -276,7 +276,7 @@ def test_vectorstore_retriever_with_llm_ranker(
         name="Test Retriever with LLM Ranker",
         text_embedder=text_embedder,
         document_retriever=document_retriever,
-        ranker=ranker,
+        document_reranker=ranker,
     )
 
     wf = Workflow(
@@ -328,16 +328,16 @@ def test_vectorstore_retriever_ranker_serialization(mock_weaviate_vector_store):
     retriever = VectorStoreRetriever(
         text_embedder=text_embedder,
         document_retriever=document_retriever,
-        ranker=ranker,
+        document_reranker=ranker,
     )
 
     retriever_dict = retriever.to_dict()
 
     assert "text_embedder" in retriever_dict
     assert "document_retriever" in retriever_dict
-    assert "ranker" in retriever_dict
-    assert retriever_dict["ranker"]["type"] == "dynamiq.nodes.rankers.CohereReranker"
-    assert retriever_dict["ranker"]["top_k"] == 5
+    assert "document_reranker" in retriever_dict
+    assert retriever_dict["document_reranker"]["type"] == "dynamiq.nodes.rankers.CohereReranker"
+    assert retriever_dict["document_reranker"]["top_k"] == 5
 
 
 def test_vectorstore_retriever_ranker_init_components(mock_weaviate_vector_store):
@@ -372,11 +372,11 @@ def test_vectorstore_retriever_ranker_init_components(mock_weaviate_vector_store
     retriever = VectorStoreRetriever(
         text_embedder=text_embedder,
         document_retriever=document_retriever,
-        ranker=ranker,
+        document_reranker=ranker,
     )
 
     cm = ConnectionManager()
     retriever.init_components(cm)
 
-    assert retriever.ranker is not None
-    assert retriever.ranker == ranker
+    assert retriever.document_reranker is not None
+    assert retriever.document_reranker == ranker

@@ -40,7 +40,7 @@ class VectorStoreRetriever(Node):
         error_handling (ErrorHandling): Error handling configuration.
         text_embedder (TextEmbedder): Text embedder node.
         document_retriever (Retriever): Document retriever node.
-        ranker (Node | None): Optional ranker node for reranking retrieved documents.
+        document_reranker (Node | None): Optional document_reranker node for reranking retrieved documents.
         filters (dict[str, Any] | None): Filters for document retrieval.
         top_k (int): The maximum number of documents to return.
         alpha (float): The alpha parameter for hybrid retrieval.
@@ -53,7 +53,7 @@ class VectorStoreRetriever(Node):
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=600))
     text_embedder: TextEmbedder
     document_retriever: Retriever
-    ranker: Node | None = None
+    document_reranker: Node | None = None
     filters: dict[str, Any] = {}
     top_k: int | None = None
     alpha: float = 0.0
@@ -98,8 +98,8 @@ class VectorStoreRetriever(Node):
             self.text_embedder.init_components(connection_manager)
         if self.document_retriever.is_postponed_component_init:
             self.document_retriever.init_components(connection_manager)
-        if self.ranker and self.ranker.is_postponed_component_init:
-            self.ranker.init_components(connection_manager)
+        if self.document_reranker and self.document_reranker.is_postponed_component_init:
+            self.document_reranker.init_components(connection_manager)
 
     @property
     def to_dict_exclude_params(self):
@@ -109,7 +109,11 @@ class VectorStoreRetriever(Node):
         Returns:
             dict: A dictionary defining the parameters to exclude.
         """
-        return super().to_dict_exclude_params | {"text_embedder": True, "document_retriever": True, "ranker": True}
+        return super().to_dict_exclude_params | {
+            "text_embedder": True,
+            "document_retriever": True,
+            "document_reranker": True,
+        }
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary.
@@ -120,8 +124,8 @@ class VectorStoreRetriever(Node):
         data = super().to_dict(**kwargs)
         data["text_embedder"] = self.text_embedder.to_dict(**kwargs)
         data["document_retriever"] = self.document_retriever.to_dict(**kwargs)
-        if self.ranker:
-            data["ranker"] = self.ranker.to_dict(**kwargs)
+        if self.document_reranker:
+            data["document_reranker"] = self.document_reranker.to_dict(**kwargs)
         return data
 
     def format_content(self, documents: list[Document], metadata_fields: list[str] | None = None) -> str:
@@ -431,22 +435,22 @@ class VectorStoreRetriever(Node):
             retrieved_documents = document_retriever_output.output.get("documents", [])
             logger.info(f"Tool {self.name} - {self.id}: retrieved {len(retrieved_documents)} documents")
 
-            if self.ranker and retrieved_documents:
+            if self.document_reranker and retrieved_documents:
                 docs_before_rerank = len(retrieved_documents)
                 logger.info(
-                    f"Tool {self.name} - {self.id}: Applying ranker '{self.ranker.name}' "
+                    f"Tool {self.name} - {self.id}: Applying document_reranker '{self.document_reranker.name}' "
                     f"to {docs_before_rerank} documents"
                 )
-                ranker_result = self.ranker.run(
+                document_reranker_result = self.document_reranker.run(
                     input_data={"query": query, "documents": retrieved_documents},
                     run_depends=self._run_depends,
                     config=config,
                     **kwargs,
                 )
-                self._run_depends = [NodeDependency(node=self.ranker).to_dict(for_tracing=True)]
-                retrieved_documents = ranker_result.output.get("documents", [])
+                self._run_depends = [NodeDependency(node=self.document_reranker).to_dict(for_tracing=True)]
+                retrieved_documents = document_reranker_result.output.get("documents", [])
                 logger.info(
-                    f"Tool {self.name} - {self.id}: Reranker finished. "
+                    f"Tool {self.name} - {self.id}: Document_reranker finished. "
                     f"Documents: {docs_before_rerank} -> {len(retrieved_documents)}"
                 )
 

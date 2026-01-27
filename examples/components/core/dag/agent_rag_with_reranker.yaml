@@ -36,7 +36,7 @@ nodes:
           connection: weaviate-conn
           index_name: default
           top_k: 10
-        ranker:
+        document_reranker:
           type: dynamiq.nodes.rankers.CohereReranker
           name: Cohere Reranker
           connection: cohere-conn
