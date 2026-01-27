@@ -14,7 +14,7 @@ Action Input: {
     "code": "print('Hello World')\nprint({'nested': 'dict'})"
 }"""
 
-    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+    thought, action, action_input = parser.parse_default_action(output)
 
     assert thought == "I need to calculate something."
     assert action == "Calculator Tool"
@@ -25,7 +25,7 @@ def test_parse_default_action_standard_format():
     """Test parsing of standard strict format."""
     output = 'Thought: thinking\nAction: Tool\nAction Input: {"key": "value"}'
 
-    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+    thought, action, action_input = parser.parse_default_action(output)
 
     assert thought == "thinking"
     assert action == "Tool"
@@ -41,7 +41,7 @@ Action: Tool Name
 
 Action Input: {"key": "value"}"""
 
-    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+    thought, action, action_input = parser.parse_default_action(output)
 
     assert thought == "thinking"
     assert action == "Tool Name"
@@ -55,52 +55,11 @@ Action: Tool
 Action Input: ```json
 {"key": "value"}
 ```"""
-    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+    thought, action, action_input = parser.parse_default_action(output)
 
     assert thought == "thinking"
     assert action == "Tool"
     assert action_input == {"key": "value"}
-
-
-def test_parse_default_action_parallel_tools():
-    """Test parsing multiple sequential tool calls when parallel_tool_calls_enabled=True."""
-    output = """Thought: I need to gather information from multiple sources.
-
-Action: Search Tool
-Action Input: {"query": "latest news"}
-
-Action: Weather Tool
-Action Input: {"location": "San Francisco"}"""
-
-    thought, action_type, actions_data = parser.parse_default_action(output, parallel_tool_calls_enabled=True)
-
-    assert thought == "I need to gather information from multiple sources."
-    assert isinstance(actions_data, list)
-    assert len(actions_data) == 2
-    assert actions_data[0]["tool_name"] == "Search Tool"
-    assert actions_data[0]["tool_input"] == {"query": "latest news"}
-    assert actions_data[1]["tool_name"] == "Weather Tool"
-    assert actions_data[1]["tool_input"] == {"location": "San Francisco"}
-    assert action_type == "multiple_tools"
-    assert isinstance(actions_data, list)
-    assert len(actions_data) == 2
-    assert actions_data[0]["tool_name"] == "Search Tool"
-    assert actions_data[0]["tool_input"] == {"query": "latest news"}
-    assert actions_data[1]["tool_name"] == "Weather Tool"
-    assert actions_data[1]["tool_input"] == {"location": "San Francisco"}
-
-
-def test_parse_default_action_single_tool_with_parallel_enabled():
-    """Test parsing single tool call when parallel_tool_calls_enabled=True."""
-    output = """Thought: I need to search for information.
-Action: Search Tool
-Action Input: {"query": "test query"}"""
-
-    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=True)
-
-    assert thought == "I need to search for information."
-    assert action == "Search Tool"
-    assert action_input == {"query": "test query"}
 
 
 def test_parse_default_action_nested_json():
@@ -109,7 +68,7 @@ def test_parse_default_action_nested_json():
 Action: API Call
 Action Input: {"params": {"nested": {"deeply": {"key": "value"}}, "list": [1, 2, 3]}}"""
 
-    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+    thought, action, action_input = parser.parse_default_action(output)
 
     assert thought == "Complex data structure"
     assert action == "API Call"
@@ -122,7 +81,7 @@ def test_parse_default_action_json_with_list():
 Action: API Call
 Action Input: {"params": {"nested": {"deeply": {"key": "value"}}, "list": [1, 2, 3]}}"""
 
-    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+    thought, action, action_input = parser.parse_default_action(output)
 
     assert thought == "Complex data structure"
     assert action == "API Call"
@@ -135,7 +94,7 @@ def test_parse_default_action_json_with_escaped_quotes():
 Action: Tool
 Action Input: {"message": "He said \\"hello\\" to me"}"""
 
-    thought, action, action_input = parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+    thought, action, action_input = parser.parse_default_action(output)
 
     assert thought == "thinking"
     assert action == "Tool"
@@ -149,7 +108,7 @@ Action: Tool
 Action Input: {invalid json}"""
 
     with pytest.raises(ActionParsingException) as excinfo:
-        parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+        parser.parse_default_action(output)
 
     assert excinfo.value.recoverable
 
@@ -160,7 +119,7 @@ def test_parse_default_action_missing_action():
 Action Input: {"key": "value"}"""
 
     with pytest.raises(ActionParsingException) as excinfo:
-        parser.parse_default_action(output, parallel_tool_calls_enabled=False)
+        parser.parse_default_action(output)
 
     assert excinfo.value.recoverable
 
