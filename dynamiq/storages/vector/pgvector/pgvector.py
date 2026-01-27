@@ -200,12 +200,16 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 if not table_exists:
                     self._track_collection(f"{self.schema_name}.{self.table_name}")
         else:
-            if not self._check_if_schema_exists(self._conn):
-                msg = f"Schema '{self.schema_name}' does not exist"
-                raise VectorStoreException(msg)
-            if not self._check_if_table_exists(self._conn):
-                msg = f"Table '{self.table_name}' does not exist"
-                raise VectorStoreException(msg)
+            try:
+                if not self._check_if_schema_exists(self._conn):
+                    msg = f"Schema '{self.schema_name}' does not exist"
+                    raise VectorStoreException(msg)
+                if not self._check_if_table_exists(self._conn):
+                    msg = f"Table '{self.table_name}' does not exist"
+                    raise VectorStoreException(msg)
+            except Exception:
+                self._safe_rollback()
+                raise
 
         logger.debug(f"PGVectorStore initialized with table_name: {self.table_name}")
 
@@ -282,11 +286,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         try:
             yield self._conn
         except Exception as e:
-            if self._conn and not self._conn.closed:
-                try:
-                    self._conn.rollback()
-                except Exception as rollback_error:
-                    logger.warning(f"Failed to rollback transaction: {rollback_error}")
+            self._safe_rollback()
             raise e
 
     def _check_if_schema_exists(self, conn: psycopg.Connection) -> bool:
@@ -340,6 +340,16 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             result = self._execute_sql_query(query, (self.schema_name, self.table_name), cursor=cur).fetchone()
             return bool(result["exists"]) if isinstance(result, dict) else bool(result[0])
 
+    def _safe_rollback(self) -> None:
+        """
+        Safely attempt to rollback the current transaction.
+        """
+        if self._conn and not self._conn.closed:
+            try:
+                self._conn.rollback()
+            except Exception as rollback_error:
+                logger.warning(f"Failed to rollback transaction: {rollback_error}")
+
     def _execute_sql_query(self, sql_query: Any, params: tuple | None = None, cursor: Cursor | None = None) -> Cursor:
         """
         Internal method to execute a SQL query.
@@ -365,35 +375,41 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         except psycopg_errors.OperationalError as e:
             # Connection issues
+            self._safe_rollback()
             sanitized_error = self._sanitize_error_message(str(e))
             logger.warning(f"Database connection error: {sanitized_error}")
             raise VectorStoreException("Database connection error") from e
 
         except psycopg_errors.UniqueViolation as e:
             # Duplicate key
+            self._safe_rollback()
             sanitized_error = self._sanitize_error_message(str(e))
             logger.debug(f"Duplicate key violation: {sanitized_error}")
             raise VectorStoreException("Document already exists") from e
 
         except psycopg_errors.DataError as e:
             # Invalid data (e.g., wrong vector dimension, invalid JSON)
+            self._safe_rollback()
             sanitized_error = self._sanitize_error_message(str(e))
             logger.error(f"Data validation error: {sanitized_error}")
             raise ValueError("Invalid document data provided") from e
 
         except psycopg_errors.SyntaxError as e:
             # SQL syntax error
+            self._safe_rollback()
             sanitized_error = self._sanitize_error_message(str(e))
             logger.error(f"SQL syntax error: {sanitized_error}")
             raise VectorStoreException("Database query syntax error") from e
 
         except psycopg_errors.InsufficientPrivilege as e:
             # Permission error
+            self._safe_rollback()
             sanitized_error = self._sanitize_error_message(str(e))
             logger.error(f"Insufficient privileges: {sanitized_error}")
             raise VectorStoreException("Insufficient database privileges") from e
 
         except Exception as e:
+            self._safe_rollback()
             sanitized_error = self._sanitize_error_message(str(e))
             logger.error(f"Unexpected database error: {sanitized_error}", exc_info=True)
             raise VectorStoreException("Unexpected database error") from e
@@ -874,6 +890,8 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         if limit is not None:
             query = query + SQL(" LIMIT {} OFFSET {}").format(SQLLiteral(limit), SQLLiteral(offset))
+        elif offset > 0:
+            query = query + SQL(" OFFSET {}").format(SQLLiteral(offset))
 
         with self._get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
