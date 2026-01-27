@@ -19,6 +19,7 @@ from dynamiq.storages.vector.exceptions import VectorStoreException
 from dynamiq.storages.vector.pgvector.filters import _convert_filters_to_query
 from dynamiq.storages.vector.utils import create_pgvector_file_id_filter, create_pgvector_file_ids_filter
 from dynamiq.types import Document
+from dynamiq.types.constants import SANITIZED_VALUE_PLACEHOLDER
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.utils.logger import logger
 
@@ -53,9 +54,6 @@ VECTOR_FUNCTION_TO_SCORE_DEFINITION = {
     PGVectorVectorFunction.L1_DISTANCE: "{embedding_key} <+> {query_embedding}",
 }
 
-DEFAULT_TABLE_NAME = "dynamiq_vector_store"
-DEFAULT_INDEX_NAME = "dynamiq_index"
-DEFAULT_KEYWORD_INDEX_NAME = "dynamiq_keyword_index"
 DEFAULT_SCHEMA_NAME = "public"
 DEFAULT_LANGUAGE = "english"
 
@@ -68,11 +66,13 @@ DEFAULT_HNSW_EF_CONSTRUCTION = 64
 
 
 class PGVectorStoreParams(BaseVectorStoreParams):
-    table_name: str = DEFAULT_TABLE_NAME
+    table_name: str
     schema_name: str = DEFAULT_SCHEMA_NAME
     dimension: int = 1536
     vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY
     embedding_key: str = "embedding"
+    index_name: str | None = None
+    keyword_index_name: str | None = None
 
 
 class PGVectorStoreRetrieverParams(PGVectorStoreParams):
@@ -88,23 +88,24 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
     def __init__(
         self,
+        table_name: str,
         connection: PostgreSQL | str | None = None,
         client: Optional["PsycopgConnection"] = None,
         create_extension: bool = True,
-        table_name: str = DEFAULT_TABLE_NAME,
         schema_name: str = DEFAULT_SCHEMA_NAME,
         dimension: int = 1536,
         vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY,
         index_method: PGVectorIndexMethod = PGVectorIndexMethod.EXACT,
-        index_name: str = DEFAULT_INDEX_NAME,
+        index_name: str | None = None,
         create_if_not_exist: bool = False,
         content_key: str = "content",
         embedding_key: str = "embedding",
-        keyword_index_name: str = DEFAULT_KEYWORD_INDEX_NAME,
+        keyword_index_name: str | None = None,
         language: str = DEFAULT_LANGUAGE,
         ivfflat_lists: int | None = DEFAULT_IVFFLAT_LISTS,
         hnsw_m: int = DEFAULT_HNSW_M,
         hnsw_ef_construction: int = DEFAULT_HNSW_EF_CONSTRUCTION,
+        set_runtime_params: bool = True,
         dry_run_config: DryRunConfig | None = None,
     ):
         """
@@ -119,15 +120,16 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             dimension (int): Dimension of the embeddings. Defaults to 1536.
             vector_function (PGVectorVectorFunction): The vector function to use for similarity calculations.
             index_method (PGVectorIndexMethod): The index method to use for the vector store.
-            index_name (str): Name of the index to create.
+            index_name (str | None): Name of the index to create.
             create_if_not_exist (bool): Whether to create the table and index if they do not exist.
             content_key (str): The field used to store content in the storage.
             embedding_key (str): The field used to store embeddings in the storage.
-            keyword_index_name (str): Name of the keyword index.
+            keyword_index_name (str | None): Name of the keyword index.
             language (str): Language for full-text search.
             ivfflat_lists (int | None): Number of lists for IVFFLAT index. Auto-calculated if None.
             hnsw_m (int): Number of connections per layer for HNSW index.
             hnsw_ef_construction (int): Size of the dynamic candidate list for HNSW index construction.
+            set_runtime_params (bool): Whether to automatically set pgvector runtime parameters for optimal performance.
             dry_run_config (Optional[DryRunConfig]): Configuration for dry run mode.
         """
         super().__init__(dry_run_config=dry_run_config)
@@ -164,11 +166,13 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         self.dimension = dimension
         self.index_method = index_method
         self.vector_function = vector_function
-        self.keyword_index_name = keyword_index_name
+        self.index_name = index_name or f"{table_name}_{index_method}_index"
+        self.keyword_index_name = keyword_index_name or f"{table_name}_keyword_index"
         self.language = language
         self.ivfflat_lists = ivfflat_lists
         self.hnsw_m = hnsw_m
         self.hnsw_ef_construction = hnsw_ef_construction
+        self.set_runtime_params = set_runtime_params
 
         self.content_key = content_key
         self.embedding_key = embedding_key
@@ -190,7 +194,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 self._create_schema(conn)
                 self._create_tables(conn)
                 if self.index_method in [PGVectorIndexMethod.IVFFLAT, PGVectorIndexMethod.HNSW]:
-                    self.index_name = index_name or f"{self.table_name}_{self.index_method}_index"
                     self._create_index(conn)
                 self._create_keyword_index(conn)
 
@@ -219,9 +222,9 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         sanitized = error_msg
 
         # Remove connection string patterns
-        sanitized = re.sub(r'postgresql://[^\'"\s]+', "postgresql://[REDACTED]", sanitized)
-        sanitized = re.sub(r'password=[^\'"\s&]+', "password=[REDACTED]", sanitized)
-        sanitized = re.sub(r'user=[^\'"\s&]+', "user=[REDACTED]", sanitized)
+        sanitized = re.sub(r'postgresql://[^\'"\s]+', f"postgresql://{SANITIZED_VALUE_PLACEHOLDER}", sanitized)
+        sanitized = re.sub(r'password=[^\'"\s&]+', f"password={SANITIZED_VALUE_PLACEHOLDER}", sanitized)
+        sanitized = re.sub(r'user=[^\'"\s&]+', f"user={SANITIZED_VALUE_PLACEHOLDER}", sanitized)
 
         if len(sanitized) > 500:
             sanitized = sanitized[:497] + "..."
@@ -250,6 +253,9 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             conn: Database connection to set parameters on.
             top_k: Number of results requested, used to tune parameters.
         """
+        if not self.set_runtime_params:
+            return
+
         if self.index_method == PGVectorIndexMethod.IVFFLAT:
             # For IVFFLAT, probes should be proportional to top_k but capped
             probes = max(top_k // 10, 1)
@@ -494,7 +500,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 WITH (lists = {lists})
                 """
             ).format(
-                index_name=Identifier(f"{self.table_name}_{self.index_method}_index"),
+                index_name=Identifier(self.index_name),
                 schema_name=Identifier(self.schema_name),
                 table_name=Identifier(self.table_name),
                 embedding=Identifier(embedding_key),
@@ -509,7 +515,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 WITH (m = {m}, ef_construction = {ef_construction})
                 """
             ).format(
-                index_name=Identifier(f"{self.table_name}_{self.index_method}_index"),
+                index_name=Identifier(self.index_name),
                 schema_name=Identifier(self.schema_name),
                 table_name=Identifier(self.table_name),
                 embedding=Identifier(embedding_key),
@@ -539,7 +545,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         """
 
         content_key = content_key or self.content_key
-        table_specific_keyword_index_name = f"{self.table_name}_{self.keyword_index_name}"
 
         create_keyword_index_query = SQL(
             """
@@ -548,7 +553,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             USING gin(to_tsvector({language}, {content_key}));
             """
         ).format(
-            index_name=Identifier(table_specific_keyword_index_name),
+            index_name=Identifier(self.keyword_index_name),
             schema_name=Identifier(self.schema_name),
             table_name=Identifier(self.table_name),
             content_key=Identifier(content_key),
@@ -579,7 +584,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             DROP INDEX IF EXISTS {index_name};
             """
         ).format(
-            index_name=Identifier(f"{self.table_name}_{self.index_method}_index"),
+            index_name=Identifier(self.index_name),
         )
 
         with conn.cursor(row_factory=dict_row) as cur:
