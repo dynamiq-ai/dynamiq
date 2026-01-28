@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Any, ClassVar, Literal
 
 from jinja2 import Template
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.node import Node, ensure_config
@@ -10,6 +11,13 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.types.feedback import FeedbackMethod
 from dynamiq.types.streaming import StreamingEntitySource, StreamingEventMessage
 from dynamiq.utils.logger import logger
+
+
+class HumanFeedbackAction(str, Enum):
+    """Actions available for the HumanFeedbackTool."""
+
+    ASK = "ask"  # Request input from user
+    SEND = "send"  # Send message without waiting for response
 
 
 class HFStreamingInputEventMessageData(BaseModel):
@@ -22,6 +30,7 @@ class HFStreamingInputEventMessage(StreamingEventMessage):
 
 class HFStreamingOutputEventMessageData(BaseModel):
     prompt: str
+    action: HumanFeedbackAction = HumanFeedbackAction.ASK
 
 
 class HFStreamingOutputEventMessage(StreamingEventMessage):
@@ -55,7 +64,7 @@ class OutputMethodCallable(ABC):
     Abstract base class for sending message.
 
     This class defines the interface for various output methods that can be used
-    to send user information in the MessageSenderTool.
+    to send messages in the HumanFeedbackTool (action='send').
     """
 
     @abstractmethod
@@ -71,15 +80,22 @@ class OutputMethodCallable(ABC):
 
 
 class HumanFeedbackInputSchema(BaseModel):
+    """Input schema for HumanFeedbackTool."""
+
+    action: HumanFeedbackAction | None = Field(
+        default=HumanFeedbackAction.SEND,
+        description="Action to perform: 'ask' to request input from user, 'send' to just send a message. "
+        "If not specified, uses tool's default_action.",
+    )
     model_config = ConfigDict(extra="allow")
 
 
 class HumanFeedbackTool(Node):
     """
-    A tool for gathering user information through human feedback.
+    A unified tool for human interaction - both gathering feedback and sending messages.
 
-    This tool prompts the user for input and returns the response. It should be used to check actual
-    information from the user or to gather additional input during a process.
+    This tool can either prompt the user for input (action="ask") or send a message
+    without waiting for response (action="send").
 
     Attributes:
         group (Literal[NodeGroup.TOOLS]): The group the node belongs to.
@@ -87,14 +103,23 @@ class HumanFeedbackTool(Node):
         description (str): A brief description of the tool's purpose.
         msg_template (str): Template of message to send.
         input_method (FeedbackMethod | InputMethodCallable): The method used to gather user input.
+        output_method (FeedbackMethod | OutputMethodCallable): The method used to send messages.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Human Feedback Tool"
-    description: str = """Collects human input.
-    Use for asking clarification questions, getting user confirmation,
-    collecting missing information, or validating content."""
+    name: str = "message_sender"
+    description: str = """Tool for human interaction - asking questions or sending messages.
+
+Actions:
+- "ask": Request input from the user (clarifications, confirmations, missing info)
+- "send": Send a message without waiting for response (notifications, status updates)
+
+Usage:
+- Ask user: {"action": "ask", "input": "What is your preference?"}
+- Send message: {"action": "send", "input": "Task completed successfully!"}
+"""
     input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
+    output_method: FeedbackMethod | OutputMethodCallable = FeedbackMethod.CONSOLE
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
     msg_template: str = "{{input}}"
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -103,8 +128,7 @@ class HumanFeedbackTool(Node):
     def update_description(self):
         msg_template = self.msg_template
         self.description += (
-            f"\nThis is the template of message to send: '{msg_template}'."
-            " Parameters will be substituted based on the provided input data."
+            f"\nMessage template: '{msg_template}'." " Parameters will be substituted based on the provided input data."
         )
         return self
 
@@ -138,7 +162,7 @@ class HumanFeedbackTool(Node):
         event = HFStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
-            data=HFStreamingOutputEventMessageData(prompt=prompt),
+            data=HFStreamingOutputEventMessageData(prompt=prompt, action=HumanFeedbackAction.ASK),
             event=streaming.event,
             source=StreamingEntitySource(
                 name=self.name,
@@ -157,110 +181,30 @@ class HumanFeedbackTool(Node):
 
         return event.data.content
 
-    def execute(
-        self, input_data: HumanFeedbackInputSchema, config: RunnableConfig | None = None, **kwargs
-    ) -> dict[str, Any]:
-        """
-        Execute the tool with the provided input data and configuration.
-
-        This method prompts the user for input using the specified input method and returns the result.
-
-        Args:
-            input_data (dict[str, Any]): The input data containing the prompt for the user.
-            config (RunnableConfig, optional): The configuration for the runnable. Defaults to None.
-            **kwargs: Additional keyword arguments to be passed to the node execute run.
-
-        Returns:
-            dict[str, Any]: A dictionary containing the user's input under the 'content' key.
-
-        Raises:
-            ValueError: If the input_data does not contain an 'input' key.
-        """
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-
-        input_text = Template(self.msg_template).render(input_data.model_dump())
-
-        if isinstance(self.input_method, FeedbackMethod):
-            if self.input_method == FeedbackMethod.CONSOLE:
-                result = self.input_method_console(input_text)
-            elif self.input_method == FeedbackMethod.STREAM:
-                streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
-                if not streaming.input_streaming_enabled:
-                    raise ValueError(
-                        f"'{FeedbackMethod.STREAM}' input method requires enabled input and output streaming."
-                    )
-
-                result = self.input_method_streaming(prompt=input_text, config=config, **kwargs)
-            else:
-                raise ValueError(f"Unsupported input method: {self.input_method}")
-        else:
-            result = self.input_method.get_input(input_text)
-
-        logger.debug(f"Tool {self.name} - {self.id}: finished with result {result}")
-        return {"content": result}
-
-
-class MessageSenderInputSchema(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-
-class MessageSenderTool(Node):
-    """
-    A tool for sending messages.
-
-    Attributes:
-        group (Literal[NodeGroup.TOOLS]): The group the node belongs to.
-        name (str): The name of the tool.
-        description (str): A brief description of the tool's purpose.
-        msg_template (str): Template of message to send.
-        output_method (FeedbackMethod | InputMethodCallable): The method used to gather user input.
-    """
-
-    group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "Message Sender Tool"
-    description: str = """Sends messages to users.
-    Delivers notifications, status updates,
-    and information to users during workflow execution.
-    Use for progress updates, error notifications, or general user communication.
-    """
-    msg_template: str = "{{input}}"
-    output_method: FeedbackMethod | OutputMethodCallable = FeedbackMethod.CONSOLE
-    input_schema: ClassVar[type[MessageSenderInputSchema]] = MessageSenderInputSchema
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @model_validator(mode="after")
-    def update_description(self):
-        msg_template = self.msg_template
-        self.description += (
-            f"\nThis is the template of message to send: '{msg_template}'."
-            " Parameters will be substituted based on the provided input data."
-        )
-        return self
-
-    def output_method_console(self, prompt: str) -> None:
+    def output_method_console(self, message: str) -> None:
         """
         Sends message to console.
 
         Args:
-            prompt (str): The prompt to display to the user.
+            message (str): The message to display to the user.
         """
-        print(prompt)
+        print(message)
 
-    def output_method_streaming(self, prompt: str, config: RunnableConfig, **kwargs) -> None:
+    def output_method_streaming(self, message: str, config: RunnableConfig, **kwargs) -> None:
         """
         Sends message using streaming method.
 
         Args:
-            prompt (str): The prompt to display to the user.
+            message (str): The message to display to the user.
             config (RunnableConfig, optional): The configuration for the runnable. Defaults to None.
         """
+        streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
+
         event = HFStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
-            data=HFStreamingOutputEventMessageData(prompt=prompt),
-            event=self.streaming.event,
+            data=HFStreamingOutputEventMessageData(prompt=message, action=HumanFeedbackAction.SEND),
+            event=streaming.event,
             source=StreamingEntitySource(
                 name=self.name,
                 group=self.group,
@@ -270,39 +214,69 @@ class MessageSenderTool(Node):
         logger.debug(f"Tool {self.name} - {self.id}: sending output event {event}")
         self.run_on_node_execute_stream(callbacks=config.callbacks, event=event, **kwargs)
 
-    def execute(
-        self, input_data: MessageSenderInputSchema, config: RunnableConfig | None = None, **kwargs
-    ) -> dict[str, Any]:
-        """
-        Execute the tool with the provided input data and configuration.
+    def _execute_ask(self, input_text: str, config: RunnableConfig, **kwargs) -> str:
+        """Execute the 'ask' action - get input from user."""
+        if isinstance(self.input_method, FeedbackMethod):
+            if self.input_method == FeedbackMethod.CONSOLE:
+                return self.input_method_console(input_text)
+            elif self.input_method == FeedbackMethod.STREAM:
+                streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
+                if not streaming.input_streaming_enabled:
+                    raise ValueError(
+                        f"'{FeedbackMethod.STREAM}' input method requires enabled input and output streaming."
+                    )
+                return self.input_method_streaming(prompt=input_text, config=config, **kwargs)
+            else:
+                raise ValueError(f"Unsupported input method: {self.input_method}")
+        else:
+            return self.input_method.get_input(input_text)
 
-        This method prompts the user for input using the specified input method and returns the result.
-
-        Args:
-            input_data (dict[str, Any]): The input data containing the prompt for the user.
-            config (RunnableConfig, optional): The configuration for the runnable. Defaults to None.
-            **kwargs: Additional keyword arguments to be passed to the node execute run.
-
-        Returns:
-            dict[str, Any]: A dictionary containing the user's input under the 'content' key.
-
-        Raises:
-            ValueError: If the input_data does not contain an 'input' key.
-        """
-        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
-        config = ensure_config(config)
-        self.run_on_node_execute_run(config.callbacks, **kwargs)
-        input_text = Template(self.msg_template).render(input_data.model_dump())
-
+    def _execute_send(self, input_text: str, config: RunnableConfig, **kwargs) -> None:
+        """Execute the 'send' action - send message to user."""
         if isinstance(self.output_method, FeedbackMethod):
             if self.output_method == FeedbackMethod.CONSOLE:
                 self.output_method_console(input_text)
             elif self.output_method == FeedbackMethod.STREAM:
-                self.output_method_streaming(prompt=input_text, config=config, **kwargs)
+                self.output_method_streaming(message=input_text, config=config, **kwargs)
             else:
-                raise ValueError(f"Unsupported feedback method: {self.output_method}")
+                raise ValueError(f"Unsupported output method: {self.output_method}")
         else:
             self.output_method.send_message(input_text)
 
-        logger.debug(f"Tool {self.name} - {self.id}: finished")
-        return {"content": input_text}
+    def execute(
+        self, input_data: HumanFeedbackInputSchema, config: RunnableConfig | None = None, **kwargs
+    ) -> dict[str, Any]:
+        """
+        Execute the tool with the provided input data and configuration.
+
+        Based on the 'action' parameter:
+        - "ask": Prompts the user for input and returns their response
+        - "send": Sends a message to the user without waiting for response
+
+        Args:
+            input_data (HumanFeedbackInputSchema): The input data containing action and message.
+            config (RunnableConfig, optional): The configuration for the runnable. Defaults to None.
+            **kwargs: Additional keyword arguments to be passed to the node execute run.
+
+        Returns:
+            dict[str, Any]: A dictionary containing the result under the 'content' key.
+        """
+        logger.debug(f"Tool {self.name} - {self.id}: started with input data {input_data.model_dump()}")
+        config = ensure_config(config)
+        self.run_on_node_execute_run(config.callbacks, **kwargs)
+
+        input_text = Template(self.msg_template).render(input_data.model_dump())
+        action = input_data.action
+
+        if action == HumanFeedbackAction.ASK:
+            result = self._execute_ask(input_text, config, **kwargs)
+            logger.debug(f"Tool {self.name} - {self.id}: finished with result {result}")
+            return {"content": result}
+        elif action == HumanFeedbackAction.SEND:
+            self._execute_send(input_text, config, **kwargs)
+            logger.debug(f"Tool {self.name} - {self.id}: message sent")
+            return {"content": f"Message sent: {input_text}"}
+        else:
+            raise ValueError(
+                f"Unsupported action: {action}. Use '{HumanFeedbackAction.ASK}' or '{HumanFeedbackAction.SEND}'."
+            )

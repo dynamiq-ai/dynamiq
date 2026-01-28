@@ -6,6 +6,7 @@ import time
 import websockets
 from websocket import WebSocket
 
+from dynamiq.nodes.tools.human_feedback import HumanFeedbackAction
 from dynamiq.types.feedback import APPROVAL_EVENT
 from dynamiq.types.streaming import StreamingEventMessage
 from examples.components.tools.human_in_the_loop.streaming_orchestrator.server_streaming import PORT
@@ -44,18 +45,20 @@ async def handle_event_data(websocket: WebSocket, event: StreamingEventMessage, 
         if content := event.data.get("choices")[0].get("delta").get("content"):
             logger.info(f"Client: {content}")
 
-    # Handle incoming message
-    if event.source.type == "dynamiq.nodes.tools.MessageSenderTool":
-        logger.info(f"Client: {event.data['prompt']}")
-
-    # Handle feedback request
+    # Handle HumanFeedbackTool events (both ask and send actions)
     if event.source.type == "dynamiq.nodes.tools.HumanFeedbackTool":
-        feedback = input(f"Client: {event.data['prompt']}")
-        wf_run_event = StreamingEventMessage(
-            entity_id=WF_ID,
-            data={"content": feedback},
-        )
-        await websocket.send(wf_run_event.to_json())
+        prompt = event.data.get("prompt", "")
+        action = event.data.get("action", HumanFeedbackAction.SEND)
+        logger.info(f"Client: {prompt}")
+
+        # For 'ask' action, we need to get user input and send it back
+        if action == HumanFeedbackAction.ASK:
+            feedback = input("Your response: ")
+            wf_run_event = StreamingEventMessage(
+                entity_id=WF_ID,
+                data={"content": feedback},
+            )
+            await websocket.send(wf_run_event.to_json())
     return False
 
 
