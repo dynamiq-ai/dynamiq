@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent as BaseAgent
@@ -19,10 +19,12 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
+from dynamiq.nodes.agents.prompts.manager import AdditionalInstructionsConfig
 from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
+from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
@@ -30,34 +32,78 @@ from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
-final_answer_function_schema = {
-    "type": "function",
-    "strict": True,
-    "function": {
-        "name": "provide_final_answer",
-        "description": "Function should be called when if you can answer the initial request"
-        " or if there is not request at all.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "thought": {
-                    "type": "string",
-                    "description": "Your reasoning about why you can answer original question.",
-                },
-                "answer": {"type": "string", "description": "Answer on initial request."},
-            },
-            "required": ["thought", "answer"],
-        },
-    },
-}
 
-TYPE_MAPPING = {
-    int: "integer",
-    float: "float",
-    bool: "boolean",
-    str: "string",
-    dict: "object",
-}
+class TodoItem(BaseModel):
+    """A single todo item in the agent's task list."""
+
+    id: str = ""
+    content: str = ""
+    status: str = "pending"  # pending, in_progress, completed
+
+    def to_display_string(self) -> str:
+        """Format todo item for display with status icon."""
+        icon = {"pending": "[ ]", "in_progress": "[~]", "completed": "[+]"}.get(self.status, "[ ]")
+        return f"{icon} {self.id}: {self.content}"
+
+
+class AgentState(BaseModel):
+    """
+    Encapsulates the dynamic state of an agent during execution.
+
+    Tracks loop progress, files, and todos. Provides its own serialization
+    to string for injection into system prompts.
+    """
+
+    current_loop: int = 0
+    max_loops: int = 0
+    files: list[str] = Field(default_factory=list)
+    todos: list[TodoItem] = Field(default_factory=list)
+
+    def reset(self, max_loops: int = 0) -> None:
+        """Reset state for a new execution."""
+        self.current_loop = 0
+        self.max_loops = max_loops
+        self.files = []
+        self.todos = []
+
+    def update_loop(self, current: int) -> None:
+        """Update current loop number."""
+        self.current_loop = current
+
+    def update_files(self, files: list[str]) -> None:
+        """Update file list."""
+        self.files = files
+
+    def update_todos(self, todos: list[dict | TodoItem]) -> None:
+        """Update todo list from dicts or TodoItem objects."""
+        self.todos = [t if isinstance(t, TodoItem) else TodoItem(**t) for t in todos]
+
+    def to_prompt_string(self) -> str:
+        """
+        Serialize state to a string for system prompt injection.
+
+        Returns:
+            str: Formatted state string, or empty string if no state to show.
+        """
+        sections = []
+
+        # Loop progress
+        if self.current_loop > 0:
+            sections.append(f"Progress: Loop {self.current_loop}/{self.max_loops}")
+
+        # File state
+        if self.files:
+            file_preview = ", ".join(self.files[:5])
+            suffix = "..." if len(self.files) > 5 else ""
+            sections.append(f"Files: {len(self.files)} stored ({file_preview}{suffix})")
+
+        # Todos
+        if self.todos:
+            todo_lines = [t.to_display_string() for t in self.todos]
+            sections.append("Todos:\n" + "\n".join(todo_lines))
+
+        return "\n".join(sections) if sections else ""
+
 
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
@@ -85,6 +131,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
+    state: AgentState = Field(default_factory=AgentState, exclude=True)
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
@@ -106,6 +153,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             }
         )
         return base
+
+    def reset_run_state(self):
+        """Resets the agent's run state including AgentState."""
+        super().reset_run_state()
+        self.state.reset()
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -195,6 +247,25 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     )
         except Exception as e:
             logger.error(f"Failed to ensure ContextManagerTool: {e}")
+        return self
+
+    @model_validator(mode="after")
+    def _ensure_todo_tools(self):
+        """Automatically add TodoWriteTool when todo is enabled in file_store config."""
+        try:
+            if self.file_store.enabled and self.file_store.todo_enabled:
+                has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
+
+                if not has_todo_write:
+                    self.tools.append(
+                        TodoWriteTool(
+                            name="todo-write",
+                            file_store=self.file_store.backend,
+                        )
+                    )
+                    logger.info("Agent: Added TodoWriteTool")
+        except Exception as e:
+            logger.error(f"Failed to ensure TodoTools: {e}")
         return self
 
     def _append_recovery_instruction(
@@ -494,11 +565,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         system_message = Message(
             role=MessageRole.SYSTEM,
-            content=self.generate_prompt(
-                tools_name=self.tool_names,
-                input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
-                **self.system_prompt_manager.build_delegation_variables(self.delegation_allowed),
-            ),
+            content=self._generate_system_prompt_content(),
             static=True,
         )
 
@@ -820,9 +887,21 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
+        # Initialize state before prompt setup so it's available in the first system message
+        self.state.max_loops = self.max_loops
+        self._refresh_agent_state(1)
+
         self._setup_prompt_and_stop_sequences(input_message, history_messages)
 
         for loop_num in range(1, self.max_loops + 1):
+            # Update agent state (skip first iteration as it was done above)
+            if loop_num > 1:
+                self._refresh_agent_state(loop_num)
+
+            # Refresh system message with latest state (for subsequent iterations)
+            if loop_num > 1 and self._prompt.messages:
+                self._prompt.messages[0].content = self._generate_system_prompt_content()
+
             try:
                 streaming_callback, llm_config, original_streaming_enabled = self._setup_streaming_callback(
                     config, loop_num, **kwargs
@@ -1027,12 +1106,86 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return f"{final_answer}"
 
+    def _generate_system_prompt_content(self) -> str:
+        """
+        Generate the system prompt content with current state.
+
+        Returns:
+            str: The rendered system prompt including tools, instructions, and agent state.
+        """
+        instructions_config = self._get_additional_instructions_config()
+
+        # Get state string from AgentState object
+        agent_state = self.state.to_prompt_string()
+
+        return self.generate_prompt(
+            tools_name=self.tool_names,
+            input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
+            agent_state=agent_state,
+            **self.system_prompt_manager.build_additional_instructions(instructions_config),
+        )
+
+    def _refresh_agent_state(self, loop_num: int) -> None:
+        """
+        Refresh the agent state with current values.
+
+        Args:
+            loop_num: Current loop iteration number.
+        """
+        self.state.update_loop(loop_num)
+
+        # Update files
+        if self.file_store.enabled and self.file_store.backend:
+            try:
+                from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
+
+                files = self.file_store.backend.list_files()
+                user_files = [f.path for f in files if f.path != TODOS_FILE_PATH]
+                self.state.update_files(user_files)
+            except Exception:
+                logger.error("Failed to get file state")
+
+        # Update todos
+        if self.file_store.enabled and self.file_store.todo_enabled:
+            try:
+                from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
+
+                file_store = self.file_store.backend
+                if file_store.exists(TODOS_FILE_PATH):
+                    content = file_store.retrieve(TODOS_FILE_PATH)
+                    data = json.loads(content.decode("utf-8"))
+                    self.state.update_todos(data.get("todos", []))
+            except Exception:
+                logger.error("Failed to get todo state")
+
+    def _get_additional_instructions_config(self) -> AdditionalInstructionsConfig:
+        """
+        Get configuration for additional instructions (capabilities) based on agent settings.
+
+        Uses the configuration as the source of truth. Tools are automatically added by
+        model validators when the corresponding config is enabled, so we don't need to
+        check tool presence here.
+
+        Returns:
+            AdditionalInstructionsConfig with capability flags for:
+                - delegation_enabled: Whether delegation is enabled
+                - context_compaction_enabled: Whether context compaction is enabled
+                - todo_management_enabled: Whether todo management is enabled
+        """
+        return AdditionalInstructionsConfig(
+            delegation_enabled=self.delegation_allowed,
+            context_compaction_enabled=self.summarization_config.enabled,
+            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
+        )
+
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
-        # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
+        # Get configuration for additional instructions and update prompt variables
+        instructions_config = self._get_additional_instructions_config()
+        # Additional instructions (delegation, context management, todos) are rendered via prompt variables
         self.system_prompt_manager.update_variables(
-            self.system_prompt_manager.build_delegation_variables(self.delegation_allowed)
+            self.system_prompt_manager.build_additional_instructions(instructions_config)
         )
 
         # Handle function calling schema generation first

@@ -11,6 +11,18 @@ DELEGATION_INSTRUCTIONS_XML = (
     "<answer> yourself; the system will return the agent's result directly."
 )
 
+CONTEXT_MANAGER_INSTRUCTIONS = """CONTEXT MANAGEMENT:
+- Use the context-manager tool proactively when conversation is getting long
+- Save critical info (IDs, filenames) in "notes" field BEFORE calling - previous messages will be summarized"""
+
+TODO_TOOLS_INSTRUCTIONS = """TODO MANAGEMENT:
+- Use the todo-write tool for complex 3+ step tasks; skip for simple requests
+- Current todos shown in "AGENT STATE" section under "Todos:".
+- When creating initial list: first task "in_progress", rest "pending"
+- After initial creation, ONLY update status via merge=true - do not restructure the plan
+- Mark completed IMMEDIATELY after finishing each step - don't batch
+- Only mark completed when FULLY done; if blocked, keep in_progress"""
+
 
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 
@@ -50,7 +62,7 @@ FILE HANDLING:
 - Files are automatically collected and will be returned with your final answer
 - Mention created files in your final answer so users know what was generated
 
-{{ delegation_instructions }}
+{{ additional_instructions }}
 """  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
@@ -97,6 +109,7 @@ CRITICAL XML FORMAT RULES:
 - Explain why this specific tool is the right choice
 - For tool use, include action and action_input tags
 - For direct answers, only include thought and answer tags
+- Tool names go as PLAIN TEXT inside <action> tags, NOT as XML tags.
 - JSON in <action_input> MUST be on single line with proper escaping
 - NO line breaks or control characters inside JSON strings
 - Use double quotes for JSON strings
@@ -122,7 +135,7 @@ FILE HANDLING:
 - Generated files are automatically collected and returned with your final answer
 - File operations are handled transparently - focus on the task, not file management
 
-{{ delegation_instructions_xml }}
+{{ additional_instructions_xml }}
 """  # noqa: E501
 
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
@@ -323,7 +336,7 @@ Answer: [Your direct response]
 - List each Action and Action Input separately
 - Only use tools from the provided list
 
-{{ delegation_instructions }}
+{{ additional_instructions }}
 
 **FILE HANDLING:**
 - Tools may generate multiple files during execution
@@ -411,10 +424,7 @@ ADDITIONAL RULES:
 - Avoid introducing precise figures or program names unless directly supported by cited evidence from the gathered sources.
 - Explicitly link key statements to specific findings from the referenced materials to strengthen credibility and transparency.
 
-{% if delegation_instructions_xml %}
-OPTIONAL AGENT PASSTHROUGH:
-{{ delegation_instructions_xml }}
-{% endif %}
+{{ additional_instructions_xml }}
 """  # noqa: E501
 )
 
@@ -496,7 +506,7 @@ FILE HANDLING:
 - Generated files will be included in the final response
 - Never return empty response.
 
-{{ delegation_instructions }}
+{{ additional_instructions }}
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
@@ -522,7 +532,7 @@ FILE HANDLING:
 - Tools may generate files that will be included in the final response
 - Files created by tools are automatically collected and returned
 
-{{ delegation_instructions }}
+{{ additional_instructions }}
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """
