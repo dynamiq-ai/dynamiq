@@ -1347,6 +1347,9 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         params = params + params
 
         with self._get_connection() as conn:
+            # Set runtime params for the current index method
+            self._set_pgvector_runtime_params(conn, top_k)
+
             with conn.cursor(row_factory=dict_row) as cur:
                 result = self._execute_sql_query(sql_query, params, cursor=cur)
                 records = result.fetchall()
