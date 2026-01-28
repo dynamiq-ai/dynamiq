@@ -3,8 +3,6 @@
 import json
 import re
 
-import regex
-
 from dynamiq.nodes.agents.exceptions import ActionParsingException
 from dynamiq.utils.logger import logger
 
@@ -54,33 +52,84 @@ def parse_default_action(output: str) -> tuple[str | None, str | None, dict | li
     try:
         thought = parse_default_thought(output) or None
 
-        action_pattern = r"Action:\s*(.*?)\nAction Input:\s*(\{(?:[^{}]|(?R))*\})"
-
-        remaining_text = output
         actions = []
+        action_input_matches = list(re.finditer(r"Action Input:", output))
 
-        while "Action:" in remaining_text:
-            action_match = regex.search(action_pattern, remaining_text, re.DOTALL)
-            if not action_match:
-                break
+        for input_match in action_input_matches:
+            preceding_text = output[: input_match.start()]
 
+            # Find the last "Action:" before this "Action Input:"
+            # Match action name up to newline or end of string
+            all_actions = list(re.finditer(r"Action:\s*(.+?)(?=\n|$|Action)", preceding_text))
+
+            if not all_actions:
+                continue
+
+            action_match = all_actions[-1]
             action_name = action_match.group(1).strip()
-            raw_input = action_match.group(2).strip()
 
+            # Extract JSON starting after "Action Input:"
+            json_str_candidate = output[input_match.end() :].strip()
+
+            # Remove markdown code block markers first
             for marker in ["```json", "```JSON", "```"]:
-                raw_input = raw_input.replace(marker, "").strip()
+                json_str_candidate = json_str_candidate.replace(marker, "").strip()
 
-            try:
-                action_input = json.loads(raw_input.strip())
-                actions.append({"tool_name": action_name, "tool_input": action_input})
-            except json.JSONDecodeError as e:
+            # Manual JSON extraction with brace counting to handle nested structures
+            brace_count = 0
+            json_end = 0
+            in_string = False
+            escape = False
+            found_start = False
+            start_idx = 0
+
+            for j, char in enumerate(json_str_candidate):
+                if not found_start:
+                    if char == "{":
+                        found_start = True
+                        start_idx = j
+                        brace_count = 1
+                    elif not char.isspace():
+                        # Non-whitespace character before '{' means invalid format
+                        break
+                    continue
+
+                if char == '"' and not escape:
+                    in_string = not in_string
+
+                if char == "\\" and not escape:
+                    escape = True
+                else:
+                    escape = False
+
+                if not in_string:
+                    if char == "{":
+                        brace_count += 1
+                    elif char == "}":
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_end = j + 1
+                            break
+
+            if json_end > 0:
+                raw_input = json_str_candidate[start_idx:json_end]
+
+                try:
+                    action_input = json.loads(raw_input)
+                    actions.append({"tool_name": action_name, "tool_input": action_input})
+                except json.JSONDecodeError as e:
+                    raise ActionParsingException(
+                        f"Invalid JSON in Action Input for {action_name}: {str(e)} : {raw_input}",
+                        recoverable=True,
+                    )
+            else:
+                # Brace counting failed - no valid JSON structure found
                 raise ActionParsingException(
-                    f"Invalid JSON in Action Input for {action_name}: {str(e)} : {raw_input}",
+                    f"Could not parse JSON structure in Action Input for {action_name}. "
+                    f"Expected JSON object starting with '{{' but found: "
+                    f"{json_str_candidate[:100]}{'...' if len(json_str_candidate) > 100 else ''}",
                     recoverable=True,
                 )
-
-            end_pos = action_match.end()
-            remaining_text = remaining_text[end_pos:]
 
         if not actions:
             logger.info("No valid Action and Action Input pairs found in the output ")
