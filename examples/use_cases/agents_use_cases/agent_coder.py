@@ -93,7 +93,7 @@ def create_agent():
     file_store_backend = InMemoryFileStore()
     file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 
-    tool = PythonCodeExecutor(name="code-executor", file_store=file_store_backend)
+    tool = PythonCodeExecutor(name="code-executor")
 
     agent_software = Agent(
         name="Agent",
