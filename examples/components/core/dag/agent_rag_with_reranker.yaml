@@ -1,0 +1,59 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+    api_key: ${oc.env:OPENAI_API_KEY}
+
+  weaviate-conn:
+    type: dynamiq.connections.Weaviate
+    api_key: ${oc.env:WEAVIATE_API_KEY}
+    url: ${oc.env:WEAVIATE_URL}
+
+  cohere-conn:
+    type: dynamiq.connections.Cohere
+    api_key: ${oc.env:COHERE_API_KEY}
+
+nodes:
+  agent-rag-reranker:
+    type: dynamiq.nodes.agents.Agent
+    llm:
+      id: agent-rag-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-5-chat-latest
+    tools:
+      - id: agent-rag-tool-with-ranker
+        type: dynamiq.nodes.retrievers.VectorStoreRetriever
+        name: Dubai Knowledge Base with Reranking
+        description: Retrieves and reranks documents about Dubai from knowledge base
+        text_embedder:
+          type: dynamiq.nodes.embedders.OpenAITextEmbedder
+          name: OpenAI Text Embedder
+          connection: openai-conn
+          model: text-embedding-3-small
+        document_retriever:
+          type: dynamiq.nodes.retrievers.WeaviateDocumentRetriever
+          name: Weaviate Document Retriever
+          connection: weaviate-conn
+          index_name: default
+          top_k: 10
+        document_reranker:
+          type: dynamiq.nodes.rankers.CohereReranker
+          name: Cohere Reranker
+          connection: cohere-conn
+          model: cohere/rerank-v4.0
+          top_k: 3
+          threshold: 0.5
+        is_optimized_for_agents: true
+    role: AI assistant with knowledge about Dubai city. Uses retrieval with reranking to provide accurate, well-explained answers.
+    max_loops: 7
+
+flows:
+  rag-agent-reranker-flow:
+    name: Agent RAG Flow with Reranking
+    nodes:
+      - agent-rag-reranker
+
+workflows:
+  rag-agent-reranker-workflow:
+    flow: rag-agent-reranker-flow
+    version: 1
