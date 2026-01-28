@@ -1180,14 +1180,18 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             list[Document]: List of retrieved Document objects.
 
         Raises:
-            ValueError: If parameters are invalid.
+            ValueError: If query is empty, query_embedding is None/empty, or parameters are invalid.
         """
 
         if not query:
             msg = "query must be provided for hybrid retrieval"
             raise ValueError(msg)
 
-        if query_embedding and len(query_embedding) != self.dimension:
+        if not query_embedding:
+            msg = "query_embedding must be a non-empty list"
+            raise ValueError(msg)
+
+        if len(query_embedding) != self.dimension:
             msg = f"query_embedding must be of dimension {self.dimension}"
             raise ValueError(msg)
 
