@@ -13,7 +13,7 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphAgentManager, GraphOrchestrator
 from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.node import InputTransformer, NodeDependency
-from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
+from dynamiq.nodes.tools.human_feedback import HumanFeedbackAction, HumanFeedbackTool
 from dynamiq.runnables import RunnableConfig, RunnableResult
 from dynamiq.runnables.base import NodeRunnableConfig
 from dynamiq.types.feedback import FeedbackMethod
@@ -60,6 +60,7 @@ def create_orchestrator() -> GraphOrchestrator:
         input_transformer=InputTransformer(
             selector={
                 "sketch": "$.history[-1].content",
+                "action": HumanFeedbackAction.ASK,  # Wait for user input
             },
         ),
         input_method=FeedbackMethod.STREAM,

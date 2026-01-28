@@ -82,10 +82,9 @@ class OutputMethodCallable(ABC):
 class HumanFeedbackInputSchema(BaseModel):
     """Input schema for HumanFeedbackTool."""
 
-    action: HumanFeedbackAction | None = Field(
+    action: HumanFeedbackAction = Field(
         default=HumanFeedbackAction.SEND,
-        description="Action to perform: 'ask' to request input from user, 'send' to just send a message. "
-        "If not specified, uses tool's default_action.",
+        description="Action to perform: 'ask' to request input from user, 'send' to just send a message.",
     )
     model_config = ConfigDict(extra="allow")
 
