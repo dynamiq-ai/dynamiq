@@ -96,7 +96,7 @@ RULES:
             if self.file_store.exists(TODOS_FILE_PATH):
                 content = self.file_store.retrieve(TODOS_FILE_PATH)
                 data = json.loads(content.decode("utf-8"))
-                return data.get("todos", [])
+                return data.get("todos") or []
         except Exception as e:
             logger.warning(f"TodoWriteTool: Failed to load todos: {e}")
         return []
