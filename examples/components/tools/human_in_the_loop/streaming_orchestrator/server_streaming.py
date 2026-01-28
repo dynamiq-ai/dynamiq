@@ -60,11 +60,11 @@ def create_orchestrator() -> GraphOrchestrator:
         input_transformer=InputTransformer(
             selector={
                 "sketch": "$.history[-1].content",
-                "action": HumanFeedbackAction.ASK,  # Wait for user input
             },
         ),
         input_method=FeedbackMethod.STREAM,
         msg_template="Generated draft of email: {{sketch}}." " Approve by sending SEND, cancel by sending CANCEL.",
+        action=HumanFeedbackAction.ASK,  # Always wait for user input
     )
     orchestrator.add_state_by_tasks("generate_sketch", [agent])
     orchestrator.add_state_by_tasks("gather_feedback", [human_feedback_tool])

@@ -119,6 +119,10 @@ Usage:
 """
     input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
     output_method: FeedbackMethod | OutputMethodCallable = FeedbackMethod.CONSOLE
+    action: HumanFeedbackAction | None = Field(
+        default=None,
+        description="If set, this action is always used, ignoring input. Useful for workflow nodes.",
+    )
     input_schema: ClassVar[type[HumanFeedbackInputSchema]] = HumanFeedbackInputSchema
     msg_template: str = "{{input}}"
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -265,7 +269,7 @@ Usage:
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         input_text = Template(self.msg_template).render(input_data.model_dump())
-        action = input_data.action
+        action = self.action if self.action is not None else input_data.action
 
         if action == HumanFeedbackAction.ASK:
             result = self._execute_ask(input_text, config, **kwargs)
