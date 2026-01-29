@@ -209,7 +209,7 @@ def generate_node(node_cls: type[Node], node_info: dict[str, Any], taken_names: 
             validate_input_transformer(node.prompt.messages, node)
 
         elif isinstance(node, Agent):
-            validate_input_transformer([Message(role=MessageRole.USER, content="{{input}} " + node.role)], node)
+            validate_input_transformer([Message(role=MessageRole.USER, content=f"{{{{input}}}} {node.role}")], node)
     if node.name in taken_names:
         raise ValueError(f"Name {node.name} is already taken.")
 
