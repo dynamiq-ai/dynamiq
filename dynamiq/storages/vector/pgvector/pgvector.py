@@ -310,7 +310,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         with conn.cursor(row_factory=dict_row) as cur:
             result = self._execute_sql_query(query, (self.schema_name,), cursor=cur).fetchone()
-            return bool(result["exists"]) if isinstance(result, dict) else bool(result[0])
+            return bool(result["exists"]) if result else False
 
     def _check_if_table_exists(self, conn: psycopg.Connection) -> bool:
         """
@@ -336,7 +336,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         with conn.cursor(row_factory=dict_row) as cur:
             result = self._execute_sql_query(query, (self.schema_name, self.table_name), cursor=cur).fetchone()
-            return bool(result["exists"]) if isinstance(result, dict) else bool(result[0])
+            return bool(result["exists"]) if result else False
 
     def _safe_rollback(self) -> None:
         """
@@ -678,7 +678,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 row = result.fetchone()
                 if row is None:
                     return 0
-                return row[0] if isinstance(row, (tuple, list)) else row.get("count", 0)
+                return int(row.get("count", 0))
 
     def write_documents(
         self, documents: list[Document], content_key: str | None = None, embedding_key: str | None = None
@@ -768,13 +768,12 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         self._track_documents(document_ids)
         return len(documents)
 
-    def delete_documents_by_filters(self, filters: dict[str, Any], top_k: int = 1000) -> None:
+    def delete_documents_by_filters(self, filters: dict[str, Any]) -> None:
         """
         Delete documents from the pgvector vector store using filters.
 
         Args:
             filters (dict[str, Any]): Filters to select documents to delete.
-            top_k (int): Unused parameter, kept for compatibility.
         """
         if filters:
             with self._get_connection() as conn:
