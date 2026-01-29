@@ -31,6 +31,7 @@ from dynamiq.nodes.tools.file_tools import (
     FileWriteTool,
 )
 from dynamiq.nodes.tools.mcp import MCPServer
+from dynamiq.nodes.tools.parallel_tool_calls import ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
@@ -295,6 +296,9 @@ class Agent(Node):
             self.tools.append(FileReadTool(file_store=self.file_store_backend, llm=self.llm))
             self.tools.append(FileSearchTool(file_store=self.file_store_backend))
             self.tools.append(FileListTool(file_store=self.file_store_backend))
+
+        if self.parallel_tool_calls_enabled:
+            self.tools.append(ParallelToolCallsTool())
 
         self._init_prompt_blocks()
 
