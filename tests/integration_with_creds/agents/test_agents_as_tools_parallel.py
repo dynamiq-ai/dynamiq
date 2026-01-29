@@ -114,7 +114,8 @@ def test_manager_with_subagents_parallel_calls():
 
     result = wf.run(
         input_data={
-            "input": "Research facts about dolphins and write a short brief using both available agents.",
+            "input": "Research facts about dolphins and about whales and write"
+            " a short brief using both available agents.",
         },
         config=RunnableConfig(callbacks=[streaming, tracing]),
     )

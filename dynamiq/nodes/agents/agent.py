@@ -12,12 +12,10 @@ from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     AgentUnknownToolException,
-    JSONParsingError,
     MaxLoopsExceededException,
     ParsingError,
     RecoverableAgentException,
     TagNotFoundError,
-    XMLParsingError,
 )
 from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
@@ -397,89 +395,43 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return None, None, None
 
-        if self.parallel_tool_calls_enabled:
-            try:
-                parsed_result = XMLParser.parse_unified_xml_format(llm_generated_output)
+        try:
+            parsed_data = XMLParser.parse(
+                llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
+            )
+            thought = parsed_data.get("thought")
+            final_answer = parsed_data.get("answer")
+            self.log_final_output(thought, final_answer, loop_num)
+            return thought, "final_answer", final_answer
 
-                thought = parsed_result.get("thought", "")
-
-                if parsed_result.get("is_final", False):
-                    final_answer = parsed_result.get("answer", "")
-                    self.log_final_output(thought, final_answer, loop_num)
-                    return thought, "final_answer", final_answer
-
-                tools_data = parsed_result.get("tools", [])
-                action = tools_data
-
-                if len(tools_data) > 1:
-                    for tool_payload in tools_data:
-                        if isinstance(tool_payload.get("input"), dict) and tool_payload["input"].get("delegate_final"):
-                            raise ActionParsingException(
-                                "delegate_final is only supported for single agent tool calls.",
-                                recoverable=True,
-                            )
-
-                if len(tools_data) == 1:
-                    self.log_reasoning(
-                        thought,
-                        tools_data[0].get("name", "unknown_tool"),
-                        tools_data[0].get("input", {}),
-                        loop_num,
-                    )
-                else:
-                    self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
-
-                return thought, action, tools_data
-
-            except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
-                self._append_recovery_instruction(
-                    error_label=type(e).__name__,
-                    error_detail=str(e),
-                    llm_generated_output=llm_generated_output,
-                    extra_guidance=(
-                        "Return <thought> with the resolved plan and list tool calls inside <tools>, "
-                        "or mark the run as final with <answer>."
-                    ),
-                )
-                return None, None, None
-        else:
+        except TagNotFoundError:
+            logger.debug("XMLParser: Not a final answer structure, trying action structure.")
             try:
                 parsed_data = XMLParser.parse(
-                    llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
+                    llm_generated_output,
+                    required_tags=["thought", "action", "action_input"],
+                    optional_tags=["output"],
+                    json_fields=["action_input"],
                 )
                 thought = parsed_data.get("thought")
-                final_answer = parsed_data.get("answer")
-                self.log_final_output(thought, final_answer, loop_num)
-                return thought, "final_answer", final_answer
-
-            except TagNotFoundError:
-                logger.debug("XMLParser: Not a final answer structure, trying action structure.")
-                try:
-                    parsed_data = XMLParser.parse(
-                        llm_generated_output,
-                        required_tags=["thought", "action", "action_input"],
-                        optional_tags=["output"],
-                        json_fields=["action_input"],
-                    )
-                    thought = parsed_data.get("thought")
-                    action = parsed_data.get("action")
-                    action_input = parsed_data.get("action_input")
-                    self.log_reasoning(thought, action, action_input, loop_num)
-                    return thought, action, action_input
-                except ParsingError as e:
-                    logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
-                    raise ActionParsingException(
-                        "The previous response was empty or invalid. "
-                        "Provide <thought> with either <action>/<action_input> or <answer>.",
-                        recoverable=True,
-                    )
-
+                action = parsed_data.get("action")
+                action_input = parsed_data.get("action_input")
+                self.log_reasoning(thought, action, action_input, loop_num)
+                return thought, action, action_input
             except ParsingError as e:
-                logger.error(f"XMLParser: Empty or invalid XML response: {e}")
+                logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
                 raise ActionParsingException(
-                    "The previous response was empty or invalid. " "Please provide the required XML tags.",
+                    "The previous response was empty or invalid. "
+                    "Provide <thought> with either <action>/<action_input> or <answer>.",
                     recoverable=True,
                 )
+
+        except ParsingError as e:
+            logger.error(f"XMLParser: Empty or invalid XML response: {e}")
+            raise ActionParsingException(
+                "The previous response was empty or invalid. " "Please provide the required XML tags.",
+                recoverable=True,
+            )
 
     def _setup_prompt_and_stop_sequences(
         self,
@@ -758,9 +710,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
 
                 # Handle XML parallel mode (but not for ContextManagerTool)
-                if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled and not skip_parallel:
-                    tools_data = action_input if isinstance(action_input, list) else [action_input]
-                    execution_output = self._execute_tools(tools_data, thought, loop_num, config, **kwargs)
+                if action == "<Parallel Tool Calls>" and self.parallel_tool_calls_enabled and not skip_parallel:
+                    execution_output = self._execute_tools(action_input["tools"], thought, loop_num, config, **kwargs)
                     tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
                 else:
                     result = self._execute_single_tool(action, action_input, thought, loop_num, config, **kwargs)
@@ -1031,6 +982,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
         # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
+
         self.system_prompt_manager.update_variables(
             self.system_prompt_manager.build_delegation_variables(self.delegation_allowed)
         )

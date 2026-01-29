@@ -17,7 +17,6 @@ from dynamiq.nodes.agents.prompts.react import (
     REACT_BLOCK_OUTPUT_FORMAT,
     REACT_BLOCK_TOOLS,
     REACT_BLOCK_TOOLS_NO_FORMATS,
-    REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
     REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS,
     REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
     REACT_MAX_LOOPS_PROMPT,
@@ -283,19 +282,12 @@ def get_model_specific_prompts(
     if instructions_default != REACT_BLOCK_INSTRUCTIONS_SINGLE:
         logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_SINGLE for '{model_name}'")
 
-    # XML mode supports parallel tool calls
-    if parallel_tool_calls_enabled:
-        instructions_xml = get_prompt_constant(
-            model_name, "REACT_BLOCK_XML_INSTRUCTIONS_MULTI", REACT_BLOCK_XML_INSTRUCTIONS_MULTI
-        )
-        if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_MULTI:
-            logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_MULTI for '{model_name}'")
-    else:
-        instructions_xml = get_prompt_constant(
-            model_name, "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
-        )
-        if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_SINGLE:
-            logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
+    # XML mode instructions
+    instructions_xml = get_prompt_constant(
+        model_name, "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
+    )
+    if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_SINGLE:
+        logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
 
     # Get other model-specific prompts
     react_block_tools = get_prompt_constant(model_name, "REACT_BLOCK_TOOLS", REACT_BLOCK_TOOLS)
@@ -340,5 +332,7 @@ def get_model_specific_prompts(
                 model_name, "REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS
             )
             prompt_blocks["instructions"] = xml_instructions_no_tools if not has_tools else instructions_xml
+
+    # Add secondary_instructions with multi-tool planning when parallel is enabled
 
     return prompt_blocks, agent_template
