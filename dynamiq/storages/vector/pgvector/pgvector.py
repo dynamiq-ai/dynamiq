@@ -89,10 +89,10 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
     def __init__(
         self,
-        table_name: str = DEFAULT_TABLE_NAME,
         connection: PostgreSQL | str | None = None,
         client: Optional["PsycopgConnection"] = None,
         create_extension: bool = True,
+        table_name: str = DEFAULT_TABLE_NAME,
         schema_name: str = DEFAULT_SCHEMA_NAME,
         dimension: int = 1536,
         vector_function: PGVectorVectorFunction = PGVectorVectorFunction.COSINE_SIMILARITY,
@@ -114,7 +114,7 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         Args:
             connection (PostgreSQL | str): PostgreSQL connection instance. Defaults to None.
-            client (Optional[PostgreSQL]): PostgreSQL client instance. Defaults to None.
+            client (Optional[PsycopgConnection]): Psycopg connection instance. Defaults to None.
             create_extension (bool): Whether to create the vector extension (if it does not exist). Defaults to True.
             table_name (str): Name of the table in the database. Defaults to "default".
             schema_name (str): Name of the schema in the database.
@@ -1125,16 +1125,11 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         )
 
         # Handle filters if they exist
-        filter_clause, params = self._prepare_filters(filters)
         if filters:
-            filter_str = filter_clause.as_string(None)
-            if filter_str.strip().startswith("WHERE"):
-                # Replace "WHERE" with "AND" for keyword search
-                where_clause = SQL(filter_str.replace(" WHERE ", " AND ", 1))
-            else:
-                where_clause = filter_clause
+            where_clause, params = _convert_filters_to_query(filters, operator="AND")
         else:
             where_clause = SQL("")
+            params = ()
 
         # Build the ORDER BY and LIMIT clause
         order_by = SQL(" ORDER BY score DESC LIMIT {limit}").format(limit=SQLLiteral(top_k))
@@ -1249,12 +1244,8 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
 
         # Apply filters to avoid duplication
         base_where_clause, params = self._prepare_filters(filters)
-        # Create separate where clauses for each subquery
-        semantic_where_clause = base_where_clause  # semantic search has no WHERE
-        keyword_where_clause = base_where_clause  # keyword search has WHERE
-        if filters:
-            where_str = base_where_clause.as_string(None)
-            keyword_where_clause = SQL(where_str.replace(" WHERE ", " AND ", 1))
+        semantic_where_clause = base_where_clause
+        keyword_where_clause = _convert_filters_to_query(filters, operator="AND")[0] if filters else SQL("")
 
         embedding_select = SQL("") if exclude_document_embeddings else SQL(", ") + Identifier(embedding_key)
         semantic_search_query = SQL(
@@ -1301,48 +1292,38 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         )
 
         # Build the final query to merge the results and sort them by score
-        if exclude_document_embeddings:
-            merge_query = SQL(
-                """
-                SELECT
-                    COALESCE(semantic_search.id, keyword_search.id) AS id,
-                    COALESCE(semantic_search.{content_key}, keyword_search.{content_key}) AS {content_key},
-                    COALESCE(semantic_search.metadata, keyword_search.metadata) AS metadata,
-                    COALESCE({alpha} / ({k} + semantic_search.rank), 0.0) +
-                    COALESCE((1 - {alpha}) / ({k} + keyword_search.rank), 0.0) AS score
-                FROM semantic_search
-                FULL OUTER JOIN keyword_search ON semantic_search.id = keyword_search.id
-                ORDER BY score DESC
-                LIMIT {top_k}
-                """
-            ).format(
-                content_key=Identifier(content_key),
-                top_k=SQLLiteral(top_k),
-                alpha=SQLLiteral(alpha),
-                k=SQLLiteral(keyword_rank_constant),
-            )
-        else:
-            merge_query = SQL(
-                """
-                SELECT
-                    COALESCE(semantic_search.id, keyword_search.id) AS id,
-                    COALESCE(semantic_search.{content_key}, keyword_search.{content_key}) AS {content_key},
-                    COALESCE(semantic_search.metadata, keyword_search.metadata) AS metadata,
-                    COALESCE(semantic_search.{embedding_key}, keyword_search.{embedding_key}) AS {embedding_key},
-                    COALESCE({alpha} / ({k} + semantic_search.rank), 0.0) +
-                    COALESCE((1 - {alpha}) / ({k} + keyword_search.rank), 0.0) AS score
-                FROM semantic_search
-                FULL OUTER JOIN keyword_search ON semantic_search.id = keyword_search.id
-                ORDER BY score DESC
-                LIMIT {top_k}
-                """
-            ).format(
-                content_key=Identifier(content_key),
-                embedding_key=Identifier(embedding_key),
-                top_k=SQLLiteral(top_k),
-                alpha=SQLLiteral(alpha),
-                k=SQLLiteral(keyword_rank_constant),
-            )
+
+        embedding_line = (
+            SQL("")
+            if exclude_document_embeddings
+            else SQL(
+                ", COALESCE(semantic_search.{embedding_key}, keyword_search.{embedding_key}) AS {embedding_key}"
+            ).format(embedding_key=Identifier(embedding_key))
+        )
+
+        merge_query = SQL(
+            """
+            SELECT
+                COALESCE(semantic_search.id, keyword_search.id) AS id,
+                COALESCE(semantic_search.{content_key}, keyword_search.{content_key}) AS {content_key},
+                COALESCE(semantic_search.metadata, keyword_search.metadata) AS metadata
+                {embedding_line},
+                COALESCE({alpha} / ({k} + semantic_search.rank), 0.0)
+            + COALESCE((1 - {alpha}) / ({k} + keyword_search.rank), 0.0)
+                AS score
+            FROM semantic_search
+            FULL OUTER JOIN keyword_search
+                ON semantic_search.id = keyword_search.id
+            ORDER BY score DESC
+            LIMIT {top_k}
+            """
+        ).format(
+            content_key=Identifier(content_key),
+            embedding_line=embedding_line,
+            top_k=SQLLiteral(top_k),
+            alpha=SQLLiteral(alpha),
+            k=SQLLiteral(keyword_rank_constant),
+        )
 
         sql_query = semantic_search_query + keyword_search_query + merge_query
 
