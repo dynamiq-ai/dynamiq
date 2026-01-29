@@ -348,6 +348,50 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             except Exception as rollback_error:
                 logger.warning(f"Failed to rollback transaction: {rollback_error}")
 
+    def _handle_db_exception(self, e: BaseException, log_context: str = "") -> None:
+        """
+        Handle database exceptions: rollback, sanitize, log, and re-raise.
+
+        Args:
+            e: The exception that was raised.
+            log_context: Optional suffix for the generic error log message (e.g. " during batch insert").
+
+        Raises:
+            VectorStoreException: For connection, privilege, syntax, and unexpected errors.
+            ValueError: For invalid document data (e.g. wrong dimension).
+        """
+        self._safe_rollback()
+        sanitized = self._sanitize_error_message(str(e))
+        if isinstance(e, psycopg_errors.OperationalError):
+            logger.warning(f"Database connection error: {sanitized}")
+            raise VectorStoreException("Database connection error") from e
+        if isinstance(e, psycopg_errors.UniqueViolation):
+            logger.debug(f"Duplicate key violation: {sanitized}")
+            raise VectorStoreException("Document already exists") from e
+        if isinstance(e, psycopg_errors.DataError):
+            logger.error(f"Data validation error: {sanitized}")
+            raise ValueError("Invalid document data provided") from e
+        if isinstance(e, psycopg_errors.SyntaxError):
+            logger.error(f"SQL syntax error: {sanitized}")
+            raise VectorStoreException("Database query syntax error") from e
+        if isinstance(e, psycopg_errors.InsufficientPrivilege):
+            logger.error(f"Insufficient privileges: {sanitized}")
+            raise VectorStoreException("Insufficient database privileges") from e
+        logger.error(f"Unexpected database error{log_context}: {sanitized}", exc_info=True)
+        raise VectorStoreException("Unexpected database error") from e
+
+    def _validate_query_embedding(self, query_embedding: list[float]) -> None:
+        """Validate query_embedding is non-empty and matches store dimension. Raises ValueError if not."""
+        if not query_embedding:
+            raise ValueError("query_embedding must be a non-empty list")
+        if len(query_embedding) != self.dimension:
+            raise ValueError(f"query_embedding must be of dimension {self.dimension}, got {len(query_embedding)}")
+
+    def _validate_top_k(self, top_k: int) -> None:
+        """Validate top_k is positive. Raises ValueError if not."""
+        if top_k <= 0:
+            raise ValueError(f"top_k must be positive, got {top_k}")
+
     def _execute_sql_query(self, sql_query: Any, params: tuple | None = None, cursor: Cursor | None = None) -> Cursor:
         """
         Internal method to execute a SQL query.
@@ -370,47 +414,15 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         try:
             result = cursor.execute(sql_query, params)
             return result
-
-        except psycopg_errors.OperationalError as e:
-            # Connection issues
-            self._safe_rollback()
-            sanitized_error = self._sanitize_error_message(str(e))
-            logger.warning(f"Database connection error: {sanitized_error}")
-            raise VectorStoreException("Database connection error") from e
-
-        except psycopg_errors.UniqueViolation as e:
-            # Duplicate key
-            self._safe_rollback()
-            sanitized_error = self._sanitize_error_message(str(e))
-            logger.debug(f"Duplicate key violation: {sanitized_error}")
-            raise VectorStoreException("Document already exists") from e
-
-        except psycopg_errors.DataError as e:
-            # Invalid data (e.g., wrong vector dimension, invalid JSON)
-            self._safe_rollback()
-            sanitized_error = self._sanitize_error_message(str(e))
-            logger.error(f"Data validation error: {sanitized_error}")
-            raise ValueError("Invalid document data provided") from e
-
-        except psycopg_errors.SyntaxError as e:
-            # SQL syntax error
-            self._safe_rollback()
-            sanitized_error = self._sanitize_error_message(str(e))
-            logger.error(f"SQL syntax error: {sanitized_error}")
-            raise VectorStoreException("Database query syntax error") from e
-
-        except psycopg_errors.InsufficientPrivilege as e:
-            # Permission error
-            self._safe_rollback()
-            sanitized_error = self._sanitize_error_message(str(e))
-            logger.error(f"Insufficient privileges: {sanitized_error}")
-            raise VectorStoreException("Insufficient database privileges") from e
-
-        except Exception as e:
-            self._safe_rollback()
-            sanitized_error = self._sanitize_error_message(str(e))
-            logger.error(f"Unexpected database error: {sanitized_error}", exc_info=True)
-            raise VectorStoreException("Unexpected database error") from e
+        except (
+            psycopg_errors.OperationalError,
+            psycopg_errors.UniqueViolation,
+            psycopg_errors.DataError,
+            psycopg_errors.SyntaxError,
+            psycopg_errors.InsufficientPrivilege,
+            Exception,
+        ) as e:
+            self._handle_db_exception(e)
 
     def _create_tables(
         self,
@@ -740,30 +752,15 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
                 try:
                     cur.executemany(query, batch_data)
                     conn.commit()
-                except psycopg_errors.OperationalError as e:
-                    # Connection issues
-                    sanitized_error = self._sanitize_error_message(str(e))
-                    logger.warning(f"Database connection error: {sanitized_error}")
-                    raise VectorStoreException("Database connection error") from e
-                except psycopg_errors.UniqueViolation as e:
-                    # Duplicate key
-                    sanitized_error = self._sanitize_error_message(str(e))
-                    logger.debug(f"Duplicate key violation: {sanitized_error}")
-                    raise VectorStoreException("Document already exists") from e
-                except psycopg_errors.DataError as e:
-                    # Invalid data (e.g., wrong vector dimension, invalid JSON)
-                    sanitized_error = self._sanitize_error_message(str(e))
-                    logger.error(f"Data validation error: {sanitized_error}")
-                    raise ValueError("Invalid document data provided") from e
-                except psycopg_errors.InsufficientPrivilege as e:
-                    # Permission error
-                    sanitized_error = self._sanitize_error_message(str(e))
-                    logger.error(f"Insufficient privileges: {sanitized_error}")
-                    raise VectorStoreException("Insufficient database privileges") from e
-                except Exception as e:
-                    sanitized_error = self._sanitize_error_message(str(e))
-                    logger.error(f"Unexpected database error during batch insert: {sanitized_error}", exc_info=True)
-                    raise VectorStoreException("Unexpected database error") from e
+                except (
+                    psycopg_errors.OperationalError,
+                    psycopg_errors.UniqueViolation,
+                    psycopg_errors.DataError,
+                    psycopg_errors.SyntaxError,
+                    psycopg_errors.InsufficientPrivilege,
+                    Exception,
+                ) as e:
+                    self._handle_db_exception(e, log_context=" during batch insert")
 
         self._track_documents(document_ids)
         return len(documents)
@@ -1002,17 +999,8 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         Raises:
             ValueError: If query_embedding is empty or has incorrect dimension.
         """
-        if not query_embedding:
-            msg = "query_embedding must be a non-empty list"
-            raise ValueError(msg)
-
-        if len(query_embedding) != self.dimension:
-            msg = f"query_embedding must be of dimension {self.dimension}"
-            raise ValueError(msg)
-
-        if top_k <= 0:
-            msg = f"top_k must be positive, got {top_k}"
-            raise ValueError(msg)
+        self._validate_query_embedding(query_embedding)
+        self._validate_top_k(top_k)
 
         vector_function = self.vector_function
         content_key = content_key or self.content_key
@@ -1097,12 +1085,9 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             ValueError: If query is empty.
         """
         if not query:
-            msg = "query must be provided for keyword retrieval"
-            raise ValueError(msg)
+            raise ValueError("query must be provided for keyword retrieval")
 
-        if top_k <= 0:
-            msg = f"top_k must be positive, got {top_k}"
-            raise ValueError(msg)
+        self._validate_top_k(top_k)
 
         content_key = content_key or self.content_key
 
@@ -1181,24 +1166,13 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         """
 
         if not query:
-            msg = "query must be provided for hybrid retrieval"
-            raise ValueError(msg)
+            raise ValueError("query must be provided for hybrid retrieval")
 
-        if not query_embedding:
-            msg = "query_embedding must be a non-empty list"
-            raise ValueError(msg)
-
-        if len(query_embedding) != self.dimension:
-            msg = f"query_embedding must be of dimension {self.dimension}"
-            raise ValueError(msg)
+        self._validate_query_embedding(query_embedding)
+        self._validate_top_k(top_k)
 
         if not 0 <= alpha <= 1:
-            msg = f"alpha must be between 0 and 1, got {alpha}"
-            raise ValueError(msg)
-
-        if top_k <= 0:
-            msg = f"top_k must be positive, got {top_k}"
-            raise ValueError(msg)
+            raise ValueError(f"alpha must be between 0 and 1, got {alpha}")
 
         vector_function = self.vector_function
         content_key = content_key or self.content_key
