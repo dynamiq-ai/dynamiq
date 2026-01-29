@@ -211,10 +211,8 @@ class ParallelToolCallsTool(Node):
 
 IMPORTANT: Call this tool exactly like any other tool - use the standard action format.
 Use the normal action/action_input structure."""
-
-+ REACT_BLOCK_MULTI_TOOL_PLANNING +
-
-"""
+        + REACT_BLOCK_MULTI_TOOL_PLANNING
+        + """
 Input format (provide this JSON in action_input):
 {
     "tools": [
