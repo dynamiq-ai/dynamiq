@@ -275,9 +275,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
     @contextmanager
     def _get_connection(self):
         """Context manager for handling a single connection"""
-
-        import psycopg
-
         if self._conn is None or self._conn.closed:
             if not self.connection_string:
                 raise VectorStoreException("Connection is closed and no connection string available for reconnection")
@@ -876,6 +873,13 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
         Returns:
             list[Document]: List of Document objects retrieved.
         """
+        if offset < 0:
+            msg = f"offset must be non-negative, got {offset}"
+            raise ValueError(msg)
+        if limit is not None and limit <= 0:
+            msg = f"limit must be positive, got {limit}"
+            raise ValueError(msg)
+
         content_key = content_key or self.content_key
         embedding_key = embedding_key or self.embedding_key
 
@@ -1102,7 +1106,6 @@ class PGVectorStore(BaseVectorStore, DryRunMixin):
             raise ValueError(msg)
 
         content_key = content_key or self.content_key
-        embedding_key = embedding_key or self.embedding_key
 
         # Do not select the embeddings if exclude_document_embeddings is True
         select_fields = f"id, {content_key}, metadata" if exclude_document_embeddings else "*"
