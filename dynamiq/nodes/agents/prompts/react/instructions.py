@@ -53,7 +53,7 @@ FILE HANDLING:
 {{ delegation_instructions }}
 """  # noqa: E501
 
-REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
+REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = f"""Always use this exact XML format in your responses:
 
 <output>
     <thought>
