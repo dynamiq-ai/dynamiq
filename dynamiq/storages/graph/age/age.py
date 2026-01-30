@@ -46,11 +46,7 @@ class ApacheAgeGraphStore(BaseGraphStore):
         self._ensure_age_loaded()
         params = parameters or {}
         safe_graph = self._validate_label(self.graph_name)
-        sql = (
-            "SELECT ag_catalog.agtype_to_json(result) AS result "
-            "FROM cypher(%s, %s, %s::agtype) AS (result agtype)"
-        )
-
+        sql = "SELECT ag_catalog.agtype_to_json(result) AS result " "FROM cypher(%s, %s, %s::agtype) AS (result agtype)"
         with self.client.cursor() as cursor:
             cursor.execute(sql, (safe_graph, query, json.dumps(params)))
             rows = cursor.fetchall()

@@ -7,6 +7,7 @@ from dynamiq.connections import Jina
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -91,6 +92,7 @@ class JinaScrapeTool(ConnectionNode):
     SCRAPE_PATH: ClassVar[str] = "https://r.jina.ai/"
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.WEB_SCRAPE
     name: str = "Jina Scraper Tool"
     description: str = DESCRIPTION_SCRAPE
     response_format: JinaResponseFormat = JinaResponseFormat.MARKDOWN
@@ -331,6 +333,7 @@ class JinaSearchTool(ConnectionNode):
     SEARCH_PATH: ClassVar[str] = "https://s.jina.ai/"
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.WEB_SEARCH
     name: str = "Jina Search Tool"
     description: str = DESCRIPTION_SEARCH
     connection: Jina

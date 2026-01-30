@@ -20,15 +20,23 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 
 @pytest.fixture
 def mock_llm_response_text():
-    return (
-        "Thought: Need to use tools to gather info and scrape.\n"
-        "Action: NoOp Tool\n"
-        "Action Input: {}\n"
-        "Action: Exa Search Tool\n"
-        'Action Input: {"query": "test", "limit": 1}\n'
-        "Action: Firecrawl Tool\n"
-        'Action Input: {"url": "https://example.com"}'
-    )
+    return """<output>
+  <thought>Need to use tools to gather info and scrape.</thought>
+  <tool_calls>
+    <tool>
+      <name>NoOp Tool</name>
+      <input>{}</input>
+    </tool>
+    <tool>
+      <name>Exa Search Tool</name>
+      <input>{"query": "test", "limit": 1}</input>
+    </tool>
+    <tool>
+      <name>Firecrawl Tool</name>
+      <input>{"url": "https://example.com"}</input>
+    </tool>
+  </tool_calls>
+</output>"""
 
 
 @pytest.fixture
@@ -82,7 +90,7 @@ def run(input_data):
     agent = Agent(
         name="React Agent",
         llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="react_map_stream", mode=StreamingMode.ALL),
@@ -138,7 +146,7 @@ def run(input_data):
     for items in llm_events_by_entity.values():
         assert len(items) > 0
         joined = "".join(str(chunk) for _, chunk in items)
-        assert ("Action:" in joined) or ("Thought:" in joined) or ("mocked_response" in joined)
+        assert ("<thought>" in joined) or ("<tool" in joined) or ("mocked_response" in joined)
 
 
 def test_react_agent_map_streaming_final_mode_isolated(mock_llm_executor, mock_tools_http):
@@ -157,7 +165,7 @@ def run(input_data):
     agent = Agent(
         name="React Agent",
         llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="react_map_stream_final", mode=StreamingMode.FINAL),

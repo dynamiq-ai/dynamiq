@@ -22,7 +22,7 @@ from dynamiq.nodes.agents.utils import (
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.nodes.tools import ContextManagerTool
+from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import (
     EXTRACTED_TEXT_SUFFIX,
     FileListTool,
@@ -32,6 +32,7 @@ from dynamiq.nodes.tools.file_tools import (
 )
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
@@ -111,20 +112,6 @@ class AgentStatus(str, Enum):
 
     SUCCESS = "success"
     FAIL = "fail"
-
-
-class AgentIntermediateStepModelObservation(BaseModel):
-    initial: str | dict | None = None
-    tool_using: str | dict | list | None = None
-    tool_input: str | dict | list | None = None
-    tool_output: Any = None
-    updated: str | dict | None = None
-
-
-class AgentIntermediateStep(BaseModel):
-    input_data: str | dict
-    agent_model_observation: AgentIntermediateStepModelObservation = Field(..., alias="model_observation")
-    final_answer: str | dict | None = None
 
 
 class ToolParams(BaseModel):
@@ -296,7 +283,6 @@ class Agent(Node):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._intermediate_steps: dict[int, dict] = {}
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
 
@@ -900,7 +886,7 @@ class Agent(Node):
                 merged_input.pop("delegate_final", None)
 
         if isinstance(tool, ContextManagerTool):
-            merged_input["history"] = self._prompt.messages[self._history_offset :]
+            merged_input["messages"] = self._prompt.messages[self._history_offset :]
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
@@ -918,6 +904,12 @@ class Agent(Node):
                         merged_input[field_name] = self.file_store_backend.list_files_bytes()
             if isinstance(tool, Python):
                 merged_input["files"] = self.file_store_backend.list_files_bytes()
+
+            if isinstance(tool, PythonCodeExecutor) and not tool.file_store:
+                tool.file_store = self.file_store_backend
+                logger.debug(
+                    f"Agent {self.name} - {self.id}: injected file_store into PythonCodeExecutor tool {tool.name}"
+                )
 
         if tool_params:
             debug_info = []
@@ -1019,7 +1011,8 @@ class Agent(Node):
             truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
         )
 
-        self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
+        if not isinstance(tool, ContextManagerTool):
+            self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
 
         output_files = tool_result.output.get("files", [])
         if collect_dependency:
@@ -1282,7 +1275,6 @@ class Agent(Node):
 
     def reset_run_state(self):
         """Resets the agent's run state."""
-        self._intermediate_steps = {}
         self._run_depends = []
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self.system_prompt_manager.reset()
