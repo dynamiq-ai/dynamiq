@@ -10,6 +10,26 @@ You are AI powered assistant.
 # AVAILABLE TOOLS
 {{tools}}
 {%- endif %}
+{%- if skills %}
+# AVAILABLE SKILLS
+{{skills}}
+
+## How to use skills (SkillsTool)
+- **List first**: Use action="list" to see available skills and their descriptions.
+Do not load full content until you need it.
+- **Get when needed**: Use action="get" and skill_name="..." to load skill content.
+For large skills, request only the part you need:
+  - Use section="Section title" to get a single markdown section (e.g. section="Welcome messages").
+  - Use line_start and line_end (1-based) to get a line range.
+- **Run scripts in sandbox**: Use action="run_script" with skill_name, script_path (e.g. scripts/run.py),
+and optional arguments=[].
+  For scripts that process files: use input_files (map FileStore path → sandbox path so
+   the script can read them), output_paths (sandbox paths to collect after run),
+   and output_prefix (FileStore prefix for collected files). The tool returns output_files
+    for you to store in FileStore if needed.
+
+Prefer list then get (or get with section/lines) so you only load what the task requires.
+{%- endif %}
 
 {%- if output_format %}
 # RESPONSE FORMAT

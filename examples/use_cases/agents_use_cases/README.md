@@ -16,6 +16,10 @@ This directory contains examples demonstrating how to apply Dynamiq agents to so
    - `OPENAI_API_KEY`: Your OpenAI API key.
    - `E2B_API_KEY`: Your E2B API key.
 
+### Xlsx price analytics dashboard
+
+- **`agent_xlsx_price_dashboard.py`**: Uses the **xlsx** skill README/SKILL content (list, get) and a Python code executor to create a house price simulation and dashboard in Excel. Sample data (X, Y) is in the prompt; no CSV upload. The agent reads the xlsx skill to learn openpyxl and formulas, then runs code to build the workbook (Data, Analytics, ROI, Coefficient). Only report/output files are saved to `skill_outputs/`.
+
 ### Financial Agent
 
 - **`agent_financial.py`**: Demonstrates an agent that can access and process financial information. This example illustrates how to:

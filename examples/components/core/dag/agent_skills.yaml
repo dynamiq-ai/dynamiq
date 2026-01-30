@@ -1,0 +1,38 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+
+nodes:
+  skills-agent:
+    type: dynamiq.nodes.agents.Agent
+    llm:
+      id: skills-agent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+    tools: []
+    role: |
+      You have access to skills. Use the SkillsTool to:
+      - action="list" to see available skills
+      - action="get" and skill_name="..." to load full skill content when needed
+      - action="run_script" with skill_name, script_path, and optional input_files, output_paths, output_prefix for file processing
+      Format responses in Markdown.
+    file_store:
+      enabled: true
+      backend:
+        type: dynamiq.storages.file.InMemoryFileStore
+      agent_file_write_enabled: true
+    skills_enabled: true
+    max_loops: 10
+    inference_mode: XML
+
+flows:
+  skills-agent-flow:
+    name: Skills Agent Flow
+    nodes:
+      - skills-agent
+
+workflows:
+  skills-agent-workflow:
+    flow: skills-agent-flow
+    version: 1

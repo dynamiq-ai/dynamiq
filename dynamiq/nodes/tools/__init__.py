@@ -13,6 +13,7 @@ from .preprocess_tool import PreprocessTool
 from .python import Python
 from .python_code_executor import PythonCodeExecutor
 from .scale_serp import ScaleSerpTool
+from .skills_tool import SkillsTool
 from .sql_executor import SQLExecutor
 from .tavily import TavilyTool
 from .thinking_tool import ThinkingTool

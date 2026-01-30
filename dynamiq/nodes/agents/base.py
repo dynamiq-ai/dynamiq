@@ -210,6 +210,15 @@ class Agent(Node):
         default=512,
         description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
     )
+    skills_enabled: bool = Field(
+        default=False,
+        description="Enable skills support. Skills are loaded from skills_config.source (default: FileStore).",
+    )
+    skills_config: Any = Field(
+        default=None,
+        description="Optional SkillsConfig (source + executor). "
+        "When None and skills_enabled, default FileStore source and subprocess executor are used.",
+    )
 
     input_message: Message | VisionMessage | None = None
     role: str | None = Field(
@@ -298,6 +307,8 @@ class Agent(Node):
             self.tools.append(FileListTool(file_store=self.file_store_backend))
 
         self._init_prompt_blocks()
+        if self.skills_enabled and (self.file_store_backend or self.skills_config):
+            self._init_skills()
 
     @model_validator(mode="after")
     def validate_input_fields(self):
@@ -324,6 +335,7 @@ class Agent(Node):
             "files": True,
             "images": True,
             "file_store": True,
+            "skills_config": True,
             "system_prompt_manager": True,  # Runtime state container, not serializable
         }
 
@@ -375,6 +387,67 @@ class Agent(Node):
         self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
         self.system_prompt_manager.setup_for_base_agent()
         self.system_prompt_manager.update_variables({"delegation_instructions": "", "delegation_instructions_xml": ""})
+
+    def _init_skills(self):
+        """Initialize skills support from skills_config (source + executor)."""
+        from dynamiq.nodes.tools.skills_tool import SkillsTool
+        from dynamiq.skills.config import SkillsConfig
+        from dynamiq.skills.executor import SkillExecutor
+        from dynamiq.skills.sources.filestore import FileStoreSkillSource
+
+        if self.skills_config is not None:
+            config = self.skills_config
+            if not isinstance(config, SkillsConfig):
+                config = SkillsConfig.model_validate(config)
+        elif self.file_store_backend:
+            source = FileStoreSkillSource(
+                file_store=self.file_store_backend,
+                skills_prefix=".skills/",
+            )
+            executor = SkillExecutor(
+                file_store=self.file_store_backend,
+                skills_prefix=".skills/",
+                default_timeout_seconds=120,
+                cleanup_work_dir=True,
+            )
+            config = SkillsConfig(source=source, executor=executor)
+        else:
+            logger.warning("Skills enabled but no skills_config and no file_store_backend; skipping skills init")
+            return
+
+        skills_tool = SkillsTool(
+            skill_source=config.source,
+            skill_executor=config.executor,
+        )
+        self.tools.append(skills_tool)
+
+        available_skills = config.source.discover_skills()
+        skills_summary = self._format_skills_summary(available_skills)
+        self.system_prompt_manager.set_block("skills", skills_summary)
+
+        logger.info(
+            f"Agent {self.name} - {self.id}: initialized with {len(available_skills)} skills "
+            f"(source={config.source.name})"
+        )
+
+    def _format_skills_summary(self, skills) -> str:
+        """Format skills summary for prompt.
+
+        Args:
+            skills: List of SkillReference objects
+
+        Returns:
+            Formatted string with skill information
+        """
+        if not skills:
+            return ""
+
+        lines = []
+        for skill in skills:
+            tags_str = f" [{', '.join(skill.tags)}]" if skill.tags else ""
+            lines.append(f"- **{skill.name}**{tags_str}: {skill.description}")
+
+        return "\n".join(lines)
 
     def set_block(self, block_name: str, content: str):
         """Adds or updates a prompt block."""
