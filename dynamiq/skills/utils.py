@@ -26,13 +26,17 @@ def extract_skill_content_slice(
         for i, line in enumerate(lines):
             s = line.strip()
             if s.startswith("#"):
+                header_level = len(s) - len(s.lstrip("#"))
                 header_text = s.lstrip("#").strip().lower()
                 if header_text == section_lower:
                     start_i = i
                     for j in range(i + 1, len(lines)):
-                        if lines[j].strip().startswith("##"):
-                            end_i = j
-                            break
+                        next_line = lines[j].strip()
+                        if next_line.startswith("#"):
+                            next_level = len(next_line) - len(next_line.lstrip("#"))
+                            if next_level <= header_level:
+                                end_i = j
+                                break
                     section_used = section
                     break
         if start_i is not None:

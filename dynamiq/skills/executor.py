@@ -10,6 +10,19 @@ from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.logger import logger
 
 
+def _resolve_sandbox_path(work_dir: str, rel_path: str) -> tuple[str, Path]:
+    rel_norm = rel_path.replace("\\", "/").strip("/")
+    if not rel_norm:
+        raise ValueError("Sandbox path cannot be empty")
+    base = Path(work_dir).resolve()
+    target = (base / rel_norm).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"Sandbox path escapes work dir: {rel_path}") from exc
+    return rel_norm, target
+
+
 class SkillExecutionResult(BaseModel):
     """Result of running a skill script in the sandbox."""
 
@@ -119,7 +132,16 @@ class SkillExecutor:
 
             for store_path, sandbox_rel in input_files.items():
                 store_path = store_path.replace("\\", "/")
-                sandbox_rel = sandbox_rel.replace("\\", "/")
+                try:
+                    _, target = _resolve_sandbox_path(work_dir, sandbox_rel)
+                except ValueError as e:
+                    return SkillExecutionResult(
+                        exit_code=-1,
+                        stdout="",
+                        stderr=f"Invalid input sandbox path: {e}",
+                        timed_out=False,
+                        work_dir=work_dir if not self.cleanup_work_dir else None,
+                    )
                 if not self.file_store.exists(store_path):
                     return SkillExecutionResult(
                         exit_code=-1,
@@ -129,13 +151,21 @@ class SkillExecutor:
                         work_dir=work_dir if not self.cleanup_work_dir else None,
                     )
                 content = self.file_store.retrieve(store_path)
-                target = Path(work_dir) / sandbox_rel
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(content)
             if input_files:
                 logger.info(f"SkillExecutor: copied {len(input_files)} input file(s) into sandbox")
 
-            script_path = Path(work_dir) / script_relative_path.replace("\\", "/")
+            try:
+                _, script_path = _resolve_sandbox_path(work_dir, script_relative_path)
+            except ValueError as e:
+                return SkillExecutionResult(
+                    exit_code=-1,
+                    stdout="",
+                    stderr=f"Invalid script path: {e}",
+                    timed_out=False,
+                    work_dir=work_dir if not self.cleanup_work_dir else None,
+                )
 
             if not script_path.exists():
                 return SkillExecutionResult(
@@ -177,8 +207,11 @@ class SkillExecutor:
                 stderr = f"Execution timed out after {timeout}s.\n" + stderr
 
             for rel in output_paths:
-                rel = rel.replace("\\", "/").strip("/")
-                p = Path(work_dir) / rel
+                try:
+                    rel, p = _resolve_sandbox_path(work_dir, rel)
+                except ValueError as e:
+                    logger.warning(f"SkillExecutor: invalid output path skipped: {e}")
+                    continue
                 if p.exists() and p.is_file():
                     key = f"{output_prefix.rstrip('/')}/{rel}".lstrip("/") if output_prefix else rel
                     output_files[key] = p.read_bytes()

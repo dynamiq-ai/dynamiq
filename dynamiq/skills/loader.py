@@ -2,12 +2,10 @@
 
 import re
 from pathlib import Path
-from typing import Any
 
 import yaml
 
 from dynamiq.skills.models import Skill, SkillMetadata, SkillReference
-from dynamiq.skills.utils import extract_skill_content_slice
 from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.logger import logger
 
@@ -50,7 +48,7 @@ class SkillLoader:
             for file_info in all_files:
                 file_path = getattr(file_info, "path", file_info)
                 file_path = str(file_path)
-                if file_path.startswith(self.skills_prefix) and file_path.endswith("/SKILL.md"):
+                if file_path.startswith(self.skills_prefix) and file_path.lower().endswith("/skill.md"):
                     try:
                         skill_ref = self._parse_skill_reference(file_path)
                         skills.append(skill_ref)
@@ -83,44 +81,6 @@ class SkillLoader:
         except Exception as e:
             logger.error(f"Failed to load skill {name}: {e}")
             return None
-
-    def load_skill_content(
-        self,
-        name: str,
-        section: str | None = None,
-        line_start: int | None = None,
-        line_end: int | None = None,
-    ) -> dict[str, Any] | None:
-        """Load skill body content, optionally a section or line range.
-
-        Use for large skills: get only the part you need instead of full content.
-
-        Args:
-            name: Skill identifier
-            section: Markdown header to extract (e.g. "Welcome messages"); first # or ## match
-            line_start: 1-based start line (body only, after frontmatter)
-            line_end: 1-based end line (inclusive)
-
-        Returns:
-            Dict with skill_name, description, instructions (full or slice), section_used, or None
-        """
-        skill = self.load_skill(name)
-        if not skill:
-            return None
-        instructions, section_used = extract_skill_content_slice(
-            skill.instructions,
-            section=section,
-            line_start=line_start,
-            line_end=line_end,
-        )
-        return {
-            "skill_name": skill.name,
-            "description": skill.metadata.description,
-            "instructions": instructions,
-            "section_used": section_used,
-            "supporting_files": [str(p) for p in skill.supporting_files_paths],
-            "dependencies": skill.metadata.dependencies,
-        }
 
     def _parse_skill_reference(self, skill_path: str) -> SkillReference:
         """Parse SKILL.md to extract metadata only (lightweight).

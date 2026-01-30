@@ -73,6 +73,13 @@ class SkillsTool(Node):
     )
     input_schema: ClassVar[type[SkillsToolInputSchema]] = SkillsToolInputSchema
 
+    @property
+    def to_dict_exclude_params(self):
+        return super().to_dict_exclude_params | {
+            "skill_source": True,
+            "skill_executor": True,
+        }
+
     def execute(
         self, input_data: SkillsToolInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:

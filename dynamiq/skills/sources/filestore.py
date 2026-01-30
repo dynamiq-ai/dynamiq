@@ -1,7 +1,5 @@
 """FileStore-backed skill source (default)."""
 
-from typing import Any
-
 from pydantic import ConfigDict, Field, model_validator
 
 from dynamiq.skills.loader import SkillLoader
@@ -31,13 +29,3 @@ class FileStoreSkillSource(SkillSource):
 
     def load_skill(self, name: str) -> Skill | None:
         return self._loader.load_skill(name)
-
-    def load_skill_content(
-        self,
-        name: str,
-        section: str | None = None,
-        line_start: int | None = None,
-        line_end: int | None = None,
-    ) -> dict[str, Any] | None:
-        """Use loader's implementation for section/line range."""
-        return self._loader.load_skill_content(name, section=section, line_start=line_start, line_end=line_end)

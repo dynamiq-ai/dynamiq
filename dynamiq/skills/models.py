@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -5,16 +6,15 @@ from pydantic import BaseModel, Field, field_validator
 
 SKILL_NAME_MAX_LENGTH = 64
 SKILL_DESCRIPTION_MAX_LENGTH = 1024
-SKILL_NAME_PATTERN = r"^[a-z0-9][a-z0-9\-]*[a-z0-9]$|^[a-z0-9]$"
 SKILL_RESERVED_NAMES = frozenset({"anthropic", "claude"})
+SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9_-]+$")
 
 
 def _validate_skill_name(name: str) -> str:
     """Validate skill name: lowercase, alphanumeric, hyphens/underscores; no reserved words."""
     if not name or len(name) > SKILL_NAME_MAX_LENGTH:
         raise ValueError(f"Skill name must be 1–{SKILL_NAME_MAX_LENGTH} characters")
-    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789-_")
-    if not name.islower() or not all(c in allowed for c in name):
+    if not SKILL_NAME_PATTERN.fullmatch(name):
         raise ValueError("Skill name must contain only lowercase letters, numbers, hyphens, and underscores")
     if name in SKILL_RESERVED_NAMES:
         raise ValueError(f"Skill name cannot be reserved: {SKILL_RESERVED_NAMES}")
