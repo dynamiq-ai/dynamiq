@@ -2,27 +2,30 @@ import os
 import shutil
 import subprocess  # nosec B404 - required for sandboxed skill script execution
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.logger import logger
 
 
-@dataclass
-class SkillExecutionResult:
+class SkillExecutionResult(BaseModel):
     """Result of running a skill script in the sandbox."""
 
-    exit_code: int
-    stdout: str
-    stderr: str
-    timed_out: bool
-    work_dir: str | None = None
-    output_files: dict[str, bytes] | None = None
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def __post_init__(self):
-        if self.output_files is None:
-            self.output_files = {}
+    exit_code: int
+    stdout: str = ""
+    stderr: str = ""
+    timed_out: bool = False
+    work_dir: str | None = None
+    output_files: dict[str, bytes] = Field(default_factory=dict)
+
+    @field_validator("output_files", mode="before")
+    @classmethod
+    def _coerce_output_files(cls, v: dict[str, bytes] | None) -> dict[str, bytes]:
+        return v if v is not None else {}
 
     @property
     def success(self) -> bool:
@@ -124,7 +127,6 @@ class SkillExecutor:
                         stderr=f"Input file not found in FileStore: {store_path}",
                         timed_out=False,
                         work_dir=work_dir if not self.cleanup_work_dir else None,
-                        output_files=None,
                     )
                 content = self.file_store.retrieve(store_path)
                 target = Path(work_dir) / sandbox_rel
@@ -142,7 +144,6 @@ class SkillExecutor:
                     stderr=f"Script not found: {script_relative_path} (resolved: {script_path})",
                     timed_out=False,
                     work_dir=work_dir if not self.cleanup_work_dir else None,
-                    output_files=None,
                 )
 
             if script_path.suffix == ".py":
@@ -176,10 +177,11 @@ class SkillExecutor:
                 stderr = f"Execution timed out after {timeout}s.\n" + stderr
 
             for rel in output_paths:
-                rel = rel.replace("\\", "/")
+                rel = rel.replace("\\", "/").strip("/")
                 p = Path(work_dir) / rel
                 if p.exists() and p.is_file():
-                    output_files[(output_prefix + p.name).strip("/")] = p.read_bytes()
+                    key = f"{output_prefix.rstrip('/')}/{rel}".lstrip("/") if output_prefix else rel
+                    output_files[key] = p.read_bytes()
                 elif p.exists():
                     logger.warning(f"SkillExecutor: output path is not a file, skipped: {rel}")
             if output_paths and output_files:
@@ -191,7 +193,7 @@ class SkillExecutor:
                 stderr=stderr,
                 timed_out=timed_out,
                 work_dir=work_dir if not self.cleanup_work_dir else None,
-                output_files=output_files or None,
+                output_files=output_files,
             )
 
         except Exception as e:
@@ -202,7 +204,6 @@ class SkillExecutor:
                 stderr=str(e),
                 timed_out=False,
                 work_dir=work_dir if work_dir and not self.cleanup_work_dir else None,
-                output_files=None,
             )
 
         finally:
@@ -223,19 +224,25 @@ class SkillExecutor:
 
         work_dir = tempfile.mkdtemp(prefix=f"dynamiq_skill_{skill_name}_")
         prefix_len = len(prefix)
-
-        for file_info in skill_files:
-            path = getattr(file_info, "path", file_info)
-            path = str(path)
-            rel = path[prefix_len:]
-            if not rel or rel.startswith("/"):
-                continue
-            target = Path(work_dir) / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            content = self.file_store.retrieve(path)
-            target.write_bytes(content)
-
-        return work_dir
+        try:
+            for file_info in skill_files:
+                path = getattr(file_info, "path", file_info)
+                path = str(path)
+                rel = path[prefix_len:]
+                if not rel or rel.startswith("/"):
+                    continue
+                target = Path(work_dir) / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                content = self.file_store.retrieve(path)
+                target.write_bytes(content)
+            return work_dir
+        except Exception:
+            if work_dir and os.path.exists(work_dir):
+                try:
+                    shutil.rmtree(work_dir, ignore_errors=True)
+                except OSError as e:
+                    logger.warning("SkillExecutor: cleanup of failed extraction dir %s: %s", work_dir, e)
+            raise
 
     def _sandbox_env(self, override: dict[str, str] | None) -> dict[str, str]:
         """Build environment for sandbox: base env, optionally no network, then override."""

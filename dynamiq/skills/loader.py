@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 from dynamiq.skills.models import Skill, SkillMetadata, SkillReference
+from dynamiq.skills.utils import extract_skill_content_slice
 from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.logger import logger
 
@@ -96,7 +97,7 @@ class SkillLoader:
 
         Args:
             name: Skill identifier
-            section: Markdown header to extract (e.g. "Welcome messages"); first ## or ### match
+            section: Markdown header to extract (e.g. "Welcome messages"); first # or ## match
             line_start: 1-based start line (body only, after frontmatter)
             line_end: 1-based end line (inclusive)
 
@@ -106,39 +107,12 @@ class SkillLoader:
         skill = self.load_skill(name)
         if not skill:
             return None
-        instructions: str = skill.instructions
-        lines = instructions.splitlines()
-        section_used: str | None = None
-
-        if section:
-            section_lower = section.strip().lower()
-            start_i = None
-            end_i = len(lines)
-            for i, line in enumerate(lines):
-                s = line.strip()
-                if s.startswith("#"):
-                    header_text = s.lstrip("#").strip().lower()
-                    if header_text == section_lower:
-                        start_i = i
-                        for j in range(i + 1, len(lines)):
-                            if lines[j].strip().startswith("##"):
-                                end_i = j
-                                break
-                        section_used = section
-                        break
-            if start_i is not None:
-                instructions = "\n".join(lines[start_i:end_i])
-            else:
-                section_used = None
-
-        elif line_start is not None or line_end is not None:
-            start = max(0, (line_start or 1) - 1)
-            end = line_end if line_end is not None else len(lines)
-            end = min(end, len(lines))
-            instructions = "\n".join(lines[start:end])
-        else:
-            pass
-
+        instructions, section_used = extract_skill_content_slice(
+            skill.instructions,
+            section=section,
+            line_start=line_start,
+            line_end=line_end,
+        )
         return {
             "skill_name": skill.name,
             "description": skill.metadata.description,
