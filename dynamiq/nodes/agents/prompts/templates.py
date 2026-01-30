@@ -12,14 +12,23 @@ You are AI powered assistant.
 {%- endif %}
 {%- if skills %}
 # AVAILABLE SKILLS
-You have access to specialized skills that can be loaded on-demand:
 {{skills}}
 
-To use a skill:
-1. List available skills: Use SkillsTool with action="list"
-2. Load a skill: Use SkillsTool with action="load" and skill_name="skill_name"
-3. Follow the loaded skill's instructions
-4. Unload when done: Use SkillsTool with action="unload" and skill_name="skill_name"
+## How to use skills (SkillsTool)
+- **List first**: Use action="list" to see available skills and their descriptions.
+Do not load full content until you need it.
+- **Get when needed**: Use action="get" and skill_name="..." to load skill content.
+For large skills, request only the part you need:
+  - Use section="Section title" to get a single markdown section (e.g. section="Welcome messages").
+  - Use line_start and line_end (1-based) to get a line range.
+- **Run scripts in sandbox**: Use action="run_script" with skill_name, script_path (e.g. scripts/run.py),
+and optional arguments=[].
+  For scripts that process files: use input_files (map FileStore path → sandbox path so
+   the script can read them), output_paths (sandbox paths to collect after run),
+   and output_prefix (FileStore prefix for collected files). The tool returns output_files
+    for you to store in FileStore if needed.
+
+Prefer list then get (or get with section/lines) so you only load what the task requires.
 {%- endif %}
 
 {%- if output_format %}

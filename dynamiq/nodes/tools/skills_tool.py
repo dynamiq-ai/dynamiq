@@ -1,3 +1,4 @@
+import io
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
@@ -5,243 +6,199 @@ from pydantic import BaseModel, Field
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.runnables import RunnableConfig
-from dynamiq.skills.loader import SkillLoader
-from dynamiq.skills.models import Skill
-from dynamiq.storages.file.base import FileStore
+from dynamiq.skills.executor import SkillExecutor
+from dynamiq.skills.sources.base import SkillSource
 from dynamiq.utils.logger import logger
 
 
 class SkillsToolInputSchema(BaseModel):
     """Input schema for Skills tool.
 
-    Attributes:
-        action: Action to perform (list, load, unload, refresh)
-        skill_name: Name of skill to load/unload (required for load/unload)
+    Actions: list (discover), get (full or partial content), run_script (sandbox).
+    For large skills use section or line_start/line_end to read only what you need.
     """
 
-    action: Literal["list", "load", "unload", "refresh"] = Field(
+    action: Literal["list", "get", "run_script"] = Field(
         ...,
         description=(
-            "Action to perform: 'list' available skills, 'load' a skill, "
-            "'unload' a skill, or 'refresh' skill list"
+            "Action: 'list' discover skills, 'get' full or partial skill content, "
+            "'run_script' execute a skill script in the sandbox"
         )
     )
-    skill_name: str | None = Field(
+    skill_name: str | None = Field(default=None, description="Skill name (required for get and run_script)")
+    section: str | None = Field(
+        default=None, description="For get: return only this markdown section (e.g. 'Welcome messages')"
+    )
+    line_start: int | None = Field(default=None, description="For get: 1-based start line (body only)")
+    line_end: int | None = Field(default=None, description="For get: 1-based end line (inclusive)")
+    script_path: str | None = Field(
+        default=None, description="Path relative to skill root, e.g. scripts/script.py (required for run_script)"
+    )
+    arguments: list[str] | None = Field(default=None, description="Arguments for the script (for run_script)")
+    input_files: dict[str, str] | None = Field(
         default=None,
-        description="Name of skill to load/unload (required for load/unload actions)"
+        description="For run_script: map FileStore path -> sandbox path (e.g. {'data/in.html': 'input/in.html'})",
+    )
+    output_paths: list[str] | None = Field(
+        default=None, description="For run_script: sandbox paths to collect after run (e.g. ['output/out.pptx'])"
+    )
+    output_prefix: str = Field(
+        default="", description="For run_script: FileStore path prefix for collected files (e.g. 'generated/')"
     )
 
 
 class SkillsTool(Node):
-    """Tool for managing agent skills - discovering, loading, and unloading.
+    """Tool for skills: discover, get content, run scripts.
 
-    This tool provides the agent with the ability to:
-    - List all available skills in the FileStore
-    - Load a skill's full content into context
-    - Unload a skill to free up context space
-    - Refresh the list of available skills
-
-    Skills are loaded on-demand to optimize context usage through
-    progressive disclosure. Skills are stored in FileStore under the
-    .skills/ prefix.
-
-    Attributes:
-        file_store: FileStore instance containing skill files
-        skills_prefix: Prefix path for skills in FileStore
-        _loader: Internal SkillLoader instance
-        _loaded_skills: Cache of currently loaded skills
+    Uses a configurable skill_source (e.g. FileStore, E2B). run_script uses
+    skill_executor when set (e.g. subprocess sandbox, E2B).
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "SkillsTool"
     description: str = (
-        "Manages available skills for the agent. Use this tool to:\n"
-        "- List all available skills with their descriptions\n"
-        "- Load a skill to access its full instructions and resources\n"
-        "- Unload a skill when no longer needed to free context\n"
-        "- Refresh the skills list after adding new skills to FileStore\n\n"
-        "Example: {\"action\": \"list\"} or {\"action\": \"load\", \"skill_name\": \"document_creator\"}"
+        "Manages skills. Use this tool to:\n"
+        "- List available skills: action='list'\n"
+        "- Get skill content: action='get', skill_name='...'. "
+        "For large skills use section='Section title' or line_start/line_end to read only a part.\n"
+        "- Run a skill script in the sandbox: action='run_script', "
+        "skill_name='...', script_path='scripts/...', optional arguments=[]\n\n"
+        "Do not load full skill content until you need it; "
+        "use list first, then get (or get with section/lines) when the task requires it."
     )
 
-    file_store: FileStore = Field(
-        ...,
-        description="FileStore instance containing skill files"
-    )
-    skills_prefix: str = Field(
-        default=".skills/",
-        description="Prefix path for skills in FileStore"
+    skill_source: SkillSource = Field(..., description="Where skills are discovered and loaded from")
+    skill_executor: SkillExecutor | None = Field(
+        default=None, description="Where skill scripts run (e.g. subprocess, E2B). None disables run_script."
     )
     input_schema: ClassVar[type[SkillsToolInputSchema]] = SkillsToolInputSchema
-
-    _loader: SkillLoader | None = None
-    _loaded_skills: dict[str, Skill] = {}
-
-    def __init__(self, **kwargs):
-        """Initialize the SkillsTool."""
-        super().__init__(**kwargs)
-        self._loader = SkillLoader(self.file_store, self.skills_prefix)
-        self._loaded_skills = {}
 
     def execute(
         self, input_data: SkillsToolInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
-        """Execute skills management action.
-
-        Args:
-            input_data: Validated input with action and optional skill_name
-            config: Optional runtime configuration
-            **kwargs: Additional keyword arguments
-
-        Returns:
-            Dictionary with 'content' key containing action results
-
-        Raises:
-            ToolExecutionException: If action fails or input is invalid
-        """
         action = input_data.action
-
-        logger.info(f"SkillsTool: executing action '{action}'")
+        logger.info(f"SkillsTool: action '{action}'")
 
         if action == "list":
             return self._list_skills()
-        elif action == "load":
+        if action == "get":
             if not input_data.skill_name:
-                raise ToolExecutionException(
-                    "skill_name required for load action",
-                    recoverable=True
-                )
-            return self._load_skill(input_data.skill_name)
-        elif action == "unload":
-            if not input_data.skill_name:
-                raise ToolExecutionException(
-                    "skill_name required for unload action",
-                    recoverable=True
-                )
-            return self._unload_skill(input_data.skill_name)
-        elif action == "refresh":
-            return self._refresh_skills()
-        else:
-            raise ToolExecutionException(
-                f"Unknown action: {action}",
-                recoverable=True
+                raise ToolExecutionException("skill_name required for get", recoverable=True)
+            return self._get_skill(
+                input_data.skill_name,
+                section=input_data.section,
+                line_start=input_data.line_start,
+                line_end=input_data.line_end,
             )
+        if action == "run_script":
+            if not self.skill_executor:
+                raise ToolExecutionException(
+                    "run_script is not available: skill_executor was not configured", recoverable=True
+                )
+            if not input_data.skill_name:
+                raise ToolExecutionException("skill_name required for run_script", recoverable=True)
+            if not input_data.script_path:
+                raise ToolExecutionException(
+                    "script_path required for run_script (e.g. scripts/run.py)", recoverable=True
+                )
+            return self._run_script(
+                input_data.skill_name,
+                input_data.script_path,
+                input_data.arguments or [],
+                input_files=input_data.input_files,
+                output_paths=input_data.output_paths,
+                output_prefix=input_data.output_prefix or "",
+            )
+        raise ToolExecutionException(f"Unknown action: {action}", recoverable=True)
 
     def _list_skills(self) -> dict[str, Any]:
-        """List all available skills.
-
-        Returns:
-            Dictionary with list of available skills and their metadata
-        """
-        skills = self._loader.discover_skills()
-
-        skills_info = []
-        for skill in skills:
-            skills_info.append({
-                "name": skill.name,
-                "description": skill.description,
-                "tags": skill.tags,
-                "loaded": skill.name in self._loaded_skills
-            })
-
-        logger.info(f"SkillsTool: listed {len(skills)} available skills")
-
+        skills = self.skill_source.discover_skills()
+        skills_info = [{"name": s.name, "description": s.description, "tags": s.tags} for s in skills]
+        logger.info(f"SkillsTool: listed {len(skills)} skills")
         return {
             "content": {
                 "available_skills": skills_info,
                 "total": len(skills),
-                "loaded_count": len(self._loaded_skills)
             }
         }
 
-    def _load_skill(self, skill_name: str) -> dict[str, Any]:
-        """Load a skill and return its full content.
-
-        Args:
-            skill_name: Name of the skill to load
-
-        Returns:
-            Dictionary with skill status and full instructions
-
-        Raises:
-            ToolExecutionException: If skill not found
-        """
-        if skill_name in self._loaded_skills:
-            logger.info(f"SkillsTool: skill '{skill_name}' already loaded")
-            return {
-                "content": {
-                    "status": "already_loaded",
-                    "message": f"Skill '{skill_name}' is already loaded",
-                    "skill": self._loaded_skills[skill_name].get_full_content()
-                }
-            }
-
-        skill = self._loader.load_skill(skill_name)
-
-        if not skill:
-            raise ToolExecutionException(
-                f"Skill '{skill_name}' not found in FileStore",
-                recoverable=True
+    def _get_skill(
+        self,
+        skill_name: str,
+        section: str | None = None,
+        line_start: int | None = None,
+        line_end: int | None = None,
+    ) -> dict[str, Any]:
+        if section is not None or line_start is not None or line_end is not None:
+            out = self.skill_source.load_skill_content(
+                skill_name,
+                section=section,
+                line_start=line_start,
+                line_end=line_end,
             )
-
-        self._loaded_skills[skill_name] = skill
-
-        logger.info(f"SkillsTool: successfully loaded skill '{skill_name}'")
-
+            if not out:
+                raise ToolExecutionException(f"Skill '{skill_name}' not found", recoverable=True)
+            logger.info(f"SkillsTool: got skill '{skill_name}' (section={section}, lines={line_start}-{line_end})")
+            return {"content": out}
+        skill = self.skill_source.load_skill(skill_name)
+        if not skill:
+            raise ToolExecutionException(f"Skill '{skill_name}' not found", recoverable=True)
+        logger.info(f"SkillsTool: got skill '{skill_name}'")
         return {
             "content": {
-                "status": "loaded",
-                "message": f"Successfully loaded skill '{skill_name}'",
                 "skill_name": skill.name,
                 "description": skill.metadata.description,
                 "instructions": skill.get_full_content(),
                 "supporting_files": [str(p) for p in skill.supporting_files_paths],
-                "dependencies": skill.metadata.dependencies
+                "dependencies": skill.metadata.dependencies,
             }
         }
 
-    def _unload_skill(self, skill_name: str) -> dict[str, Any]:
-        """Unload a skill from memory.
-
-        Args:
-            skill_name: Name of the skill to unload
-
-        Returns:
-            Dictionary with unload status
-        """
-        if skill_name not in self._loaded_skills:
-            logger.info(f"SkillsTool: skill '{skill_name}' is not currently loaded")
+    def _run_script(
+        self,
+        skill_name: str,
+        script_path: str,
+        arguments: list[str],
+        input_files: dict[str, str] | None = None,
+        output_paths: list[str] | None = None,
+        output_prefix: str = "",
+    ) -> dict[str, Any]:
+        if not isinstance(self.skill_executor, SkillExecutor):
             return {
                 "content": {
-                    "status": "not_loaded",
-                    "message": f"Skill '{skill_name}' is not currently loaded"
+                    "status": "error",
+                    "message": "skill_executor is not a SkillExecutor instance",
+                    "stdout": "",
+                    "stderr": "",
+                    "exit_code": -1,
+                    "success": False,
                 }
             }
 
-        del self._loaded_skills[skill_name]
+        result = self.skill_executor.execute_script(
+            skill_name=skill_name,
+            script_relative_path=script_path.replace("\\", "/"),
+            argv=arguments,
+            input_files=input_files,
+            output_paths=output_paths,
+            output_prefix=output_prefix,
+        )
+        logger.info(f"SkillsTool: run_script {skill_name}/{script_path} {result.summary()}")
 
-        logger.info(f"SkillsTool: successfully unloaded skill '{skill_name}'")
-
-        return {
-            "content": {
-                "status": "unloaded",
-                "message": f"Successfully unloaded skill '{skill_name}'"
-            }
+        content: dict[str, Any] = {
+            "status": "completed" if result.success else "failed",
+            "success": result.success,
+            "exit_code": result.exit_code,
+            "timed_out": result.timed_out,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
         }
-
-    def _refresh_skills(self) -> dict[str, Any]:
-        """Refresh the skills list by re-scanning FileStore.
-
-        Returns:
-            Dictionary with refresh status and updated skill count
-        """
-        skills = self._loader.discover_skills()
-
-        logger.info(f"SkillsTool: refreshed skills list, found {len(skills)} skills")
-
-        return {
-            "content": {
-                "status": "refreshed",
-                "message": f"Refreshed skills list. Found {len(skills)} skills",
-                "available_skills": [skill.name for skill in skills]
-            }
-        }
+        if result.output_files:
+            content["output_files"] = list(result.output_files.keys())
+            files_list = []
+            for path, data in result.output_files.items():
+                bio = io.BytesIO(data)
+                bio.name = path
+                files_list.append(bio)
+            return {"content": content, "files": files_list}
+        return {"content": content}

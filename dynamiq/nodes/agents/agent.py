@@ -935,6 +935,8 @@ class Agent(BaseAgent):
                     if isinstance(tool, ContextManagerTool):
                         _apply_context_manager_tool_effect(self._prompt, tool_result, self._history_offset)
 
+                    n_files = len(tool_files) if isinstance(tool_files, dict) else 0
+                    logger.info(f"Tool result passed to agent: content_len={len(str(tool_result))}, files={n_files}")
                     observation = f"\nObservation: {tool_result}\n"
                     self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 

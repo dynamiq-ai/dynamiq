@@ -2,6 +2,7 @@
 
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -43,10 +44,8 @@ class SkillLoader:
         skills = []
 
         try:
-            # List all files in FileStore
             all_files = self.file_store.list_files(recursive=True)
 
-            # Find SKILL.md files
             for file_info in all_files:
                 file_path = getattr(file_info, "path", file_info)
                 file_path = str(file_path)
@@ -84,6 +83,71 @@ class SkillLoader:
             logger.error(f"Failed to load skill {name}: {e}")
             return None
 
+    def load_skill_content(
+        self,
+        name: str,
+        section: str | None = None,
+        line_start: int | None = None,
+        line_end: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Load skill body content, optionally a section or line range.
+
+        Use for large skills: get only the part you need instead of full content.
+
+        Args:
+            name: Skill identifier
+            section: Markdown header to extract (e.g. "Welcome messages"); first ## or ### match
+            line_start: 1-based start line (body only, after frontmatter)
+            line_end: 1-based end line (inclusive)
+
+        Returns:
+            Dict with skill_name, description, instructions (full or slice), section_used, or None
+        """
+        skill = self.load_skill(name)
+        if not skill:
+            return None
+        instructions: str = skill.instructions
+        lines = instructions.splitlines()
+        section_used: str | None = None
+
+        if section:
+            section_lower = section.strip().lower()
+            start_i = None
+            end_i = len(lines)
+            for i, line in enumerate(lines):
+                s = line.strip()
+                if s.startswith("#"):
+                    header_text = s.lstrip("#").strip().lower()
+                    if header_text == section_lower:
+                        start_i = i
+                        for j in range(i + 1, len(lines)):
+                            if lines[j].strip().startswith("##"):
+                                end_i = j
+                                break
+                        section_used = section
+                        break
+            if start_i is not None:
+                instructions = "\n".join(lines[start_i:end_i])
+            else:
+                section_used = None
+
+        elif line_start is not None or line_end is not None:
+            start = max(0, (line_start or 1) - 1)
+            end = line_end if line_end is not None else len(lines)
+            end = min(end, len(lines))
+            instructions = "\n".join(lines[start:end])
+        else:
+            pass
+
+        return {
+            "skill_name": skill.name,
+            "description": skill.metadata.description,
+            "instructions": instructions,
+            "section_used": section_used,
+            "supporting_files": [str(p) for p in skill.supporting_files_paths],
+            "dependencies": skill.metadata.dependencies,
+        }
+
     def _parse_skill_reference(self, skill_path: str) -> SkillReference:
         """Parse SKILL.md to extract metadata only (lightweight).
 
@@ -96,18 +160,15 @@ class SkillLoader:
         Raises:
             ValueError: If YAML frontmatter is missing or invalid
         """
-        # Retrieve file content from FileStore
         content_bytes = self.file_store.retrieve(skill_path)
         content = content_bytes.decode('utf-8')
 
-        # Extract YAML frontmatter
         match = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
         if not match:
             raise ValueError(f"No YAML frontmatter found in {skill_path}")
 
         metadata_dict = yaml.safe_load(match.group(1))
 
-        # Validate required fields
         if 'name' not in metadata_dict:
             raise ValueError(f"Missing required field 'name' in {skill_path}")
         if 'description' not in metadata_dict:
@@ -133,11 +194,9 @@ class SkillLoader:
         Raises:
             ValueError: If SKILL.md format is invalid
         """
-        # Retrieve file content from FileStore
         content_bytes = self.file_store.retrieve(skill_path)
         content = content_bytes.decode('utf-8')
 
-        # Extract YAML frontmatter and markdown content
         match = re.match(r'^---\s*\n(.*?)\n---\s*\n(.*)', content, re.DOTALL)
         if not match:
             raise ValueError(f"Invalid SKILL.md format in {skill_path}")
@@ -145,16 +204,13 @@ class SkillLoader:
         metadata_dict = yaml.safe_load(match.group(1))
         instructions = match.group(2).strip()
 
-        # Validate and create metadata
         metadata = SkillMetadata(**metadata_dict)
 
-        # Resolve supporting files in FileStore
         skill_dir = f"{self.skills_prefix}{skill_name}/"
         supporting_paths = []
         for rel_path in metadata.supporting_files:
             file_path_in_store = skill_dir + rel_path
             if self.file_store.exists(file_path_in_store):
-                # Store as Path for compatibility, but it's actually a FileStore path
                 supporting_paths.append(Path(file_path_in_store))
             else:
                 logger.warning(
@@ -164,6 +220,6 @@ class SkillLoader:
         return Skill(
             metadata=metadata,
             instructions=instructions,
-            file_path=Path(skill_path),  # Store as Path for compatibility
+            file_path=Path(skill_path),
             supporting_files_paths=supporting_paths
         )

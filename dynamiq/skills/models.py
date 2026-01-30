@@ -1,18 +1,47 @@
-"""Data models for skills."""
-
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+SKILL_NAME_MAX_LENGTH = 64
+SKILL_DESCRIPTION_MAX_LENGTH = 1024
+SKILL_NAME_PATTERN = r"^[a-z0-9][a-z0-9\-]*[a-z0-9]$|^[a-z0-9]$"
+SKILL_RESERVED_NAMES = frozenset({"anthropic", "claude"})
+
+
+def _validate_skill_name(name: str) -> str:
+    """Validate skill name: lowercase, alphanumeric, hyphens/underscores; no reserved words."""
+    if not name or len(name) > SKILL_NAME_MAX_LENGTH:
+        raise ValueError(f"Skill name must be 1–{SKILL_NAME_MAX_LENGTH} characters")
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789-_")
+    if not name.islower() or not all(c in allowed for c in name):
+        raise ValueError("Skill name must contain only lowercase letters, numbers, hyphens, and underscores")
+    if name in SKILL_RESERVED_NAMES:
+        raise ValueError(f"Skill name cannot be reserved: {SKILL_RESERVED_NAMES}")
+    if "<" in name or ">" in name:
+        raise ValueError("Skill name cannot contain XML tags")
+    return name
+
+
+def _validate_skill_description(description: str) -> str:
+    """Validate description: non-empty, max length, no XML."""
+    if not description or not description.strip():
+        raise ValueError("Skill description must be non-empty")
+    if len(description) > SKILL_DESCRIPTION_MAX_LENGTH:
+        raise ValueError(f"Skill description must be at most {SKILL_DESCRIPTION_MAX_LENGTH} characters")
+    if "<" in description or ">" in description:
+        raise ValueError("Skill description cannot contain XML tags")
+    return description.strip()
 
 
 class SkillMetadata(BaseModel):
     """Metadata from YAML frontmatter in SKILL.md file.
 
+
     Attributes:
-        name: Unique identifier for the skill
+        name: Unique identifier (lowercase, numbers, hyphens; max 64 chars)
         version: Semantic version of the skill
-        description: Brief description of what the skill does
+        description: What the skill does and when to use it (max 1024 chars)
         author: Optional author information
         tags: List of tags for categorization
         dependencies: List of required Python packages
@@ -20,14 +49,24 @@ class SkillMetadata(BaseModel):
         created_at: Timestamp when skill was created
     """
 
-    name: str = Field(..., description="Unique skill identifier")
+    name: str = Field(..., description="Unique skill identifier (Claude-compliant)")
     version: str = Field(default="1.0.0", description="Semantic version")
-    description: str = Field(..., description="Brief description of the skill")
+    description: str = Field(..., description="Brief description; what and when to use")
     author: str | None = Field(default=None, description="Author information")
     tags: list[str] = Field(default_factory=list, description="Categorization tags")
     dependencies: list[str] = Field(default_factory=list, description="Required Python packages")
     supporting_files: list[str] = Field(default_factory=list, description="Supporting file paths")
     created_at: datetime = Field(default_factory=datetime.now, description="Creation timestamp")
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_skill_name(v)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str) -> str:
+        return _validate_skill_description(v)
 
 
 class Skill(BaseModel):
@@ -68,11 +107,9 @@ class Skill(BaseModel):
 
 
 class SkillReference(BaseModel):
-    """Lightweight reference to a skill (for agent memory).
+    """Lightweight reference to a skill (progressive disclosure).
 
-    This is used when discovering skills without loading full content.
-    Keeps memory footprint minimal while providing enough info for
-    the agent to decide when to load a skill.
+    Used when discovering skills without loading full content
 
     Attributes:
         name: Skill identifier
@@ -85,3 +122,13 @@ class SkillReference(BaseModel):
     description: str = Field(..., description="Brief description")
     file_path: str = Field(..., description="Path to SKILL.md file")
     tags: list[str] = Field(default_factory=list, description="Categorization tags")
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_skill_name(v)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str) -> str:
+        return _validate_skill_description(v)
