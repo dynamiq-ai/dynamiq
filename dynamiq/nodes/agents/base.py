@@ -335,6 +335,7 @@ class Agent(Node):
             "files": True,
             "images": True,
             "file_store": True,
+            "skills_config": True,
             "system_prompt_manager": True,  # Runtime state container, not serializable
         }
 

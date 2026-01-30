@@ -70,7 +70,7 @@ def upload_skills_to_filestore(file_store: InMemoryFileStore) -> None:
                 logger.info(" Uploaded %s", store_path)
 
 
-def create_agent(file_store: InMemoryFileStore, tracing_handler=None) -> Agent:
+def create_agent(file_store: InMemoryFileStore) -> Agent:
     """Create agent with skills (SkillsTool) and PythonCodeExecutor so it uses skill README and code to build Excel."""
     file_store_config = FileStoreConfig(
         enabled=True,
@@ -101,7 +101,7 @@ def main():
     upload_skills_to_filestore(file_store)
 
     tracing_handler = TracingCallbackHandler()
-    agent = create_agent(file_store, tracing_handler)
+    agent = create_agent(file_store)
 
     prompt = (
         "Create a house price simulation and dashboard in Excel based on this sample data. "

@@ -70,10 +70,10 @@ class SkillLoader:
         Returns:
             Fully loaded Skill object or None if not found
         """
-        skill_path = f"{self.skills_prefix}{name}/SKILL.md"
+        skill_path = self._resolve_skill_path(name)
 
-        if not self.file_store.exists(skill_path):
-            logger.error(f"Skill not found: {name} at {skill_path}")
+        if not skill_path:
+            logger.error(f"Skill not found: {name} under {self.skills_prefix}{name}/")
             return None
 
         try:
@@ -81,6 +81,28 @@ class SkillLoader:
         except Exception as e:
             logger.error(f"Failed to load skill {name}: {e}")
             return None
+
+    def _resolve_skill_path(self, name: str) -> str | None:
+        """Resolve the SKILL.md path for a skill directory, case-insensitively."""
+        skill_dir = f"{self.skills_prefix}{name}/"
+        exact_path = f"{skill_dir}SKILL.md"
+
+        if self.file_store.exists(exact_path):
+            return exact_path
+
+        try:
+            files = self.file_store.list_files(directory=skill_dir, recursive=True)
+        except Exception as e:
+            logger.warning(f"Failed to list files for skill {name}: {e}")
+            return None
+
+        for file_info in files:
+            file_path = getattr(file_info, "path", file_info)
+            file_path = str(file_path)
+            if file_path.startswith(skill_dir) and file_path.lower().endswith("/skill.md"):
+                return file_path
+
+        return None
 
     def _parse_skill_reference(self, skill_path: str) -> SkillReference:
         """Parse SKILL.md to extract metadata only (lightweight).
