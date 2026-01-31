@@ -31,12 +31,6 @@ These supplementary instructions enhance the agent's interactions but should nev
 {{context}}
 {%- endif %}
 
-{%- if agent_state %}
-
-# AGENT STATE
-{{agent_state}}
-{%- endif %}
-
 {%- if date %}
 - Current date: {{date}}
 {%- endif %}

@@ -3,6 +3,7 @@ Todo Management Tools for Agents
 """
 
 import json
+from enum import Enum
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,6 +15,15 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.logger import logger
 
+
+class TodoStatus(str, Enum):
+    """Status of a todo item."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
 # Path where todos are stored within the file store
 TODOS_FILE_PATH = "._agent/todos.json"
 
@@ -23,18 +33,18 @@ class TodoItem(BaseModel):
 
     id: str
     content: str
-    status: Literal["pending", "in_progress", "completed"] = "pending"
+    status: TodoStatus = TodoStatus.PENDING
 
     model_config = ConfigDict(extra="allow")
 
-
-class TodoReadInputSchema(BaseModel):
-    """Input schema for reading todos."""
-
-    filter_status: str | None = Field(
-        default=None,
-        description="Optional filter: 'pending', 'in_progress', 'completed'. Leave empty for all.",
-    )
+    def to_display_string(self) -> str:
+        """Format todo item for display with status icon."""
+        icon = {
+            TodoStatus.PENDING: "[ ]",
+            TodoStatus.IN_PROGRESS: "[~]",
+            TodoStatus.COMPLETED: "[+]",
+        }.get(self.status, "[ ]")
+        return f"{icon} {self.id}: {self.content}"
 
 
 class TodoWriteInputSchema(BaseModel):
@@ -44,7 +54,7 @@ class TodoWriteInputSchema(BaseModel):
         ...,
         description=(
             "List of todo items. Each item MUST have: "
-            "'id' (required string), 'content' (string), 'status' ('pending'|'in_progress'|'completed')."
+            "'id' (required string), 'content' (string), 'status' (TodoStatus enum: pending/in_progress/completed)."
         ),
     )
     merge: bool = Field(

@@ -24,7 +24,7 @@ from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CO
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
-from dynamiq.nodes.tools.todo_tools import TodoWriteTool
+from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
@@ -33,46 +33,27 @@ from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
 
-class TodoItem(BaseModel):
-    """A single todo item in the agent's task list."""
-
-    id: str = ""
-    content: str = ""
-    status: str = "pending"  # pending, in_progress, completed
-
-    def to_display_string(self) -> str:
-        """Format todo item for display with status icon."""
-        icon = {"pending": "[ ]", "in_progress": "[~]", "completed": "[+]"}.get(self.status, "[ ]")
-        return f"{icon} {self.id}: {self.content}"
-
-
 class AgentState(BaseModel):
     """
     Encapsulates the dynamic state of an agent during execution.
 
-    Tracks loop progress, files, and todos. Provides its own serialization
-    to string for injection into system prompts.
+    Tracks loop progress and todos. Provides its own serialization
+    to string for injection into observations.
     """
 
     current_loop: int = 0
     max_loops: int = 0
-    files: list[str] = Field(default_factory=list)
     todos: list[TodoItem] = Field(default_factory=list)
 
     def reset(self, max_loops: int = 0) -> None:
         """Reset state for a new execution."""
         self.current_loop = 0
         self.max_loops = max_loops
-        self.files = []
         self.todos = []
 
     def update_loop(self, current: int) -> None:
         """Update current loop number."""
         self.current_loop = current
-
-    def update_files(self, files: list[str]) -> None:
-        """Update file list."""
-        self.files = files
 
     def update_todos(self, todos: list[dict | TodoItem]) -> None:
         """Update todo list from dicts or TodoItem objects."""
@@ -80,7 +61,7 @@ class AgentState(BaseModel):
 
     def to_prompt_string(self) -> str:
         """
-        Serialize state to a string for system prompt injection.
+        Serialize state to a string for observation injection.
 
         Returns:
             str: Formatted state string, or empty string if no state to show.
@@ -90,12 +71,6 @@ class AgentState(BaseModel):
         # Loop progress
         if self.current_loop > 0:
             sections.append(f"Progress: Loop {self.current_loop}/{self.max_loops}")
-
-        # File state
-        if self.files:
-            file_preview = ", ".join(self.files[:5])
-            suffix = "..." if len(self.files) > 5 else ""
-            sections.append(f"Files: {len(self.files)} stored ({file_preview}{suffix})")
 
         # Todos
         if self.todos:
@@ -252,20 +227,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
     @model_validator(mode="after")
     def _ensure_todo_tools(self):
         """Automatically add TodoWriteTool when todo is enabled in file_store config."""
-        try:
-            if self.file_store.enabled and self.file_store.todo_enabled:
-                has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
+        if self.file_store.enabled and self.file_store.todo_enabled:
+            has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
 
-                if not has_todo_write:
-                    self.tools.append(
-                        TodoWriteTool(
-                            name="todo-write",
-                            file_store=self.file_store.backend,
-                        )
+            if not has_todo_write:
+                self.tools.append(
+                    TodoWriteTool(
+                        name="todo-write",
+                        file_store=self.file_store.backend,
                     )
-                    logger.info("Agent: Added TodoWriteTool")
-        except Exception as e:
-            logger.error(f"Failed to ensure TodoTools: {e}")
+                )
+                logger.info("Agent: Added TodoWriteTool")
         return self
 
     def _append_recovery_instruction(
@@ -866,6 +838,30 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return None
 
+    def _inject_state_into_messages(self, messages: list[Message]) -> list[Message]:
+        """
+        Create a copy of messages with state injected into the last user message.
+
+        Original messages are not modified.
+        """
+        state_info = self.state.to_prompt_string()
+        if not state_info or not messages:
+            return messages
+
+        last_msg = messages[-1]
+        if last_msg.role != MessageRole.USER:
+            return messages
+
+        # Return new list with modified last message (original unchanged)
+        return messages[:-1] + [
+            Message(
+                role=last_msg.role,
+                content=f"{last_msg.content}\n\n[State: {state_info}]",
+                metadata=last_msg.metadata,
+                static=last_msg.static,
+            )
+        ]
+
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
@@ -887,7 +883,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
-        # Initialize state before prompt setup so it's available in the first system message
+        # Initialize state (used for observation injection, not system prompt)
         self.state.max_loops = self.max_loops
         self._refresh_agent_state(1)
 
@@ -895,21 +891,22 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         for loop_num in range(1, self.max_loops + 1):
             # Update agent state (skip first iteration as it was done above)
+            # State is now injected into observations, not system prompt (preserves prompt caching)
             if loop_num > 1:
                 self._refresh_agent_state(loop_num)
-
-            # Refresh system message with latest state (for subsequent iterations)
-            if loop_num > 1 and self._prompt.messages:
-                self._prompt.messages[0].content = self._generate_system_prompt_content()
 
             try:
                 streaming_callback, llm_config, original_streaming_enabled = self._setup_streaming_callback(
                     config, loop_num, **kwargs
                 )
 
+                # Append state to the last user message before LLM call
+
+                messages = self._inject_state_into_messages(self._prompt.messages)
+
                 try:
                     llm_result = self._run_llm(
-                        messages=self._prompt.messages,
+                        messages=messages,
                         tools=self._tools,
                         response_format=self._response_format,
                         config=llm_config,
@@ -1108,20 +1105,16 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _generate_system_prompt_content(self) -> str:
         """
-        Generate the system prompt content with current state.
+        Generate the system prompt content (static, no dynamic state).
 
         Returns:
-            str: The rendered system prompt including tools, instructions, and agent state.
+            str: The rendered system prompt including tools and instructions.
         """
         instructions_config = self._get_additional_instructions_config()
-
-        # Get state string from AgentState object
-        agent_state = self.state.to_prompt_string()
 
         return self.generate_prompt(
             tools_name=self.tool_names,
             input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
-            agent_state=agent_state,
             **self.system_prompt_manager.build_additional_instructions(instructions_config),
         )
 
@@ -1133,17 +1126,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             loop_num: Current loop iteration number.
         """
         self.state.update_loop(loop_num)
-
-        # Update files
-        if self.file_store.enabled and self.file_store.backend:
-            try:
-                from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
-
-                files = self.file_store.backend.list_files()
-                user_files = [f.path for f in files if f.path != TODOS_FILE_PATH]
-                self.state.update_files(user_files)
-            except Exception:
-                logger.error("Failed to get file state")
 
         # Update todos
         if self.file_store.enabled and self.file_store.todo_enabled:
