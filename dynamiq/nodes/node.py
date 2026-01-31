@@ -1111,7 +1111,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         elapsed = 0.0
 
         while not is_done():
-            remaining = streaming.timeout - elapsed if streaming.timeout else poll_interval
+            remaining = streaming.timeout - elapsed if streaming.timeout is not None else poll_interval
             wait_time = min(poll_interval, remaining) if remaining > 0 else poll_interval
 
             try:
@@ -1120,7 +1120,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                 elapsed += wait_time
                 if is_done():
                     raise ValueError("Input streaming completed without receiving valid data.")
-                if streaming.timeout and elapsed >= streaming.timeout:
+                if streaming.timeout is not None and elapsed >= streaming.timeout:
                     raise ValueError(f"Input streaming timeout: {streaming.timeout} seconds exceeded.")
                 continue
 
