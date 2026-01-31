@@ -32,6 +32,7 @@ from dynamiq.nodes.tools.file_tools import (
 )
 from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
@@ -836,6 +837,12 @@ class Agent(Node):
                         merged_input[field_name] = self.file_store_backend.list_files_bytes()
             if isinstance(tool, Python):
                 merged_input["files"] = self.file_store_backend.list_files_bytes()
+
+            if isinstance(tool, PythonCodeExecutor) and not tool.file_store:
+                tool.file_store = self.file_store_backend
+                logger.debug(
+                    f"Agent {self.name} - {self.id}: injected file_store into PythonCodeExecutor tool {tool.name}"
+                )
 
         if tool_params:
             debug_info = []

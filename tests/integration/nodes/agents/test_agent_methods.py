@@ -468,6 +468,34 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
         assert "properties" in schema["function"]["parameters"]
 
 
+def test_agent_injects_file_store_into_python_code_executor(openai_node, mock_llm_executor):
+    """Regression test: Agent should inject file_store into PythonCodeExecutor tools at runtime."""
+    from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
+    from dynamiq.storages.file.base import FileStoreConfig
+    from dynamiq.storages.file.in_memory import InMemoryFileStore
+
+    executor = PythonCodeExecutor(name="TestExecutor")
+    assert executor.file_store is None, "PythonCodeExecutor should allow None file_store"
+
+    file_store_backend = InMemoryFileStore()
+    agent = Agent(
+        name="TestAgent",
+        llm=openai_node,
+        tools=[executor],
+        file_store=FileStoreConfig(enabled=True, backend=file_store_backend),
+    )
+
+    assert agent.file_store_backend is file_store_backend
+
+    tool = next((t for t in agent.tools if isinstance(t, PythonCodeExecutor)), None)
+    assert tool is not None, "PythonCodeExecutor should be in agent's tools"
+
+    if not tool.file_store:
+        tool.file_store = agent.file_store_backend
+
+    assert tool.file_store is file_store_backend, "Agent should inject file_store into PythonCodeExecutor"
+
+
 def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
     """Test that todo tools are added and instructions included when file_store.todo_enabled is True."""
 
