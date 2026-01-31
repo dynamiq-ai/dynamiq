@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.nodes.agents import Agent
-from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool, MessageSenderTool
+from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.feedback import ApprovalConfig, FeedbackMethod
@@ -70,28 +70,29 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
     )
 
     human_feedback_tool = HumanFeedbackTool(
-        description="This tool can be used to request some clarifications from user.",
+        name="human-feedback",
+        description="Tool for human interaction. Use action='ask' to request clarifications, action='info' "
+        "to notify user.",
         input_method=FeedbackMethod.STREAM,
+        output_method=FeedbackMethod.STREAM,
         streaming=StreamingConfig(enabled=True, input_queue=input_queue),
-    )
-
-    message_sender_tool = MessageSenderTool(
-        output_method=FeedbackMethod.STREAM, streaming=StreamingConfig(enabled=True, input_queue=input_queue)
     )
 
     agent = Agent(
         name="research_agent",
         role=(
             "You are a helpful assistant that has access to the internet using Tavily Tool."
-            "You can request some clarifications using HumanFeedbackTool and send messages using MessageSenderTool "
+            "You can request clarifications or send messages using human-feedback tool with action='ask' "
+            "or action='info'."
         ),
         llm=llm,
-        tools=[email_sender_tool, human_feedback_tool, message_sender_tool],
+        tools=[email_sender_tool, human_feedback_tool],
     )
 
     return agent.run(
         input_data={
-            "input": f"Write and send email: {request}. Notify user about status of email using MessageSenderTool."
+            "input": f"Write and send email: {request}. Notify user about status using human-feedback tool "
+            " with action='info'."
         },
         config=RunnableConfig(callbacks=[send_handler]),
     ).output["content"]

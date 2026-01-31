@@ -8,7 +8,7 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.graph import END, GraphOrchestrator
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.tools.function_tool import function_tool
-from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
+from dynamiq.nodes.tools.human_feedback import HumanFeedbackAction, HumanFeedbackTool
 from dynamiq.prompts import Message, Prompt
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
@@ -164,7 +164,9 @@ def create_workflow() -> Workflow:
 
         return {"result": result.output.get("content"), **context}
 
-    human_feedback_tool = HumanFeedbackTool()
+    human_feedback_tool = HumanFeedbackTool(
+        action=HumanFeedbackAction.ASK,  # Always wait for user input
+    )
 
     def concierge(context: dict[str, Any], **kwargs):
         if current_task := context.get("current_task"):
