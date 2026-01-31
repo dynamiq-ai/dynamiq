@@ -173,12 +173,23 @@ class FileStore(abc.ABC, BaseModel):
 
 
 class FileStoreConfig(BaseModel):
-    """Configuration for file storage."""
+    """Configuration for file storage and related features.
+
+    Attributes:
+        enabled: Whether file storage is enabled.
+        backend: The file storage backend to use.
+        agent_file_write_enabled: Whether the agent can write files.
+        todo_enabled: Whether to enable todo management tools (stored in ._agent/todos.json).
+        config: Additional configuration options.
+    """
 
     enabled: bool = False
     backend: FileStore = Field(..., description="File storage to use.")
     agent_file_write_enabled: bool = Field(
         default=False, description="Whether the agent is permitted to write files to the file store."
+    )
+    todo_enabled: bool = Field(
+        default=False, description="Whether to enable todo management tools (todos stored in ._agent/todos.json)."
     )
     config: dict[str, Any] = Field(default_factory=dict)
 

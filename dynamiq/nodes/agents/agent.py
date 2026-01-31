@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent as BaseAgent
@@ -19,10 +19,12 @@ from dynamiq.nodes.agents.exceptions import (
     TagNotFoundError,
     XMLParsingError,
 )
+from dynamiq.nodes.agents.prompts.manager import AdditionalInstructionsConfig
 from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
+from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
@@ -30,34 +32,53 @@ from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
 from dynamiq.utils.logger import logger
 
-final_answer_function_schema = {
-    "type": "function",
-    "strict": True,
-    "function": {
-        "name": "provide_final_answer",
-        "description": "Function should be called when if you can answer the initial request"
-        " or if there is not request at all.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "thought": {
-                    "type": "string",
-                    "description": "Your reasoning about why you can answer original question.",
-                },
-                "answer": {"type": "string", "description": "Answer on initial request."},
-            },
-            "required": ["thought", "answer"],
-        },
-    },
-}
 
-TYPE_MAPPING = {
-    int: "integer",
-    float: "float",
-    bool: "boolean",
-    str: "string",
-    dict: "object",
-}
+class AgentState(BaseModel):
+    """
+    Encapsulates the dynamic state of an agent during execution.
+
+    Tracks loop progress and todos. Provides its own serialization
+    to string for injection into observations.
+    """
+
+    current_loop: int = 0
+    max_loops: int = 0
+    todos: list[TodoItem] = Field(default_factory=list)
+
+    def reset(self, max_loops: int = 0) -> None:
+        """Reset state for a new execution."""
+        self.current_loop = 0
+        self.max_loops = max_loops
+        self.todos = []
+
+    def update_loop(self, current: int) -> None:
+        """Update current loop number."""
+        self.current_loop = current
+
+    def update_todos(self, todos: list[dict | TodoItem]) -> None:
+        """Update todo list from dicts or TodoItem objects."""
+        self.todos = [t if isinstance(t, TodoItem) else TodoItem(**t) for t in todos]
+
+    def to_prompt_string(self) -> str:
+        """
+        Serialize state to a string for observation injection.
+
+        Returns:
+            str: Formatted state string, or empty string if no state to show.
+        """
+        sections = []
+
+        # Loop progress
+        if self.current_loop > 0:
+            sections.append(f"Progress: Loop {self.current_loop}/{self.max_loops}")
+
+        # Todos
+        if self.todos:
+            todo_lines = [t.to_display_string() for t in self.todos]
+            sections.append("Todos:\n" + "\n".join(todo_lines))
+
+        return "\n".join(sections) if sections else ""
+
 
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
@@ -85,6 +106,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
+    state: AgentState = Field(default_factory=AgentState, exclude=True)
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
@@ -106,6 +128,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
             }
         )
         return base
+
+    def reset_run_state(self):
+        """Resets the agent's run state including AgentState."""
+        super().reset_run_state()
+        self.state.reset()
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -195,6 +222,22 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     )
         except Exception as e:
             logger.error(f"Failed to ensure ContextManagerTool: {e}")
+        return self
+
+    @model_validator(mode="after")
+    def _ensure_todo_tools(self):
+        """Automatically add TodoWriteTool when todo is enabled in file_store config."""
+        if self.file_store.enabled and self.file_store.todo_enabled:
+            has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
+
+            if not has_todo_write:
+                self.tools.append(
+                    TodoWriteTool(
+                        name="todo-write",
+                        file_store=self.file_store.backend,
+                    )
+                )
+                logger.info("Agent: Added TodoWriteTool")
         return self
 
     def _append_recovery_instruction(
@@ -494,11 +537,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         system_message = Message(
             role=MessageRole.SYSTEM,
-            content=self.generate_prompt(
-                tools_name=self.tool_names,
-                input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
-                **self.system_prompt_manager.build_delegation_variables(self.delegation_allowed),
-            ),
+            content=self._generate_system_prompt_content(),
             static=True,
         )
 
@@ -799,6 +838,30 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return None
 
+    def _inject_state_into_messages(self, messages: list[Message]) -> list[Message]:
+        """
+        Create a copy of messages with state injected into the last user message.
+
+        Original messages are not modified.
+        """
+        state_info = self.state.to_prompt_string()
+        if not state_info or not messages:
+            return messages
+
+        last_msg = messages[-1]
+        if last_msg.role != MessageRole.USER:
+            return messages
+
+        # Return new list with modified last message (original unchanged)
+        return messages[:-1] + [
+            Message(
+                role=last_msg.role,
+                content=f"{last_msg.content}\n\n[State: {state_info}]",
+                metadata=last_msg.metadata,
+                static=last_msg.static,
+            )
+        ]
+
     def _run_agent(
         self,
         input_message: Message | VisionMessage,
@@ -820,17 +883,30 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
+        # Initialize state (used for observation injection, not system prompt)
+        self.state.max_loops = self.max_loops
+        self._refresh_agent_state(1)
+
         self._setup_prompt_and_stop_sequences(input_message, history_messages)
 
         for loop_num in range(1, self.max_loops + 1):
+            # Update agent state (skip first iteration as it was done above)
+            # State is now injected into observations, not system prompt (preserves prompt caching)
+            if loop_num > 1:
+                self._refresh_agent_state(loop_num)
+
             try:
                 streaming_callback, llm_config, original_streaming_enabled = self._setup_streaming_callback(
                     config, loop_num, **kwargs
                 )
 
+                # Append state to the last user message before LLM call
+
+                messages = self._inject_state_into_messages(self._prompt.messages)
+
                 try:
                     llm_result = self._run_llm(
-                        messages=self._prompt.messages,
+                        messages=messages,
                         tools=self._tools,
                         response_format=self._response_format,
                         config=llm_config,
@@ -1027,12 +1103,71 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return f"{final_answer}"
 
+    def _generate_system_prompt_content(self) -> str:
+        """
+        Generate the system prompt content (static, no dynamic state).
+
+        Returns:
+            str: The rendered system prompt including tools and instructions.
+        """
+        instructions_config = self._get_additional_instructions_config()
+
+        return self.generate_prompt(
+            tools_name=self.tool_names,
+            input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
+            **self.system_prompt_manager.build_additional_instructions(instructions_config),
+        )
+
+    def _refresh_agent_state(self, loop_num: int) -> None:
+        """
+        Refresh the agent state with current values.
+
+        Args:
+            loop_num: Current loop iteration number.
+        """
+        self.state.update_loop(loop_num)
+
+        # Update todos
+        if self.file_store.enabled and self.file_store.todo_enabled:
+            try:
+                from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
+
+                file_store = self.file_store.backend
+                if file_store.exists(TODOS_FILE_PATH):
+                    content = file_store.retrieve(TODOS_FILE_PATH)
+                    data = json.loads(content.decode("utf-8"))
+                    self.state.update_todos(data.get("todos", []))
+            except Exception:
+                logger.error("Failed to get todo state")
+
+    def _get_additional_instructions_config(self) -> AdditionalInstructionsConfig:
+        """
+        Get configuration for additional instructions (capabilities) based on agent settings.
+
+        Uses the configuration as the source of truth. Tools are automatically added by
+        model validators when the corresponding config is enabled, so we don't need to
+        check tool presence here.
+
+        Returns:
+            AdditionalInstructionsConfig with capability flags for:
+                - delegation_enabled: Whether delegation is enabled
+                - context_compaction_enabled: Whether context compaction is enabled
+                - todo_management_enabled: Whether todo management is enabled
+        """
+        return AdditionalInstructionsConfig(
+            delegation_enabled=self.delegation_allowed,
+            context_compaction_enabled=self.summarization_config.enabled,
+            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
+        )
+
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
-        # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
+        # Get configuration for additional instructions and update prompt variables
+        instructions_config = self._get_additional_instructions_config()
+        # Additional instructions (delegation, context management, todos) are rendered via prompt variables
         self.system_prompt_manager.update_variables(
-            self.system_prompt_manager.build_delegation_variables(self.delegation_allowed)
+            self.system_prompt_manager.build_additional_instructions(instructions_config)
         )
 
         # Handle function calling schema generation first
