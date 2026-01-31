@@ -517,15 +517,11 @@ def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
     assert "TODO MANAGEMENT" in prompt, "TODO instructions should be in system prompt"
     assert "todo-write" in prompt, "todo-write tool should be mentioned in prompt"
 
-    # Check that agent state section is rendered (when state is provided)
-    prompt_with_state = agent.generate_prompt(agent_state="Progress: Loop 1/10")
-    assert "AGENT STATE" in prompt_with_state, "AGENT STATE section should be in system prompt"
-    assert "Progress: Loop 1/10" in prompt_with_state, "Loop progress should be shown in state"
-
 
 def test_agent_state_updates_with_todos(openai_node):
     """Test that AgentState correctly updates and serializes todo state."""
-    from dynamiq.nodes.agents.agent import AgentState, TodoItem
+    from dynamiq.nodes.agents.agent import AgentState
+    from dynamiq.nodes.tools.todo_tools import TodoItem, TodoStatus
 
     state = AgentState()
 
@@ -541,9 +537,9 @@ def test_agent_state_updates_with_todos(openai_node):
     # Update with todos (accepts both dicts and TodoItem objects)
     state.update_todos(
         [
-            TodoItem(id="1", content="First task", status="completed"),
-            TodoItem(id="2", content="Second task", status="in_progress"),
-            TodoItem(id="3", content="Third task", status="pending"),
+            TodoItem(id="1", content="First task", status=TodoStatus.COMPLETED),
+            TodoItem(id="2", content="Second task", status=TodoStatus.IN_PROGRESS),
+            TodoItem(id="3", content="Third task", status=TodoStatus.PENDING),
         ]
     )
     prompt_str = state.to_prompt_string()
@@ -559,4 +555,3 @@ def test_agent_state_updates_with_todos(openai_node):
     assert state.current_loop == 0
     assert state.max_loops == 10
     assert state.todos == []
-    assert state.files == []
