@@ -972,6 +972,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         error = None
         n_attempt = self.error_handling.max_retries + 1
         executor = None
+        timed_out = False
 
         try:
             if timeout is not None:
@@ -1013,6 +1014,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
                     return output
                 except TimeoutError as e:
                     error = e
+                    timed_out = True
                     self.run_on_node_execute_error(config.callbacks, error, **merged_kwargs)
                     logger.warning(f"Node {self.name} - {self.id}: timeout.")
                 except Exception as e:
@@ -1032,7 +1034,9 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             raise error
         finally:
             if executor is not None:
-                executor.shutdown()
+                # Use cancel_futures=True and wait=False when timeout occurred to prevent
+                # blocking on threads that may be stuck waiting (e.g., on input_queue.get())
+                executor.shutdown(wait=not timed_out, cancel_futures=timed_out)
 
     def execute_with_timeout(
         self,
@@ -1056,16 +1060,19 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             Any: Result of the execution.
 
         Raises:
-            Exception: If execution fails or times out.
+            TimeoutError: If execution exceeds the timeout.
+            Exception: If execution fails.
         """
         future = executor.submit(self.execute, input_data, config=config, **kwargs)
 
         try:
-            result = future.result(timeout=timeout)
-        except Exception as e:
-            raise e
-
-        return result
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            # Cancel the future to prevent further execution if possible.
+            # Note: cancel() only works if the task hasn't started yet.
+            # For running tasks, we rely on executor.shutdown(cancel_futures=True).
+            future.cancel()
+            raise
 
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""
@@ -1084,30 +1091,53 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             event_msg_type (Type[StreamingEventMessage], optional): The event message type to use.
             event (str, optional): The event to use for the message.
             config (RunnableConfig, optional): Configuration for the runnable.
+
+        Returns:
+            StreamingEventMessage: The validated streaming event message.
+
+        Raises:
+            ValueError: If input streaming is not enabled, timeout is exceeded, or the done event is set
+                before receiving valid data.
         """
         # Use runnable streaming configuration. If not found use node streaming configuration
         streaming = getattr(config.nodes_override.get(self.id), "streaming", None) or self.streaming
-        if streaming.input_streaming_enabled:
-            while not streaming.input_queue_done_event or not streaming.input_queue_done_event.is_set():
-                try:
-                    data = streaming.input_queue.get(timeout=streaming.timeout)
-                except Empty:
-                    raise ValueError(f"Input streaming timeout: {streaming.timeout} exceeded.")
+        if not streaming.input_streaming_enabled:
+            raise ValueError("Input streaming is not enabled.")
 
-                try:
-                    event_msg = event_msg_type.model_validate_json(data)
-                    if event and event_msg.event != event:
-                        raise ValueError()
-                except ValueError:
-                    logger.error(
-                        f"Invalid streaming event data: {data}. "
-                        f"Allowed event: {event}, event_msg_type: {event_msg_type}"
-                    )
-                    continue
+        def is_done() -> bool:
+            return streaming.input_queue_done_event is not None and streaming.input_queue_done_event.is_set()
 
-                return event_msg
+        poll_interval = streaming.input_queue_poll_interval
+        elapsed = 0.0
 
-        raise ValueError("Input streaming is not enabled.")
+        while not is_done():
+            remaining = streaming.timeout - elapsed if streaming.timeout else poll_interval
+            wait_time = min(poll_interval, remaining) if remaining > 0 else poll_interval
+
+            try:
+                data = streaming.input_queue.get(timeout=wait_time)
+            except Empty:
+                elapsed += wait_time
+                if is_done():
+                    raise ValueError("Input streaming completed without receiving valid data.")
+                if streaming.timeout and elapsed >= streaming.timeout:
+                    raise ValueError(f"Input streaming timeout: {streaming.timeout} seconds exceeded.")
+                continue
+
+            try:
+                event_msg = event_msg_type.model_validate_json(data)
+                if event and event_msg.event != event:
+                    raise ValueError()
+            except ValueError:
+                logger.error(
+                    f"Invalid streaming event data: {data}. "
+                    f"Allowed event: {event}, event_msg_type: {event_msg_type}"
+                )
+                continue
+
+            return event_msg
+
+        raise ValueError("Input streaming completed without receiving valid data.")
 
     def run_on_node_start(
         self,
