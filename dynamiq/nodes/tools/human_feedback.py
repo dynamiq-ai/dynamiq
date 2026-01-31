@@ -17,7 +17,7 @@ class HumanFeedbackAction(str, Enum):
     """Actions available for the HumanFeedbackTool."""
 
     ASK = "ask"  # Request input from user
-    SEND = "send"  # Send message without waiting for response
+    INFO = "info"  # Send info message without waiting for response
 
 
 class HFStreamingInputEventMessageData(BaseModel):
@@ -64,7 +64,7 @@ class OutputMethodCallable(ABC):
     Abstract base class for sending message.
 
     This class defines the interface for various output methods that can be used
-    to send messages in the HumanFeedbackTool (action='send').
+    to send messages in the HumanFeedbackTool (action='info').
     """
 
     @abstractmethod
@@ -83,8 +83,8 @@ class HumanFeedbackInputSchema(BaseModel):
     """Input schema for HumanFeedbackTool."""
 
     action: HumanFeedbackAction = Field(
-        default=HumanFeedbackAction.SEND,
-        description="Action to perform: 'ask' to request input from user, 'send' to just send a message.",
+        default=HumanFeedbackAction.INFO,
+        description="Action to perform: 'ask' to request input from user, 'info' to just send a message.",
     )
     model_config = ConfigDict(extra="allow")
 
@@ -93,8 +93,8 @@ class HumanFeedbackTool(Node):
     """
     A unified tool for human interaction - both gathering feedback and sending messages.
 
-    This tool can either prompt the user for input (action="ask") or send a message
-    without waiting for response (action="send").
+    This tool can either prompt the user for input (action="ask") or send an info message
+    without waiting for response (action="info").
 
     Attributes:
         group (Literal[NodeGroup.TOOLS]): The group the node belongs to.
@@ -107,15 +107,15 @@ class HumanFeedbackTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "message_sender"
-    description: str = """Tool for human interaction - asking questions or sending messages.
+    description: str = """Tool for human interaction - asking questions or sending info messages.
 
 Actions:
 - "ask": Request input from the user (clarifications, confirmations, missing info)
-- "send": Send a message without waiting for response (notifications, status updates)
+- "info": Send an info message without waiting for response (notifications, status updates)
 
 Usage:
 - Ask user: {"action": "ask", "input": "What is your preference?"}
-- Send message: {"action": "send", "input": "Task completed successfully!"}
+- Send info: {"action": "info", "input": "Task completed successfully!"}
 """
     input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
     output_method: FeedbackMethod | OutputMethodCallable = FeedbackMethod.CONSOLE
@@ -206,7 +206,7 @@ Usage:
         event = HFStreamingOutputEventMessage(
             wf_run_id=config.run_id,
             entity_id=self.id,
-            data=HFStreamingOutputEventMessageData(prompt=message, action=HumanFeedbackAction.SEND),
+            data=HFStreamingOutputEventMessageData(prompt=message, action=HumanFeedbackAction.INFO),
             event=streaming.event,
             source=StreamingEntitySource(
                 name=self.name,
@@ -235,7 +235,7 @@ Usage:
             return self.input_method.get_input(input_text)
 
     def _execute_send(self, input_text: str, config: RunnableConfig, **kwargs) -> None:
-        """Execute the 'send' action - send message to user."""
+        """Execute the 'info' action - send info message to user."""
         if isinstance(self.output_method, FeedbackMethod):
             if self.output_method == FeedbackMethod.CONSOLE:
                 self.output_method_console(input_text)
@@ -254,7 +254,7 @@ Usage:
 
         Based on the 'action' parameter:
         - "ask": Prompts the user for input and returns their response
-        - "send": Sends a message to the user without waiting for response
+        - "info": Sends an info message to the user without waiting for response
 
         Args:
             input_data (HumanFeedbackInputSchema): The input data containing action and message.
@@ -275,11 +275,11 @@ Usage:
             result = self._execute_ask(input_text, config, **kwargs)
             logger.debug(f"Tool {self.name} - {self.id}: finished with result {result}")
             return {"content": result}
-        elif action == HumanFeedbackAction.SEND:
+        elif action == HumanFeedbackAction.INFO:
             self._execute_send(input_text, config, **kwargs)
             logger.debug(f"Tool {self.name} - {self.id}: message sent")
             return {"content": f"Message sent: {input_text}"}
         else:
             raise ValueError(
-                f"Unsupported action: {action}. Use '{HumanFeedbackAction.ASK}' or '{HumanFeedbackAction.SEND}'."
+                f"Unsupported action: {action}. Use '{HumanFeedbackAction.ASK}' or '{HumanFeedbackAction.INFO}'."
             )

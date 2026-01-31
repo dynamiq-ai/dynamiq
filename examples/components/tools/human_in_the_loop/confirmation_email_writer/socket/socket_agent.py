@@ -71,7 +71,7 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
 
     human_feedback_tool = HumanFeedbackTool(
         name="human-feedback",
-        description="Tool for human interaction. Use action='ask' to request clarifications, action='send' "
+        description="Tool for human interaction. Use action='ask' to request clarifications, action='info' "
         "to notify user.",
         input_method=FeedbackMethod.STREAM,
         output_method=FeedbackMethod.STREAM,
@@ -83,7 +83,7 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
         role=(
             "You are a helpful assistant that has access to the internet using Tavily Tool."
             "You can request clarifications or send messages using human-feedback tool with action='ask' "
-            "or action='send'."
+            "or action='info'."
         ),
         llm=llm,
         tools=[email_sender_tool, human_feedback_tool],
@@ -92,7 +92,7 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
     return agent.run(
         input_data={
             "input": f"Write and send email: {request}. Notify user about status using human-feedback tool "
-            " with action='send'."
+            " with action='info'."
         },
         config=RunnableConfig(callbacks=[send_handler]),
     ).output["content"]

@@ -108,7 +108,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     message_queue = Queue()
 
-    # Message sender tool - uses action='send' to just send without waiting for response
+    # Message sender tool - uses action='info' to just send without waiting for response
     message_tool = HumanFeedbackTool(
         name="start-notification",
         output_method=FeedbackMethod.STREAM,

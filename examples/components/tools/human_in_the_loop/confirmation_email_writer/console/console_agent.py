@@ -37,7 +37,7 @@ def run_agent(query) -> dict:
 
     human_feedback_tool = HumanFeedbackTool(
         name="human-feedback",
-        description="Tool for human interaction. Use action='ask' to request clarifications, action='send' "
+        description="Tool for human interaction. Use action='ask' to request clarifications, action='info' "
         "to notify user.",
         input_method=FeedbackMethod.CONSOLE,
         output_method=FeedbackMethod.CONSOLE,
@@ -48,7 +48,7 @@ def run_agent(query) -> dict:
         role=(
             "You are a helpful assistant that has access to the internet using Tavily Tool."
             "You can request clarifications or send messages using human-feedback tool with "
-            "action='ask' or action='send'."
+            "action='ask' or action='info'."
         ),
         inference_mode=InferenceMode.XML,
         llm=llm,
@@ -58,7 +58,7 @@ def run_agent(query) -> dict:
     return agent.run(
         input_data={
             "input": f"Write and send email: {query}. Notify user about status using human-feedback tool "
-            "with action='send'."
+            "with action='info'."
         },
     ).output["content"]
 

@@ -48,7 +48,7 @@ async def handle_event_data(websocket: WebSocket, event: StreamingEventMessage, 
     # Handle HumanFeedbackTool events (both ask and send actions)
     if event.source.type == "dynamiq.nodes.tools.HumanFeedbackTool":
         prompt = event.data.get("prompt", "")
-        action = event.data.get("action", HumanFeedbackAction.SEND)
+        action = event.data.get("action", HumanFeedbackAction.INFO)
         logger.info(f"Client: {prompt}")
 
         # For 'ask' action, we need to get user input and send it back
