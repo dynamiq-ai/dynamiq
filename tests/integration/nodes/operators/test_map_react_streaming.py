@@ -23,20 +23,12 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 def mock_llm_response_text():
     return """<output>
   <thought>We'll try a noop, then query and scrape.</thought>
-  <tool_calls>
-    <tool>
-      <name>NoOp Tool</name>
-      <input>{}</input>
-    </tool>
-    <tool>
-      <name>Exa Search Tool</name>
-      <input>{"query": "test", "limit": 1}</input>
-    </tool>
-    <tool>
-      <name>Firecrawl Tool</name>
-      <input>{"url": "https://example.com"}</input>
-    </tool>
-  </tool_calls>
+  <action>RunParallelTool</action>
+  <action_input>{"tools": [
+    {"name": "NoOp Tool", "input": {}},
+    {"name": "Exa Search Tool", "input": {"query": "test", "limit": 1}},
+    {"name": "Firecrawl Tool", "input": {"url": "https://example.com"}}
+  ]}</action_input>
 </output>"""
 
 
@@ -134,7 +126,7 @@ def run(input_data):
         assert len(items) > 0
         joined = "".join(str(chunk) for _, chunk in items)
         # Check for XML format or mocked response
-        assert ("<thought>" in joined) or ("<tool" in joined) or ("mocked_response" in joined)
+        assert ("<thought>" in joined) or ("<action>" in joined) or ("mocked_response" in joined)
 
     # Verify each tool produced at least one trace
     def is_tool_group(g):

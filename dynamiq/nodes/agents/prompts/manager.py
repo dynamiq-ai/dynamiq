@@ -22,6 +22,7 @@ from dynamiq.nodes.agents.prompts.react import (
     REACT_MAX_LOOPS_PROMPT,
 )
 from dynamiq.nodes.agents.prompts.registry import get_prompt_constant
+from dynamiq.nodes.agents.prompts.secondary_instructions import REACT_BLOCK_MULTI_TOOL_PLANNING
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
@@ -334,5 +335,7 @@ def get_model_specific_prompts(
             prompt_blocks["instructions"] = xml_instructions_no_tools if not has_tools else instructions_xml
 
     # Add secondary_instructions with multi-tool planning when parallel is enabled
+    if parallel_tool_calls_enabled:
+        prompt_blocks["secondary_instructions"] = REACT_BLOCK_MULTI_TOOL_PLANNING
 
     return prompt_blocks, agent_template

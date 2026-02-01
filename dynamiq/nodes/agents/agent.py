@@ -710,7 +710,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
 
                 # Handle XML parallel mode (but not for ContextManagerTool)
-                if action == "<Parallel Tool Calls>" and self.parallel_tool_calls_enabled and not skip_parallel:
+                if (
+                    self.sanitize_tool_name(action) == "RunParallelTool"
+                    and self.parallel_tool_calls_enabled
+                    and not skip_parallel
+                ):
                     execution_output = self._execute_tools(action_input["tools"], thought, loop_num, config, **kwargs)
                     tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
                 else:

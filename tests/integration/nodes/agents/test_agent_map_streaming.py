@@ -22,20 +22,12 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 def mock_llm_response_text():
     return """<output>
   <thought>Need to use tools to gather info and scrape.</thought>
-  <tool_calls>
-    <tool>
-      <name>NoOp Tool</name>
-      <input>{}</input>
-    </tool>
-    <tool>
-      <name>Exa Search Tool</name>
-      <input>{"query": "test", "limit": 1}</input>
-    </tool>
-    <tool>
-      <name>Firecrawl Tool</name>
-      <input>{"url": "https://example.com"}</input>
-    </tool>
-  </tool_calls>
+  <action>RunParallelTool</action>
+  <action_input>{"tools": [
+    {"name": "NoOp Tool", "input": {}},
+    {"name": "Exa Search Tool", "input": {"query": "test", "limit": 1}},
+    {"name": "Firecrawl Tool", "input": {"url": "https://example.com"}}
+  ]}</action_input>
 </output>"""
 
 
@@ -146,7 +138,7 @@ def run(input_data):
     for items in llm_events_by_entity.values():
         assert len(items) > 0
         joined = "".join(str(chunk) for _, chunk in items)
-        assert ("<thought>" in joined) or ("<tool" in joined) or ("mocked_response" in joined)
+        assert ("<thought>" in joined) or ("<action>" in joined) or ("mocked_response" in joined)
 
 
 def test_react_agent_map_streaming_final_mode_isolated(mock_llm_executor, mock_tools_http):
