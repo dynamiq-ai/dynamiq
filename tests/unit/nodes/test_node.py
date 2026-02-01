@@ -645,10 +645,12 @@ def test_background_thread_can_be_unblocked_by_done_event():
     input_queue = Queue()
 
     # Long streaming timeout, but we'll signal done_event to unblock
+    # Use short poll interval so done_event is detected quickly
     node.streaming = StreamingConfig(
         enabled=True,
         input_queue=input_queue,
         input_queue_done_event=done_event,
+        input_queue_poll_interval=SHORT_POLL_INTERVAL,
         timeout=STREAMING_TIMEOUT_LONG,
     )
     node.error_handling.timeout_seconds = EXECUTE_TIMEOUT
