@@ -141,6 +141,7 @@ class HumanFeedbackTool(Node):
             data=HFStreamingOutputEventMessageData(prompt=prompt),
             event=streaming.event,
             source=StreamingEntitySource(
+                entity_id=self.id,
                 name=self.name,
                 group=self.group,
                 type=self.type,
@@ -262,6 +263,7 @@ class MessageSenderTool(Node):
             data=HFStreamingOutputEventMessageData(prompt=prompt),
             event=self.streaming.event,
             source=StreamingEntitySource(
+                entity_id=self.id,
                 name=self.name,
                 group=self.group,
                 type=self.type,
