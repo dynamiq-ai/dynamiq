@@ -21,6 +21,7 @@ from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CO
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
+from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
@@ -711,7 +712,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
                 # Handle XML parallel mode (but not for ContextManagerTool)
                 if (
-                    self.sanitize_tool_name(action) == "RunParallelTool"
+                    self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
                     and self.parallel_tool_calls_enabled
                     and not skip_parallel
                 ):

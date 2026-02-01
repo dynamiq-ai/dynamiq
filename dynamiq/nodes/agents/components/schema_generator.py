@@ -56,13 +56,19 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
         params = []
         for name, field in tool.input_schema.model_fields.items():
             if not field.json_schema_extra or field.json_schema_extra.get("is_accessible_to_agent", True):
+                args = get_args(field.annotation)
                 if get_origin(field.annotation) in (Union, types.UnionType):
                     type_str = str(field.annotation)
+                elif field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
+                    type_str = "tuple[str, ...]"
+                elif args and hasattr(args[0], "model_fields"):
+                    nested_fields = [
+                        f"{fn}: {getattr(fi.annotation, '__name__', str(fi.annotation))} - {fi.description or ''}"
+                        for fn, fi in args[0].model_fields.items()
+                    ]
+                    type_str = f"list[{{{', '.join(nested_fields)}}}, ...]"
                 else:
                     type_str = getattr(field.annotation, "__name__", str(field.annotation))
-
-                if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
-                    type_str = "tuple[str, ...]"
 
                 description = field.description or "No description"
                 params.append(f"{name} ({type_str}): {description}")

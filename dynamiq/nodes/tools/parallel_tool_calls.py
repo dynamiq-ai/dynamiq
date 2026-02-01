@@ -4,29 +4,32 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from dynamiq.nodes import ErrorHandling, Node, NodeGroup
+from dynamiq.nodes import Node, NodeGroup
+
+PARALLEL_TOOL_NAME = "ParallelTool"
+
+
+class ToolCallItem(BaseModel):
+    """Schema for a single tool call within parallel execution."""
+
+    name: str = Field(
+        ...,
+        description="Name of the tool to execute (must match an available tool name)",
+    )
+    input: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Input parameters for the tool as key-value pairs",
+    )
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class ParallelToolCallsInputSchema(BaseModel):
-    """Input schema for ParallelToolCallsTool.
+    """Input schema for ParallelToolCallsTool."""
 
-    Example:
-        {
-            "tools": [
-                {"name": "<ToolA>", "input": {"query": "AI news"}},
-                {"name": "<ToolB>", "input": {"city": "NYC"}}
-            ]
-        }
-    """
-
-    tools: list[dict[str, Any]] = Field(
+    tools: list[ToolCallItem] = Field(
         ...,
-        description=(
-            "List of tools to execute in parallel. Each item must have 'name' (from available tool names) "
-            "and 'input' (dict of tool parameters). Example: "
-            '[{"name": "<ToolA>", "input": {"query": "AI"}}, '
-            '{"name": "<ToolB>", "input": {"expr": "2+2"}}]'
-        ),
+        description="List of tools to execute in parallel",
         min_length=1,
     )
 
@@ -46,17 +49,8 @@ class ParallelToolCallsTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
-    name: str = "RunParallelTool"
-    description: str = (
-        "Run multiple tools at once. "
-        "Input is a JSON object with a 'tools' array. "
-        "Each array item has 'name' (string) and 'input' (object). "
-        'Example input: {"tools": [{"name": "<ToolA>", "input": {"x": 1}}, {"name": "<ToolB>", "input": {"y": 2}}]}'
-    )
-
-    error_handling: ErrorHandling = Field(
-        default_factory=lambda: ErrorHandling(timeout_seconds=600)
-    )
+    name: str = PARALLEL_TOOL_NAME
+    description: str = "Tool that enables running multiple other tools simultaneously in parallel execution."
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ParallelToolCallsInputSchema]] = ParallelToolCallsInputSchema
