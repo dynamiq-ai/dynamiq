@@ -26,7 +26,7 @@ from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
-from dynamiq.prompts import Message, MessageRole, VisionMessage
+from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.llm_tool import Tool
 from dynamiq.types.streaming import StreamingMode
@@ -838,11 +838,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return None
 
-    def _inject_state_into_messages(self, messages: list[Message]) -> list[Message]:
+    def _inject_state_into_messages(self, messages: list[Message | VisionMessage]) -> list[Message | VisionMessage]:
         """
         Create a copy of messages with state injected into the last user message.
 
-        Original messages are not modified.
+        Original messages are not modified. Handles both Message and VisionMessage types.
         """
         state_info = self.state.to_prompt_string()
         if not state_info or not messages:
@@ -852,11 +852,24 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if last_msg.role != MessageRole.USER:
             return messages
 
-        # Return new list with modified last message (original unchanged)
+        state_suffix = f"\n\n[State: {state_info}]"
+
+        if isinstance(last_msg, VisionMessage):
+            # For VisionMessage, append state as a new text content item
+            new_content = list(last_msg.content) + [VisionMessageTextContent(text=state_suffix)]
+            return messages[:-1] + [
+                VisionMessage(
+                    role=last_msg.role,
+                    content=new_content,
+                    static=last_msg.static,
+                )
+            ]
+
+        # Regular Message with string content
         return messages[:-1] + [
             Message(
                 role=last_msg.role,
-                content=f"{last_msg.content}\n\n[State: {state_info}]",
+                content=f"{last_msg.content}{state_suffix}",
                 metadata=last_msg.metadata,
                 static=last_msg.static,
             )
