@@ -61,7 +61,7 @@ def generate_input_formats(tools: list[Node], sanitize_tool_name: Callable[[str]
                     type_str = str(field.annotation)
                 elif field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
                     type_str = "tuple[str, ...]"
-                elif args and hasattr(args[0], "model_fields"):
+                elif args and hasattr(args[0], "model_fields") and get_origin(field.annotation) is list:
                     nested_fields = [
                         f"{fn}: {getattr(fi.annotation, '__name__', str(fi.annotation))} - {fi.description or ''}"
                         for fn, fi in args[0].model_fields.items()

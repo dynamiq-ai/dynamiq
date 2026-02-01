@@ -597,10 +597,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             if tool is not None:
                 source_name = tool_name = tool.name
-            elif isinstance(action, list):
+            elif self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
                 tool_names = [
                     tool_data["name"] if isinstance(tool_data, dict) and "name" in tool_data else UNKNOWN_TOOL_NAME
-                    for tool_data in action
+                    for tool_data in action_input["tools"]
                 ]
 
                 if len(tool_names) == 1:

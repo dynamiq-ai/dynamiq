@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.nodes import Node, NodeGroup
 
-PARALLEL_TOOL_NAME = "run_parallel"
+PARALLEL_TOOL_NAME = "run_parallel"  # if change here, also change in ParallelToolCallsTool
 
 
 class ToolCallItem(BaseModel):
@@ -52,7 +52,6 @@ class ParallelToolCallsTool(Node):
     name: Literal["run_parallel"] = PARALLEL_TOOL_NAME  # Frozen - cannot be overridden
     description: str = "Tool that enables running multiple other tools simultaneously in parallel execution."
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[ParallelToolCallsInputSchema]] = ParallelToolCallsInputSchema
 
     def execute(self, input_data: ParallelToolCallsInputSchema, config=None, **kwargs):
