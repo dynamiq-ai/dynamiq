@@ -13,6 +13,7 @@ from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.operators import Map
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
+from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -21,15 +22,19 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 
 @pytest.fixture
 def mock_llm_response_text():
-    return """<output>
+    return (
+        """<output>
   <thought>We'll try a noop, then query and scrape.</thought>
-  <action>RunParallelTool</action>
+  <action>"""
+        + PARALLEL_TOOL_NAME
+        + """</action>
   <action_input>{"tools": [
     {"name": "NoOp Tool", "input": {}},
     {"name": "Exa Search Tool", "input": {"query": "test", "limit": 1}},
     {"name": "Firecrawl Tool", "input": {"url": "https://example.com"}}
   ]}</action_input>
 </output>"""
+    )
 
 
 @pytest.fixture

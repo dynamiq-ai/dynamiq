@@ -450,7 +450,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             content=self.generate_prompt(
                 tools_name=self.tool_names,
                 input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
-                **self.system_prompt_manager.build_delegation_variables(self.delegation_allowed),
             ),
             static=True,
         )
@@ -988,10 +987,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         super()._init_prompt_blocks()
         # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
 
-        self.system_prompt_manager.update_variables(
-            self.system_prompt_manager.build_delegation_variables(self.delegation_allowed)
-        )
-
         # Handle function calling schema generation first
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             self._tools = schema_generator.generate_function_calling_schemas(
@@ -1007,6 +1002,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             inference_mode=self.inference_mode,
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             has_tools=bool(self.tools),
+            delegation_allowed=self.delegation_allowed,
         )
 
         # Only auto-wrap the entire role in a raw block if the user did not

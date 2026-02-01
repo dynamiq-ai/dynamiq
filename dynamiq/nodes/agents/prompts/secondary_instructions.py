@@ -1,5 +1,18 @@
 """Secondary instructions for agent prompts."""
 
+DELEGATION_INSTRUCTIONS = (
+    "- Optional: If you want an agent tool's response returned verbatim as the final output, "
+    'set "delegate_final": true in that tool\'s input. Use this only for a single agent tool call '
+    "and do not provide your own final answer; the system will return the agent's result directly. "
+    "Do not set delegate_final: true inside metadata of the input, it has to be a separate field."
+)
+
+DELEGATION_INSTRUCTIONS_XML = (
+    '- To return an agent tool\'s response as the final output, include "delegate_final": true inside that '
+    "tool's <input> or <action_input>. Use this only for a single agent tool call and do not provide an "
+    "<answer> yourself; the system will return the agent's result directly."
+)
+
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
 MULTI-TOOL PLANNING AND STRATEGY:
 
@@ -68,7 +81,6 @@ EFFICIENCY GUIDELINES:
 1. Parallel vs Sequential:
    - Use PARALLEL calls when queries are independent
    - Use SEQUENTIAL only when later queries depend on earlier results
-   - Group related queries in single tool_calls block
 
 2. Query Optimization:
    - Start broad, then narrow based on results

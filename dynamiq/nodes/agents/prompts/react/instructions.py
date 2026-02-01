@@ -1,17 +1,3 @@
-DELEGATION_INSTRUCTIONS = (
-    "- Optional: If you want an agent tool's response returned verbatim as the final output, "
-    'set "delegate_final": true in that tool\'s input. Use this only for a single agent tool call '
-    "and do not provide your own final answer; the system will return the agent's result directly."
-    "Do not set delegate_final: true inside metadata of the input, it has to be a separate field."
-)
-
-DELEGATION_INSTRUCTIONS_XML = (
-    '- To return an agent tool\'s response as the final output, include "delegate_final": true inside that '
-    "tool's <input> or <action_input>. Use this only for a single agent tool call and do not provide an "
-    "<answer> yourself; the system will return the agent's result directly."
-)
-
-
 REACT_BLOCK_INSTRUCTIONS_SINGLE = """Always follow this exact format in your responses:
 
 Thought: [Your detailed reasoning about what to do next]
@@ -49,8 +35,6 @@ FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - Files are automatically collected and will be returned with your final answer
 - Mention created files in your final answer so users know what was generated
-
-{{ delegation_instructions }}
 """  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
@@ -95,7 +79,7 @@ CRITICAL XML FORMAT RULES:
 - Start the text immediately after each opening tag; do not add leading newlines or indentation inside the tags
 - Write thoughts in the first person (e.g., "I will...", "I should...")
 - Explain why this specific tool is the right choice
-- For tool use, include action and action_input tags
+- For tool use, always include action and action_input tags
 - For direct answers, only include thought and answer tags
 - JSON in <action_input> MUST be on single line with proper escaping
 - NO line breaks or control characters inside JSON strings
@@ -121,8 +105,6 @@ FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
 - Generated files are automatically collected and returned with your final answer
 - File operations are handled transparently - focus on the task, not file management
-
-{{ delegation_instructions_xml }}
 """  # noqa: E501
 
 
@@ -146,21 +128,6 @@ You have access to a variety of tools,
 and you are responsible for using
 them in any order you choose to complete the task:\n
 {{ tool_description }}
-"""
-
-REACT_BLOCK_NO_TOOLS = """Always follow this exact format in your responses:
-
-Thought: [Your detailed reasoning about the user's question]
-Answer: [Your complete answer to the user's question]
-
-IMPORTANT RULES:
-- ALWAYS start with "Thought:" to explain your reasoning process
-- Keep the explanation on the same line as "Thought:" without inserting blank lines or leading spaces
-- Use first-person language when thinking or answering (e.g., "I think...", "I recommend...")
-- Provide a clear, direct answer after your thought
-- If you cannot fully answer, explain why in your thought
-- Be thorough and helpful in your response
-- Do not mention tools or actions since you don't have access to any
 """
 
 REACT_BLOCK_OUTPUT_FORMAT = """In your final answer:
@@ -202,8 +169,6 @@ FILE HANDLING:
 - Tools may generate files that are automatically collected
 - Generated files will be included in the final response
 - Never return empty response.
-
-{{ delegation_instructions }}
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING = """
@@ -228,8 +193,6 @@ FUNCTION CALLING GUIDELINES:
 FILE HANDLING:
 - Tools may generate files that will be included in the final response
 - Files created by tools are automatically collected and returned
-
-{{ delegation_instructions }}
 """  # noqa: E501
 
 REACT_BLOCK_INSTRUCTIONS_NO_TOOLS = """

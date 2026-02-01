@@ -8,8 +8,6 @@ from typing import Any
 from jinja2 import Template
 
 from dynamiq.nodes.agents.prompts.react import (
-    DELEGATION_INSTRUCTIONS,
-    DELEGATION_INSTRUCTIONS_XML,
     REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING,
     REACT_BLOCK_INSTRUCTIONS_NO_TOOLS,
     REACT_BLOCK_INSTRUCTIONS_SINGLE,
@@ -22,7 +20,11 @@ from dynamiq.nodes.agents.prompts.react import (
     REACT_MAX_LOOPS_PROMPT,
 )
 from dynamiq.nodes.agents.prompts.registry import get_prompt_constant
-from dynamiq.nodes.agents.prompts.secondary_instructions import REACT_BLOCK_MULTI_TOOL_PLANNING
+from dynamiq.nodes.agents.prompts.secondary_instructions import (
+    DELEGATION_INSTRUCTIONS,
+    DELEGATION_INSTRUCTIONS_XML,
+    REACT_BLOCK_MULTI_TOOL_PLANNING,
+)
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
@@ -204,6 +206,7 @@ class AgentPromptManager:
         inference_mode: InferenceMode,
         parallel_tool_calls_enabled: bool,
         has_tools: bool,
+        delegation_allowed: bool = False,
     ) -> None:
         """
         Setup prompts for ReAct-style Agent.
@@ -216,6 +219,7 @@ class AgentPromptManager:
             inference_mode=inference_mode,
             parallel_tool_calls_enabled=parallel_tool_calls_enabled,
             has_tools=has_tools,
+            delegation_allowed=delegation_allowed,
         )
 
         # Update prompt blocks
@@ -234,30 +238,13 @@ class AgentPromptManager:
         else:
             logger.debug(f"Using default prompts for model '{self.model_name}'")
 
-    def build_delegation_variables(self, delegation_allowed: bool = False) -> dict[str, str]:
-        """
-        Provide prompt snippets for delegate_final guidance when enabled.
-
-        Args:
-            delegation_allowed: Whether delegation is allowed for the agent
-
-        Returns:
-            Dictionary containing delegation instructions for both standard and XML formats
-        """
-        if not delegation_allowed:
-            return {"delegation_instructions": "", "delegation_instructions_xml": ""}
-
-        return {
-            "delegation_instructions": DELEGATION_INSTRUCTIONS,
-            "delegation_instructions_xml": DELEGATION_INSTRUCTIONS_XML,
-        }
-
 
 def get_model_specific_prompts(
     model_name: str,
     inference_mode: InferenceMode,
     parallel_tool_calls_enabled: bool,
     has_tools: bool,
+    delegation_allowed: bool = False,
 ) -> tuple[dict[str, str], str]:
     """
     Get model-specific prompts based on the model name and agent configuration.
@@ -267,6 +254,7 @@ def get_model_specific_prompts(
         inference_mode: The inference mode being used
         parallel_tool_calls_enabled: Whether parallel tool calls are enabled
         has_tools: Whether the agent has tools
+        delegation_allowed: Whether delegation is allowed
 
     Returns:
         Tuple of (prompt_blocks dict, agent_prompt_template string)
@@ -276,19 +264,11 @@ def get_model_specific_prompts(
     if agent_template != AGENT_PROMPT_TEMPLATE:
         logger.debug(f"Using model-specific AGENT_PROMPT_TEMPLATE for '{model_name}'")
 
-    # DEFAULT mode always uses single-tool instructions (parallel not supported)
     instructions_default = get_prompt_constant(
         model_name, "REACT_BLOCK_INSTRUCTIONS_SINGLE", REACT_BLOCK_INSTRUCTIONS_SINGLE
     )
     if instructions_default != REACT_BLOCK_INSTRUCTIONS_SINGLE:
         logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_SINGLE for '{model_name}'")
-
-    # XML mode instructions
-    instructions_xml = get_prompt_constant(
-        model_name, "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
-    )
-    if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_SINGLE:
-        logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
 
     # Get other model-specific prompts
     react_block_tools = get_prompt_constant(model_name, "REACT_BLOCK_TOOLS", REACT_BLOCK_TOOLS)
@@ -332,10 +312,25 @@ def get_model_specific_prompts(
             xml_instructions_no_tools = get_prompt_constant(
                 model_name, "REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS
             )
+            # XML mode instructions
+            instructions_xml = get_prompt_constant(
+                model_name, "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
+            )
+            if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_SINGLE:
+                logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
             prompt_blocks["instructions"] = xml_instructions_no_tools if not has_tools else instructions_xml
 
-    # Add secondary_instructions with multi-tool planning when parallel is enabled
+    # Build secondary_instructions from enabled features
+    secondary_parts = []
     if parallel_tool_calls_enabled:
-        prompt_blocks["secondary_instructions"] = REACT_BLOCK_MULTI_TOOL_PLANNING
+        secondary_parts.append(REACT_BLOCK_MULTI_TOOL_PLANNING)
+    if delegation_allowed:
+        if inference_mode == InferenceMode.XML:
+            secondary_parts.append(DELEGATION_INSTRUCTIONS_XML)
+        else:
+            secondary_parts.append(DELEGATION_INSTRUCTIONS)
+
+    if secondary_parts:
+        prompt_blocks["secondary_instructions"] = "\n\n".join(secondary_parts)
 
     return prompt_blocks, agent_template
