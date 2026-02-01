@@ -3,7 +3,8 @@ from functools import cached_property
 from queue import Queue
 from threading import Event
 from typing import Any
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator
 
 from dynamiq.utils import generate_uuid
 
@@ -101,10 +102,10 @@ class StreamingConfig(BaseModel):
     """
     enabled: bool = False
     event: str = STREAMING_EVENT
-    timeout: float | None = 600
+    timeout: PositiveFloat | None = 600.0
     input_queue: Queue | None = None
     input_queue_done_event: Event | None = None
-    input_queue_poll_interval: float = 5.0
+    input_queue_poll_interval: PositiveFloat = 5.0
     mode: StreamingMode = StreamingMode.FINAL
     include_usage: bool = False
 
