@@ -683,22 +683,25 @@ class Agent(HistoryManagerMixin, BaseAgent):
         observation = f"\nObservation: {tool_result}\n"
         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
 
-    def _validate_parallel_tool_input(self, action_input: Any) -> dict[str, Any]:
+    def _validate_parallel_tool_input(self, action_input: Any) -> list[dict[str, Any]] | None:
         """Validate and parse parallel tool input schema.
+
+        If validation fails, logs error and adds observation for agent recovery.
 
         Args:
             action_input: Raw input from LLM for the parallel tool.
 
         Returns:
-            Validated input as a dictionary.
-
-        Raises:
-            RecoverableAgentException: If validation fails.
+            list: Validated tools list, or None if validation failed
         """
         try:
-            return ParallelToolCallsInputSchema.model_validate(action_input).model_dump()
+            validated = ParallelToolCallsInputSchema.model_validate(action_input).model_dump()
+            return validated["tools"]
         except Exception as e:
-            raise RecoverableAgentException(f"Invalid parallel tool input: {e}. ")
+            error_message = f"Invalid parallel tool input: {e}"
+            logger.error(error_message)
+            self._add_observation(error_message)
+            return None
 
     def _should_skip_parallel_mode(
         self, action: str | None, action_input: Any
@@ -775,7 +778,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             skipped_tools: list[str] = []
 
             if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
-                action_input = self._validate_parallel_tool_input(action_input)["tools"]
+                action_input = self._validate_parallel_tool_input(action_input)
+                if action_input is None:
+                    return None
 
             # Check if ContextManagerTool is in the action - if so, skip parallel mode
             skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(action, action_input)
