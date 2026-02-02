@@ -765,40 +765,20 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if action and self.tools:
             tool_result = None
             skipped_tools: list[str] = []
-            try:
-                if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
-                    action_input = self._validate_parallel_tool_input(action_input)
 
-                # Check if ContextManagerTool is in the action - if so, skip parallel mode
-                skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(
-                    action, action_input
-                )
+            if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
+                action_input = self._validate_parallel_tool_input(action_input)
 
-                # Check if ContextManagerTool is in the action - if so, skip parallel mode
-                skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(
-                    action, action_input
-                )
+            # Check if ContextManagerTool is in the action - if so, skip parallel mode
+            skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(action, action_input)
 
-                # Handle XML parallel mode (but not for ContextManagerTool)
-                if (
-                    self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
-                    and self.parallel_tool_calls_enabled
-                    and not skip_parallel
-                ):
-                    execution_output = self._execute_tools(action_input["tools"], thought, loop_num, config, **kwargs)
-                    tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
-                else:
-                    result = self._execute_single_tool(action, action_input, thought, loop_num, config, **kwargs)
-
-                    if isinstance(result, tuple) and len(result) == 3 and result[0] == "DELEGATED":
-                        return result[1]
-                    tool_result, tool_files, tool = result
-
-            except RecoverableAgentException as e:
-                tool_result = f"{type(e).__name__}: {e}"
             # Handle XML parallel mode (only for multiple tools, not for ContextManagerTool)
             tools_data = action_input if isinstance(action_input, list) else [action_input]
-            if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled and not skip_parallel:
+            if (
+                self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
+                and self.parallel_tool_calls_enabled
+                and not skip_parallel
+            ):
                 tool_result, _ = self._execute_tools(tools_data, thought, loop_num, config, **kwargs)
             else:
                 tool_result, _, is_delegated, _ = self._execute_single_tool(
