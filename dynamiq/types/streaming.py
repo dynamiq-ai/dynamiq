@@ -86,7 +86,7 @@ class StreamingThought(BaseModel):
         return self.model_dump(**kwargs)
 
 
-class AgentReasoningToolData(BaseModel):
+class AgentToolData(BaseModel):
     """Model for tool information in agent reasoning events."""
 
     name: str
@@ -100,7 +100,7 @@ class AgentReasoningEventMessageData(BaseModel):
     tool_run_id: str
     thought: str
     action: str
-    tool: AgentReasoningToolData
+    tool: AgentToolData
     action_input: Any
     loop_num: int
 
@@ -110,7 +110,7 @@ class AgentToolResultEventMessageData(BaseModel):
 
     tool_run_id: str
     name: str
-    tool: AgentReasoningToolData
+    tool: AgentToolData
     input: Any
     result: Any
     files: list = Field(default_factory=list)
