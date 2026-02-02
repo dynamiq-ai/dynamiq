@@ -147,13 +147,13 @@ def resolve_skills_config(
             )
         source = FileStoreSkillSource(
             file_store=fs,
-            skills_prefix=backend.skills_prefix or ".skills/",
+            skills_prefix=prefix,
         )
         if whitelist_entries:
             source = _FilteringSkillSourceWrapper(source, whitelist_entries)
         executor = SkillExecutor(
             file_store=fs,
-            skills_prefix=backend.skills_prefix or ".skills/",
+            skills_prefix=prefix,
             default_timeout_seconds=120,
             cleanup_work_dir=True,
         )

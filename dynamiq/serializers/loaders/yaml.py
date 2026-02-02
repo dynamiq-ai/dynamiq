@@ -597,9 +597,10 @@ class WorkflowYAMLLoader:
                     and "skills." not in type_str
                 ):
                     param_id = updated_param_data.get("id")
-                    updated_param_data = cls.get_nodes_without_depends({param_id: updated_param_data}, **kwargs)[
-                        param_id
-                    ]
+                    get_node_kwargs = {k: v for k, v in kwargs.items() if k != "node_id"}
+                    updated_param_data = cls.get_nodes_without_depends(
+                        {param_id: updated_param_data}, **get_node_kwargs
+                    )[param_id]
 
                 updated_node_init_data[param_name] = updated_param_data
 

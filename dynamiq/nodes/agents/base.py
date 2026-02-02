@@ -233,6 +233,7 @@ class Agent(Node):
     description: str | None = Field(default=None, description="Short human-readable description of the agent.")
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
+    _skills_tool_ids: list[str] = PrivateAttr(default_factory=list)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _history_offset: int = PrivateAttr(
         default=2,  # Offset to the first message (default: 2 — system and initial user messages).
@@ -360,7 +361,8 @@ class Agent(Node):
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
 
-        data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools if tool.id not in self._mcp_server_tool_ids]
+        excluded_tool_ids = set(self._mcp_server_tool_ids) | set(self._skills_tool_ids)
+        data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools if tool.id not in excluded_tool_ids]
         data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_servers]
 
         data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
@@ -432,6 +434,7 @@ class Agent(Node):
         source, executor = resolved
         skills_tool = SkillsTool(skill_source=source, skill_executor=executor)
         self.tools.append(skills_tool)
+        self._skills_tool_ids.append(skills_tool.id)
 
         available_skills = source.discover_skills()
         skills_summary = self._format_skills_summary(available_skills)
