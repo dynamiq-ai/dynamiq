@@ -20,6 +20,7 @@ STREAMING_EVENT = "streaming"
 
 
 class StreamingEntitySource(BaseModel):
+    id: str | None = None
     name: str | None = None
     group: str | None = None
     type: str | None = None
@@ -84,6 +85,37 @@ class StreamingThought(BaseModel):
 
     def to_dict(self, **kwargs) -> dict:
         return self.model_dump(**kwargs)
+
+
+class AgentToolData(BaseModel):
+    """Model for tool information in agent reasoning events."""
+
+    name: str
+    type: str
+    action_type: str | None = None
+
+
+class AgentReasoningEventMessageData(BaseModel):
+    """Model for agent reasoning streaming event data."""
+
+    tool_run_id: str
+    thought: str
+    action: str
+    tool: AgentToolData
+    action_input: Any
+    loop_num: int
+
+
+class AgentToolResultEventMessageData(BaseModel):
+    """Model for agent tool result streaming event data."""
+
+    tool_run_id: str
+    name: str
+    tool: AgentToolData
+    input: Any
+    result: Any
+    files: list = Field(default_factory=list)
+    loop_num: int
 
 
 class StreamingConfig(BaseModel):
