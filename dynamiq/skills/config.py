@@ -78,9 +78,16 @@ def resolve_skills_config(skills: SkillsConfig | dict | None) -> SkillSource | N
 
     whitelist_entries: list[SkillWhitelistEntry] | None = None
     if whitelist_data:
-        whitelist_entries = [
-            SkillWhitelistEntry.model_validate(e) if isinstance(e, dict) else e for e in whitelist_data
-        ]
+        whitelist_entries = []
+        for e in whitelist_data:
+            if isinstance(e, dict):
+                whitelist_entries.append(SkillWhitelistEntry.model_validate(e))
+            elif isinstance(e, SkillWhitelistEntry):
+                whitelist_entries.append(e)
+            else:
+                raise ValueError(
+                    f"Whitelist entry must be a dict or SkillWhitelistEntry, got {type(e).__name__}"
+                )
 
     from dynamiq.skills.registry.dynamiq import DynamiqSkillSource
 

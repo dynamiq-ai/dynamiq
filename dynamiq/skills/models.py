@@ -90,11 +90,6 @@ class Skill(BaseModel):
         """Get skill name from metadata."""
         return self.metadata.name
 
-    @property
-    def summary(self) -> str:
-        """Get short summary for agent memory."""
-        return f"{self.metadata.name}: {self.metadata.description}"
-
     def get_full_content(self) -> str:
         """Returns complete skill content for loading into agent context.
 
