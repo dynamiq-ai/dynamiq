@@ -31,6 +31,7 @@ from dynamiq.nodes.tools.file_tools import (
     FileWriteTool,
 )
 from dynamiq.nodes.tools.mcp import MCPServer
+from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
@@ -199,6 +200,11 @@ class Agent(Node):
         default=False,
         description="Allow returning a child agent tool's output directly via delegate_final flag.",
     )
+    parallel_tool_calls_enabled: bool = Field(
+        default=False,
+        description="Enable multi-tool execution in a single step. "
+        "When True, the agent can call multiple tools in parallel.",
+    )
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
@@ -303,6 +309,11 @@ class Agent(Node):
             self.tools.append(FileSearchTool(file_store=self.file_store_backend))
             self.tools.append(FileListTool(file_store=self.file_store_backend))
 
+        if self.parallel_tool_calls_enabled:
+            # Filter out any user tools with the reserved parallel tool name
+            self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
+            self.tools.append(ParallelToolCallsTool())
+
         self._init_prompt_blocks()
         if self._skills_should_init():
             self._init_skills()
@@ -391,7 +402,6 @@ class Agent(Node):
 
         self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
         self.system_prompt_manager.setup_for_base_agent()
-        self.system_prompt_manager.update_variables({"delegation_instructions": "", "delegation_instructions_xml": ""})
 
     def _skills_should_init(self) -> bool:
         """True if skills support should be initialized (enabled and backend set)."""
@@ -560,6 +570,7 @@ class Agent(Node):
                             inference_mode=self.inference_mode,
                             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
                             has_tools=True,
+                            delegation_allowed=self.delegation_allowed,
                         )
 
             normalized_files = self._ensure_named_files(files)
@@ -1242,16 +1253,7 @@ class Agent(Node):
     @property
     def tool_description(self) -> str:
         """Returns a description of the tools available to the agent."""
-        return (
-            "\n".join(
-                [
-                    f"{tool.name}:\n <{tool.name}_description>\n{tool.description.strip()}\n<\\{tool.name}_description>"
-                    for tool in self.tools
-                ]
-            )
-            if self.tools
-            else ""
-        )
+        return "\n".join([f"- {tool.name}: {tool.description.strip()}" for tool in self.tools]) if self.tools else ""
 
     @property
     def tool_names(self) -> str:
