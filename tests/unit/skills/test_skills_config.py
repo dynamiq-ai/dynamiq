@@ -78,18 +78,15 @@ def test_resolve_skills_config_dynamiq_backend_missing_connection_raises():
 
 
 def test_resolve_skills_config_dynamiq_backend():
-    """resolve_skills_config returns (source, None) for Dynamiq backend with connection."""
+    """resolve_skills_config returns source for Dynamiq backend with connection."""
     conn = MagicMock()
     skills_dict = {
         "enabled": True,
         "backend": {"type": "Dynamiq", "connection": conn},
         "whitelist": [],
     }
-    result = resolve_skills_config(skills_dict)
-    assert result is not None
-    source, executor = result
+    source = resolve_skills_config(skills_dict)
     assert source is not None
-    assert executor is None
     assert isinstance(source, DynamiqSkillSource)
     assert source.connection is conn
 
@@ -99,9 +96,6 @@ def test_resolve_skills_config_dynamiq_skills_config_instance():
     conn = MagicMock()
     backend = SkillsBackendConfig(type=SkillsBackendType.Dynamiq, connection=conn)
     cfg = SkillsConfig(enabled=True, backend=backend)
-    result = resolve_skills_config(cfg)
-    assert result is not None
-    source, executor = result
+    source = resolve_skills_config(cfg)
     assert source is not None
-    assert executor is None
     assert isinstance(source, DynamiqSkillSource)

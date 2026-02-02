@@ -315,9 +315,9 @@ class Agent(Node):
             self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
             self.tools.append(ParallelToolCallsTool())
 
+        self._init_prompt_blocks()
         if self._skills_should_init():
             self._init_skills()
-        self._init_prompt_blocks()
 
     @model_validator(mode="before")
     @classmethod
@@ -420,16 +420,14 @@ class Agent(Node):
         return self.skills is not None and self.skills.enabled and self.skills.backend is not None
 
     def _init_skills(self):
-        """Initialize skills support from skills config (backend -> source + derived executor)."""
+        """Initialize skills support from skills config (backend -> source)."""
         from dynamiq.nodes.tools.skills_tool import SkillsTool
         from dynamiq.skills.config import resolve_skills_config
 
-        resolved = resolve_skills_config(self.skills)
-        if resolved is None:
+        source = resolve_skills_config(self.skills)
+        if source is None:
             logger.warning("Skills config missing or invalid (backend required); skipping skills init")
             return
-
-        source, _ = resolved
         skills_tool = SkillsTool(skill_source=source)
         self.tools.append(skills_tool)
         self._skills_tool_ids.append(skills_tool.id)

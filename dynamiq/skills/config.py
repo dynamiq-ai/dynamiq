@@ -1,14 +1,15 @@
 """Skills configuration: Dynamiq registry backend only."""
 
+from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.skills.models import SkillWhitelistEntry
 from dynamiq.skills.sources.base import SkillSource
 
 
-class SkillsBackendType:
+class SkillsBackendType(str, Enum):
     """Skills backend: Dynamiq (API) only."""
 
     Dynamiq = "Dynamiq"
@@ -19,7 +20,7 @@ class SkillsBackendConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    type: str = Field(
+    type: SkillsBackendType = Field(
         default=SkillsBackendType.Dynamiq,
         description="Backend type: 'Dynamiq' (API registry).",
     )
@@ -27,16 +28,6 @@ class SkillsBackendConfig(BaseModel):
         default=None,
         description="Connection instance for Dynamiq backend (resolved by loader).",
     )
-
-    @field_validator("type", mode="before")
-    @classmethod
-    def normalize_type(cls, v: Any) -> str:
-        if v is None or (isinstance(v, str) and v.strip() == ""):
-            return SkillsBackendType.Dynamiq
-        s = str(v).strip()
-        if "Dynamiq" in s or "registry" in s.lower():
-            return SkillsBackendType.Dynamiq
-        return SkillsBackendType.Dynamiq
 
 
 class SkillsConfig(BaseModel):
@@ -62,10 +53,10 @@ class SkillsConfig(BaseModel):
     )
 
 
-def resolve_skills_config(skills: SkillsConfig | dict | None) -> tuple[SkillSource, None] | None:
-    """Resolve skills config to (source, None). Returns None if skills disabled or invalid.
+def resolve_skills_config(skills: SkillsConfig | dict | None) -> SkillSource | None:
+    """Resolve skills config to a skill source. Returns None if skills disabled or invalid.
 
-    Only Dynamiq backend is supported: source = DynamiqSkillSource(connection, whitelist).
+    Only Dynamiq backend is supported: DynamiqSkillSource(connection, whitelist).
     """
     if skills is None:
         return None
@@ -95,5 +86,4 @@ def resolve_skills_config(skills: SkillsConfig | dict | None) -> tuple[SkillSour
 
     if not backend.connection:
         raise ValueError("Skills backend requires connection (Dynamiq API).")
-    source: SkillSource = DynamiqSkillSource(connection=backend.connection, whitelist=whitelist_entries)
-    return (source, None)
+    return DynamiqSkillSource(connection=backend.connection, whitelist=whitelist_entries)

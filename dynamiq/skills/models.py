@@ -18,8 +18,6 @@ def _validate_skill_name(name: str) -> str:
         raise ValueError("Skill name must contain only lowercase letters, numbers, hyphens, and underscores")
     if name in SKILL_RESERVED_NAMES:
         raise ValueError(f"Skill name cannot be reserved: {SKILL_RESERVED_NAMES}")
-    if "<" in name or ">" in name:
-        raise ValueError("Skill name cannot contain XML tags")
     return name
 
 
