@@ -18,7 +18,10 @@ from dynamiq.nodes.agents.exceptions import (
 )
 from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.storages.file.base import FileStoreConfig
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
 @pytest.fixture
@@ -491,3 +494,62 @@ def test_agent_injects_file_store_into_python_code_executor(openai_node, mock_ll
         tool.file_store = agent.file_store_backend
 
     assert tool.file_store is file_store_backend, "Agent should inject file_store into PythonCodeExecutor"
+
+
+def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
+    """Test that todo tools are added and instructions included when file_store.todo_enabled is True."""
+
+    file_store_config = FileStoreConfig(enabled=True, backend=InMemoryFileStore(), todo_enabled=True)
+    agent = Agent(
+        name="Todo Agent",
+        llm=openai_node,
+        tools=[],
+        file_store=file_store_config,
+        inference_mode=InferenceMode.DEFAULT,
+    )
+
+    # Check that TodoWriteTool was automatically added
+    todo_tools = [t for t in agent.tools if isinstance(t, TodoWriteTool)]
+    assert len(todo_tools) == 1, "TodoWriteTool should be automatically added"
+
+    # Check that todo instructions are in the prompt
+    prompt = agent.generate_prompt()
+    assert "TODO MANAGEMENT" in prompt, "TODO instructions should be in system prompt"
+    assert "todo-write" in prompt, "todo-write tool should be mentioned in prompt"
+
+
+def test_agent_state_updates_with_todos(openai_node):
+    """Test that AgentState correctly updates and serializes todo state."""
+    from dynamiq.nodes.agents.agent import AgentState
+    from dynamiq.nodes.tools.todo_tools import TodoItem, TodoStatus
+
+    state = AgentState()
+
+    assert state.to_prompt_string() == ""
+
+    state.max_loops = 15
+    state.update_loop(3)
+    prompt_str = state.to_prompt_string()
+    assert "Progress: Loop 3/15" in prompt_str
+
+    # Update with todos (accepts both dicts and TodoItem objects)
+    state.update_todos(
+        [
+            TodoItem(id="1", content="First task", status=TodoStatus.COMPLETED),
+            TodoItem(id="2", content="Second task", status=TodoStatus.IN_PROGRESS),
+            TodoItem(id="3", content="Third task", status=TodoStatus.PENDING),
+        ]
+    )
+    prompt_str = state.to_prompt_string()
+    assert "[+] 1: First task" in prompt_str, "Completed todo should show [+]"
+    assert "[~] 2: Second task" in prompt_str, "In-progress todo should show [~]"
+    assert "[ ] 3: Third task" in prompt_str, "Pending todo should show [ ]"
+
+    # Verify todos are TodoItem instances
+    assert all(isinstance(t, TodoItem) for t in state.todos)
+
+    # Reset should clear state
+    state.reset(max_loops=10)
+    assert state.current_loop == 0
+    assert state.max_loops == 10
+    assert state.todos == []
