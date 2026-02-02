@@ -525,10 +525,8 @@ def test_agent_state_updates_with_todos(openai_node):
 
     state = AgentState()
 
-    # Initial state should be empty
     assert state.to_prompt_string() == ""
 
-    # Update with loop progress
     state.max_loops = 15
     state.update_loop(3)
     prompt_str = state.to_prompt_string()

@@ -71,11 +71,9 @@ class AgentState(BaseModel):
         """
         sections = []
 
-        # Loop progress
         if self.current_loop > 0:
             sections.append(f"Progress: Loop {self.current_loop}/{self.max_loops}")
 
-        # Todos
         if self.todos:
             todo_lines = [t.to_display_string() for t in self.todos]
             sections.append("Todos:\n" + "\n".join(todo_lines))
@@ -880,7 +878,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         state_suffix = f"\n\n[State: {state_info}]"
 
         if isinstance(last_msg, VisionMessage):
-            # For VisionMessage, append state as a new text content item
             new_content = list(last_msg.content) + [VisionMessageTextContent(text=state_suffix)]
             return messages[:-1] + [
                 VisionMessage(
@@ -890,7 +887,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
             ]
 
-        # Regular Message with string content
         return messages[:-1] + [
             Message(
                 role=last_msg.role,
@@ -921,15 +917,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
-        # Initialize state (used for observation injection, not system prompt)
         self.state.max_loops = self.max_loops
         self._refresh_agent_state(1)
 
         self._setup_prompt_and_stop_sequences(input_message, history_messages)
 
         for loop_num in range(1, self.max_loops + 1):
-            # Update agent state (skip first iteration as it was done above)
-            # State is now injected into observations, not system prompt (preserves prompt caching)
             if loop_num > 1:
                 self._refresh_agent_state(loop_num)
 
@@ -939,7 +932,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
 
                 # Append state to the last user message before LLM call
-
                 messages = self._inject_state_into_messages(self._prompt.messages)
 
                 try:
@@ -1276,7 +1268,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         def execute_and_convert(tool_name: str, tool_input: Any, order: int) -> dict[str, Any]:
             """Execute tool and convert tuple result to dict for parallel execution."""
-            # update_run_depends=False, collect_dependency=True: for parallel mode
             tool_result, tool_files, _, success, dependency = self._execute_single_tool(
                 tool_name,
                 tool_input,
@@ -1298,7 +1289,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         if prepared_tools:
             if len(prepared_tools) == 1:
-                # Single tool: update_run_depends=True (set immediately like old behavior)
                 tool_payload = prepared_tools[0]
                 tool_result, tool_files, _, success, dependency = self._execute_single_tool(
                     tool_payload["name"],

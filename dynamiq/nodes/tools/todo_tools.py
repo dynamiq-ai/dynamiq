@@ -102,7 +102,18 @@ RULES:
             if self.file_store.exists(TODOS_FILE_PATH):
                 content = self.file_store.retrieve(TODOS_FILE_PATH)
                 data = json.loads(content.decode("utf-8"))
-                return data.get("todos") or []
+                todos = data.get("todos")
+                if not isinstance(todos, list):
+                    logger.warning(f"TodoWriteTool: Invalid todos format (expected list, got {type(todos).__name__})")
+                    return []
+                # Validate each item is a valid TodoItem
+                validated = []
+                for t in todos:
+                    try:
+                        validated.append(TodoItem.model_validate(t).model_dump())
+                    except Exception as e:
+                        logger.warning(f"TodoWriteTool: Skipping invalid todo item: {e}")
+                return validated
         except Exception as e:
             logger.warning(f"TodoWriteTool: Failed to load todos: {e}")
         return []
