@@ -1181,6 +1181,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         ordered_results = sorted(all_results, key=lambda r: r.get("order", 0))
 
+        dependencies: list[dict] = []
         for result in ordered_results:
             tool_name = result.get("tool_name", UNKNOWN_TOOL_NAME)
             result_content = result.get("result", "")
@@ -1188,6 +1189,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
             observation_parts.append(f"--- {tool_name} has resulted in {success_status} ---\n{result_content}")
 
             self._merge_tool_files(aggregated_files, tool_name, result.get("files"))
+
+            # Collect dependency for tool execution (for tracing)
+            tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
+            if tool:
+                dependencies.append(NodeDependency(node=tool).to_dict(for_tracing=True))
+
+        # Set run_depends after parallel execution completes
+        if dependencies:
+            self._run_depends = dependencies
 
         combined_observation = "\n\n".join(observation_parts)
 
