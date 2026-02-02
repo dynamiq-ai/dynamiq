@@ -1112,8 +1112,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     content = file_store.retrieve(TODOS_FILE_PATH)
                     data = json.loads(content.decode("utf-8"))
                     self.state.update_todos(data.get("todos", []))
-            except Exception:
-                logger.error("Failed to get todo state")
+            except Exception as e:
+                logger.error(f"Failed to get todo state: {e}")
 
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""

@@ -145,12 +145,12 @@ class AgentPromptManager:
         formatted_prompt_blocks = {}
         for block, content in self._prompt_blocks.items():
             if block_names is None or block in block_names:
-                formatted_content = Template(content).render(**temp_variables)
+                formatted_content = Template(content).render(temp_variables)
                 if content:
                     formatted_prompt_blocks[block] = formatted_content
 
-        render_context = {**formatted_prompt_blocks, **temp_variables}
-        prompt = Template(self.agent_template).render(**render_context).strip()
+        render_context = {**temp_variables, **formatted_prompt_blocks}
+        prompt = Template(self.agent_template).render(render_context).strip()
         prompt = self._clean_prompt(prompt)
         return textwrap.dedent(prompt)
 
@@ -177,7 +177,8 @@ class AgentPromptManager:
         variables = self._prompt_variables.copy()
         variables.update(kwargs)
 
-        return Template(template_content).render(**variables)
+        # Pass dict directly to avoid crash on non-identifier keys
+        return Template(template_content).render(variables)
 
     @staticmethod
     def _clean_prompt(prompt: str) -> str:
