@@ -220,7 +220,7 @@ class Agent(Node):
     skills: SkillsConfig | None = Field(
         default=None,
         description="Skills config: None or SkillsConfig. When SkillsConfig.enabled is True and backend is set, "
-        "skills are on. Backend: Dynamiq (API) or Local (FileStore). Executor derived from backend.",
+        "skills are on. Backend: Dynamiq (API) only.",
     )
 
     input_message: Message | VisionMessage | None = None
@@ -315,9 +315,9 @@ class Agent(Node):
             self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
             self.tools.append(ParallelToolCallsTool())
 
-        self._init_prompt_blocks()
         if self._skills_should_init():
             self._init_skills()
+        self._init_prompt_blocks()
 
     @model_validator(mode="before")
     @classmethod
@@ -382,8 +382,6 @@ class Agent(Node):
             backend_data = data["skills"].setdefault("backend", {})
             if self.skills.backend.connection is not None:
                 backend_data["connection"] = self.skills.backend.connection.to_dict(**kwargs)
-            if self.skills.backend.file_store is not None:
-                backend_data["file_store"] = self.skills.backend.file_store.to_dict(**kwargs)
 
         return data
 
@@ -426,13 +424,13 @@ class Agent(Node):
         from dynamiq.nodes.tools.skills_tool import SkillsTool
         from dynamiq.skills.config import resolve_skills_config
 
-        resolved = resolve_skills_config(self.skills, self.file_store_backend)
+        resolved = resolve_skills_config(self.skills)
         if resolved is None:
             logger.warning("Skills config missing or invalid (backend required); skipping skills init")
             return
 
-        source, executor = resolved
-        skills_tool = SkillsTool(skill_source=source, skill_executor=executor)
+        source, _ = resolved
+        skills_tool = SkillsTool(skill_source=source)
         self.tools.append(skills_tool)
         self._skills_tool_ids.append(skills_tool.id)
 

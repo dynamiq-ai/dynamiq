@@ -1,38 +1,3 @@
-from pathlib import Path
-from typing import Any
-
-from dynamiq.utils.logger import logger
-
-
-def sync_local_skills_to_filestore(
-    file_store: Any,
-    local_dir: str | Path = ".skills",
-    prefix: str = ".skills/",
-) -> None:
-    """Sync a local skills directory into FileStore (e.g. .skills/ -> .skills/ prefix).
-
-    Called during skills init for Local backend so skills are available without
-    manual upload. Normalizes SKILL.MD -> SKILL.md so the loader discovers skills.
-    """
-    path = Path(local_dir).resolve()
-    if not path.exists() or not path.is_dir():
-        logger.debug("No local skills dir at %s; skipping sync", path)
-        return
-    prefix_norm = prefix.rstrip("/") + "/"
-    for skill_dir in path.iterdir():
-        if not skill_dir.is_dir():
-            continue
-        for file_path in skill_dir.rglob("*"):
-            if file_path.is_file():
-                rel = file_path.relative_to(path)
-                store_path = prefix_norm + rel.as_posix()
-                if store_path.endswith("/SKILL.MD"):
-                    store_path = store_path.replace("/SKILL.MD", "/SKILL.md")
-                file_store.store(store_path, file_path.read_bytes())
-                logger.debug("Synced %s -> %s", file_path, store_path)
-    logger.info("Synced local skills from %s into FileStore (prefix %s)", path, prefix_norm)
-
-
 def extract_skill_content_slice(
     instructions: str,
     section: str | None = None,

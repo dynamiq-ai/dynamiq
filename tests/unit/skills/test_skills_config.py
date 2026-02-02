@@ -1,17 +1,20 @@
-"""Unit tests for SkillsConfig and resolve_skills_config."""
+"""Unit tests for SkillsConfig and resolve_skills_config (Dynamiq backend only)."""
+
+from unittest.mock import MagicMock
+
+import pytest
 
 from dynamiq.skills.config import SkillsBackendConfig, SkillsBackendType, SkillsConfig, resolve_skills_config
-from dynamiq.storages.file.in_memory import InMemoryFileStore
+from dynamiq.skills.registry.dynamiq import DynamiqSkillSource
 
 
-def test_skills_backend_type_enum():
-    """SkillsBackendType enum has Local and Dynamiq; strings coerce to enum."""
-    assert SkillsBackendType.Local.value == "Local"
-    assert SkillsBackendType.Dynamiq.value == "Dynamiq"
+def test_skills_backend_type():
+    """SkillsBackendType has Dynamiq; type normalizes to Dynamiq."""
+    assert SkillsBackendType.Dynamiq == "Dynamiq"
     backend = SkillsBackendConfig.model_validate({"type": "Dynamiq"})
     assert backend.type == SkillsBackendType.Dynamiq
-    backend_local = SkillsBackendConfig.model_validate({"type": "Local"})
-    assert backend_local.type == SkillsBackendType.Local
+    backend_normalized = SkillsBackendConfig.model_validate({"type": "  "})
+    assert backend_normalized.type == SkillsBackendType.Dynamiq
 
 
 def test_skills_config_defaults():
@@ -23,85 +26,82 @@ def test_skills_config_defaults():
 
 
 def test_skills_config_enabled_with_backend():
-    """SkillsConfig accepts enabled=True and backend."""
-    backend = SkillsBackendConfig(
-        type=SkillsBackendType.Local,
-        file_store=InMemoryFileStore(),
-    )
+    """SkillsConfig accepts enabled=True and backend (Dynamiq)."""
+    backend = SkillsBackendConfig(type=SkillsBackendType.Dynamiq, connection=MagicMock())
     cfg = SkillsConfig(enabled=True, backend=backend)
     assert cfg.enabled is True
     assert cfg.backend is backend
 
 
 def test_skills_config_from_dict():
-    """SkillsConfig can be built from dict (YAML shape); type string coerced to enum."""
+    """SkillsConfig can be built from dict (YAML shape); type string coerced to Dynamiq."""
     cfg = SkillsConfig.model_validate(
         {
             "enabled": True,
             "backend": {
-                "type": "Local",
+                "type": "Dynamiq",
             },
         }
     )
     assert cfg.enabled is True
     assert cfg.backend is not None
-    assert cfg.backend.type == SkillsBackendType.Local
+    assert cfg.backend.type == SkillsBackendType.Dynamiq
 
 
 def test_resolve_skills_config_none():
     """resolve_skills_config returns None when skills is None."""
-    assert resolve_skills_config(None, InMemoryFileStore()) is None
+    assert resolve_skills_config(None) is None
 
 
 def test_resolve_skills_config_disabled_dict():
     """resolve_skills_config returns None when dict has enabled=False or no backend."""
-    fs = InMemoryFileStore()
-    assert resolve_skills_config({"enabled": False, "backend": {"type": "x"}}, fs) is None
-    assert resolve_skills_config({"enabled": True}, fs) is None
-    assert resolve_skills_config({}, fs) is None
+    assert resolve_skills_config({"enabled": False, "backend": {"type": "Dynamiq"}}) is None
+    assert resolve_skills_config({"enabled": True}) is None
+    assert resolve_skills_config({}) is None
 
 
 def test_resolve_skills_config_disabled_skills_config():
     """resolve_skills_config returns None when SkillsConfig.enabled is False."""
-    fs = InMemoryFileStore()
-    backend = SkillsBackendConfig(
-        type=SkillsBackendType.Local,
-        file_store=fs,
-    )
+    backend = SkillsBackendConfig(type=SkillsBackendType.Dynamiq, connection=MagicMock())
     cfg = SkillsConfig(enabled=False, backend=backend)
-    assert resolve_skills_config(cfg, fs) is None
+    assert resolve_skills_config(cfg) is None
 
 
-def test_resolve_skills_config_local_backend():
-    """resolve_skills_config returns (source, executor) for Local backend with file_store."""
-    fs = InMemoryFileStore()
+def test_resolve_skills_config_dynamiq_backend_missing_connection_raises():
+    """resolve_skills_config raises when Dynamiq backend has no connection."""
     skills_dict = {
         "enabled": True,
-        "backend": {
-            "type": SkillsBackendType.Local,
-        },
+        "backend": {"type": "Dynamiq"},
     }
-    result = resolve_skills_config(skills_dict, fs)
+    with pytest.raises(ValueError, match="connection"):
+        resolve_skills_config(skills_dict)
+
+
+def test_resolve_skills_config_dynamiq_backend():
+    """resolve_skills_config returns (source, None) for Dynamiq backend with connection."""
+    conn = MagicMock()
+    skills_dict = {
+        "enabled": True,
+        "backend": {"type": "Dynamiq", "connection": conn},
+        "whitelist": [],
+    }
+    result = resolve_skills_config(skills_dict)
     assert result is not None
     source, executor = result
     assert source is not None
-    assert executor is not None
-    assert source.name == "FileStoreSkillSource"
-    from dynamiq.skills.executor import SkillExecutor
-
-    assert isinstance(executor, SkillExecutor)
+    assert executor is None
+    assert isinstance(source, DynamiqSkillSource)
+    assert source.connection is conn
 
 
-def test_resolve_skills_config_local_backend_skills_config_instance():
-    """resolve_skills_config works with SkillsConfig instance (Local backend)."""
-    fs = InMemoryFileStore()
-    backend = SkillsBackendConfig(
-        type=SkillsBackendType.Local,
-        file_store=fs,
-    )
+def test_resolve_skills_config_dynamiq_skills_config_instance():
+    """resolve_skills_config works with SkillsConfig instance (Dynamiq backend)."""
+    conn = MagicMock()
+    backend = SkillsBackendConfig(type=SkillsBackendType.Dynamiq, connection=conn)
     cfg = SkillsConfig(enabled=True, backend=backend)
-    result = resolve_skills_config(cfg, fs)
+    result = resolve_skills_config(cfg)
     assert result is not None
     source, executor = result
     assert source is not None
-    assert executor is not None
+    assert executor is None
+    assert isinstance(source, DynamiqSkillSource)

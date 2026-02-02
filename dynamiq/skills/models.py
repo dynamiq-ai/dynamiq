@@ -117,6 +117,16 @@ class SkillWhitelistEntry(BaseModel):
     description: str = Field(..., description="Brief description")
     version_id: str = Field(..., description="Version ID (e.g. UUID for API, or 'latest')")
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_skill_name(v)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str) -> str:
+        return _validate_skill_description(v)
+
 
 class SkillReference(BaseModel):
     """Lightweight reference to a skill (progressive disclosure).

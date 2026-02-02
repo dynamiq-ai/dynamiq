@@ -1,4 +1,4 @@
-"""Skill registry backends: Dynamiq (API) and Local (FileStore)."""
+"""Skill registry: Dynamiq (API) only."""
 
 from dynamiq.skills.registry.dynamiq import DynamiqSkillSource
 

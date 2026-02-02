@@ -1,0 +1,41 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+  dynamiq-conn:
+    type: dynamiq.connections.Dynamiq
+
+nodes:
+  humanizer-agent:
+    type: dynamiq.nodes.agents.Agent
+    llm:
+      id: humanizer-agent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+    tools: []
+    role: |
+      You have access to the humanizer skill via the SkillsTool only. Use action="list" then action="get" and skill_name="humanizer" to load the skill content. After get, apply the guidelines yourself and provide the humanized text in your final answer; do not call the tool again with text.
+    skills:
+      enabled: true
+      backend:
+        type: Dynamiq
+        connection:
+          type: dynamiq.connections.Dynamiq
+      whitelist:
+        - id: cfb2ddd9-7b5b-457f-9ef6-666db9c45eb3
+          name: humanizer
+          description: Remove signs of AI-generated writing from text. Use when editing or reviewing text to make it sound more natural and human-written.
+          version_id: adcf8695-31b0-4a50-ba68-3606b5158e7c
+    max_loops: 10
+    inference_mode: XML
+
+flows:
+  humanizer-agent-flow:
+    name: Humanizer Skill Flow
+    nodes:
+      - humanizer-agent
+
+workflows:
+  humanizer-skill-workflow:
+    flow: humanizer-agent-flow
+    version: 1
