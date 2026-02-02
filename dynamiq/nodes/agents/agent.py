@@ -231,23 +231,32 @@ class Agent(HistoryManagerMixin, BaseAgent):
             Message(role=MessageRole.USER, content=correction_message, static=True)
         )
 
-    def stream_reasoning(self, content: AgentReasoningEventMessageData, config: RunnableConfig, **kwargs) -> None:
-        """
-        Streams intermediate reasoning of the Agent.
+    def _stream_agent_event(
+        self,
+        content: AgentReasoningEventMessageData | AgentToolResultEventMessageData,
+        step: str,
+        config: RunnableConfig,
+        **kwargs,
+    ) -> None:
+        """Stream agent event if streaming is enabled.
 
         Args:
-            content (AgentReasoningEventMessageData): Content that will be sent.
-            config (RunnableConfig | None): Configuration for the agent run.
-            **kwargs: Additional parameters for running the agent.
+            content: The event data (reasoning or tool result).
+            step: Event type ("reasoning" or "tool").
+            config: Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
         """
-        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            self.stream_content(
-                content=content.model_dump(),
-                source=self.name,
-                step="reasoning",
-                config=config,
-                **kwargs,
-            )
+        if not (self.streaming.enabled and self.streaming.mode == StreamingMode.ALL):
+            return
+
+        source = content.tool.name if step == "reasoning" else content.name
+        self.stream_content(
+            content=content.model_dump(),
+            source=source,
+            step=step,
+            config=config,
+            **kwargs,
+        )
 
     def _append_assistant_message(self, llm_result: Any, llm_generated_output: str) -> None:
         """
@@ -595,19 +604,22 @@ class Agent(HistoryManagerMixin, BaseAgent):
             return error_message, [], False, False
 
         tool_run_id = generate_uuid()
-        self.stream_reasoning(
+        tool_data = AgentToolData(
+            name=tool.name,
+            type=tool.type,
+            action_type=tool.action_type.value if tool.action_type else None,
+        )
+
+        self._stream_agent_event(
             AgentReasoningEventMessageData(
                 tool_run_id=tool_run_id,
                 thought=thought or "",
                 action=action,
-                tool=AgentToolData(
-                    name=tool.name,
-                    type=tool.type,
-                    action_type=tool.action_type.value if tool.action_type else None,
-                ),
+                tool=tool_data,
                 action_input=action_input,
                 loop_num=loop_num,
             ),
+            "reasoning",
             config,
             **kwargs,
         )
@@ -643,15 +655,18 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if delegate_final:
                 self.log_final_output(thought, tool_result, loop_num)
                 # Stream tool result (with files) before streaming final answer
-                self._stream_tool_result(
-                    tool_result,
-                    tool_files,
-                    tool,
-                    action,
-                    action_input,
+                self._stream_agent_event(
+                    AgentToolResultEventMessageData(
+                        tool_run_id=tool_run_id,
+                        name=tool.name,
+                        tool=tool_data,
+                        input=action_input,
+                        result=tool_result,
+                        files=tool_files,
+                        loop_num=loop_num,
+                    ),
+                    "tool",
                     config,
-                    tool_run_id=tool_run_id,
-                    loop_num=loop_num,
                     **kwargs,
                 )
                 if self.streaming.enabled:
@@ -668,15 +683,18 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self._compact_history()
 
             # Stream the result
-            self._stream_tool_result(
-                tool_result,
-                tool_files,
-                tool,
-                action,
-                action_input,
+            self._stream_agent_event(
+                AgentToolResultEventMessageData(
+                    tool_run_id=tool_run_id,
+                    name=tool.name,
+                    tool=tool_data,
+                    input=action_input,
+                    result=tool_result,
+                    files=tool_files,
+                    loop_num=loop_num,
+                ),
+                "tool",
                 config,
-                tool_run_id=tool_run_id,
-                loop_num=loop_num,
                 **kwargs,
             )
 
@@ -685,15 +703,18 @@ class Agent(HistoryManagerMixin, BaseAgent):
         except RecoverableAgentException as e:
             # Stream error result with the same tool_run_id used for reasoning
             error_message = f"{type(e).__name__}: {e}"
-            self._stream_tool_result(
-                error_message,
-                [],
-                tool,
-                action,
-                action_input,
+            self._stream_agent_event(
+                AgentToolResultEventMessageData(
+                    tool_run_id=tool_run_id,
+                    name=tool.name,
+                    tool=tool_data,
+                    input=action_input,
+                    result=error_message,
+                    files=[],
+                    loop_num=loop_num,
+                ),
+                "tool",
                 config,
-                tool_run_id=tool_run_id,
-                loop_num=loop_num,
                 **kwargs,
             )
             return error_message, [], False, False
@@ -706,57 +727,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         observation = f"\nObservation: {tool_result}\n"
         self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
-
-    def _stream_tool_result(
-        self,
-        tool_result: Any,
-        tool_files: list,
-        tool: Any,
-        action: Any,
-        action_input: Any,
-        config: RunnableConfig,
-        tool_run_id: str,
-        loop_num: int,
-        **kwargs,
-    ) -> None:
-        """Stream tool result if streaming is enabled.
-
-        Args:
-            tool_result: The result from the tool execution.
-            tool_files: Files produced by the tool.
-            tool: The tool that was executed.
-            action: The action name or list of actions.
-            action_input: The input provided to the tool.
-            config: Configuration for the runnable.
-            tool_run_id: ID to correlate with the reasoning event.
-            loop_num: Current loop iteration number.
-            **kwargs: Additional keyword arguments.
-        """
-        if not (self.streaming.enabled and self.streaming.mode == StreamingMode.ALL):
-            return
-
-        tool_name = tool.name if tool is not None else str(action)
-        tool_data = AgentToolData(
-            name=tool_name,
-            type=tool.type if tool else "unknown",
-            action_type=tool.action_type.value if tool and tool.action_type else None,
-        )
-
-        self.stream_content(
-            content=AgentToolResultEventMessageData(
-                tool_run_id=tool_run_id,
-                name=tool_name,
-                tool=tool_data,
-                input=action_input,
-                result=tool_result,
-                files=tool_files,
-                loop_num=loop_num,
-            ).model_dump(),
-            source=tool_name,
-            step="tool",
-            config=config,
-            **kwargs,
-        )
 
     def _should_skip_parallel_mode(
         self, action: str | None, action_input: Any
