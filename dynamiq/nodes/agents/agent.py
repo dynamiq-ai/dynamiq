@@ -530,15 +530,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
         loop_num: int,
         config: RunnableConfig,
         update_run_depends: bool = True,
+        collect_dependency: bool = False,
         **kwargs,
-    ) -> tuple[Any, list, bool, bool]:
+    ) -> tuple[Any, list, bool, bool, dict | None]:
         """Execute a single tool with caching support.
 
         Args:
             update_run_depends: Whether to update self._run_depends. Set to False for parallel execution.
+            collect_dependency: Whether to collect and return the dependency dict.
 
         Returns:
-            tuple: (tool_result, tool_files, is_delegated, success)
+            tuple: (tool_result, tool_files, is_delegated, success, dependency)
         """
         tool = self.tool_by_names.get(self.sanitize_tool_name(action))
 
@@ -548,7 +550,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 "action field. Do not include any additional reasoning. "
                 "Please correct the action field or state that you cannot answer the question."
             )
-            return error_message, [], False, False
+            return error_message, [], False, False, None
 
         tool_run_id = generate_uuid()
         tool_data = AgentToolData(
@@ -583,17 +585,23 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             delegate_final = self._should_delegate_final(tool, action_input)
 
+            dependency: dict | None = None
             if not tool_result:
                 tool_kwargs = kwargs.copy()
 
-                tool_result, tool_files = self._run_tool(
+                run_tool_result = self._run_tool(
                     tool,
                     action_input,
                     config,
                     delegate_final=delegate_final,
                     update_run_depends=update_run_depends,
+                    collect_dependency=collect_dependency,
                     **tool_kwargs,
                 )
+                if collect_dependency:
+                    tool_result, tool_files, dependency = run_tool_result
+                else:
+                    tool_result, tool_files = run_tool_result
 
             else:
                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
@@ -624,7 +632,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         config=config,
                         **kwargs,
                     )
-                return tool_result, tool_files, True, True
+                return tool_result, tool_files, True, True, dependency
 
             if isinstance(tool, ContextManagerTool):
                 self._compact_history()
@@ -645,7 +653,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **kwargs,
             )
 
-            return tool_result, tool_files, False, True
+            return tool_result, tool_files, False, True, dependency
 
         except RecoverableAgentException as e:
             # Stream error result with the same tool_run_id used for reasoning
@@ -664,7 +672,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 config,
                 **kwargs,
             )
-            return error_message, [], False, False
+            return error_message, [], False, False, None
 
     def _add_observation(self, tool_result: Any) -> None:
         """Add observation to prompt.
@@ -781,7 +789,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             ):
                 tool_result, _ = self._execute_tools(tools_data, thought, loop_num, config, **kwargs)
             else:
-                tool_result, _, is_delegated, _ = self._execute_single_tool(
+                tool_result, _, is_delegated, _, _ = self._execute_single_tool(
                     action, action_input, thought, loop_num, config, **kwargs
                 )
                 if is_delegated:
@@ -1141,10 +1149,17 @@ class Agent(HistoryManagerMixin, BaseAgent):
             prepared_tools.append({"order": idx, "name": tool_name, "input": tool_input})
 
         def execute_and_convert(tool_name: str, tool_input: Any, order: int) -> dict[str, Any]:
-            """Execute tool and convert tuple result to dict."""
-            # update_run_depends=False: _execute_tools is for parallel/batch mode
-            tool_result, tool_files, _, success = self._execute_single_tool(
-                tool_name, tool_input, thought or "", loop_num, config, update_run_depends=False, **kwargs
+            """Execute tool and convert tuple result to dict for parallel execution."""
+            # update_run_depends=False, collect_dependency=True: for parallel mode
+            tool_result, tool_files, _, success, dependency = self._execute_single_tool(
+                tool_name,
+                tool_input,
+                thought or "",
+                loop_num,
+                config,
+                update_run_depends=False,
+                collect_dependency=True,
+                **kwargs,
             )
             return {
                 "order": order,
@@ -1152,12 +1167,31 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 "success": success,
                 "result": tool_result,
                 "files": tool_files,
+                "dependency": dependency,
             }
 
         if prepared_tools:
             if len(prepared_tools) == 1:
+                # Single tool: update_run_depends=True (set immediately like old behavior)
                 tool_payload = prepared_tools[0]
-                res = execute_and_convert(tool_payload["name"], tool_payload["input"], tool_payload["order"])
+                tool_result, tool_files, _, success, dependency = self._execute_single_tool(
+                    tool_payload["name"],
+                    tool_payload["input"],
+                    thought or "",
+                    loop_num,
+                    config,
+                    update_run_depends=True,
+                    collect_dependency=True,
+                    **kwargs,
+                )
+                res = {
+                    "order": tool_payload["order"],
+                    "tool_name": tool_payload["name"],
+                    "success": success,
+                    "result": tool_result,
+                    "files": tool_files,
+                    "dependency": dependency,
+                }
                 all_results.append(res)
             else:
                 max_workers = len(prepared_tools)
@@ -1181,7 +1215,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         ordered_results = sorted(all_results, key=lambda r: r.get("order", 0))
 
-        dependencies: list[dict] = []
         for result in ordered_results:
             tool_name = result.get("tool_name", UNKNOWN_TOOL_NAME)
             result_content = result.get("result", "")
@@ -1190,10 +1223,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             self._merge_tool_files(aggregated_files, tool_name, result.get("files"))
 
-            # Collect dependency for tool execution (for tracing)
-            tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
-            if tool:
-                dependencies.append(NodeDependency(node=tool).to_dict(for_tracing=True))
+        # Collect dependencies from results (for tracing)
+        dependencies = [result.get("dependency") for result in ordered_results if result.get("dependency")]
 
         # Set run_depends after parallel execution completes
         if dependencies:
