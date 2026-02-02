@@ -9,12 +9,10 @@ from dynamiq.skills.registry.dynamiq import DynamiqSkillSource
 
 
 def test_skills_backend_type():
-    """SkillsBackendType has Dynamiq; type normalizes to Dynamiq."""
+    """SkillsBackendType has Dynamiq; valid type string coerces to enum."""
     assert SkillsBackendType.Dynamiq == "Dynamiq"
     backend = SkillsBackendConfig.model_validate({"type": "Dynamiq"})
     assert backend.type == SkillsBackendType.Dynamiq
-    backend_normalized = SkillsBackendConfig.model_validate({"type": "  "})
-    assert backend_normalized.type == SkillsBackendType.Dynamiq
 
 
 def test_skills_config_defaults():

@@ -37,6 +37,7 @@ from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.skills.config import SkillsConfig
+from dynamiq.skills.models import SkillReference
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -419,7 +420,7 @@ class Agent(Node):
         """True if skills support should be initialized (enabled and backend set)."""
         return self.skills is not None and self.skills.enabled and self.skills.backend is not None
 
-    def _init_skills(self):
+    def _init_skills(self) -> None:
         """Initialize skills support from skills config (backend -> source)."""
         from dynamiq.nodes.tools.skills_tool import SkillsTool
         from dynamiq.skills.config import resolve_skills_config
@@ -440,7 +441,7 @@ class Agent(Node):
             f"Agent {self.name} - {self.id}: initialized with {len(available_skills)} skills " f"(source={source.name})"
         )
 
-    def _format_skills_summary(self, skills) -> str:
+    def _format_skills_summary(self, skills: list[SkillReference]) -> str:
         """Format skills summary for prompt.
 
         Args:
