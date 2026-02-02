@@ -110,9 +110,11 @@ class AgentToolResultEventMessageData(BaseModel):
 
     tool_run_id: str
     name: str
+    tool: AgentReasoningToolData
     input: Any
     result: Any
     files: list = Field(default_factory=list)
+    loop_num: int
 
 
 class StreamingConfig(BaseModel):
