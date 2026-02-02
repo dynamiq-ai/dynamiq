@@ -525,6 +525,7 @@ class WorkflowYAMLLoader:
         connection_manager: ConnectionManager | None = None,
         init_components: bool = False,
         max_workers: int | None = None,
+        node_id: str | None = None,
     ):
         """
         Get node init data with initialized nodes components recursively (llms, agents, etc)
@@ -553,6 +554,7 @@ class WorkflowYAMLLoader:
             connection_manager=connection_manager,
             init_components=init_components,
             max_workers=max_workers,
+            node_id=node_id,
         )
         for param_name, param_data in node_init_data.items():
             # TODO: dummy fix, revisit this!
@@ -566,6 +568,20 @@ class WorkflowYAMLLoader:
                 for param_name_inner, param_data_inner in param_data.items():
                     if param_name_inner in ("prompt", "schema", "response_format"):
                         updated_param_data[param_name_inner] = param_data_inner
+                    elif (
+                        param_name_inner == "connection"
+                        and isinstance(param_data_inner, dict)
+                        and param_data_inner.get("type")
+                        and "connections" in str(param_data_inner.get("type", ""))
+                    ):
+                        try:
+                            updated_param_data[param_name_inner] = cls.get_inline_connection(
+                                node_id or "unknown", param_data_inner, registry
+                            )
+                        except Exception as e:
+                            raise WorkflowYAMLLoaderException(
+                                f"Invalid inline connection in node '{node_id}': {e}"
+                            ) from e
                     elif isinstance(param_data_inner, (dict, list)):
                         param_id = None
                         updated_param_data[param_name_inner] = cls.get_updated_node_init_data_with_initialized_nodes(
@@ -574,7 +590,12 @@ class WorkflowYAMLLoader:
                     else:
                         updated_param_data[param_name_inner] = param_data_inner
 
-                if cls.is_node_type(updated_param_data.get("type")):
+                type_str = str(updated_param_data.get("type", ""))
+                if (
+                    cls.is_node_type(updated_param_data.get("type"))
+                    and "connections" not in type_str
+                    and "skills." not in type_str
+                ):
                     param_id = updated_param_data.get("id")
                     updated_param_data = cls.get_nodes_without_depends({param_id: updated_param_data}, **kwargs)[
                         param_id
@@ -772,6 +793,7 @@ class WorkflowYAMLLoader:
                 registry=registry,
                 connection_manager=connection_manager,
                 init_components=init_components,
+                node_id=node_id,
             )
 
             node = node_cls(**node_init_data)

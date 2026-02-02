@@ -23,7 +23,10 @@ nodes:
       backend:
         type: dynamiq.storages.file.InMemoryFileStore
       agent_file_write_enabled: true
-    skills_enabled: true
+    skills:
+      enabled: true
+      backend:
+        type: Local
     max_loops: 12
     inference_mode: XML
 

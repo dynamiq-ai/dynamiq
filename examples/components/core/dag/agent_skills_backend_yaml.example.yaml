@@ -1,0 +1,64 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+  dynamiq-conn:
+    type: dynamiq.connections.Dynamiq
+
+nodes:
+  skills-agent-dynamiq:
+    type: dynamiq.nodes.agents.Agent
+    llm:
+      id: skills-agent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+    tools: []
+    role: |
+      You have access to skills from the Dynamiq API. Use SkillsTool action="list" to see
+      available skills (id, name, description, version_id), then "get" or "run_script" by skill_name.
+    skills:
+      enabled: true
+      backend:
+        type: Dynamiq
+        connection:
+          type: dynamiq.connections.Dynamiq
+      whitelist:
+        - id: "00000000-0000-0000-0000-000000000000"
+          name: example-skill
+          description: "Example skill from API"
+          version_id: "88888888-8888-8888-8888-888888888888"
+    max_loops: 10
+    inference_mode: XML
+
+  # Local skills: backend FileStoreSkillSource; executor derived (filestore)
+  skills-agent-local:
+    type: dynamiq.nodes.agents.Agent
+    llm:
+      id: skills-agent-llm-2
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+    tools: []
+    role: Use SkillsTool to list, get, and run skills from the local .skills folder.
+    file_store:
+      enabled: true
+      backend:
+        type: dynamiq.storages.file.InMemoryFileStore
+      agent_file_write_enabled: true
+    skills:
+      enabled: true
+      backend:
+        type: Local
+    max_loops: 10
+
+flows:
+  skills-flow:
+    name: Skills Flow
+    nodes:
+      - skills-agent-dynamiq
+      - skills-agent-local
+
+workflows:
+  skills-workflow:
+    flow: skills-flow
+    version: 1

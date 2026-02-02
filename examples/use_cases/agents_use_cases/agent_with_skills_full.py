@@ -8,6 +8,7 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools import PythonCodeExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
+from dynamiq.skills import SkillsBackendType
 from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
 from dynamiq.utils.logger import logger
 
@@ -20,29 +21,13 @@ You have access to skills. Use the SkillsTool to:
 Format responses in Markdown.
 """
 
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SKILLS_DIR = PROJECT_ROOT / ".skills"
 
 
-def upload_skills_to_filestore(file_store: InMemoryFileStore) -> None:
-    """Upload skills from .skills/ into FileStore."""
-    logger.info("Uploading skills to FileStore...")
-    if not SKILLS_DIR.exists():
-        logger.warning("No .skills directory at %s", SKILLS_DIR)
-        return
-    for skill_dir in SKILLS_DIR.iterdir():
-        if not skill_dir.is_dir():
-            continue
-        for path in skill_dir.rglob("*"):
-            if path.is_file():
-                rel = path.relative_to(SKILLS_DIR)
-                store_path = f".skills/{rel.as_posix()}"
-                file_store.store(store_path, path.read_bytes())
-                logger.info(" Uploaded %s", store_path)
-
-
 def create_agent(file_store: InMemoryFileStore, tracing_handler=None) -> Agent:
-    """Create agent with skills (default SkillsConfig: FileStore source + subprocess executor)."""
+    """Create agent with skills (Local backend: FileStore source + derived filestore executor)."""
     python_tool = PythonCodeExecutor(name="python_executor", file_store=file_store)
     llm = OpenAI(model="gpt-4o", temperature=0.7, max_tokens=4096)
     file_store_config = FileStoreConfig(
@@ -58,9 +43,15 @@ def create_agent(file_store: InMemoryFileStore, tracing_handler=None) -> Agent:
         max_loops=10,
         inference_mode=InferenceMode.XML,
         file_store=file_store_config,
-        skills_enabled=True,
+        skills={
+            "enabled": True,
+            "backend": {
+                "type": SkillsBackendType.Local,
+                "local_skills_dir": str(SKILLS_DIR),
+            },
+        },
     )
-    logger.info("Agent created with skills_enabled=True")
+    logger.info("Agent created with skills (Local backend)")
     return agent
 
 
@@ -87,8 +78,6 @@ def main():
     print(f"Start: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
     file_store = InMemoryFileStore()
-    upload_skills_to_filestore(file_store)
-
     tracing_handler = TracingCallbackHandler()
     agent = create_agent(file_store, tracing_handler)
 

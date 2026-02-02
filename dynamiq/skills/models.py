@@ -106,22 +106,38 @@ class Skill(BaseModel):
         return f"# Skill: {self.metadata.name}\n\n{self.instructions}"
 
 
+class SkillWhitelistEntry(BaseModel):
+    """Whitelist entry for skills (e.g. from config or API).
+
+    Used to restrict which skills are available and to pass id/version for API-backed skills.
+    """
+
+    id: str = Field(..., description="Skill ID (e.g. UUID for API skills)")
+    name: str = Field(..., description="Skill name")
+    description: str = Field(..., description="Brief description")
+    version_id: str = Field(..., description="Version ID (e.g. UUID for API, or 'latest')")
+
+
 class SkillReference(BaseModel):
     """Lightweight reference to a skill (progressive disclosure).
 
-    Used when discovering skills without loading full content
+    Used when discovering skills without loading full content.
 
     Attributes:
         name: Skill identifier
         description: Brief description
-        file_path: Path to SKILL.md (as string for serialization)
+        file_path: Path to SKILL.md (as string for serialization); optional for API-backed skills
         tags: Categorization tags
+        id: Optional skill ID (for API-backed skills)
+        version_id: Optional version ID (for API-backed skills)
     """
 
     name: str = Field(..., description="Skill identifier")
     description: str = Field(..., description="Brief description")
-    file_path: str = Field(..., description="Path to SKILL.md file")
+    file_path: str = Field(default="", description="Path to SKILL.md file (empty for API-backed skills)")
     tags: list[str] = Field(default_factory=list, description="Categorization tags")
+    id: str | None = Field(default=None, description="Skill ID (e.g. UUID for API skills)")
+    version_id: str | None = Field(default=None, description="Version ID (for API-backed skills)")
 
     @field_validator("name")
     @classmethod

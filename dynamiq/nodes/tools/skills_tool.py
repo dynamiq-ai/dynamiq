@@ -120,7 +120,14 @@ class SkillsTool(Node):
 
     def _list_skills(self) -> dict[str, Any]:
         skills = self.skill_source.discover_skills()
-        skills_info = [{"name": s.name, "description": s.description, "tags": s.tags} for s in skills]
+        skills_info = []
+        for s in skills:
+            info = {"name": s.name, "description": s.description, "tags": s.tags}
+            if s.id is not None:
+                info["id"] = s.id
+            if s.version_id is not None:
+                info["version_id"] = s.version_id
+            skills_info.append(info)
         logger.info(f"SkillsTool: listed {len(skills)} skills")
         return {
             "content": {

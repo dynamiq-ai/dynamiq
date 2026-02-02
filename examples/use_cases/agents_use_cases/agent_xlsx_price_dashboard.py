@@ -6,6 +6,7 @@ from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools import PythonCodeExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
+from dynamiq.skills import SkillsBackendType
 from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
 from dynamiq.utils.logger import logger
 
@@ -51,25 +52,6 @@ text. Format responses in Markdown.
 """
 
 
-def upload_skills_to_filestore(file_store: InMemoryFileStore) -> None:
-    """Upload .skills/ into FileStore. Normalize SKILL.MD -> SKILL.md so the loader discovers skills."""
-    logger.info("Uploading skills to FileStore...")
-    if not SKILLS_DIR.exists():
-        logger.warning("No .skills directory at %s", SKILLS_DIR)
-        return
-    for skill_dir in SKILLS_DIR.iterdir():
-        if not skill_dir.is_dir():
-            continue
-        for path in skill_dir.rglob("*"):
-            if path.is_file():
-                rel = path.relative_to(SKILLS_DIR)
-                store_path = f".skills/{rel.as_posix()}"
-                if store_path.endswith("/SKILL.MD"):
-                    store_path = store_path.replace("/SKILL.MD", "/SKILL.md")
-                file_store.store(store_path, path.read_bytes())
-                logger.info(" Uploaded %s", store_path)
-
-
 def create_agent(file_store: InMemoryFileStore) -> Agent:
     """Create agent with skills (SkillsTool) and PythonCodeExecutor so it uses skill README and code to build Excel."""
     file_store_config = FileStoreConfig(
@@ -86,9 +68,15 @@ def create_agent(file_store: InMemoryFileStore) -> Agent:
         max_loops=12,
         inference_mode=InferenceMode.XML,
         file_store=file_store_config,
-        skills_enabled=True,
+        skills={
+            "enabled": True,
+            "backend": {
+                "type": SkillsBackendType.Local,
+                "local_skills_dir": str(SKILLS_DIR),
+            },
+        },
     )
-    logger.info("Agent created with skills_enabled=True")
+    logger.info("Agent created with skills (Local backend)")
     return agent
 
 
@@ -98,8 +86,6 @@ def main():
     print("=" * 80 + "\n")
 
     file_store = InMemoryFileStore()
-    upload_skills_to_filestore(file_store)
-
     tracing_handler = TracingCallbackHandler()
     agent = create_agent(file_store)
 

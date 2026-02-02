@@ -35,6 +35,7 @@ from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.skills.config import SkillsConfig
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -210,14 +211,10 @@ class Agent(Node):
         default=512,
         description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
     )
-    skills_enabled: bool = Field(
-        default=False,
-        description="Enable skills support. Skills are loaded from skills_config.source (default: FileStore).",
-    )
-    skills_config: Any = Field(
+    skills: SkillsConfig | None = Field(
         default=None,
-        description="Optional SkillsConfig (source + executor). "
-        "When None and skills_enabled, default FileStore source and subprocess executor are used.",
+        description="Skills config: None or SkillsConfig. When SkillsConfig.enabled is True and backend is set, "
+        "skills are on. Backend: Dynamiq (API) or Local (FileStore). Executor derived from backend.",
     )
 
     input_message: Message | VisionMessage | None = None
@@ -307,8 +304,16 @@ class Agent(Node):
             self.tools.append(FileListTool(file_store=self.file_store_backend))
 
         self._init_prompt_blocks()
-        if self.skills_enabled and (self.file_store_backend or self.skills_config):
+        if self._skills_should_init():
             self._init_skills()
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_skills_config(cls, data: Any) -> Any:
+        """Coerce skills dict (from YAML/JSON) to SkillsConfig."""
+        if isinstance(data, dict) and "skills" in data and isinstance(data["skills"], dict):
+            data = {**data, "skills": SkillsConfig.model_validate(data["skills"])}
+        return data
 
     @model_validator(mode="after")
     def validate_input_fields(self):
@@ -335,7 +340,7 @@ class Agent(Node):
             "files": True,
             "images": True,
             "file_store": True,
-            "skills_config": True,
+            "skills": True,
             "system_prompt_manager": True,  # Runtime state container, not serializable
         }
 
@@ -388,46 +393,30 @@ class Agent(Node):
         self.system_prompt_manager.setup_for_base_agent()
         self.system_prompt_manager.update_variables({"delegation_instructions": "", "delegation_instructions_xml": ""})
 
-    def _init_skills(self):
-        """Initialize skills support from skills_config (source + executor)."""
-        from dynamiq.nodes.tools.skills_tool import SkillsTool
-        from dynamiq.skills.config import SkillsConfig
-        from dynamiq.skills.executor import SkillExecutor
-        from dynamiq.skills.sources.filestore import FileStoreSkillSource
+    def _skills_should_init(self) -> bool:
+        """True if skills support should be initialized (enabled and backend set)."""
+        return self.skills is not None and self.skills.enabled and self.skills.backend is not None
 
-        if self.skills_config is not None:
-            config = self.skills_config
-            if not isinstance(config, SkillsConfig):
-                config = SkillsConfig.model_validate(config)
-        elif self.file_store_backend:
-            source = FileStoreSkillSource(
-                file_store=self.file_store_backend,
-                skills_prefix=".skills/",
-            )
-            executor = SkillExecutor(
-                file_store=self.file_store_backend,
-                skills_prefix=".skills/",
-                default_timeout_seconds=120,
-                cleanup_work_dir=True,
-            )
-            config = SkillsConfig(source=source, executor=executor)
-        else:
-            logger.warning("Skills enabled but no skills_config and no file_store_backend; skipping skills init")
+    def _init_skills(self):
+        """Initialize skills support from skills config (backend -> source + derived executor)."""
+        from dynamiq.nodes.tools.skills_tool import SkillsTool
+        from dynamiq.skills.config import resolve_skills_config
+
+        resolved = resolve_skills_config(self.skills, self.file_store_backend)
+        if resolved is None:
+            logger.warning("Skills config missing or invalid (backend required); skipping skills init")
             return
 
-        skills_tool = SkillsTool(
-            skill_source=config.source,
-            skill_executor=config.executor,
-        )
+        source, executor = resolved
+        skills_tool = SkillsTool(skill_source=source, skill_executor=executor)
         self.tools.append(skills_tool)
 
-        available_skills = config.source.discover_skills()
+        available_skills = source.discover_skills()
         skills_summary = self._format_skills_summary(available_skills)
         self.system_prompt_manager.set_block("skills", skills_summary)
 
         logger.info(
-            f"Agent {self.name} - {self.id}: initialized with {len(available_skills)} skills "
-            f"(source={config.source.name})"
+            f"Agent {self.name} - {self.id}: initialized with {len(available_skills)} skills " f"(source={source.name})"
         )
 
     def _format_skills_summary(self, skills) -> str:
