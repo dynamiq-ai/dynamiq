@@ -568,7 +568,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _execute_single_tool(
         self, action: str, action_input: Any, thought: str, loop_num: int, config: RunnableConfig, **kwargs
-    ) -> tuple[Any, dict, bool, bool]:
+    ) -> tuple[Any, list, bool, bool]:
         """Execute a single tool with caching support.
 
         Returns:
@@ -601,7 +601,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **kwargs,
             )
 
-            return error_message, {}, False, False
+            return error_message, [], False, False
 
         self.stream_reasoning(
             AgentReasoningEventMessageData(
@@ -641,7 +641,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             else:
                 logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
-                tool_files = {}
+                tool_files = []
 
             if delegate_final:
                 self.log_final_output(thought, tool_result, loop_num)
@@ -673,9 +673,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             # Stream error result with the same tool_run_id used for reasoning
             error_message = f"{type(e).__name__}: {e}"
             self._stream_tool_result(
-                error_message, {}, tool, action, action_input, config, tool_run_id=tool_run_id, **kwargs
+                error_message, [], tool, action, action_input, config, tool_run_id=tool_run_id, **kwargs
             )
-            return error_message, {}, False, False
+            return error_message, [], False, False
 
     def _add_observation(self, tool_result: Any) -> None:
         """Add observation to prompt.
@@ -689,7 +689,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
     def _stream_tool_result(
         self,
         tool_result: Any,
-        tool_files: dict,
+        tool_files: list,
         tool: Any,
         action: Any,
         action_input: Any,
@@ -1165,7 +1165,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         "tool_name": tool_name or UNKNOWN_TOOL_NAME,
                         "success": False,
                         "result": error_message,
-                        "files": {},
+                        "files": [],
                     }
                 )
                 continue
