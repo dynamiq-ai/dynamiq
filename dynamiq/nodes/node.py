@@ -38,7 +38,7 @@ from dynamiq.types.feedback import (
     ApprovalStreamingOutputEventMessage,
     FeedbackMethod,
 )
-from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEventMessage
+from dynamiq.types.streaming import STREAMING_EVENT, StreamingConfig, StreamingEntitySource, StreamingEventMessage
 from dynamiq.utils import format_value, generate_uuid, merge
 from dynamiq.utils.duration import format_duration
 from dynamiq.utils.jsonpath import filter as jsonpath_filter
@@ -716,6 +716,12 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             entity_id=self.id,
             data={"template": template, "data": input_data, "mutable_data_params": approval_config.mutable_data_params},
             event=approval_config.event,
+            source=StreamingEntitySource(
+                id=self.id,
+                name=self.name,
+                group=self.group,
+                type=self.type,
+            ),
         )
 
         logger.info(f"Node {self.name} - {self.id}: sending approval.")
