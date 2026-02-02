@@ -606,7 +606,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self.stream_reasoning(
             AgentReasoningEventMessageData(
                 tool_run_id=tool_run_id,
-                thought=thought,
+                thought=thought or "",
                 action=action,
                 tool=AgentReasoningToolData(
                     name=tool.name,
@@ -1141,18 +1141,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
             thought: The agent's reasoning
             loop_num: Current loop iteration number
             config (RunnableConfig): Configuration for the runnable
-
-        Returns:
-            tuple: (combined_observation, aggregated_files)
             **kwargs: Additional arguments for tool execution
 
         Returns:
-            str | dict[str, Any]: Combined observation string with all tool results and optional files
+            tuple: (combined_observation, aggregated_files)
         """
         all_results: list[dict[str, Any]] = []
 
         if not tools_data:
-            return ""
+            return "", {}
 
         prepared_tools: list[dict[str, Any]] = []
 
