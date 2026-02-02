@@ -13,7 +13,7 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.graph import END, START, GraphAgentManager, GraphOrchestrator
 from dynamiq.nodes.llms.anthropic import Anthropic
 from dynamiq.nodes.node import InputTransformer, NodeDependency
-from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool, MessageSenderTool
+from dynamiq.nodes.tools.human_feedback import HumanFeedbackAction, HumanFeedbackTool
 from dynamiq.runnables import RunnableConfig, RunnableResult
 from dynamiq.runnables.base import NodeRunnableConfig
 from dynamiq.types.feedback import FeedbackMethod
@@ -64,6 +64,7 @@ def create_orchestrator() -> GraphOrchestrator:
         ),
         input_method=FeedbackMethod.STREAM,
         msg_template="Generated draft of email: {{sketch}}." " Approve by sending SEND, cancel by sending CANCEL.",
+        action=HumanFeedbackAction.ASK,  # Always wait for user input
     )
     orchestrator.add_state_by_tasks("generate_sketch", [agent])
     orchestrator.add_state_by_tasks("gather_feedback", [human_feedback_tool])
@@ -107,7 +108,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
     message_queue = Queue()
 
-    message_tool = MessageSenderTool(
+    # Message sender tool - uses action='info' to just send without waiting for response
+    message_tool = HumanFeedbackTool(
+        name="start-notification",
         output_method=FeedbackMethod.STREAM,
         msg_template="Workflow started execution!",
         streaming=StreamingConfig(enabled=True),
@@ -115,7 +118,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
     orchestrator, feedback_tool_id = create_orchestrator()
 
-    final_status_tool = MessageSenderTool(
+    final_status_tool = HumanFeedbackTool(
+        name="final-notification",
         output_method=FeedbackMethod.STREAM,
         msg_template="Workflow finished with status: {{status}}",
         streaming=StreamingConfig(enabled=True),
