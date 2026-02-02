@@ -82,11 +82,12 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
     # Run task that generates lots of content to exceed token limit
     input_data = {
         "input": (
-            "IMPORTANT: Follow these steps EXACTLY in order. Do NOT skip any step.\n\n"
-            "Step 1: Call the word-generator tool ONCE to generate a word. Do not call it more than once.\n"
-            "Step 2: Call the context-manager tool ONCE to clean/summarize the context. Do not skip this step.\n"
-            "Step 3: Provide your final answer stating the word that was generated (retrieve it from the summary).\n\n"
-            "You MUST complete all 3 steps in this exact order."
+            "IMPORTANT: Follow these steps EXACTLY in order.\n\n"
+            "Step 1: Call word-generator ONCE to generate a word.\n"
+            "Step 2: Call context-manager ONCE to clean the context. Pass the generated word in 'notes' field.\n"
+            "Step 3: Provide final answer with the word (check the summary/notes if context was cleaned).\n\n"
+            "CRITICAL: If you see a summary mentioning a word was already generated, do NOT call word-generator again. "
+            "Go directly to the next incomplete step. Check the summary for completed work before acting."
         )
     }
 
