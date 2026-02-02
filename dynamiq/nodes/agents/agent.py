@@ -622,6 +622,23 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 **kwargs,
             )
 
+    def _validate_parallel_tool_input(self, action_input: Any) -> dict[str, Any]:
+        """Validate and parse parallel tool input schema.
+
+        Args:
+            action_input: Raw input from LLM for the parallel tool.
+
+        Returns:
+            Validated input as a dictionary.
+
+        Raises:
+            RecoverableAgentException: If validation fails.
+        """
+        try:
+            return ParallelToolCallsInputSchema.model_validate(action_input).model_dump()
+        except Exception as e:
+            raise RecoverableAgentException(f"Invalid parallel tool input: {e}. ")
+
     def _should_skip_parallel_mode(
         self, action: str | None, action_input: Any
     ) -> tuple[bool, str | None, Any, list[str]]:
@@ -699,7 +716,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             skipped_tools: list[str] = []
             try:
                 if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
-                    action_input = ParallelToolCallsInputSchema.model_validate(action_input).model_dump()
+                    action_input = self._validate_parallel_tool_input(action_input)
 
                 # Check if ContextManagerTool is in the action - if so, skip parallel mode
                 skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(
