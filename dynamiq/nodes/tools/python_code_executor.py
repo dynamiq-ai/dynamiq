@@ -294,7 +294,7 @@ class PythonCodeExecutor(Node):
         "on subscripts/slices (e.g., `counts[key] += 1`); use "
         "`counts[key] = counts[key] + 1` instead."
     )
-    file_store: FileStore = Field(..., description="File storage backend shared with the agent.")
+    file_store: FileStore | None = Field(default=None, description="File storage backend shared with the agent.")
     is_files_allowed: bool = True
     input_schema: ClassVar[type[PythonCodeExecutorInputSchema]] = PythonCodeExecutorInputSchema
 
