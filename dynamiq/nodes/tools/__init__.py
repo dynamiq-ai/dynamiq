@@ -9,6 +9,7 @@ from .human_feedback import HumanFeedbackTool
 from .jina import JinaResponseFormat, JinaScrapeTool, JinaSearchTool
 from .llm_summarizer import SummarizerTool
 from .mcp import MCPServer, MCPTool
+from .parallel_tool_calls import ParallelToolCallsTool
 from .preprocess_tool import PreprocessTool
 from .python import Python
 from .python_code_executor import PythonCodeExecutor
