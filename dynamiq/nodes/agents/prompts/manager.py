@@ -149,7 +149,7 @@ class AgentPromptManager:
                 if content:
                     formatted_prompt_blocks[block] = formatted_content
 
-        render_context = {**formatted_prompt_blocks, **temp_variables}
+        render_context = {**temp_variables, **formatted_prompt_blocks}
         prompt = Template(self.agent_template).render(**render_context).strip()
         prompt = self._clean_prompt(prompt)
         return textwrap.dedent(prompt)

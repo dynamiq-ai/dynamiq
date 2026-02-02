@@ -19,7 +19,7 @@ CONTEXT_MANAGER_INSTRUCTIONS = """CONTEXT MANAGEMENT:
 
 TODO_TOOLS_INSTRUCTIONS = """TODO MANAGEMENT:
 - Use the todo-write tool for complex 3+ step tasks; skip for simple requests
-- Current todos shown in "AGENT STATE" section under "Todos:".
+- Current todos shown in [State: ...] at the end of user last messages under "Todos:"
 - When creating initial list: first task "in_progress", rest "pending"
 - After initial creation, ONLY update status via merge=true - do not restructure the plan
 - Mark completed IMMEDIATELY after finishing each step - don't batch
