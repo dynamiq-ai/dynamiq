@@ -21,6 +21,7 @@ from dynamiq.nodes.converters import (
 from dynamiq.nodes.converters.pypdf import DocumentCreationMode as PyPDFDocumentCreationMode
 from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.nodes.node import ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.file_types import EXTENSION_MAP, FileType
@@ -160,6 +161,7 @@ class FileReadTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.FILE_OPERATION
     name: str = "FileReadTool"
     description: str = """
         Reads files from storage based on the provided file path with intelligent file processing.
@@ -821,6 +823,7 @@ class FileWriteTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.FILE_OPERATION
     name: str = "FileWriteTool"
     description: str = """Writes files to storage based on the provided file path and content.
 
@@ -953,6 +956,7 @@ class FileSearchTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.FILE_OPERATION
     name: str = "FileSearchTool"
     description: str = """
         Searches stored files for substrings or regular expressions and returns contextual matches.
@@ -1161,6 +1165,7 @@ class FileListTool(Node):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.FILE_OPERATION
     name: str = "FileListTool"
     description: str = """Lists files in storage based on the provided file path."""
 

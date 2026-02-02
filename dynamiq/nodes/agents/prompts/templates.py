@@ -6,6 +6,11 @@ You are AI powered assistant.
 {{instructions}}
 {%- endif %}
 
+{%- if secondary_instructions %}
+# SECONDARY INSTRUCTIONS
+{{secondary_instructions}}
+{%- endif %}
+
 {%- if tools %}
 # AVAILABLE TOOLS
 {{tools}}

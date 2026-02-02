@@ -46,8 +46,6 @@ FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - Files are automatically collected and will be returned with your final answer
 - Mention created files in your final answer so users know what was generated
-
-{{ delegation_instructions }}
 """  # noqa: E501
 
 
@@ -96,6 +94,7 @@ CRITICAL XML FORMAT RULES:
 - Explain why this specific tool is the right choice
 - For tool use, include action and action_input tags
 - For direct answers, only include thought and answer tags
+- Tool names go as PLAIN TEXT inside <action> tags, NOT as XML tags.
 - JSON in <action_input> MUST be on single line with proper escaping
 - NO line breaks or control characters inside JSON strings
 - Use double quotes for JSON strings
@@ -125,6 +124,4 @@ FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)
 - Generated files are automatically collected and returned with your final answer
 - File operations are handled transparently - focus on the task, not file management
-
-{{ delegation_instructions_xml }}
 """  # noqa: E501

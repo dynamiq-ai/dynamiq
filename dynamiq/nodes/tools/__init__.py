@@ -1,4 +1,3 @@
-from .context_manager import ContextManagerTool
 from .cypher_executor import CypherExecutor
 from .e2b_sandbox import E2BInterpreterTool
 from .exa_search import ExaTool
@@ -10,6 +9,7 @@ from .human_feedback import HumanFeedbackTool
 from .jina import JinaResponseFormat, JinaScrapeTool, JinaSearchTool
 from .llm_summarizer import SummarizerTool
 from .mcp import MCPServer, MCPTool
+from .parallel_tool_calls import ParallelToolCallsTool
 from .preprocess_tool import PreprocessTool
 from .python import Python
 from .python_code_executor import PythonCodeExecutor
@@ -17,4 +17,5 @@ from .scale_serp import ScaleSerpTool
 from .sql_executor import SQLExecutor
 from .tavily import TavilyTool
 from .thinking_tool import ThinkingTool
+from .todo_tools import TodoItem, TodoStatus, TodoWriteTool
 from .zenrows import ZenRowsTool

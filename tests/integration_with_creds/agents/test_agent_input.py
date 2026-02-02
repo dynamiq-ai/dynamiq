@@ -117,7 +117,7 @@ def run_config():
                 "{% raw %}<Button onClick={handleClick} data={{userId: 123}} />{% endraw %}\n"
                 "```\n"
                 "- Always include code context in your explanations."
-                " Additional instructions: {{additional_instructions}}"
+                " Extra instructions: {{extra_instructions}}"
             ),
         ),
     ],
@@ -145,7 +145,7 @@ def test_react_agent_role_with_special_characters(test_llm, test_id, agent_name,
 
     input_data = {
         "input": "What is 2 + 2? Provide result in JSON format.",
-        "additional_instructions": "In the very end of the response, say 'have a nice day!'.",
+        "extra_instructions": "In the very end of the response, say 'have a nice day!'.",
     }
     config = RunnableConfig(request_timeout=30)
     result = agent.run(input_data=input_data, config=config)

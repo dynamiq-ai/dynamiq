@@ -6,6 +6,7 @@ from dynamiq.connections import ZenRows
 from dynamiq.nodes import NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ConnectionNode, ensure_config
+from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig
 from dynamiq.utils.logger import logger
 
@@ -41,6 +42,7 @@ class ZenRowsTool(ConnectionNode):
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
+    action_type: ActionType = ActionType.WEB_SCRAPE
     name: str = "Zenrows Scraper Tool"
     description: str = DESCRIPTION_ZENROWS
     connection: ZenRows

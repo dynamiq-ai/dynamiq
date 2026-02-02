@@ -22,7 +22,7 @@ from dynamiq.nodes.agents.utils import (
 )
 from dynamiq.nodes.llms import BaseLLM
 from dynamiq.nodes.node import NodeDependency, ensure_config
-from dynamiq.nodes.tools import ContextManagerTool
+from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.file_tools import (
     EXTRACTED_TEXT_SUFFIX,
     FileListTool,
@@ -31,7 +31,9 @@ from dynamiq.nodes.tools.file_tools import (
     FileWriteTool,
 )
 from dynamiq.nodes.tools.mcp import MCPServer
+from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
+from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
@@ -113,20 +115,6 @@ class AgentStatus(str, Enum):
     FAIL = "fail"
 
 
-class AgentIntermediateStepModelObservation(BaseModel):
-    initial: str | dict | None = None
-    tool_using: str | dict | list | None = None
-    tool_input: str | dict | list | None = None
-    tool_output: Any = None
-    updated: str | dict | None = None
-
-
-class AgentIntermediateStep(BaseModel):
-    input_data: str | dict
-    agent_model_observation: AgentIntermediateStepModelObservation = Field(..., alias="model_observation")
-    final_answer: str | dict | None = None
-
-
 class ToolParams(BaseModel):
     global_params: dict[str, Any] = Field(default_factory=dict, alias="global")
     by_name_params: dict[str, Union[dict[str, Any], "ToolParams"]] = Field(default_factory=dict, alias="by_name")
@@ -142,7 +130,7 @@ class AgentInputSchema(BaseModel):
 
     user_id: str | None = Field(default=None, description="Parameter to provide user ID.")
     session_id: str | None = Field(default=None, description="Parameter to provide session ID.")
-    metadata: dict | list = Field(default={}, description="Parameter to provide metadata.")
+    metadata: dict = Field(default={}, description="Parameter to provide metadata in key-value pairs.")
 
     model_config = ConfigDict(extra="allow", strict=True, arbitrary_types_allowed=True)
 
@@ -210,6 +198,11 @@ class Agent(Node):
     delegation_allowed: bool = Field(
         default=False,
         description="Allow returning a child agent tool's output directly via delegate_final flag.",
+    )
+    parallel_tool_calls_enabled: bool = Field(
+        default=False,
+        description="Enable multi-tool execution in a single step. "
+        "When True, the agent can call multiple tools in parallel.",
     )
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
@@ -287,7 +280,6 @@ class Agent(Node):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._intermediate_steps: dict[int, dict] = {}
         self._run_depends: list[dict] = []
         self._prompt = Prompt(messages=[])
 
@@ -310,6 +302,11 @@ class Agent(Node):
             self.tools.append(FileReadTool(file_store=self.file_store_backend, llm=self.llm))
             self.tools.append(FileSearchTool(file_store=self.file_store_backend))
             self.tools.append(FileListTool(file_store=self.file_store_backend))
+
+        if self.parallel_tool_calls_enabled:
+            # Filter out any user tools with the reserved parallel tool name
+            self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
+            self.tools.append(ParallelToolCallsTool())
 
         self._init_prompt_blocks()
 
@@ -388,7 +385,6 @@ class Agent(Node):
 
         self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
         self.system_prompt_manager.setup_for_base_agent()
-        self.system_prompt_manager.update_variables({"delegation_instructions": "", "delegation_instructions_xml": ""})
 
     def set_block(self, block_name: str, content: str):
         """Adds or updates a prompt block."""
@@ -398,20 +394,23 @@ class Agent(Node):
         """Sets or updates a prompt variable."""
         self.system_prompt_manager.set_variable(variable_name, value)
 
-    def _prepare_metadata(self, input_data: dict) -> dict:
+    def _prepare_metadata(self, input_data: AgentInputSchema) -> dict:
         """
         Prepare metadata from input data.
 
         Args:
-            input_data (dict): Input data containing user information
+            input_data: Agent input schema containing user information
 
         Returns:
             dict: Processed metadata
         """
-        EXCLUDED_KEYS = {"user_id", "session_id", "input", "metadata", "files", "images", "tool_params"}
-        custom_metadata = input_data.get("metadata", {}).copy()
-        custom_metadata.update({k: v for k, v in input_data.items() if k not in EXCLUDED_KEYS})
+        custom_metadata = input_data.metadata.copy()
 
+        # Add extra fields that were provided (model allows extra fields with ConfigDict extra="allow")
+        if input_data.model_extra:
+            custom_metadata.update(input_data.model_extra)
+
+        # Clean up any leaked fields
         if "files" in custom_metadata:
             del custom_metadata["files"]
         if "images" in custom_metadata:
@@ -419,13 +418,10 @@ class Agent(Node):
         if "tool_params" in custom_metadata:
             del custom_metadata["tool_params"]
 
-        user_id = input_data.get("user_id")
-        session_id = input_data.get("session_id")
-
-        if user_id:
-            custom_metadata["user_id"] = user_id
-        if session_id:
-            custom_metadata["session_id"] = session_id
+        if input_data.user_id:
+            custom_metadata["user_id"] = input_data.user_id
+        if input_data.session_id:
+            custom_metadata["session_id"] = input_data.session_id
 
         return custom_metadata
 
@@ -439,12 +435,10 @@ class Agent(Node):
         """
         Executes the agent with the given input data.
         """
-        input_dict = dict(input_data)
-        log_data = input_dict.copy()
-
+        # Convert to dict only for logging (to avoid logging BytesIO objects)
+        log_data = input_data.model_dump()
         if log_data.get("images"):
             log_data["images"] = [f"image_{i}" for i in range(len(log_data["images"]))]
-
         if log_data.get("files"):
             log_data["files"] = [f"file_{i}" for i in range(len(log_data["files"]))]
 
@@ -453,20 +447,24 @@ class Agent(Node):
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
-        custom_metadata = self._prepare_metadata(input_dict)
+        custom_metadata = self._prepare_metadata(input_data)
         self._current_call_context = {
-            "user_id": input_dict.get("user_id"),
-            "session_id": input_dict.get("session_id"),
+            "user_id": input_data.user_id,
+            "session_id": input_data.session_id,
             "metadata": custom_metadata,
         }
 
         input_message = input_message or self.input_message or Message(role=MessageRole.USER, content=input_data.input)
-        input_message = input_message.format_message(**input_dict)
+        # Convert to dict for format_message, excluding fields that are unsafe for templates
+        # (binary data like files/images, complex objects like tool_params, and input which is already handled)
+        standard_fields = set(AgentInputSchema.model_fields.keys())
+        extra_fields = input_data.model_dump(exclude=standard_fields)
+        input_message = input_message.format_message(**extra_fields)
 
-        use_memory = self.memory and (input_dict.get("user_id") or input_dict.get("session_id"))
+        use_memory = self.memory and (input_data.user_id or input_data.session_id)
 
         if use_memory:
-            history_messages = self._retrieve_memory(input_dict)
+            history_messages = self._retrieve_memory(input_data)
             if len(history_messages) > 0:
                 history_messages.insert(
                     0,
@@ -510,6 +508,9 @@ class Agent(Node):
                             inference_mode=self.inference_mode,
                             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
                             has_tools=True,
+                            delegation_allowed=self.delegation_allowed,
+                            context_compaction_enabled=self.summarization_config.enabled,
+                            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
                         )
 
             normalized_files = self._ensure_named_files(files)
@@ -596,18 +597,19 @@ class Agent(Node):
         )
         return conversation
 
-    def _retrieve_memory(self, input_data: dict) -> list[Message]:
+    def _retrieve_memory(self, input_data: AgentInputSchema) -> list[Message]:
         """
+        Args:
+            input_data: Agent input schema containing user information
+
+        Returns:
+            list[Message]: List of messages forming a valid conversation context
         Retrieves memory messages when user_id and/or session_id are provided.
         """
-        user_id = input_data.get("user_id")
-        session_id = input_data.get("session_id")
-
-        user_query = input_data.get("input", "")
         history_messages = self.retrieve_conversation_history(
-            user_query=user_query,
-            user_id=user_id,
-            session_id=session_id,
+            user_query=input_data.input,
+            user_id=input_data.user_id,
+            session_id=input_data.session_id,
             strategy=self.memory_retrieval_strategy,
         )
         logger.info("Agent %s - %s: retrieved %d messages from memory", self.name, self.id, len(history_messages))
@@ -825,7 +827,7 @@ class Agent(Node):
                 merged_input.pop("delegate_final", None)
 
         if isinstance(tool, ContextManagerTool):
-            merged_input["history"] = self._prompt.messages[self._history_offset :]
+            merged_input["messages"] = self._prompt.messages[self._history_offset :]
 
         raw_tool_params = kwargs.get("tool_params", ToolParams())
         tool_params = (
@@ -843,6 +845,12 @@ class Agent(Node):
                         merged_input[field_name] = self.file_store_backend.list_files_bytes()
             if isinstance(tool, Python):
                 merged_input["files"] = self.file_store_backend.list_files_bytes()
+
+            if isinstance(tool, PythonCodeExecutor) and not tool.file_store:
+                tool.file_store = self.file_store_backend
+                logger.debug(
+                    f"Agent {self.name} - {self.id}: injected file_store into PythonCodeExecutor tool {tool.name}"
+                )
 
         if tool_params:
             debug_info = []
@@ -944,7 +952,8 @@ class Agent(Node):
             truncate=self.tool_output_truncate_enabled and not effective_delegate_final,
         )
 
-        self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
+        if not isinstance(tool, ContextManagerTool):
+            self._tool_cache[ToolCacheEntry(action=tool.name, action_input=tool_input)] = tool_result_content_processed
 
         output_files = tool_result.output.get("files", [])
         if collect_dependency:
@@ -1184,16 +1193,7 @@ class Agent(Node):
     @property
     def tool_description(self) -> str:
         """Returns a description of the tools available to the agent."""
-        return (
-            "\n".join(
-                [
-                    f"{tool.name}:\n <{tool.name}_description>\n{tool.description.strip()}\n<\\{tool.name}_description>"
-                    for tool in self.tools
-                ]
-            )
-            if self.tools
-            else ""
-        )
+        return "\n".join([f"- {tool.name}: {tool.description.strip()}" for tool in self.tools]) if self.tools else ""
 
     @property
     def tool_names(self) -> str:
@@ -1207,7 +1207,6 @@ class Agent(Node):
 
     def reset_run_state(self):
         """Resets the agent's run state."""
-        self._intermediate_steps = {}
         self._run_depends = []
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
         self.system_prompt_manager.reset()

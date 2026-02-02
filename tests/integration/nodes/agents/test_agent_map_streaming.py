@@ -12,6 +12,7 @@ from dynamiq.nodes.llms.openai import OpenAI
 from dynamiq.nodes.operators import Map
 from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.firecrawl import FirecrawlTool
+from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -21,13 +22,17 @@ from dynamiq.types.streaming import StreamingConfig, StreamingMode
 @pytest.fixture
 def mock_llm_response_text():
     return (
-        "Thought: Need to use tools to gather info and scrape.\n"
-        "Action: NoOp Tool\n"
-        "Action Input: {}\n"
-        "Action: Exa Search Tool\n"
-        'Action Input: {"query": "test", "limit": 1}\n'
-        "Action: Firecrawl Tool\n"
-        'Action Input: {"url": "https://example.com"}'
+        """<output>
+  <thought>Need to use tools to gather info and scrape.</thought>
+  <action>"""
+        + PARALLEL_TOOL_NAME
+        + """</action>
+  <action_input>{"tools": [
+    {"name": "NoOp Tool", "input": {}},
+    {"name": "Exa Search Tool", "input": {"query": "test", "limit": 1}},
+    {"name": "Firecrawl Tool", "input": {"url": "https://example.com"}}
+  ]}</action_input>
+</output>"""
     )
 
 
@@ -82,7 +87,7 @@ def run(input_data):
     agent = Agent(
         name="React Agent",
         llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="react_map_stream", mode=StreamingMode.ALL),
@@ -138,7 +143,7 @@ def run(input_data):
     for items in llm_events_by_entity.values():
         assert len(items) > 0
         joined = "".join(str(chunk) for _, chunk in items)
-        assert ("Action:" in joined) or ("Thought:" in joined) or ("mocked_response" in joined)
+        assert ("<thought>" in joined) or ("<action>" in joined) or ("mocked_response" in joined)
 
 
 def test_react_agent_map_streaming_final_mode_isolated(mock_llm_executor, mock_tools_http):
@@ -157,7 +162,7 @@ def run(input_data):
     agent = Agent(
         name="React Agent",
         llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.XML,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="react_map_stream_final", mode=StreamingMode.FINAL),

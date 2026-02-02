@@ -39,7 +39,7 @@ def _child_researcher(llm: OpenAI) -> Agent:
         llm=llm,
         tools=[],
         inference_mode=InferenceMode.XML,
-        parallel_tool_calls_enabled=True,
+        parallel_tool_calls_enabled=False,
         max_loops=6,
     )
 
@@ -61,7 +61,7 @@ def _child_writer(llm: OpenAI) -> Agent:
         llm=llm,
         tools=[],
         inference_mode=InferenceMode.XML,
-        parallel_tool_calls_enabled=True,
+        parallel_tool_calls_enabled=False,
         max_loops=6,
     )
 
@@ -114,7 +114,8 @@ def test_manager_with_subagents_parallel_calls():
 
     result = wf.run(
         input_data={
-            "input": "Research facts about dolphins and write a short brief using both available agents.",
+            "input": "Research facts about dolphins and about whales and write"
+            " a short brief using both available agents.",
         },
         config=RunnableConfig(callbacks=[streaming, tracing]),
     )
