@@ -6,12 +6,8 @@ from datetime import datetime
 from typing import Any
 
 from jinja2 import Template
-from pydantic import BaseModel
 
 from dynamiq.nodes.agents.prompts.react import (
-    CONTEXT_MANAGER_INSTRUCTIONS,
-    DELEGATION_INSTRUCTIONS,
-    DELEGATION_INSTRUCTIONS_XML,
     REACT_BLOCK_INSTRUCTIONS_FUNCTION_CALLING,
     REACT_BLOCK_INSTRUCTIONS_NO_TOOLS,
     REACT_BLOCK_INSTRUCTIONS_SINGLE,
@@ -19,32 +15,21 @@ from dynamiq.nodes.agents.prompts.react import (
     REACT_BLOCK_OUTPUT_FORMAT,
     REACT_BLOCK_TOOLS,
     REACT_BLOCK_TOOLS_NO_FORMATS,
-    REACT_BLOCK_XML_INSTRUCTIONS_MULTI,
     REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS,
     REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
     REACT_MAX_LOOPS_PROMPT,
-    TODO_TOOLS_INSTRUCTIONS,
 )
 from dynamiq.nodes.agents.prompts.registry import get_prompt_constant
+from dynamiq.nodes.agents.prompts.secondary_instructions import (
+    CONTEXT_MANAGER_INSTRUCTIONS,
+    DELEGATION_INSTRUCTIONS,
+    DELEGATION_INSTRUCTIONS_XML,
+    REACT_BLOCK_MULTI_TOOL_PLANNING,
+    TODO_TOOLS_INSTRUCTIONS,
+)
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.utils.logger import logger
-
-
-class AdditionalInstructionsConfig(BaseModel):
-    """Configuration for additional agent instructions (capabilities).
-
-    Attributes:
-        delegation_enabled: Whether delegation to sub-agents is enabled
-        context_compaction_enabled: Whether context compaction/summarization is enabled
-            (requires ContextManagerTool to be available)
-        todo_management_enabled: Whether todo management capabilities are enabled
-            (requires TodoWriteTool to be available)
-    """
-
-    delegation_enabled: bool = False
-    context_compaction_enabled: bool = False
-    todo_management_enabled: bool = False
 
 
 class AgentPromptManager:
@@ -224,6 +209,9 @@ class AgentPromptManager:
         inference_mode: InferenceMode,
         parallel_tool_calls_enabled: bool,
         has_tools: bool,
+        delegation_allowed: bool = False,
+        context_compaction_enabled: bool = False,
+        todo_management_enabled: bool = False,
     ) -> None:
         """
         Setup prompts for ReAct-style Agent.
@@ -236,6 +224,9 @@ class AgentPromptManager:
             inference_mode=inference_mode,
             parallel_tool_calls_enabled=parallel_tool_calls_enabled,
             has_tools=has_tools,
+            delegation_allowed=delegation_allowed,
+            context_compaction_enabled=context_compaction_enabled,
+            todo_management_enabled=todo_management_enabled,
         )
 
         # Update prompt blocks
@@ -254,54 +245,15 @@ class AgentPromptManager:
         else:
             logger.debug(f"Using default prompts for model '{self.model_name}'")
 
-    def build_additional_instructions(
-        self,
-        config: AdditionalInstructionsConfig,
-    ) -> dict[str, str]:
-        """
-        Build unified additional instructions based on enabled features.
-
-        Args:
-            config: Configuration specifying which features are enabled
-
-        Returns:
-            Dictionary containing additional_instructions and additional_instructions_xml
-        """
-        instructions_parts = []
-        instructions_xml_parts = []
-
-        # Add delegation instructions if enabled
-        if config.delegation_enabled:
-            instructions_parts.append(DELEGATION_INSTRUCTIONS)
-            instructions_xml_parts.append(DELEGATION_INSTRUCTIONS_XML)
-
-        # Add context compaction instructions if enabled
-        if config.context_compaction_enabled:
-            instructions_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
-            instructions_xml_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
-
-        # Add todo management instructions if enabled
-        if config.todo_management_enabled:
-            instructions_parts.append(TODO_TOOLS_INSTRUCTIONS)
-            instructions_xml_parts.append(TODO_TOOLS_INSTRUCTIONS)
-
-        # Combine all instructions
-        additional_instructions = "\n\n".join(instructions_parts) if instructions_parts else ""
-        additional_instructions_xml = "\n\n".join(instructions_xml_parts) if instructions_xml_parts else ""
-
-        return {
-            "additional_instructions": additional_instructions,
-            # Contains delegation + context manager + todos when enabled
-            "additional_instructions_xml": additional_instructions_xml,
-            # Contains delegation + context manager + todos when enabled
-        }
-
 
 def get_model_specific_prompts(
     model_name: str,
     inference_mode: InferenceMode,
     parallel_tool_calls_enabled: bool,
     has_tools: bool,
+    delegation_allowed: bool = False,
+    context_compaction_enabled: bool = False,
+    todo_management_enabled: bool = False,
 ) -> tuple[dict[str, str], str]:
     """
     Get model-specific prompts based on the model name and agent configuration.
@@ -311,6 +263,9 @@ def get_model_specific_prompts(
         inference_mode: The inference mode being used
         parallel_tool_calls_enabled: Whether parallel tool calls are enabled
         has_tools: Whether the agent has tools
+        delegation_allowed: Whether delegation is allowed
+        context_compaction_enabled: Whether context compaction/summarization is enabled
+        todo_management_enabled: Whether todo management is enabled
 
     Returns:
         Tuple of (prompt_blocks dict, agent_prompt_template string)
@@ -320,26 +275,11 @@ def get_model_specific_prompts(
     if agent_template != AGENT_PROMPT_TEMPLATE:
         logger.debug(f"Using model-specific AGENT_PROMPT_TEMPLATE for '{model_name}'")
 
-    # DEFAULT mode always uses single-tool instructions (parallel not supported)
     instructions_default = get_prompt_constant(
         model_name, "REACT_BLOCK_INSTRUCTIONS_SINGLE", REACT_BLOCK_INSTRUCTIONS_SINGLE
     )
     if instructions_default != REACT_BLOCK_INSTRUCTIONS_SINGLE:
         logger.debug(f"Using model-specific REACT_BLOCK_INSTRUCTIONS_SINGLE for '{model_name}'")
-
-    # XML mode supports parallel tool calls
-    if parallel_tool_calls_enabled:
-        instructions_xml = get_prompt_constant(
-            model_name, "REACT_BLOCK_XML_INSTRUCTIONS_MULTI", REACT_BLOCK_XML_INSTRUCTIONS_MULTI
-        )
-        if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_MULTI:
-            logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_MULTI for '{model_name}'")
-    else:
-        instructions_xml = get_prompt_constant(
-            model_name, "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
-        )
-        if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_SINGLE:
-            logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
 
     # Get other model-specific prompts
     react_block_tools = get_prompt_constant(model_name, "REACT_BLOCK_TOOLS", REACT_BLOCK_TOOLS)
@@ -383,6 +323,29 @@ def get_model_specific_prompts(
             xml_instructions_no_tools = get_prompt_constant(
                 model_name, "REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS", REACT_BLOCK_XML_INSTRUCTIONS_NO_TOOLS
             )
+            # XML mode instructions
+            instructions_xml = get_prompt_constant(
+                model_name, "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", REACT_BLOCK_XML_INSTRUCTIONS_SINGLE
+            )
+            if instructions_xml != REACT_BLOCK_XML_INSTRUCTIONS_SINGLE:
+                logger.debug(f"Using model-specific REACT_BLOCK_XML_INSTRUCTIONS_SINGLE for '{model_name}'")
             prompt_blocks["instructions"] = xml_instructions_no_tools if not has_tools else instructions_xml
+
+    # Build secondary_instructions from enabled features
+    secondary_parts = []
+    if parallel_tool_calls_enabled:
+        secondary_parts.append(REACT_BLOCK_MULTI_TOOL_PLANNING)
+    if delegation_allowed:
+        if inference_mode == InferenceMode.XML:
+            secondary_parts.append(DELEGATION_INSTRUCTIONS_XML)
+        else:
+            secondary_parts.append(DELEGATION_INSTRUCTIONS)
+    if context_compaction_enabled:
+        secondary_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
+    if todo_management_enabled:
+        secondary_parts.append(TODO_TOOLS_INSTRUCTIONS)
+
+    if secondary_parts:
+        prompt_blocks["secondary_instructions"] = "\n\n".join(secondary_parts)
 
     return prompt_blocks, agent_template

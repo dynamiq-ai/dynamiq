@@ -30,7 +30,7 @@ from dynamiq.nodes.agents.prompts.overrides.gpt import (
 from dynamiq.nodes.agents.prompts.overrides.gpt import (
     REACT_BLOCK_XML_INSTRUCTIONS_SINGLE as GPT_REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
 )
-from dynamiq.nodes.agents.prompts.react import DELEGATION_INSTRUCTIONS, DELEGATION_INSTRUCTIONS_XML
+from dynamiq.nodes.agents.prompts.secondary_instructions import DELEGATION_INSTRUCTIONS, DELEGATION_INSTRUCTIONS_XML
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode

@@ -12,19 +12,17 @@ from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     AgentUnknownToolException,
-    JSONParsingError,
     MaxLoopsExceededException,
     ParsingError,
     RecoverableAgentException,
     TagNotFoundError,
-    XMLParsingError,
 )
-from dynamiq.nodes.agents.prompts.manager import AdditionalInstructionsConfig
 from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
+from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
@@ -92,11 +90,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
     behaviour_on_max_loops: Behavior = Field(
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
-    )
-    parallel_tool_calls_enabled: bool = Field(
-        default=False,
-        description="Enable multi-tool execution in a single step. "
-        "When True, the agent can call multiple tools in parallel.",
     )
     direct_tool_output_enabled: bool = Field(
         default=False,
@@ -302,7 +295,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             # For function calling, construct a message that includes the tool call
-            if "tool_calls" in dict(llm_result.output):
+            if "tool_calls" in dict[Any, Any](llm_result.output):
                 try:
                     tool_call = list(llm_result.output["tool_calls"].values())[0]
                     function_name = tool_call["function"]["name"]
@@ -445,89 +438,43 @@ class Agent(HistoryManagerMixin, BaseAgent):
             )
             return None, None, None
 
-        if self.parallel_tool_calls_enabled:
-            try:
-                parsed_result = XMLParser.parse_unified_xml_format(llm_generated_output)
+        try:
+            parsed_data = XMLParser.parse(
+                llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
+            )
+            thought = parsed_data.get("thought")
+            final_answer = parsed_data.get("answer")
+            self.log_final_output(thought, final_answer, loop_num)
+            return thought, "final_answer", final_answer
 
-                thought = parsed_result.get("thought", "")
-
-                if parsed_result.get("is_final", False):
-                    final_answer = parsed_result.get("answer", "")
-                    self.log_final_output(thought, final_answer, loop_num)
-                    return thought, "final_answer", final_answer
-
-                tools_data = parsed_result.get("tools", [])
-                action = tools_data
-
-                if len(tools_data) > 1:
-                    for tool_payload in tools_data:
-                        if isinstance(tool_payload.get("input"), dict) and tool_payload["input"].get("delegate_final"):
-                            raise ActionParsingException(
-                                "delegate_final is only supported for single agent tool calls.",
-                                recoverable=True,
-                            )
-
-                if len(tools_data) == 1:
-                    self.log_reasoning(
-                        thought,
-                        tools_data[0].get("name", "unknown_tool"),
-                        tools_data[0].get("input", {}),
-                        loop_num,
-                    )
-                else:
-                    self.log_reasoning(thought, "multiple_tools", str(tools_data), loop_num)
-
-                return thought, action, tools_data
-
-            except (XMLParsingError, TagNotFoundError, JSONParsingError) as e:
-                self._append_recovery_instruction(
-                    error_label=type(e).__name__,
-                    error_detail=str(e),
-                    llm_generated_output=llm_generated_output,
-                    extra_guidance=(
-                        "Return <thought> with the resolved plan and list tool calls inside <tools>, "
-                        "or mark the run as final with <answer>."
-                    ),
-                )
-                return None, None, None
-        else:
+        except TagNotFoundError:
+            logger.debug("XMLParser: Not a final answer structure, trying action structure.")
             try:
                 parsed_data = XMLParser.parse(
-                    llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
+                    llm_generated_output,
+                    required_tags=["thought", "action", "action_input"],
+                    optional_tags=["output"],
+                    json_fields=["action_input"],
                 )
                 thought = parsed_data.get("thought")
-                final_answer = parsed_data.get("answer")
-                self.log_final_output(thought, final_answer, loop_num)
-                return thought, "final_answer", final_answer
-
-            except TagNotFoundError:
-                logger.debug("XMLParser: Not a final answer structure, trying action structure.")
-                try:
-                    parsed_data = XMLParser.parse(
-                        llm_generated_output,
-                        required_tags=["thought", "action", "action_input"],
-                        optional_tags=["output"],
-                        json_fields=["action_input"],
-                    )
-                    thought = parsed_data.get("thought")
-                    action = parsed_data.get("action")
-                    action_input = parsed_data.get("action_input")
-                    self.log_reasoning(thought, action, action_input, loop_num)
-                    return thought, action, action_input
-                except ParsingError as e:
-                    logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
-                    raise ActionParsingException(
-                        "The previous response was empty or invalid. "
-                        "Provide <thought> with either <action>/<action_input> or <answer>.",
-                        recoverable=True,
-                    )
-
+                action = parsed_data.get("action")
+                action_input = parsed_data.get("action_input")
+                self.log_reasoning(thought, action, action_input, loop_num)
+                return thought, action, action_input
             except ParsingError as e:
-                logger.error(f"XMLParser: Empty or invalid XML response: {e}")
+                logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
                 raise ActionParsingException(
-                    "The previous response was empty or invalid. " "Please provide the required XML tags.",
+                    "The previous response was empty or invalid. "
+                    "Provide <thought> with either <action>/<action_input> or <answer>.",
                     recoverable=True,
                 )
+
+        except ParsingError as e:
+            logger.error(f"XMLParser: Empty or invalid XML response: {e}")
+            raise ActionParsingException(
+                "The previous response was empty or invalid. " "Please provide the required XML tags.",
+                recoverable=True,
+            )
 
     def _setup_prompt_and_stop_sequences(
         self,
@@ -542,7 +489,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         system_message = Message(
             role=MessageRole.SYSTEM,
-            content=self._generate_system_prompt_content(),
+            content=self.generate_prompt(
+                tools_name=self.tool_names,
+                input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
+            ),
             static=True,
         )
 
@@ -689,10 +639,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
             if tool is not None:
                 source_name = tool_name = tool.name
-            elif isinstance(action, list):
+            elif self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
                 tool_names = [
                     tool_data["name"] if isinstance(tool_data, dict) and "name" in tool_data else UNKNOWN_TOOL_NAME
-                    for tool_data in action
+                    for tool_data in action_input["tools"]
                 ]
 
                 if len(tool_names) == 1:
@@ -718,6 +668,23 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 config=config,
                 **kwargs,
             )
+
+    def _validate_parallel_tool_input(self, action_input: Any) -> dict[str, Any]:
+        """Validate and parse parallel tool input schema.
+
+        Args:
+            action_input: Raw input from LLM for the parallel tool.
+
+        Returns:
+            Validated input as a dictionary.
+
+        Raises:
+            RecoverableAgentException: If validation fails.
+        """
+        try:
+            return ParallelToolCallsInputSchema.model_validate(action_input).model_dump()
+        except Exception as e:
+            raise RecoverableAgentException(f"Invalid parallel tool input: {e}. ")
 
     def _should_skip_parallel_mode(
         self, action: str | None, action_input: Any
@@ -794,17 +761,22 @@ class Agent(HistoryManagerMixin, BaseAgent):
             tool_files: Any = []
             tool = None
             skipped_tools: list[str] = []
-
             try:
+                if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
+                    action_input = self._validate_parallel_tool_input(action_input)
+
                 # Check if ContextManagerTool is in the action - if so, skip parallel mode
                 skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(
                     action, action_input
                 )
 
                 # Handle XML parallel mode (but not for ContextManagerTool)
-                if self.inference_mode == InferenceMode.XML and self.parallel_tool_calls_enabled and not skip_parallel:
-                    tools_data = action_input if isinstance(action_input, list) else [action_input]
-                    execution_output = self._execute_tools(tools_data, thought, loop_num, config, **kwargs)
+                if (
+                    self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
+                    and self.parallel_tool_calls_enabled
+                    and not skip_parallel
+                ):
+                    execution_output = self._execute_tools(action_input["tools"], thought, loop_num, config, **kwargs)
                     tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
                 else:
                     result = self._execute_single_tool(action, action_input, thought, loop_num, config, **kwargs)
@@ -1121,21 +1093,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return f"{final_answer}"
 
-    def _generate_system_prompt_content(self) -> str:
-        """
-        Generate the system prompt content (static, no dynamic state).
-
-        Returns:
-            str: The rendered system prompt including tools and instructions.
-        """
-        instructions_config = self._get_additional_instructions_config()
-
-        return self.generate_prompt(
-            tools_name=self.tool_names,
-            input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
-            **self.system_prompt_manager.build_additional_instructions(instructions_config),
-        )
-
     def _refresh_agent_state(self, loop_num: int) -> None:
         """
         Refresh the agent state with current values.
@@ -1158,35 +1115,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
             except Exception:
                 logger.error("Failed to get todo state")
 
-    def _get_additional_instructions_config(self) -> AdditionalInstructionsConfig:
-        """
-        Get configuration for additional instructions (capabilities) based on agent settings.
-
-        Uses the configuration as the source of truth. Tools are automatically added by
-        model validators when the corresponding config is enabled, so we don't need to
-        check tool presence here.
-
-        Returns:
-            AdditionalInstructionsConfig with capability flags for:
-                - delegation_enabled: Whether delegation is enabled
-                - context_compaction_enabled: Whether context compaction is enabled
-                - todo_management_enabled: Whether todo management is enabled
-        """
-        return AdditionalInstructionsConfig(
-            delegation_enabled=self.delegation_allowed,
-            context_compaction_enabled=self.summarization_config.enabled,
-            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
-        )
-
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
-        # Get configuration for additional instructions and update prompt variables
-        instructions_config = self._get_additional_instructions_config()
-        # Additional instructions (delegation, context management, todos) are rendered via prompt variables
-        self.system_prompt_manager.update_variables(
-            self.system_prompt_manager.build_additional_instructions(instructions_config)
-        )
+        # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
 
         # Handle function calling schema generation first
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
@@ -1203,6 +1135,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
             inference_mode=self.inference_mode,
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             has_tools=bool(self.tools),
+            delegation_allowed=self.delegation_allowed,
+            context_compaction_enabled=self.summarization_config.enabled,
+            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
         )
 
         # Only auto-wrap the entire role in a raw block if the user did not

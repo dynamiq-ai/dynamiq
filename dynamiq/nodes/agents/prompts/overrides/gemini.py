@@ -49,8 +49,6 @@ FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, etc.)
 - Files are automatically collected and will be returned with your final answer
 - Mention created files in your final answer so users know what was generated
-
-{{ additional_instructions }}
 """  # noqa: E501
 
 REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
@@ -132,5 +130,4 @@ FILE HANDLING:
 - Generated files are automatically collected and returned with your final answer
 - File operations are handled transparently - focus on the task, not file management
 
-{{ additional_instructions_xml }}
 """  # noqa: E501
