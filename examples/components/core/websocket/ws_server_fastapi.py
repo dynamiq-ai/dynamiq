@@ -12,7 +12,7 @@ from dynamiq import Workflow, callbacks, connections, flows, prompts
 from dynamiq.callbacks.streaming import AsyncStreamingIteratorCallbackHandler
 from dynamiq.nodes import llms
 from dynamiq.nodes.node import NodeDependency
-from dynamiq.nodes.tools.human_feedback import HumanFeedbackTool
+from dynamiq.nodes.tools.human_feedback import HumanFeedbackAction, HumanFeedbackTool
 from dynamiq.runnables import RunnableConfig
 from dynamiq.runnables.base import NodeRunnableConfig
 from dynamiq.types.feedback import FeedbackMethod
@@ -68,6 +68,7 @@ HF_NODE = HumanFeedbackTool(
     input_method=FeedbackMethod.STREAM,
     streaming=StreamingConfig(enabled=True, event=HF_NODE_STREAMING_EVENT, timeout=15),
     depends=[NodeDependency(node=OPENAI_NODE)],
+    action=HumanFeedbackAction.ASK,  # Always wait for user input
 )
 WF_ID = "9cd3e052-6af8-4e89-9e88-5a654ec9c492"
 
