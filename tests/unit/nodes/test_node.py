@@ -26,8 +26,6 @@ BACKGROUND_THREAD_WAIT = 3.0
 SHORT_POLL_INTERVAL = 0.2
 LONG_POLL_INTERVAL = 2.0
 
-# Timing tolerance for elapsed time assertions.
-# Accounts for timing variations due to thread scheduling, CI load, and slow machines.
 TIMING_TOLERANCE = 0.2
 
 
@@ -794,7 +792,6 @@ def test_execute_timeout_with_custom_poll_interval():
     result = node.run(input_data=TEST_INPUT_DATA, config=RunnableConfig())
     main_flow_elapsed = time.time() - start_time
 
-    # Main flow returns quickly with timeout error
     assert result.status == RunnableStatus.FAILURE
     assert main_flow_elapsed < MAX_ELAPSED_TIME
 
