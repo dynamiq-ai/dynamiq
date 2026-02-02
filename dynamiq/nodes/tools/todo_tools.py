@@ -96,10 +96,6 @@ RULES:
     def reset_run_state(self):
         self._run_depends = []
 
-    @property
-    def to_dict_exclude_params(self):
-        return super().to_dict_exclude_params | {"file_store": True}
-
     def _load_todos(self) -> list[dict]:
         """Load todos from file store."""
         try:
