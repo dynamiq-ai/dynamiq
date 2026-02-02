@@ -767,7 +767,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             skipped_tools: list[str] = []
 
             if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
-                action_input = self._validate_parallel_tool_input(action_input)
+                action_input = self._validate_parallel_tool_input(action_input)["tools"]
 
             # Check if ContextManagerTool is in the action - if so, skip parallel mode
             skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(action, action_input)
