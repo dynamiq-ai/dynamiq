@@ -20,7 +20,7 @@ STREAMING_EVENT = "streaming"
 
 
 class StreamingEntitySource(BaseModel):
-    entity_id: str | None = None
+    id: str | None = None
     name: str | None = None
     group: str | None = None
     type: str | None = None

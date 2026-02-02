@@ -717,7 +717,7 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             data={"template": template, "data": input_data, "mutable_data_params": approval_config.mutable_data_params},
             event=approval_config.event,
             source=StreamingEntitySource(
-                entity_id=self.id,
+                id=self.id,
                 name=self.name,
                 group=self.group,
                 type=self.type,

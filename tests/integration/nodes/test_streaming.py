@@ -52,7 +52,7 @@ def test_node_streaming(
     }
 
     expected_final_output_source = StreamingEntitySource(
-        entity_id=wf.id, name="Workflow", group=None, type="dynamiq.workflows.Workflow"
+        id=wf.id, name="Workflow", group=None, type="dynamiq.workflows.Workflow"
     )
 
     assert response == RunnableResult(
@@ -67,7 +67,7 @@ def test_node_streaming(
     assert "".join([content for _, content, _ in node_output]) == mock_llm_response_text
     assert all(event == streaming_custom_event for event, _, _ in node_output)
     expected_streaming_node_source = StreamingEntitySource(
-        entity_id=node_with_streaming.id, name="OpenAI", group="llms", type="dynamiq.nodes.llms.OpenAI"
+        id=node_with_streaming.id, name="OpenAI", group="llms", type="dynamiq.nodes.llms.OpenAI"
     )
     assert all(source == expected_streaming_node_source for _, _, source in node_output)
 

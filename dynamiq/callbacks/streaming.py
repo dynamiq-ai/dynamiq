@@ -129,7 +129,7 @@ class StreamingQueueCallbackHandler(BaseStreamingCallbackHandler):
             data=format_value(chunk),
             event=serialized.get("streaming", {}).get("event"),
             source=StreamingEntitySource(
-                entity_id=serialized.get("id"),
+                id=serialized.get("id"),
                 name=serialized.get("name", None),
                 group=serialized.get("group", None),
                 type=serialized.get("type", None),
@@ -154,7 +154,7 @@ class StreamingQueueCallbackHandler(BaseStreamingCallbackHandler):
             data=format_value(output_data),
             event=serialized.get("streaming", {}).get("event"),
             source=StreamingEntitySource(
-                entity_id=serialized.get("id"),
+                id=serialized.get("id"),
                 name=serialized.get("name", None),
                 group=serialized.get("group", None),
                 type=serialized.get("type", None),
@@ -180,7 +180,7 @@ class StreamingQueueCallbackHandler(BaseStreamingCallbackHandler):
             data={"error": str(error)},
             event=serialized.get("streaming", {}).get("event"),
             source=StreamingEntitySource(
-                entity_id=serialized.get("id"),
+                id=serialized.get("id"),
                 name=serialized.get("name", None),
                 group=serialized.get("group", None),
                 type=serialized.get("type", None),

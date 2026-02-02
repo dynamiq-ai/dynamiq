@@ -168,7 +168,7 @@ Usage:
             data=HFStreamingOutputEventMessageData(prompt=prompt, action=HumanFeedbackAction.ASK),
             event=streaming.event,
             source=StreamingEntitySource(
-                entity_id=self.id,
+                id=self.id,
                 name=self.name,
                 group=self.group,
                 type=self.type,
@@ -210,7 +210,7 @@ Usage:
             data=HFStreamingOutputEventMessageData(prompt=message, action=HumanFeedbackAction.INFO),
             event=streaming.event,
             source=StreamingEntitySource(
-                entity_id=self.id,
+                id=self.id,
                 name=self.name,
                 group=self.group,
                 type=self.type,
