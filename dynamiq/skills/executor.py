@@ -208,15 +208,19 @@ class SkillExecutor:
 
             for rel in output_paths:
                 try:
-                    rel, p = _resolve_sandbox_path(work_dir, rel)
+                    rel_norm, p = _resolve_sandbox_path(work_dir, rel)
                 except ValueError as e:
                     logger.warning(f"SkillExecutor: invalid output path skipped: {e}")
                     continue
                 if p.exists() and p.is_file():
-                    key = f"{output_prefix.rstrip('/')}/{rel}".lstrip("/") if output_prefix else rel
+                    key = (
+                        f"{output_prefix.rstrip('/')}/{rel_norm}".lstrip("/")
+                        if output_prefix
+                        else rel_norm
+                    )
                     output_files[key] = p.read_bytes()
                 elif p.exists():
-                    logger.warning(f"SkillExecutor: output path is not a file, skipped: {rel}")
+                    logger.warning(f"SkillExecutor: output path is not a file, skipped: {rel_norm}")
             if output_paths and output_files:
                 logger.info(f"SkillExecutor: collected {len(output_files)} output file(s) from sandbox")
 

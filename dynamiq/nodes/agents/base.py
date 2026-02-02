@@ -371,6 +371,18 @@ class Agent(Node):
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
 
+        data["skills"] = (
+            self.skills.model_dump(exclude={"backend": {"connection", "file_store"}})
+            if self.skills
+            else None
+        )
+        if self.skills and self.skills.backend:
+            backend_data = data["skills"].setdefault("backend", {})
+            if self.skills.backend.connection is not None:
+                backend_data["connection"] = self.skills.backend.connection.to_dict(**kwargs)
+            if self.skills.backend.file_store is not None:
+                backend_data["file_store"] = self.skills.backend.file_store.to_dict(**kwargs)
+
         return data
 
     def init_components(self, connection_manager: ConnectionManager | None = None):

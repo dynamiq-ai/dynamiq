@@ -82,14 +82,6 @@ class DynamiqSkillSource(SkillSource):
                 return e
         return None
 
-    def _entry_by_id(self, skill_id: str) -> SkillWhitelistEntry | None:
-        if not self.whitelist:
-            return None
-        for e in self.whitelist:
-            if e.id == skill_id:
-                return e
-        return None
-
     def _fetch_instructions(self, skill_id: str, version_id: str) -> str | None:
         """GET /v1/skills/{skill_id}/versions/{version_id}/instructions."""
         path = f"{self._base_path}/{skill_id}/versions/{version_id}/instructions"
