@@ -26,7 +26,6 @@ TODO_TOOLS_INSTRUCTIONS = """TODO MANAGEMENT:
 - Only mark completed when FULLY done; if blocked, keep in_progress"""
 
 
-
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
 MULTI-TOOL PLANNING AND STRATEGY:
 
