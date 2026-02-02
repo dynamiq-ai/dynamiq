@@ -117,6 +117,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         Ensures that cloned agents get fresh instances of:
         - _tool_cache: Independent tool execution cache
+        - state: Independent AgentState to avoid race conditions in parallel execution
 
         Returns:
             Dictionary mapping attribute names to initializer functions
@@ -125,6 +126,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         base.update(
             {
                 "_tool_cache": lambda _: {},
+                "state": lambda _: AgentState(),
             }
         )
         return base
@@ -227,17 +229,20 @@ class Agent(HistoryManagerMixin, BaseAgent):
     @model_validator(mode="after")
     def _ensure_todo_tools(self):
         """Automatically add TodoWriteTool when todo is enabled in file_store config."""
-        if self.file_store.enabled and self.file_store.todo_enabled:
-            has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
+        try:
+            if self.file_store.enabled and self.file_store.todo_enabled:
+                has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
 
-            if not has_todo_write:
-                self.tools.append(
-                    TodoWriteTool(
-                        name="todo-write",
-                        file_store=self.file_store.backend,
+                if not has_todo_write:
+                    self.tools.append(
+                        TodoWriteTool(
+                            name="todo-write",
+                            file_store=self.file_store.backend,
+                        )
                     )
-                )
-                logger.info("Agent: Added TodoWriteTool")
+                    logger.info("Agent: Added TodoWriteTool")
+        except Exception as e:
+            logger.error(f"Failed to ensure TodoWriteTool: {e}")
         return self
 
     def _append_recovery_instruction(

@@ -150,22 +150,33 @@ RULES:
         # Calculate stats
         stats = {
             "total": len(final_todos),
-            "pending": sum(1 for t in final_todos if t.get("status") == "pending"),
-            "in_progress": sum(1 for t in final_todos if t.get("status") == "in_progress"),
-            "completed": sum(1 for t in final_todos if t.get("status") == "completed"),
+            TodoStatus.PENDING.value: sum(1 for t in final_todos if t.get("status") == TodoStatus.PENDING.value),
+            TodoStatus.IN_PROGRESS.value: sum(
+                1 for t in final_todos if t.get("status") == TodoStatus.IN_PROGRESS.value
+            ),
+            TodoStatus.COMPLETED.value: sum(1 for t in final_todos if t.get("status") == TodoStatus.COMPLETED.value),
+        }
+
+        status_icons = {
+            TodoStatus.PENDING.value: "⏳",
+            TodoStatus.IN_PROGRESS.value: "🔄",
+            TodoStatus.COMPLETED.value: "✅",
         }
 
         lines = ["✅ Todos saved successfully!"]
         lines.append("")
         lines.append("📋 Current Todo List:")
         for t in final_todos:
-            icon = {"pending": "⏳", "in_progress": "🔄", "completed": "✅"}.get(t.get("status", ""), "❓")
+            icon = status_icons.get(t.get("status", ""), "❓")
             lines.append(f"  {icon} [{t.get('id')}] {t.get('content')} ({t.get('status')})")
 
         lines.append("")
+        pending = TodoStatus.PENDING.value
+        in_progress = TodoStatus.IN_PROGRESS.value
+        completed = TodoStatus.COMPLETED.value
         lines.append(
-            f"📊 Stats: {stats['total']} total | ⏳ {stats['pending']} pending |\
-                  🔄 {stats['in_progress']} in progress | ✅ {stats['completed']} completed"
+            f"📊 Stats: {stats['total']} total | ⏳ {stats[pending]} pending |"
+            f" 🔄 {stats[in_progress]} in progress | ✅ {stats[completed]} completed"
         )
 
         return {"content": "\n".join(lines)}
