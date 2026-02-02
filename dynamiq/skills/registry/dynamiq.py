@@ -1,5 +1,6 @@
 """Dynamiq API skill source: discover and load skills via GET /v1/skills/.../instructions."""
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,10 @@ class DynamiqSkillSource(SkillSource):
             name=entry.name,
             description=entry.description,
             version="1.0.0",
+            tags=[],
+            dependencies=[],
+            supporting_files=[],
+            created_at=datetime.now(),
         )
         return Skill.model_construct(
             metadata=metadata,

@@ -254,7 +254,10 @@ class SkillExecutor:
         """Extract skill directory from FileStore to a temp directory."""
         prefix = f"{self.skills_prefix}{skill_name}/"
         all_files = self.file_store.list_files(directory="", recursive=True)
-        skill_files = [f for f in all_files if getattr(f, "path", f) and str(getattr(f, "path", "")).startswith(prefix)]
+        skill_files = [
+            f for f in all_files
+            if str(getattr(f, "path", f)).startswith(prefix)
+        ]
 
         if not skill_files:
             raise FileNotFoundError(f"No files found for skill: {skill_name} under {prefix}")
