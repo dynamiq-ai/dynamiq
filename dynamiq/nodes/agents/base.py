@@ -198,6 +198,11 @@ class Agent(Node):
         default=False,
         description="Allow returning a child agent tool's output directly via delegate_final flag.",
     )
+    parallel_tool_calls_enabled: bool = Field(
+        default=False,
+        description="Enable multi-tool execution in a single step. "
+        "When True, the agent can call multiple tools in parallel.",
+    )
     memory: Memory | None = Field(None, description="Memory node for the agent.")
     memory_limit: int = Field(100, description="Maximum number of messages to retrieve from memory")
     memory_retrieval_strategy: MemoryRetrievalStrategy | None = MemoryRetrievalStrategy.ALL
@@ -297,7 +302,7 @@ class Agent(Node):
             self.tools.append(FileSearchTool(file_store=self.file_store_backend))
             self.tools.append(FileListTool(file_store=self.file_store_backend))
 
-        if getattr(self, "parallel_tool_calls_enabled", False):
+        if self.parallel_tool_calls_enabled:
             # Filter out any user tools with the reserved parallel tool name
             self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
             self.tools.append(ParallelToolCallsTool())

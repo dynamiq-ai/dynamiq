@@ -21,7 +21,7 @@ from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CO
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
-from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME
+from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage
 from dynamiq.runnables import RunnableConfig
@@ -70,11 +70,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
     behaviour_on_max_loops: Behavior = Field(
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
-    )
-    parallel_tool_calls_enabled: bool = Field(
-        default=False,
-        description="Enable multi-tool execution in a single step. "
-        "When True, the agent can call multiple tools in parallel.",
     )
     direct_tool_output_enabled: bool = Field(
         default=False,
@@ -253,7 +248,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         if self.inference_mode == InferenceMode.FUNCTION_CALLING:
             # For function calling, construct a message that includes the tool call
-            if "tool_calls" in dict(llm_result.output):
+            if "tool_calls" in dict[Any, Any](llm_result.output):
                 try:
                     tool_call = list(llm_result.output["tool_calls"].values())[0]
                     function_name = tool_call["function"]["name"]
@@ -702,8 +697,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
             tool_files: Any = []
             tool = None
             skipped_tools: list[str] = []
-
             try:
+                if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
+                    action_input = ParallelToolCallsInputSchema.model_validate(action_input).model_dump()
+
                 # Check if ContextManagerTool is in the action - if so, skip parallel mode
                 skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(
                     action, action_input
