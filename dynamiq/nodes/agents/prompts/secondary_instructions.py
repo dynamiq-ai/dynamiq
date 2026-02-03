@@ -13,6 +13,19 @@ DELEGATION_INSTRUCTIONS_XML = (
     "<answer> yourself; the system will return the agent's result directly."
 )
 
+CONTEXT_MANAGER_INSTRUCTIONS = """CONTEXT MANAGEMENT:
+- Use the context-manager tool proactively when conversation is getting long
+- Save critical info (IDs, filenames) in "notes" field BEFORE calling - previous messages will be summarized"""
+
+TODO_TOOLS_INSTRUCTIONS = """TODO MANAGEMENT:
+- Use the todo-write tool for complex 3+ step tasks; skip for simple requests
+- Current todos shown in [State: ...] at the end of user last messages under "Todos:"
+- When creating initial list: first task "in_progress", rest "pending"
+- After initial creation, ONLY update status via merge=true - do not restructure the plan
+- Mark completed IMMEDIATELY after finishing each step - don't batch
+- Only mark completed when FULLY done; if blocked, keep in_progress"""
+
+
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
 MULTI-TOOL PLANNING AND STRATEGY:
 

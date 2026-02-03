@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Mapping
 
 from litellm import get_supported_openai_params, supports_function_calling
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent as BaseAgent
@@ -11,7 +11,6 @@ from dynamiq.nodes.agents.components import parser, schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
-    AgentUnknownToolException,
     MaxLoopsExceededException,
     ParsingError,
     RecoverableAgentException,
@@ -21,42 +20,66 @@ from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CO
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
+from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema
 from dynamiq.nodes.types import Behavior, InferenceMode
-from dynamiq.prompts import Message, MessageRole, VisionMessage
+from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
 from dynamiq.types.llm_tool import Tool
-from dynamiq.types.streaming import StreamingMode
+from dynamiq.types.streaming import (
+    AgentReasoningEventMessageData,
+    AgentToolData,
+    AgentToolResultEventMessageData,
+    StreamingMode,
+)
+from dynamiq.utils import generate_uuid
 from dynamiq.utils.logger import logger
 
-final_answer_function_schema = {
-    "type": "function",
-    "strict": True,
-    "function": {
-        "name": "provide_final_answer",
-        "description": "Function should be called when if you can answer the initial request"
-        " or if there is not request at all.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "thought": {
-                    "type": "string",
-                    "description": "Your reasoning about why you can answer original question.",
-                },
-                "answer": {"type": "string", "description": "Answer on initial request."},
-            },
-            "required": ["thought", "answer"],
-        },
-    },
-}
 
-TYPE_MAPPING = {
-    int: "integer",
-    float: "float",
-    bool: "boolean",
-    str: "string",
-    dict: "object",
-}
+class AgentState(BaseModel):
+    """
+    Encapsulates the dynamic state of an agent during execution.
+
+    Tracks loop progress and todos. Provides its own serialization
+    to string for injection into observations.
+    """
+
+    current_loop: int = 0
+    max_loops: int = 0
+    todos: list[TodoItem] = Field(default_factory=list)
+
+    def reset(self, max_loops: int = 0) -> None:
+        """Reset state for a new execution."""
+        self.current_loop = 0
+        self.max_loops = max_loops
+        self.todos = []
+
+    def update_loop(self, current: int) -> None:
+        """Update current loop number."""
+        self.current_loop = current
+
+    def update_todos(self, todos: list[dict | TodoItem]) -> None:
+        """Update todo list from dicts or TodoItem objects."""
+        self.todos = [t if isinstance(t, TodoItem) else TodoItem(**t) for t in todos]
+
+    def to_prompt_string(self) -> str:
+        """
+        Serialize state to a string for observation injection.
+
+        Returns:
+            str: Formatted state string, or empty string if no state to show.
+        """
+        sections = []
+
+        if self.current_loop > 0:
+            sections.append(f"Progress: Loop {self.current_loop}/{self.max_loops}")
+
+        if self.todos:
+            todo_lines = [t.to_display_string() for t in self.todos]
+            sections.append("Todos:\n" + "\n".join(todo_lines))
+
+        return "\n".join(sections) if sections else ""
+
 
 UNKNOWN_TOOL_NAME = "unknown_tool"
 
@@ -79,6 +102,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     format_schema: list = Field(default_factory=list)
     summarization_config: SummarizationConfig = Field(default_factory=SummarizationConfig)
+    state: AgentState = Field(default_factory=AgentState, exclude=True)
 
     _tools: list[Tool] = []
     _response_format: dict[str, Any] | None = None
@@ -89,6 +113,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         Ensures that cloned agents get fresh instances of:
         - _tool_cache: Independent tool execution cache
+        - state: Independent AgentState to avoid race conditions in parallel execution
 
         Returns:
             Dictionary mapping attribute names to initializer functions
@@ -97,9 +122,15 @@ class Agent(HistoryManagerMixin, BaseAgent):
         base.update(
             {
                 "_tool_cache": lambda _: {},
+                "state": lambda _: AgentState(),
             }
         )
         return base
+
+    def reset_run_state(self):
+        """Resets the agent's run state including AgentState."""
+        super().reset_run_state()
+        self.state.reset()
 
     def log_reasoning(self, thought: str, action: str, action_input: str, loop_num: int) -> None:
         """
@@ -191,6 +222,25 @@ class Agent(HistoryManagerMixin, BaseAgent):
             logger.error(f"Failed to ensure ContextManagerTool: {e}")
         return self
 
+    @model_validator(mode="after")
+    def _ensure_todo_tools(self):
+        """Automatically add TodoWriteTool when todo is enabled in file_store config."""
+        try:
+            if self.file_store.enabled and self.file_store.todo_enabled:
+                has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
+
+                if not has_todo_write:
+                    self.tools.append(
+                        TodoWriteTool(
+                            name="todo-write",
+                            file_store=self.file_store.backend,
+                        )
+                    )
+                    logger.info("Agent: Added TodoWriteTool")
+        except Exception as e:
+            logger.error(f"Failed to ensure TodoWriteTool: {e}")
+        return self
+
     def _append_recovery_instruction(
         self,
         *,
@@ -220,23 +270,32 @@ class Agent(HistoryManagerMixin, BaseAgent):
             Message(role=MessageRole.USER, content=correction_message, static=True)
         )
 
-    def stream_reasoning(self, content: dict[str, Any], config: RunnableConfig, **kwargs) -> None:
-        """
-        Streams intermediate reasoning of the Agent.
+    def _stream_agent_event(
+        self,
+        content: AgentReasoningEventMessageData | AgentToolResultEventMessageData,
+        step: str,
+        config: RunnableConfig,
+        **kwargs,
+    ) -> None:
+        """Stream agent event if streaming is enabled.
 
         Args:
-            content (dict[str, Any]): Content that will be sent.
-            config (RunnableConfig | None): Configuration for the agent run.
-            **kwargs: Additional parameters for running the agent.
+            content: The event data (reasoning or tool result).
+            step: Event type ("reasoning" or "tool").
+            config: Configuration for the runnable.
+            **kwargs: Additional keyword arguments.
         """
-        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            self.stream_content(
-                content=content,
-                source=self.name,
-                step="reasoning",
-                config=config,
-                **kwargs,
-            )
+        if not (self.streaming.enabled and self.streaming.mode == StreamingMode.ALL):
+            return
+
+        source = content.tool.name if step == "reasoning" else content.name
+        self.stream_content(
+            content=content.model_dump(),
+            source=source,
+            step=step,
+            config=config,
+            **kwargs,
+        )
 
     def _append_assistant_message(self, llm_result: Any, llm_generated_output: str) -> None:
         """
@@ -509,135 +568,185 @@ class Agent(HistoryManagerMixin, BaseAgent):
         return streaming_callback, llm_config, original_streaming_enabled
 
     def _execute_single_tool(
-        self, action: str, action_input: Any, thought: str, loop_num: int, config: RunnableConfig, **kwargs
-    ) -> tuple[Any, dict, Any] | tuple[str, Any, Any]:
-        """Execute a single tool with caching support."""
+        self,
+        action: str,
+        action_input: Any,
+        thought: str,
+        loop_num: int,
+        config: RunnableConfig,
+        update_run_depends: bool = True,
+        collect_dependency: bool = False,
+        **kwargs,
+    ) -> tuple[Any, list, bool, bool, dict | None]:
+        """Execute a single tool with caching support.
+
+        Args:
+            update_run_depends: Whether to update self._run_depends. Set to False for parallel execution.
+            collect_dependency: Whether to collect and return the dependency dict.
+
+        Returns:
+            tuple: (tool_result, tool_files, is_delegated, success, dependency)
+        """
         tool = self.tool_by_names.get(self.sanitize_tool_name(action))
+
         if not tool:
-            raise AgentUnknownToolException(
+            error_message = (
                 f"Unknown tool: {action}. Use only available tools and provide only the tool's name in the "
                 "action field. Do not include any additional reasoning. "
                 "Please correct the action field or state that you cannot answer the question."
             )
+            return error_message, [], False, False, None
 
-        self.stream_reasoning(
-            {
-                "thought": thought,
-                "action": action,
-                "tool": {
-                    "name": tool.name,
-                    "type": tool.type,
-                    "action_type": tool.action_type.value if tool.action_type else None,
-                },
-                "action_input": action_input,
-                "loop_num": loop_num,
-            },
+        tool_run_id = generate_uuid()
+        tool_data = AgentToolData(
+            name=tool.name,
+            type=tool.type,
+            action_type=tool.action_type.value if tool.action_type else None,
+        )
+
+        self._stream_agent_event(
+            AgentReasoningEventMessageData(
+                tool_run_id=tool_run_id,
+                thought=thought or "",
+                action=action,
+                tool=tool_data,
+                action_input=action_input,
+                loop_num=loop_num,
+            ),
+            "reasoning",
             config,
             **kwargs,
         )
 
-        # Don't cache ContextManagerTool results - they should always be regenerated
-        # (messages are injected in _run_tool in base.py)
-        if isinstance(tool, ContextManagerTool):
-            tool_result = None
-        else:
-            # For other tools, check cache for previously computed results
-            tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
-            tool_result = self._tool_cache.get(tool_cache_entry, None)
+        try:
+            # Don't cache ContextManagerTool results - they should always be regenerated
+            # (messages are injected in _run_tool in base.py)
+            if isinstance(tool, ContextManagerTool):
+                tool_result = None
+            else:
+                # For other tools, check cache for previously computed results
+                tool_cache_entry = ToolCacheEntry(action=action, action_input=action_input)
+                tool_result = self._tool_cache.get(tool_cache_entry, None)
 
-        delegate_final = self._should_delegate_final(tool, action_input)
+            delegate_final = self._should_delegate_final(tool, action_input)
 
-        if not tool_result:
-            tool_kwargs = kwargs.copy()
+            dependency: dict | None = None
+            if not tool_result:
+                tool_kwargs = kwargs.copy()
 
-            tool_result, tool_files = self._run_tool(
-                tool, action_input, config, delegate_final=delegate_final, **tool_kwargs
-            )
+                run_tool_result = self._run_tool(
+                    tool,
+                    action_input,
+                    config,
+                    delegate_final=delegate_final,
+                    update_run_depends=update_run_depends,
+                    collect_dependency=collect_dependency,
+                    **tool_kwargs,
+                )
+                if collect_dependency:
+                    tool_result, tool_files, dependency = run_tool_result
+                else:
+                    tool_result, tool_files = run_tool_result
 
-        else:
-            logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
-            tool_files = {}
+            else:
+                logger.info(f"Agent {self.name} - {self.id}: Cached output of {action} found.")
+                tool_files = []
 
-        if delegate_final:
-            self.log_final_output(thought, tool_result, loop_num)
-            if self.streaming.enabled:
-                self.stream_content(
-                    content=tool_result,
-                    source=tool.name,
-                    step="answer",
-                    config=config,
+            if delegate_final:
+                self.log_final_output(thought, tool_result, loop_num)
+                # Stream tool result (with files) before streaming final answer
+                self._stream_agent_event(
+                    AgentToolResultEventMessageData(
+                        tool_run_id=tool_run_id,
+                        name=tool.name,
+                        tool=tool_data,
+                        input=action_input,
+                        result=tool_result,
+                        files=tool_files,
+                        loop_num=loop_num,
+                    ),
+                    "tool",
+                    config,
                     **kwargs,
                 )
-            return "DELEGATED", tool_result, tool
+                if self.streaming.enabled:
+                    self.stream_content(
+                        content=tool_result,
+                        source=tool.name,
+                        step="answer",
+                        config=config,
+                        **kwargs,
+                    )
+                return tool_result, tool_files, True, True, dependency
 
-        if isinstance(tool, ContextManagerTool):
-            self._compact_history()
+            if isinstance(tool, ContextManagerTool):
+                self._compact_history()
 
-        return tool_result, tool_files, tool
-
-    def _add_observation_and_stream(
-        self,
-        tool_result: Any,
-        tool_files: dict,
-        tool: Any,
-        action: Any,
-        action_input: Any,
-        config: RunnableConfig,
-        **kwargs,
-    ) -> None:
-        """Add observation to prompt and stream tool result if enabled."""
-        observation = f"\nObservation: {tool_result}\n"
-        self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
-
-        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            if tool is not None:
-                source_name = tool_name = tool.name
-            elif self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
-                tool_names = [
-                    tool_data["name"] if isinstance(tool_data, dict) and "name" in tool_data else UNKNOWN_TOOL_NAME
-                    for tool_data in action_input["tools"]
-                ]
-
-                if len(tool_names) == 1:
-                    source_name = tool_name = tool_names[0]
-                else:
-                    unique_tools = list(set(tool_names))
-                    if len(unique_tools) == 1:
-                        source_name = tool_name = f"{unique_tools[0]} (parallel)"
-                    else:
-                        source_name = tool_name = " + ".join(unique_tools)
-            else:
-                source_name = tool_name = str(action)
-
-            self.stream_content(
-                content={
-                    "name": tool_name,
-                    "input": action_input,
-                    "result": tool_result,
-                    "files": tool_files,
-                },
-                source=source_name,
-                step="tool",
-                config=config,
+            # Stream the result
+            self._stream_agent_event(
+                AgentToolResultEventMessageData(
+                    tool_run_id=tool_run_id,
+                    name=tool.name,
+                    tool=tool_data,
+                    input=action_input,
+                    result=tool_result,
+                    files=tool_files,
+                    loop_num=loop_num,
+                ),
+                "tool",
+                config,
                 **kwargs,
             )
 
-    def _validate_parallel_tool_input(self, action_input: Any) -> dict[str, Any]:
+            return tool_result, tool_files, False, True, dependency
+
+        except RecoverableAgentException as e:
+            # Stream error result with the same tool_run_id used for reasoning
+            error_message = f"{type(e).__name__}: {e}"
+            self._stream_agent_event(
+                AgentToolResultEventMessageData(
+                    tool_run_id=tool_run_id,
+                    name=tool.name,
+                    tool=tool_data,
+                    input=action_input,
+                    result=error_message,
+                    files=[],
+                    loop_num=loop_num,
+                ),
+                "tool",
+                config,
+                **kwargs,
+            )
+            return error_message, [], False, False, None
+
+    def _add_observation(self, tool_result: Any) -> None:
+        """Add observation to prompt.
+
+        Args:
+            tool_result: The result from the tool execution.
+        """
+        observation = f"\nObservation: {tool_result}\n"
+        self._prompt.messages.append(Message(role=MessageRole.USER, content=observation, static=True))
+
+    def _validate_parallel_tool_input(self, action_input: Any) -> list[dict[str, Any]] | None:
         """Validate and parse parallel tool input schema.
+
+        If validation fails, logs error and adds observation for agent recovery.
 
         Args:
             action_input: Raw input from LLM for the parallel tool.
 
         Returns:
-            Validated input as a dictionary.
-
-        Raises:
-            RecoverableAgentException: If validation fails.
+            list: Validated tools list, or None if validation failed
         """
         try:
-            return ParallelToolCallsInputSchema.model_validate(action_input).model_dump()
+            validated = ParallelToolCallsInputSchema.model_validate(action_input).model_dump()
+            return validated["tools"]
         except Exception as e:
-            raise RecoverableAgentException(f"Invalid parallel tool input: {e}. ")
+            error_message = f"Invalid parallel tool input: {e}"
+            logger.error(error_message)
+            self._add_observation(error_message)
+            return None
 
     def _should_skip_parallel_mode(
         self, action: str | None, action_input: Any
@@ -711,35 +820,30 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         if action and self.tools:
             tool_result = None
-            tool_files: Any = []
-            tool = None
             skipped_tools: list[str] = []
-            try:
-                if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
-                    action_input = self._validate_parallel_tool_input(action_input)
 
-                # Check if ContextManagerTool is in the action - if so, skip parallel mode
-                skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(
-                    action, action_input
+            if self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME:
+                action_input = self._validate_parallel_tool_input(action_input)
+                if action_input is None:
+                    return None
+
+            # Check if ContextManagerTool is in the action - if so, skip parallel mode
+            skip_parallel, action, action_input, skipped_tools = self._should_skip_parallel_mode(action, action_input)
+
+            # Handle XML parallel mode (only for multiple tools, not for ContextManagerTool)
+            tools_data = action_input if isinstance(action_input, list) else [action_input]
+            if (
+                self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
+                and self.parallel_tool_calls_enabled
+                and not skip_parallel
+            ):
+                tool_result, _ = self._execute_tools(tools_data, thought, loop_num, config, **kwargs)
+            else:
+                tool_result, _, is_delegated, _, _ = self._execute_single_tool(
+                    action, action_input, thought, loop_num, config, **kwargs
                 )
-
-                # Handle XML parallel mode (but not for ContextManagerTool)
-                if (
-                    self.sanitize_tool_name(action) == PARALLEL_TOOL_NAME
-                    and self.parallel_tool_calls_enabled
-                    and not skip_parallel
-                ):
-                    execution_output = self._execute_tools(action_input["tools"], thought, loop_num, config, **kwargs)
-                    tool_result, tool_files = self._separate_tool_result_and_files(execution_output)
-                else:
-                    result = self._execute_single_tool(action, action_input, thought, loop_num, config, **kwargs)
-
-                    if isinstance(result, tuple) and len(result) == 3 and result[0] == "DELEGATED":
-                        return result[1]
-                    tool_result, tool_files, tool = result
-
-            except RecoverableAgentException as e:
-                tool_result = f"{type(e).__name__}: {e}"
+                if is_delegated:
+                    return tool_result
 
             # Add feedback about skipped tools if any were filtered out
             if skipped_tools:
@@ -750,23 +854,47 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 )
                 tool_result = f"{tool_result}{skipped_notice}" if tool_result else skipped_notice
 
-            # Add observation and stream result (for regular tools)
-            self._add_observation_and_stream(tool_result, tool_files, tool, action, action_input, config, **kwargs)
+            # Add observation (streaming already done in _execute_single_tool)
+            self._add_observation(tool_result)
 
-        else:
-            # No action or no tools available
-            self.stream_reasoning(
-                {
-                    "thought": thought,
-                    "action": action,
-                    "action_input": action_input,
-                    "loop_num": loop_num,
-                },
-                config,
-                **kwargs,
-            )
+        # else: No action or no tools available - no reasoning to stream
 
         return None
+
+    def _inject_state_into_messages(self, messages: list[Message | VisionMessage]) -> list[Message | VisionMessage]:
+        """
+        Create a copy of messages with state injected into the last user message.
+
+        Original messages are not modified. Handles both Message and VisionMessage types.
+        """
+        state_info = self.state.to_prompt_string()
+        if not state_info or not messages:
+            return messages
+
+        last_msg = messages[-1]
+        if last_msg.role != MessageRole.USER:
+            return messages
+
+        state_suffix = f"\n\n[State: {state_info}]"
+
+        if isinstance(last_msg, VisionMessage):
+            new_content = list(last_msg.content) + [VisionMessageTextContent(text=state_suffix)]
+            return messages[:-1] + [
+                VisionMessage(
+                    role=last_msg.role,
+                    content=new_content,
+                    static=last_msg.static,
+                )
+            ]
+
+        return messages[:-1] + [
+            Message(
+                role=last_msg.role,
+                content=f"{last_msg.content}{state_suffix}",
+                metadata=last_msg.metadata,
+                static=last_msg.static,
+            )
+        ]
 
     def _run_agent(
         self,
@@ -789,17 +917,26 @@ class Agent(HistoryManagerMixin, BaseAgent):
         if self.verbose:
             logger.info(f"Agent {self.name} - {self.id}: Running ReAct strategy")
 
+        self.state.max_loops = self.max_loops
+        self._refresh_agent_state(1)
+
         self._setup_prompt_and_stop_sequences(input_message, history_messages)
 
         for loop_num in range(1, self.max_loops + 1):
+            if loop_num > 1:
+                self._refresh_agent_state(loop_num)
+
             try:
                 streaming_callback, llm_config, original_streaming_enabled = self._setup_streaming_callback(
                     config, loop_num, **kwargs
                 )
 
+                # Append state to the last user message before LLM call
+                messages = self._inject_state_into_messages(self._prompt.messages)
+
                 try:
                     llm_result = self._run_llm(
-                        messages=self._prompt.messages,
+                        messages=messages,
                         tools=self._tools,
                         response_format=self._response_format,
                         config=llm_config,
@@ -996,6 +1133,28 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         return f"{final_answer}"
 
+    def _refresh_agent_state(self, loop_num: int) -> None:
+        """
+        Refresh the agent state with current values.
+
+        Args:
+            loop_num: Current loop iteration number.
+        """
+        self.state.update_loop(loop_num)
+
+        # Update todos
+        if self.file_store.enabled and self.file_store.todo_enabled:
+            try:
+                from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
+
+                file_store = self.file_store.backend
+                if file_store.exists(TODOS_FILE_PATH):
+                    content = file_store.retrieve(TODOS_FILE_PATH)
+                    data = json.loads(content.decode("utf-8"))
+                    self.state.update_todos(data.get("todos", []))
+            except Exception as e:
+                logger.error(f"Failed to get todo state: {e}")
+
     def _init_prompt_blocks(self):
         """Initialize the prompt blocks required for the ReAct strategy."""
         super()._init_prompt_blocks()
@@ -1017,6 +1176,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
             has_tools=bool(self.tools),
             delegation_allowed=self.delegation_allowed,
+            context_compaction_enabled=self.summarization_config.enabled,
+            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
         )
 
         # Only auto-wrap the entire role in a raw block if the user did not
@@ -1059,98 +1220,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
             unique_key = self._build_unique_file_key(aggregated, sanitized_name)
             aggregated[unique_key] = files
 
-    @staticmethod
-    def _separate_tool_result_and_files(execution_result: Any) -> tuple[Any, dict[str, Any]]:
-        if isinstance(execution_result, dict):
-            content = execution_result.get("content", "")
-            files = execution_result.get("files", {})
-            if isinstance(files, dict):
-                return content, files
-            if isinstance(files, (list, tuple)):
-                return content, {str(index): file for index, file in enumerate(files)}
-            if files:
-                return content, {"result": files}
-            return content, {}
-        return execution_result, {}
-
-    def _run_single_tool(
-        self,
-        tool_name: str,
-        tool_input: dict[str, Any],
-        config: RunnableConfig,
-        update_run_depends: bool = True,
-        **kwargs,
-    ) -> dict[str, Any]:
-        tool = self.tool_by_names.get(self.sanitize_tool_name(tool_name))
-        if not tool:
-            return {
-                "tool_name": tool_name,
-                "success": False,
-                "tool_input": tool_input,
-                "result": f"Unknown tool: {tool_name}. Please use only available tools.",
-                "files": {},
-                "dependency": None,
-            }
-
-        delegate_final = self._should_delegate_final(tool, tool_input)
-        if delegate_final and not update_run_depends:
-            return {
-                "tool_name": tool.name,
-                "success": False,
-                "tool_input": tool_input,
-                "result": "delegate_final is only supported for single agent tool calls.",
-                "files": {},
-                "dependency": None,
-            }
-
-        try:
-            tool_result, tool_files, dependency = self._run_tool(
-                tool,
-                tool_input,
-                config,
-                update_run_depends=update_run_depends,
-                collect_dependency=True,
-                delegate_final=delegate_final,
-                **kwargs,
-            )
-            return {
-                "tool_name": tool.name,
-                "success": True,
-                "tool_input": tool_input,
-                "result": tool_result,
-                "files": tool_files,
-                "dependency": dependency,
-            }
-        except RecoverableAgentException as e:
-            error_message = f"{type(e).__name__}: {e}"
-            logger.error(error_message)
-            return {
-                "tool_name": tool.name,
-                "success": False,
-                "tool_input": tool_input,
-                "result": error_message,
-                "files": {},
-                "dependency": None,
-            }
-
-    def _stream_tool_result(self, result: dict[str, Any], config: RunnableConfig, **kwargs) -> None:
-        if self.streaming.enabled and self.streaming.mode == StreamingMode.ALL:
-            try:
-                self.stream_content(
-                    content={
-                        "name": result.get("tool_name"),
-                        "input": result.get("tool_input"),
-                        "result": result.get("result"),
-                        "files": result.get("files"),
-                    },
-                    source=str(result.get("tool_name")),
-                    step="tool",
-                    config=config,
-                    **kwargs,
-                )
-            except Exception as stream_err:
-                logger.error(f"Streaming error for tool {result.get('tool_name')}: {stream_err}")
-
     def _execute_tools(
         self,
         tools_data: list[dict[str, Any]],
@@ -1158,7 +1227,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         loop_num: int,
         config: RunnableConfig,
         **kwargs,
-    ) -> str | dict[str, Any]:
+    ) -> tuple[str, dict[str, Any]]:
         """
         Execute one or more tools and gather their results.
 
@@ -1170,37 +1239,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
             **kwargs: Additional arguments for tool execution
 
         Returns:
-            str | dict[str, Any]: Combined observation string with all tool results and optional files
+            tuple: (combined_observation, aggregated_files)
         """
         all_results: list[dict[str, Any]] = []
 
         if not tools_data:
-            return ""
-
-        # Stream reasoning with tools info
-        tools_data_for_streaming = []
-        for tool_data in tools_data:
-            tool_name = tool_data.get("name", "")
-            tool = self.tool_by_names.get(tool_name)
-            if tool_name and tool:
-                tools_data_for_streaming.append(
-                    {
-                        "name": tool_name,
-                        "type": tool.type,
-                        "action_type": tool.action_type.value if tool.action_type else None,
-                    }
-                )
-
-        if tools_data_for_streaming:
-            self.stream_reasoning(
-                {
-                    "thought": thought,
-                    "tools": tools_data_for_streaming,
-                    "loop_num": loop_num,
-                },
-                config,
-                **kwargs,
-            )
+            return "", {}
 
         prepared_tools: list[dict[str, Any]] = []
 
@@ -1215,63 +1259,72 @@ class Agent(HistoryManagerMixin, BaseAgent):
                         "order": idx,
                         "tool_name": tool_name or UNKNOWN_TOOL_NAME,
                         "success": False,
-                        "tool_input": tool_input,
                         "result": error_message,
-                        "files": {},
-                        "dependency": None,
+                        "files": [],
                     }
                 )
                 continue
             prepared_tools.append({"order": idx, "name": tool_name, "input": tool_input})
 
+        def execute_and_convert(tool_name: str, tool_input: Any, order: int) -> dict[str, Any]:
+            """Execute tool and convert tuple result to dict for parallel execution."""
+            tool_result, tool_files, _, success, dependency = self._execute_single_tool(
+                tool_name,
+                tool_input,
+                thought or "",
+                loop_num,
+                config,
+                update_run_depends=False,
+                collect_dependency=True,
+                **kwargs,
+            )
+            return {
+                "order": order,
+                "tool_name": tool_name,
+                "success": success,
+                "result": tool_result,
+                "files": tool_files,
+                "dependency": dependency,
+            }
+
         if prepared_tools:
             if len(prepared_tools) == 1:
                 tool_payload = prepared_tools[0]
-                res = self._run_single_tool(
+                tool_result, tool_files, _, success, dependency = self._execute_single_tool(
                     tool_payload["name"],
                     tool_payload["input"],
+                    thought or "",
+                    loop_num,
                     config,
                     update_run_depends=True,
+                    collect_dependency=True,
                     **kwargs,
                 )
-                res["order"] = tool_payload["order"]
+                res = {
+                    "order": tool_payload["order"],
+                    "tool_name": tool_payload["name"],
+                    "success": success,
+                    "result": tool_result,
+                    "files": tool_files,
+                    "dependency": dependency,
+                }
                 all_results.append(res)
-                self._stream_tool_result(res, config, **kwargs)
             else:
                 max_workers = len(prepared_tools)
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     future_map = {}
                     for tool_payload in prepared_tools:
                         future = executor.submit(
-                            self._run_single_tool,
+                            execute_and_convert,
                             tool_payload["name"],
                             tool_payload["input"],
-                            config,
-                            False,
-                            **kwargs,
+                            tool_payload["order"],
                         )
                         future_map[future] = tool_payload
 
                     for future in as_completed(future_map.keys()):
-                        tool_payload = future_map[future]
-                        tool_name = tool_payload["name"]
-                        tool_input = tool_payload["input"]
-                        try:
-                            res = future.result()
-                        except Exception as e:
-                            error_message = f"Error executing tool {tool_name}: {str(e)}"
-                            logger.error(error_message)
-                            res = {
-                                "tool_name": tool_name,
-                                "success": False,
-                                "tool_input": tool_input,
-                                "result": error_message,
-                                "files": {},
-                                "dependency": None,
-                            }
-                        res["order"] = tool_payload["order"]
+                        res = future.result()
                         all_results.append(res)
-                        self._stream_tool_result(res, config, **kwargs)
 
         observation_parts: list[str] = []
         aggregated_files: dict[str, Any] = {}
@@ -1286,12 +1339,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
             self._merge_tool_files(aggregated_files, tool_name, result.get("files"))
 
+        # Collect dependencies from results (for tracing)
         dependencies = [result.get("dependency") for result in ordered_results if result.get("dependency")]
+
+        # Set run_depends after parallel execution completes
         if dependencies:
             self._run_depends = dependencies
 
         combined_observation = "\n\n".join(observation_parts)
 
-        if aggregated_files:
-            return {"content": combined_observation, "files": aggregated_files}
-        return combined_observation
+        return combined_observation, aggregated_files

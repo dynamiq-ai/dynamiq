@@ -21,9 +21,11 @@ from dynamiq.nodes.agents.prompts.react import (
 )
 from dynamiq.nodes.agents.prompts.registry import get_prompt_constant
 from dynamiq.nodes.agents.prompts.secondary_instructions import (
+    CONTEXT_MANAGER_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
     REACT_BLOCK_MULTI_TOOL_PLANNING,
+    TODO_TOOLS_INSTRUCTIONS,
 )
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.types import InferenceMode
@@ -143,11 +145,12 @@ class AgentPromptManager:
         formatted_prompt_blocks = {}
         for block, content in self._prompt_blocks.items():
             if block_names is None or block in block_names:
-                formatted_content = Template(content).render(**temp_variables)
+                formatted_content = Template(content).render(temp_variables)
                 if content:
                     formatted_prompt_blocks[block] = formatted_content
 
-        prompt = Template(self.agent_template).render(formatted_prompt_blocks).strip()
+        render_context = {**temp_variables, **formatted_prompt_blocks}
+        prompt = Template(self.agent_template).render(render_context).strip()
         prompt = self._clean_prompt(prompt)
         return textwrap.dedent(prompt)
 
@@ -174,7 +177,8 @@ class AgentPromptManager:
         variables = self._prompt_variables.copy()
         variables.update(kwargs)
 
-        return Template(template_content).render(**variables)
+        # Pass dict directly to avoid crash on non-identifier keys
+        return Template(template_content).render(variables)
 
     @staticmethod
     def _clean_prompt(prompt: str) -> str:
@@ -207,6 +211,8 @@ class AgentPromptManager:
         parallel_tool_calls_enabled: bool,
         has_tools: bool,
         delegation_allowed: bool = False,
+        context_compaction_enabled: bool = False,
+        todo_management_enabled: bool = False,
     ) -> None:
         """
         Setup prompts for ReAct-style Agent.
@@ -220,6 +226,8 @@ class AgentPromptManager:
             parallel_tool_calls_enabled=parallel_tool_calls_enabled,
             has_tools=has_tools,
             delegation_allowed=delegation_allowed,
+            context_compaction_enabled=context_compaction_enabled,
+            todo_management_enabled=todo_management_enabled,
         )
 
         # Update prompt blocks
@@ -245,6 +253,8 @@ def get_model_specific_prompts(
     parallel_tool_calls_enabled: bool,
     has_tools: bool,
     delegation_allowed: bool = False,
+    context_compaction_enabled: bool = False,
+    todo_management_enabled: bool = False,
 ) -> tuple[dict[str, str], str]:
     """
     Get model-specific prompts based on the model name and agent configuration.
@@ -255,6 +265,8 @@ def get_model_specific_prompts(
         parallel_tool_calls_enabled: Whether parallel tool calls are enabled
         has_tools: Whether the agent has tools
         delegation_allowed: Whether delegation is allowed
+        context_compaction_enabled: Whether context compaction/summarization is enabled
+        todo_management_enabled: Whether todo management is enabled
 
     Returns:
         Tuple of (prompt_blocks dict, agent_prompt_template string)
@@ -329,6 +341,10 @@ def get_model_specific_prompts(
             secondary_parts.append(DELEGATION_INSTRUCTIONS_XML)
         else:
             secondary_parts.append(DELEGATION_INSTRUCTIONS)
+    if context_compaction_enabled:
+        secondary_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
+    if todo_management_enabled:
+        secondary_parts.append(TODO_TOOLS_INSTRUCTIONS)
 
     if secondary_parts:
         prompt_blocks["secondary_instructions"] = "\n\n".join(secondary_parts)

@@ -39,7 +39,7 @@ def _child_researcher(llm: OpenAI) -> Agent:
         llm=llm,
         tools=[],
         inference_mode=InferenceMode.XML,
-        parallel_tool_calls_enabled=True,
+        parallel_tool_calls_enabled=False,
         max_loops=6,
     )
 
@@ -61,7 +61,7 @@ def _child_writer(llm: OpenAI) -> Agent:
         llm=llm,
         tools=[],
         inference_mode=InferenceMode.XML,
-        parallel_tool_calls_enabled=True,
+        parallel_tool_calls_enabled=False,
         max_loops=6,
     )
 

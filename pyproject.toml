@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "dynamiq"
-version = "0.36.1"
+version = "0.37.0"
 description = "Dynamiq is an orchestration framework for agentic AI and LLM applications"
 authors = ["Dynamiq Team <hello@getdynamiq.ai>"]
 license = "Apache License 2.0"
@@ -42,7 +42,7 @@ more-itertools = "~10.3.0"
 pdf2image = "~1.17.0"
 e2b-code-interpreter = "~2.0.0"
 black = "~24.8.0"
-pypdf = "~6.3.0"
+pypdf = "~6.6.2"
 python-pptx = "1.0.2"
 qdrant-client = "~1.11.3"
 pymilvus = "~2.5.6"

@@ -583,6 +583,8 @@ class Agent(Node):
                             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
                             has_tools=True,
                             delegation_allowed=self.delegation_allowed,
+                            context_compaction_enabled=self.summarization_config.enabled,
+                            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
                         )
 
             normalized_files = self._ensure_named_files(files)

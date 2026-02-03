@@ -131,7 +131,7 @@ class ContextManagerTool(Node):
             input_data={},
             prompt=Prompt(messages=summary_messages),
             config=config,
-            **(kwargs | {"parent_run_id": kwargs.get("run_id")}),
+            **(kwargs | {"parent_run_id": kwargs.get("run_id"), "run_depends": []}),
         )
 
         # Track LLM dependency for tracing
