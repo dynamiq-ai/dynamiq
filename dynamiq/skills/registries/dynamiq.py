@@ -91,7 +91,7 @@ class Dynamiq(BaseSkillRegistry):
 
     def _get_whitelist_entry_by_name(self, name: str) -> DynamiqSkillWhitelistEntry:
         for entry in self.whitelist:
-            if entry.name == name:
+            if name == (entry.name or entry.id):
                 return entry
         raise SkillRegistryError("Skill not found in whitelist.", details={"name": name})
 

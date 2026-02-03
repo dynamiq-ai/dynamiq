@@ -50,7 +50,32 @@ class TestLocalRegistry:
             )
             instructions = registry.get_skill_instructions("my-skill")
             assert instructions.name == "my-skill"
+            assert instructions.description == "My skill"
             assert instructions.instructions == "# My Skill\n\nDo something."
+
+    def test_get_skill_instructions_not_in_whitelist_raises(self):
+        """Local.get_skill_instructions raises when skill name not in whitelist."""
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / "other-skill"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("content", encoding="utf-8")
+            registry = Local(
+                base_path=tmp,
+                whitelist=[LocalSkillWhitelistEntry(name="my-skill", description=None)],
+            )
+            with pytest.raises(SkillRegistryError, match="not found in whitelist"):
+                registry.get_skill_instructions("other-skill")
+
+    def test_get_skill_instructions_path_traversal_raises(self):
+        """Local.get_skill_instructions rejects skill names with path components."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for invalid_name in ("../other", "foo/bar", "..", "a\\b"):
+                registry = Local(
+                    base_path=tmp,
+                    whitelist=[LocalSkillWhitelistEntry(name=invalid_name, description=None)],
+                )
+                with pytest.raises(SkillRegistryError, match="Invalid skill name|outside base"):
+                    registry.get_skill_instructions(invalid_name)
 
     def test_type_computed_field(self):
         """Local registry has type computed field with module and class name."""
@@ -131,3 +156,37 @@ class TestDynamiqRegistry:
         client.request.assert_called_once()
         call_args = client.request.call_args
         assert "/v1/skills/skill-id/versions/ver-id/instructions" in call_args[0][1]
+
+    def test_get_skill_instructions_lookup_by_id_when_name_none(self):
+        """Dynamiq.get_skill_instructions finds entry by id when entry.name is None."""
+        conn = MagicMock()
+        conn.conn_params = {"api_base": "https://api.example.com"}
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = b"# Skill by id"
+        resp.text = "# Skill by id"
+        resp.json.side_effect = ValueError("not JSON")
+        client = MagicMock()
+        client.request.return_value = resp
+        conn.connect.return_value = client
+
+        registry = Dynamiq.model_construct(
+            connection=conn,
+            whitelist=[
+                DynamiqSkillWhitelistEntry(
+                    id="skill-by-id",
+                    version_id="ver-id",
+                    name=None,
+                    description="Cached description",
+                ),
+            ],
+        )
+        metadata = registry.get_skills_metadata()
+        assert metadata[0].name == "skill-by-id"
+        instructions = registry.get_skill_instructions("skill-by-id")
+        assert instructions.name == "skill-by-id"
+        assert instructions.description == "Cached description"
+        assert instructions.instructions == "# Skill by id"
+        client.request.assert_called_once()
+        call_args = client.request.call_args
+        assert "/v1/skills/skill-by-id/versions/ver-id/instructions" in call_args[0][1]

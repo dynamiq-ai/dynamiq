@@ -33,6 +33,7 @@ class Local(BaseSkillRegistry):
         return metadata
 
     def get_skill_instructions(self, name: str) -> SkillInstructions:
+        entry = self._get_whitelist_entry_by_name(name)
         skill_path = self._resolve_skill_path(name)
         if not skill_path.exists():
             raise SkillRegistryError(
@@ -40,8 +41,31 @@ class Local(BaseSkillRegistry):
                 details={"name": name, "path": str(skill_path)},
             )
         instructions = skill_path.read_text(encoding="utf-8")
-        return SkillInstructions(name=name, description=None, instructions=instructions)
+        return SkillInstructions(
+            name=entry.name,
+            description=entry.description,
+            instructions=instructions,
+        )
+
+    def _get_whitelist_entry_by_name(self, name: str) -> LocalSkillWhitelistEntry:
+        for entry in self.whitelist:
+            if entry.name == name:
+                return entry
+        raise SkillRegistryError("Skill not found in whitelist.", details={"name": name})
 
     def _resolve_skill_path(self, skill_name: str) -> Path:
-        base = Path(self.base_path).expanduser()
-        return base / skill_name / "SKILL.md"
+        if "/" in skill_name or "\\" in skill_name or ".." in skill_name:
+            raise SkillRegistryError(
+                "Invalid skill name: path components are not allowed.",
+                details={"name": skill_name},
+            )
+        base = Path(self.base_path).expanduser().resolve()
+        full_path = (base / skill_name / "SKILL.md").resolve()
+        try:
+            full_path.relative_to(base)
+        except ValueError:
+            raise SkillRegistryError(
+                "Invalid skill path: resolved path is outside base path.",
+                details={"name": skill_name, "path": str(full_path)},
+            )
+        return full_path
