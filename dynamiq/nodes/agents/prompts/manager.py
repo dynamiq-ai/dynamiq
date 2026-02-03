@@ -67,6 +67,8 @@ class AgentPromptManager:
         self._prompt_blocks: dict[str, str] = {
             "date": "{{ date }}",
             "tools": "{{ tool_description }}",
+            "skills": "{{ skills }}",
+            "skill_instructions": "{{ skill_instructions }}",
             "instructions": "",
             "context": "{{ context }}",
         }
@@ -75,6 +77,8 @@ class AgentPromptManager:
         self._initial_variables: dict[str, Any] = {
             "tool_description": tool_description,
             "date": datetime.now().strftime("%d %B %Y"),
+            "skills": "",
+            "skill_instructions": "",
         }
         self._prompt_variables: dict[str, Any] = self._initial_variables.copy()
 

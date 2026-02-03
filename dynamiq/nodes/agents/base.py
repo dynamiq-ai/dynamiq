@@ -36,6 +36,7 @@ from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.skills import SkillInstructions, SkillMetadata, SkillRegistryError, SkillsConfig
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -216,6 +217,7 @@ class Agent(Node):
         default=512,
         description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
     )
+    skills: SkillsConfig = Field(default_factory=SkillsConfig, description="Skill configuration for the agent.")
 
     input_message: Message | VisionMessage | None = None
     role: str | None = Field(
@@ -233,6 +235,8 @@ class Agent(Node):
     )
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
+    _skill_metadata: list[SkillMetadata] = PrivateAttr(default_factory=list)
+    _skill_instructions: dict[str, SkillInstructions] = PrivateAttr(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[AgentInputSchema]] = AgentInputSchema
@@ -309,6 +313,7 @@ class Agent(Node):
             self.tools.append(ParallelToolCallsTool())
 
         self._init_prompt_blocks()
+        self._init_skills_metadata()
 
     @model_validator(mode="after")
     def validate_input_fields(self):
@@ -385,6 +390,55 @@ class Agent(Node):
 
         self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
         self.system_prompt_manager.setup_for_base_agent()
+
+    def _init_skills_metadata(self) -> None:
+        """Load skills metadata and inject into prompt variables when enabled."""
+        if not self.skills or not self.skills.enabled:
+            return
+
+        metadata = self.skills.get_skills_metadata()
+        self._skill_metadata = metadata
+        formatted = self._format_skill_metadata(metadata)
+        self.system_prompt_manager.set_initial_variable("skills", formatted)
+
+    @staticmethod
+    def _format_skill_metadata(metadata: list[SkillMetadata]) -> str:
+        if not metadata:
+            return ""
+        lines = []
+        for skill in metadata:
+            description = skill.description or ""
+            if description:
+                lines.append(f"- {skill.name}: {description}")
+            else:
+                lines.append(f"- {skill.name}")
+        return "\n".join(lines)
+
+    def _format_skill_instructions(self) -> str:
+        if not self._skill_instructions:
+            return ""
+        blocks = []
+        for skill in self._skill_instructions.values():
+            header = f"{skill.name}"
+            blocks.append(f"{header}\n{skill.instructions}".strip())
+        return "\n\n".join(blocks)
+
+    def load_skill_instructions(
+        self,
+        *,
+        name: str | None = None,
+    ) -> SkillInstructions:
+        """Fetch full instructions for a skill and update prompt variables."""
+        if not self.skills or not self.skills.enabled:
+            raise SkillRegistryError("Skills are disabled for this agent.")
+
+        if not name:
+            raise SkillRegistryError("Skill name is required to load instructions.")
+
+        instructions = self.skills.get_skill_instructions(name)
+        self._skill_instructions[instructions.name] = instructions
+        self.system_prompt_manager.set_variable("skill_instructions", self._format_skill_instructions())
+        return instructions
 
     def set_block(self, block_name: str, content: str):
         """Adds or updates a prompt block."""
@@ -1209,6 +1263,7 @@ class Agent(Node):
         """Resets the agent's run state."""
         self._run_depends = []
         self._tool_cache: dict[ToolCacheEntry, Any] = {}
+        self._skill_instructions = {}
         self.system_prompt_manager.reset()
 
     def generate_prompt(self, block_names: list[str] | None = None, **kwargs) -> str:

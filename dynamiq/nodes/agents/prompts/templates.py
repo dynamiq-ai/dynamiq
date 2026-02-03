@@ -16,6 +16,16 @@ You are AI powered assistant.
 {{tools}}
 {%- endif %}
 
+{%- if skills %}
+# AVAILABLE SKILLS
+{{skills}}
+{%- endif %}
+
+{%- if skill_instructions %}
+# SKILL INSTRUCTIONS
+{{skill_instructions}}
+{%- endif %}
+
 {%- if output_format %}
 # RESPONSE FORMAT
 {{output_format}}
