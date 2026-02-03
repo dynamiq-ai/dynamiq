@@ -99,6 +99,7 @@ class TavilyInputSchema(BaseModel):
     include_favicon: bool | None = Field(
         default=None,
         description="Include the favicon URL for each result.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
     include_answer: bool | Literal["basic", "advanced"] | None = Field(
         default=None,
@@ -123,6 +124,7 @@ class TavilyInputSchema(BaseModel):
     use_cache: bool | None = Field(
         default=None,
         description="Use cached Tavily results when available.",
+        json_schema_extra={"is_accessible_to_agent": False},
     )
 
 
