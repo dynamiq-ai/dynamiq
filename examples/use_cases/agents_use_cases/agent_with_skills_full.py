@@ -84,7 +84,7 @@ def main():
     if not api_key:
         print("Set DYNAMIQ_API_KEY to run this example.")
         return
-    connection = Dynamiq(base_url=DYNAMIQ_SANDBOX_URL, api_key=api_key)
+    connection = Dynamiq(url=DYNAMIQ_SANDBOX_URL, api_key=api_key)
     tracing_handler = TracingCallbackHandler()
     agent = create_agent(connection, tracing_handler)
 
