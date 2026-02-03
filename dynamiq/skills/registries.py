@@ -10,11 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validat
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import HTTPMethod
 from dynamiq.skills.models import (
-    LocalSkillWhitelistEntry,
     SkillInstructions,
     SkillMetadata,
     SkillRegistryError,
-    SkillWhitelistEntry,
 )
 from dynamiq.utils.logger import logger
 
@@ -38,12 +36,21 @@ class BaseSkillRegistry(ABC, BaseModel):
         raise NotImplementedError
 
 
+class DynamiqSkillWhitelistEntry(BaseModel):
+    """Whitelist entry describing which skills are available to the agent."""
+
+    id: str = Field(..., min_length=1, description="Skill identifier.")
+    version_id: str | None = Field(default=None, description="Skill version identifier.")
+    name: str | None = Field(default=None, description="Optional cached skill name.")
+    description: str | None = Field(default=None, description="Optional cached skill description.")
+
+
 class Dynamiq(BaseSkillRegistry):
     """Dynamiq skill registry implementation."""
 
     connection: DynamiqConnection = Field(default_factory=DynamiqConnection)
     timeout: float = Field(default=10, description="Timeout in seconds for API requests.")
-    whitelist: list[SkillWhitelistEntry] = Field(default_factory=list)
+    whitelist: list[DynamiqSkillWhitelistEntry] = Field(default_factory=list)
 
     @field_validator("whitelist", mode="before")
     @classmethod
@@ -55,15 +62,7 @@ class Dynamiq(BaseSkillRegistry):
     def get_skills_metadata(self) -> list[SkillMetadata]:
         metadata: list[SkillMetadata] = []
         for entry in self.whitelist:
-            if not entry.version_id:
-                raise SkillRegistryError(
-                    "Skill whitelist entry is missing version_id.",
-                    details={"skill_id": entry.id},
-                )
-            data = self._fetch_skill_payload(entry.id, entry.version_id)
-            name = data.get("name") or entry.name or entry.id
-            description = data.get("description") or entry.description
-            metadata.append(SkillMetadata(name=name, description=description))
+            metadata.append(SkillMetadata(name=entry.name, description=entry.description))
         return metadata
 
     def get_skill_instructions(self, name: str) -> SkillInstructions:
@@ -92,7 +91,7 @@ class Dynamiq(BaseSkillRegistry):
             )
         return data
 
-    def _get_whitelist_entry_by_name(self, name: str) -> SkillWhitelistEntry:
+    def _get_whitelist_entry_by_name(self, name: str) -> DynamiqSkillWhitelistEntry:
         for entry in self.whitelist:
             if entry.name == name:
                 if not entry.version_id:
@@ -150,6 +149,13 @@ class Dynamiq(BaseSkillRegistry):
         except ValueError:
             logger.debug("Received non-JSON response from Dynamiq skills API for %s: %s", url, response.text)
             return response.text
+
+
+class LocalSkillWhitelistEntry(BaseModel):
+    """Whitelist entry for local skill registry."""
+
+    name: str = Field(..., min_length=1, description="Skill name.")
+    description: str | None = Field(default=None, description="Optional cached skill description.")
 
 
 class Local(BaseSkillRegistry):
