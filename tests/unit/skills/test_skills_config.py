@@ -40,6 +40,21 @@ def test_skills_config_get_skill_instructions_disabled_raises():
         cfg.get_skill_instructions("any")
 
 
+def test_skills_config_source_malformed_type_raises():
+    """SkillsConfig raises when source type string has no module path (no dot)."""
+    with pytest.raises(SkillRegistryError, match="fully qualified class name"):
+        SkillsConfig.model_validate(
+            {
+                "enabled": True,
+                "source": {
+                    "type": "Local",
+                    "base_path": "/tmp",
+                    "whitelist": [],
+                },
+            }
+        )
+
+
 def test_skills_config_source_resolved_from_dict_dynamiq():
     """SkillsConfig resolves source from dict with type dynamiq.skills.registries.Dynamiq."""
     conn = DynamiqConnection(url="https://api.example.com", api_key="test-key")

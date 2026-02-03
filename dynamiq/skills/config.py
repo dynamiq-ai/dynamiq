@@ -31,6 +31,11 @@ class SkillsConfig(BaseModel):
             registry_type = v.get("type")
             if not registry_type:
                 return v
+            if "." not in registry_type:
+                raise SkillRegistryError(
+                    "Registry type must be a fully qualified class name (e.g. dynamiq.skills.registries.local.Local).",
+                    details={"type": registry_type},
+                )
             module_name, class_name = registry_type.rsplit(".", 1)
             module = importlib.import_module(module_name)
             registry_cls = getattr(module, class_name)
