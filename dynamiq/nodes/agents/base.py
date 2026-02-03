@@ -315,9 +315,11 @@ class Agent(Node):
             self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
             self.tools.append(ParallelToolCallsTool())
 
-        self._init_prompt_blocks()
         if self._skills_should_init():
             self._init_skills()
+        self._init_prompt_blocks()
+        if self._skills_should_init():
+            self._apply_skills_to_prompt()
 
     @model_validator(mode="before")
     @classmethod
@@ -419,11 +421,7 @@ class Agent(Node):
         return self.skills.enabled and self.skills.source is not None
 
     def _init_skills(self) -> None:
-        """Initialize skills support from skills config (source registry).
-
-        Order: add SkillsTool to tools, set skills block in prompt, then refresh
-        tool_description so the prompt's AVAILABLE TOOLS section includes SkillsTool.
-        """
+        """Add SkillsTool to self.tools so it is included in function-calling and structured-output schemas."""
         from dynamiq.nodes.tools.skills_tool import SkillsTool
 
         source = self.skills.source
@@ -434,11 +432,15 @@ class Agent(Node):
         self.tools.append(skills_tool)
         self._skills_tool_ids.append(skills_tool.id)
 
+    def _apply_skills_to_prompt(self) -> None:
+        """Set skills block and tool_description on the prompt manager after _init_prompt_blocks()."""
+        source = self.skills.source
+        if source is None:
+            return
         metadata = self.skills.get_skills_metadata()
         skills_summary = self._format_skills_summary(metadata)
         self.system_prompt_manager.set_block("skills", skills_summary)
         self.system_prompt_manager.set_initial_variable("tool_description", self.tool_description)
-
         logger.info(
             f"Agent {self.name} - {self.id}: initialized with {len(metadata)} skills "
             f"(source={source.__class__.__name__})"
