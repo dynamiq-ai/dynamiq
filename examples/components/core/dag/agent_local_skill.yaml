@@ -1,9 +1,6 @@
 connections:
   openai-conn:
     type: dynamiq.connections.OpenAI
-  dynamiq-conn:
-    type: dynamiq.connections.Dynamiq
-
 
 nodes:
   humanizer-agent:
@@ -19,20 +16,17 @@ nodes:
     skills:
       enabled: true
       source:
-        type: dynamiq.skills.registries.Dynamiq
-        connection:
-          type: dynamiq.connections.Dynamiq
+        type: dynamiq.skills.registries.Local
+        base_path: ".skills"
         whitelist:
-          - id: cfb2ddd9-7b5b-457f-9ef6-666db9c45eb3
-            version_id: adcf8695-31b0-4a50-ba68-3606b5158e7c
-            name: humanizer
+          - name: humanizer
             description: Remove signs of AI-generated writing from text. Use when editing or reviewing text to make it sound more natural and human-written.
     max_loops: 10
     inference_mode: XML
 
 flows:
   humanizer-agent-flow:
-    name: Humanizer Skill Flow
+    name: Humanizer Skill Flow (Local)
     nodes:
       - humanizer-agent
 

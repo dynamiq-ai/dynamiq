@@ -1,96 +1,55 @@
-"""Skills configuration: Dynamiq registry backend only."""
+"""Skills configuration: enabled + source registry (Dynamiq or Local)."""
 
-from enum import Enum
+from __future__ import annotations
+
+import importlib
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from dynamiq.skills.models import SkillWhitelistEntry
-from dynamiq.skills.sources.base import SkillSource
-
-
-class SkillsBackendType(str, Enum):
-    """Skills backend: Dynamiq (API) only."""
-
-    Dynamiq = "Dynamiq"
-
-
-class SkillsBackendConfig(BaseModel):
-    """Backend for skills: Dynamiq API registry."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    type: SkillsBackendType = Field(
-        default=SkillsBackendType.Dynamiq,
-        description="Backend type: 'Dynamiq' (API registry).",
-    )
-    connection: Any = Field(
-        default=None,
-        description="Connection instance for Dynamiq backend (resolved by loader).",
-    )
+from dynamiq.skills.models import SkillInstructions, SkillMetadata, SkillRegistryError
+from dynamiq.skills.registries import BaseSkillRegistry
 
 
 class SkillsConfig(BaseModel):
-    """Unified skills configuration: enabled flag + backend (Dynamiq) + optional whitelist.
+    """Configuration for agent skills."""
 
-    When enabled is True, backend is required. Only Dynamiq (API registry) backend is supported.
-    Accepts dict from YAML/JSON; resolved to source at init via resolve_skills_config().
-    """
+    enabled: bool = Field(default=False, description="Enable skill support for the agent.")
+    source: BaseSkillRegistry | None = Field(
+        default=None,
+        description="Registry providing skills (Dynamiq or Local).",
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    enabled: bool = Field(
-        default=False,
-        description="Whether skills support is enabled. When True, backend is required.",
-    )
-    backend: SkillsBackendConfig | None = Field(
-        default=None,
-        description="Backend (Dynamiq registry). Required when enabled is True.",
-    )
-    whitelist: list[SkillWhitelistEntry] | None = Field(
-        default=None,
-        description="Whitelist of skills (id, name, description, version_id). Required for Dynamiq backend.",
-    )
+    @field_validator("source", mode="before")
+    @classmethod
+    def resolve_source(cls, v: Any) -> Any:
+        if v is None or isinstance(v, BaseSkillRegistry):
+            return v
+        if isinstance(v, dict):
+            registry_type = v.get("type")
+            if not registry_type:
+                return v
+            module_name, class_name = registry_type.rsplit(".", 1)
+            module = importlib.import_module(module_name)
+            registry_cls = getattr(module, class_name)
+            init_data = {k: val for k, val in v.items() if k != "type"}
+            return registry_cls(**init_data)
+        return v
 
+    @model_validator(mode="after")
+    def validate_enabled_source(self) -> SkillsConfig:
+        if self.enabled and self.source is None:
+            raise SkillRegistryError("Skills are enabled but no source registry is configured.")
+        return self
 
-def resolve_skills_config(skills: SkillsConfig | dict | None) -> SkillSource | None:
-    """Resolve skills config to a skill source. Returns None if skills disabled or invalid.
+    def get_skills_metadata(self) -> list[SkillMetadata]:
+        if not self.enabled or self.source is None:
+            return []
+        return self.source.get_skills_metadata()
 
-    Only Dynamiq backend is supported: DynamiqSkillSource(connection, whitelist).
-    """
-    if skills is None:
-        return None
-    if isinstance(skills, dict):
-        if not skills.get("enabled") or not skills.get("backend"):
-            return None
-        backend_data = skills.get("backend")
-        whitelist_data = skills.get("whitelist")
-    else:
-        if not skills.enabled or not skills.backend:
-            return None
-        backend_data = skills.backend
-        whitelist_data = skills.whitelist
-
-    if isinstance(backend_data, dict):
-        backend = SkillsBackendConfig.model_validate(backend_data)
-    else:
-        backend = backend_data
-
-    whitelist_entries: list[SkillWhitelistEntry] | None = None
-    if whitelist_data:
-        whitelist_entries = []
-        for e in whitelist_data:
-            if isinstance(e, dict):
-                whitelist_entries.append(SkillWhitelistEntry.model_validate(e))
-            elif isinstance(e, SkillWhitelistEntry):
-                whitelist_entries.append(e)
-            else:
-                raise ValueError(
-                    f"Whitelist entry must be a dict or SkillWhitelistEntry, got {type(e).__name__}"
-                )
-
-    from dynamiq.skills.registry.dynamiq import DynamiqSkillSource
-
-    if not backend.connection:
-        raise ValueError("Skills backend requires connection (Dynamiq API).")
-    return DynamiqSkillSource(connection=backend.connection, whitelist=whitelist_entries)
+    def get_skill_instructions(self, name: str) -> SkillInstructions:
+        if not self.enabled or self.source is None:
+            raise SkillRegistryError("Skills are disabled for this agent.")
+        return self.source.get_skill_instructions(name)

@@ -5,7 +5,8 @@ from pydantic import BaseModel, Field
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.runnables import RunnableConfig
-from dynamiq.skills.sources.base import SkillSource
+from dynamiq.skills import BaseSkillRegistry
+from dynamiq.skills.utils import extract_skill_content_slice
 from dynamiq.utils.logger import logger
 
 
@@ -26,16 +27,15 @@ class SkillsToolInputSchema(BaseModel):
 
 
 class SkillsTool(Node):
-    """Tool for skills: discover and get content from Dynamiq registry.
+    """Tool for skills: discover and get content from a skill registry (Dynamiq or Local).
 
-    Uses a configurable skill_source (Dynamiq API). After get, apply the
-    skill's instructions yourself and provide the result in your final answer.
+    After get, apply the skill's instructions yourself and provide the result in your final answer.
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "SkillsTool"
     description: str = (
-        "Manages skills (API-backed; instructions only). Use this tool to:\n"
+        "Manages skills (instructions only). Use this tool to:\n"
         "- List available skills: action='list'\n"
         "- Get skill content: action='get', skill_name='...'. "
         "For large skills use section='Section title' or line_start/line_end to read only a part.\n\n"
@@ -44,13 +44,16 @@ class SkillsTool(Node):
         "the tool only provides instructions; you produce the output."
     )
 
-    skill_source: SkillSource = Field(..., description="Where skills are discovered and loaded from")
+    skill_registry: BaseSkillRegistry = Field(
+        ...,
+        description="Registry providing skills (Dynamiq or Local).",
+    )
     input_schema: ClassVar[type[SkillsToolInputSchema]] = SkillsToolInputSchema
 
     @property
     def to_dict_exclude_params(self):
         return super().to_dict_exclude_params | {
-            "skill_source": True,
+            "skill_registry": True,
         }
 
     def execute(
@@ -73,21 +76,14 @@ class SkillsTool(Node):
         raise ToolExecutionException(f"Unknown action: {action}", recoverable=True)
 
     def _list_skills(self) -> dict[str, Any]:
-        skills = self.skill_source.discover_skills()
-        skills_info = []
-        for s in skills:
-            info = {"name": s.name, "description": s.description, "tags": s.tags}
-            if s.id is not None:
-                info["id"] = s.id
-            if s.version_id is not None:
-                info["version_id"] = s.version_id
-            skills_info.append(info)
-        names = [s.name for s in skills]
-        logger.info("SkillsTool - list: %d skill(s) %s", len(skills), names)
+        metadata_list = self.skill_registry.get_skills_metadata()
+        skills_info = [{"name": m.name, "description": m.description} for m in metadata_list]
+        names = [m.name for m in metadata_list]
+        logger.info("SkillsTool - list: %d skill(s) %s", len(metadata_list), names)
         return {
             "content": {
                 "available_skills": skills_info,
-                "total": len(skills),
+                "total": len(metadata_list),
             }
         }
 
@@ -98,15 +94,24 @@ class SkillsTool(Node):
         line_start: int | None = None,
         line_end: int | None = None,
     ) -> dict[str, Any]:
+        try:
+            instructions = self.skill_registry.get_skill_instructions(skill_name)
+        except Exception as e:
+            raise ToolExecutionException(f"Skill '{skill_name}' not found: {e}", recoverable=True) from e
+
         if section is not None or line_start is not None or line_end is not None:
-            out = self.skill_source.load_skill_content(
-                skill_name,
+            sliced, section_used = extract_skill_content_slice(
+                instructions.instructions,
                 section=section,
                 line_start=line_start,
                 line_end=line_end,
             )
-            if not out:
-                raise ToolExecutionException(f"Skill '{skill_name}' not found", recoverable=True)
+            out = {
+                "skill_name": instructions.name,
+                "description": instructions.description,
+                "instructions": sliced,
+                "section_used": section_used,
+            }
             logger.info(
                 "SkillsTool - get: skill=%s (section=%s, lines=%s-%s) -> content received",
                 skill_name,
@@ -115,17 +120,16 @@ class SkillsTool(Node):
                 line_end,
             )
             return {"content": out}
-        skill = self.skill_source.load_skill(skill_name)
-        if not skill:
-            raise ToolExecutionException(f"Skill '{skill_name}' not found", recoverable=True)
-        content = skill.get_full_content()
-        logger.info("SkillsTool - get: skill=%s -> content received (%d chars)", skill_name, len(content))
+
+        logger.info(
+            "SkillsTool - get: skill=%s -> content received (%d chars)",
+            skill_name,
+            len(instructions.instructions),
+        )
         return {
             "content": {
-                "skill_name": skill.name,
-                "description": skill.metadata.description,
-                "instructions": content,
-                "supporting_files": [str(p) for p in skill.supporting_files_paths],
-                "dependencies": skill.metadata.dependencies,
+                "skill_name": instructions.name,
+                "description": instructions.description,
+                "instructions": instructions.instructions,
             }
         }

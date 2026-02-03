@@ -1,17 +1,14 @@
-from dynamiq.skills.config import SkillsBackendConfig, SkillsBackendType, SkillsConfig, resolve_skills_config
-from dynamiq.skills.models import Skill, SkillMetadata, SkillReference, SkillWhitelistEntry
-from dynamiq.skills.registry import DynamiqSkillSource
-from dynamiq.skills.sources import SkillSource
+# Public API: config, models, registries only.
+from dynamiq.skills.config import SkillsConfig
+from dynamiq.skills.models import SkillInstructions, SkillMetadata, SkillRegistryError
+from dynamiq.skills.registries import BaseSkillRegistry, Dynamiq, Local
 
 __all__ = [
-    "DynamiqSkillSource",
-    "Skill",
+    "BaseSkillRegistry",
+    "Dynamiq",
+    "Local",
+    "SkillInstructions",
     "SkillMetadata",
-    "SkillReference",
-    "SkillsBackendConfig",
-    "SkillsBackendType",
+    "SkillRegistryError",
     "SkillsConfig",
-    "SkillSource",
-    "SkillWhitelistEntry",
-    "resolve_skills_config",
 ]

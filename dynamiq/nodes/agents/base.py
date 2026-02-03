@@ -37,7 +37,7 @@ from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.skills.config import SkillsConfig
-from dynamiq.skills.models import SkillReference
+from dynamiq.skills.models import SkillMetadata
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -218,10 +218,9 @@ class Agent(Node):
         default=512,
         description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
     )
-    skills: SkillsConfig | None = Field(
-        default=None,
-        description="Skills config: None or SkillsConfig. When SkillsConfig.enabled is True and backend is set, "
-        "skills are on. Backend: Dynamiq (API) only.",
+    skills: SkillsConfig = Field(
+        default_factory=SkillsConfig,
+        description="Skills config. When enabled and source registry is set, skills are on (Dynamiq or Local).",
     )
 
     input_message: Message | VisionMessage | None = None
@@ -324,8 +323,11 @@ class Agent(Node):
     @classmethod
     def coerce_skills_config(cls, data: Any) -> Any:
         """Coerce skills dict (from YAML/JSON) to SkillsConfig."""
-        if isinstance(data, dict) and "skills" in data and isinstance(data["skills"], dict):
-            data = {**data, "skills": SkillsConfig.model_validate(data["skills"])}
+        if isinstance(data, dict) and "skills" in data:
+            if isinstance(data["skills"], dict):
+                data = {**data, "skills": SkillsConfig.model_validate(data["skills"])}
+            elif data["skills"] is None:
+                data = {**data, "skills": SkillsConfig()}
         return data
 
     @model_validator(mode="after")
@@ -374,15 +376,11 @@ class Agent(Node):
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
 
-        data["skills"] = (
-            self.skills.model_dump(exclude={"backend": {"connection", "file_store"}})
-            if self.skills
-            else None
-        )
-        if self.skills and self.skills.backend:
-            backend_data = data["skills"].setdefault("backend", {})
-            if self.skills.backend.connection is not None:
-                backend_data["connection"] = self.skills.backend.connection.to_dict(**kwargs)
+        data["skills"] = self.skills.model_dump() if self.skills else None
+        if self.skills and self.skills.source is not None:
+            source = self.skills.source
+            if "source" in data["skills"] and getattr(source, "connection", None) is not None:
+                data["skills"]["source"]["connection"] = source.connection.to_dict(**kwargs)
 
         return data
 
@@ -417,47 +415,54 @@ class Agent(Node):
         self.system_prompt_manager.setup_for_base_agent()
 
     def _skills_should_init(self) -> bool:
-        """True if skills support should be initialized (enabled and backend set)."""
-        return self.skills is not None and self.skills.enabled and self.skills.backend is not None
+        """True if skills support should be initialized (enabled and source set)."""
+        return self.skills.enabled and self.skills.source is not None
 
     def _init_skills(self) -> None:
-        """Initialize skills support from skills config (backend -> source)."""
-        from dynamiq.nodes.tools.skills_tool import SkillsTool
-        from dynamiq.skills.config import resolve_skills_config
+        """Initialize skills support from skills config (source registry).
 
-        source = resolve_skills_config(self.skills)
+        Order: add SkillsTool to tools, set skills block in prompt, then refresh
+        tool_description so the prompt's AVAILABLE TOOLS section includes SkillsTool.
+        """
+        from dynamiq.nodes.tools.skills_tool import SkillsTool
+
+        source = self.skills.source
         if source is None:
-            logger.warning("Skills config missing or invalid (backend required); skipping skills init")
+            logger.warning("Skills config missing or invalid (source required); skipping skills init")
             return
-        skills_tool = SkillsTool(skill_source=source)
+        skills_tool = SkillsTool(skill_registry=source)
         self.tools.append(skills_tool)
         self._skills_tool_ids.append(skills_tool.id)
 
-        available_skills = source.discover_skills()
-        skills_summary = self._format_skills_summary(available_skills)
+        metadata = self.skills.get_skills_metadata()
+        skills_summary = self._format_skills_summary(metadata)
         self.system_prompt_manager.set_block("skills", skills_summary)
+        self.system_prompt_manager.set_initial_variable("tool_description", self.tool_description)
 
         logger.info(
-            f"Agent {self.name} - {self.id}: initialized with {len(available_skills)} skills " f"(source={source.name})"
+            f"Agent {self.name} - {self.id}: initialized with {len(metadata)} skills "
+            f"(source={source.__class__.__name__})"
         )
 
-    def _format_skills_summary(self, skills: list[SkillReference]) -> str:
+    def _format_skills_summary(self, metadata: list[SkillMetadata]) -> str:
         """Format skills summary for prompt.
 
         Args:
-            skills: List of SkillReference objects
+            metadata: List of SkillMetadata objects.
 
         Returns:
-            Formatted string with skill information
+            Formatted string with skill information.
         """
-        if not skills:
+        if not metadata:
             return ""
 
         lines = []
-        for skill in skills:
-            tags_str = f" [{', '.join(skill.tags)}]" if skill.tags else ""
-            lines.append(f"- **{skill.name}**{tags_str}: {skill.description}")
-
+        for skill in metadata:
+            description = skill.description or ""
+            if description:
+                lines.append(f"- **{skill.name}**: {description}")
+            else:
+                lines.append(f"- **{skill.name}**")
         return "\n".join(lines)
 
     def set_block(self, block_name: str, content: str):

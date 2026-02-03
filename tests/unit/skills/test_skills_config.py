@@ -1,99 +1,100 @@
-"""Unit tests for SkillsConfig and resolve_skills_config (Dynamiq backend only)."""
-
-from unittest.mock import MagicMock
+"""Unit tests for SkillsConfig (source-based: Dynamiq and Local registries)."""
 
 import pytest
 
-from dynamiq.skills.config import SkillsBackendConfig, SkillsBackendType, SkillsConfig, resolve_skills_config
-from dynamiq.skills.registry.dynamiq import DynamiqSkillSource
-
-
-def test_skills_backend_type():
-    """SkillsBackendType has Dynamiq; valid type string coerces to enum."""
-    assert SkillsBackendType.Dynamiq == "Dynamiq"
-    backend = SkillsBackendConfig.model_validate({"type": "Dynamiq"})
-    assert backend.type == SkillsBackendType.Dynamiq
+from dynamiq.connections import Dynamiq as DynamiqConnection
+from dynamiq.skills.config import SkillsConfig
+from dynamiq.skills.models import SkillRegistryError
+from dynamiq.skills.registries import Dynamiq, Local
 
 
 def test_skills_config_defaults():
-    """SkillsConfig has enabled=False and backend=None by default."""
+    """SkillsConfig has enabled=False and source=None by default."""
     cfg = SkillsConfig()
     assert cfg.enabled is False
-    assert cfg.backend is None
-    assert cfg.whitelist is None
+    assert cfg.source is None
 
 
-def test_skills_config_enabled_with_backend():
-    """SkillsConfig accepts enabled=True and backend (Dynamiq)."""
-    backend = SkillsBackendConfig(type=SkillsBackendType.Dynamiq, connection=MagicMock())
-    cfg = SkillsConfig(enabled=True, backend=backend)
-    assert cfg.enabled is True
-    assert cfg.backend is backend
+def test_skills_config_enabled_without_source_raises():
+    """SkillsConfig raises when enabled=True and source is None."""
+    with pytest.raises(SkillRegistryError, match="enabled but no source"):
+        SkillsConfig(enabled=True, source=None)
 
 
-def test_skills_config_from_dict():
-    """SkillsConfig can be built from dict (YAML shape); type string coerced to Dynamiq."""
+def test_skills_config_get_skills_metadata_disabled():
+    """get_skills_metadata returns [] when disabled."""
+    cfg = SkillsConfig(enabled=False)
+    assert cfg.get_skills_metadata() == []
+
+
+def test_skills_config_get_skills_metadata_no_source():
+    """get_skills_metadata returns [] when source is None (enabled=False)."""
+    cfg = SkillsConfig()
+    assert cfg.get_skills_metadata() == []
+
+
+def test_skills_config_get_skill_instructions_disabled_raises():
+    """get_skill_instructions raises when skills disabled."""
+    cfg = SkillsConfig(enabled=False)
+    with pytest.raises(SkillRegistryError, match="disabled"):
+        cfg.get_skill_instructions("any")
+
+
+def test_skills_config_source_resolved_from_dict_dynamiq():
+    """SkillsConfig resolves source from dict with type dynamiq.skills.registries.Dynamiq."""
+    conn = DynamiqConnection(url="https://api.example.com", api_key="test-key")
     cfg = SkillsConfig.model_validate(
         {
             "enabled": True,
-            "backend": {
-                "type": "Dynamiq",
+            "source": {
+                "type": "dynamiq.skills.registries.Dynamiq",
+                "connection": conn,
+                "whitelist": [
+                    {"id": "sid", "version_id": "vid", "name": "foo", "description": "Foo skill"},
+                ],
             },
         }
     )
     assert cfg.enabled is True
-    assert cfg.backend is not None
-    assert cfg.backend.type == SkillsBackendType.Dynamiq
+    assert cfg.source is not None
+    assert isinstance(cfg.source, Dynamiq)
+    assert cfg.source.connection is conn
+    assert len(cfg.source.whitelist) == 1
+    assert cfg.source.whitelist[0].name == "foo"
+    metadata = cfg.get_skills_metadata()
+    assert len(metadata) == 1
+    assert metadata[0].name == "foo"
+    assert metadata[0].description == "Foo skill"
 
 
-def test_resolve_skills_config_none():
-    """resolve_skills_config returns None when skills is None."""
-    assert resolve_skills_config(None) is None
+def test_skills_config_source_resolved_from_dict_local():
+    """SkillsConfig resolves source from dict with type dynamiq.skills.registries.Local."""
+    cfg = SkillsConfig.model_validate(
+        {
+            "enabled": True,
+            "source": {
+                "type": "dynamiq.skills.registries.Local",
+                "base_path": "~/.dynamiq/skills",
+                "whitelist": [
+                    {"name": "local-skill", "description": "Local skill"},
+                ],
+            },
+        }
+    )
+    assert cfg.enabled is True
+    assert cfg.source is not None
+    assert isinstance(cfg.source, Local)
+    assert cfg.source.base_path == "~/.dynamiq/skills"
+    assert len(cfg.source.whitelist) == 1
+    assert cfg.source.whitelist[0].name == "local-skill"
+    metadata = cfg.get_skills_metadata()
+    assert len(metadata) == 1
+    assert metadata[0].name == "local-skill"
+    assert metadata[0].description == "Local skill"
 
 
-def test_resolve_skills_config_disabled_dict():
-    """resolve_skills_config returns None when dict has enabled=False or no backend."""
-    assert resolve_skills_config({"enabled": False, "backend": {"type": "Dynamiq"}}) is None
-    assert resolve_skills_config({"enabled": True}) is None
-    assert resolve_skills_config({}) is None
-
-
-def test_resolve_skills_config_disabled_skills_config():
-    """resolve_skills_config returns None when SkillsConfig.enabled is False."""
-    backend = SkillsBackendConfig(type=SkillsBackendType.Dynamiq, connection=MagicMock())
-    cfg = SkillsConfig(enabled=False, backend=backend)
-    assert resolve_skills_config(cfg) is None
-
-
-def test_resolve_skills_config_dynamiq_backend_missing_connection_raises():
-    """resolve_skills_config raises when Dynamiq backend has no connection."""
-    skills_dict = {
-        "enabled": True,
-        "backend": {"type": "Dynamiq"},
-    }
-    with pytest.raises(ValueError, match="connection"):
-        resolve_skills_config(skills_dict)
-
-
-def test_resolve_skills_config_dynamiq_backend():
-    """resolve_skills_config returns source for Dynamiq backend with connection."""
-    conn = MagicMock()
-    skills_dict = {
-        "enabled": True,
-        "backend": {"type": "Dynamiq", "connection": conn},
-        "whitelist": [],
-    }
-    source = resolve_skills_config(skills_dict)
-    assert source is not None
-    assert isinstance(source, DynamiqSkillSource)
-    assert source.connection is conn
-
-
-def test_resolve_skills_config_dynamiq_skills_config_instance():
-    """resolve_skills_config works with SkillsConfig instance (Dynamiq backend)."""
-    conn = MagicMock()
-    backend = SkillsBackendConfig(type=SkillsBackendType.Dynamiq, connection=conn)
-    cfg = SkillsConfig(enabled=True, backend=backend)
-    source = resolve_skills_config(cfg)
-    assert source is not None
-    assert isinstance(source, DynamiqSkillSource)
+def test_skills_config_source_instance_unchanged():
+    """When source is already a BaseSkillRegistry instance, it is not re-resolved."""
+    registry = Local(base_path="/tmp/skills", whitelist=[])
+    cfg = SkillsConfig(enabled=True, source=registry)
+    assert cfg.source is registry

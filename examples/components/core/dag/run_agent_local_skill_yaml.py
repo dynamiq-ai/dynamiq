@@ -1,9 +1,3 @@
-"""Run agent with Dynamiq API skill (humanizer) from YAML.
-
-Loads agent_humanizer_skill.yaml, runs with a humanizer prompt. Set DYNAMIQ_URL
-(e.g. https://api.sandbox.getdynamiq.ai) and DYNAMIQ_API_KEY.
-"""
-
 from pathlib import Path
 
 from dynamiq import Workflow
@@ -11,11 +5,16 @@ from dynamiq.connections.managers import get_connection_manager
 from dynamiq.runnables import RunnableConfig
 
 EXAMPLES_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = EXAMPLES_DIR.parent.parent.parent.parent
 
 
-def run_agent_humanizer_skill_yaml():
-    """Load workflow from YAML, run humanizer skill agent."""
-    yaml_path = EXAMPLES_DIR / "agent_humanizer_skill.yaml"
+def run_agent_local_skill_yaml():
+    """Load workflow from YAML, run humanizer skill agent (Local registry)."""
+    import os
+
+    os.chdir(PROJECT_ROOT)
+
+    yaml_path = EXAMPLES_DIR / "agent_local_skill.yaml"
 
     with get_connection_manager() as cm:
         wf = Workflow.from_yaml_file(
@@ -25,8 +24,7 @@ def run_agent_humanizer_skill_yaml():
         )
 
         prompt = (
-            "Show your skills"
-            "Humanize this text: "
+            "Show skills, then humanize text:"
             "In conclusion, it is important to note that leveraging cutting-edge solutions "
             "can help stakeholders unlock value and drive transformative outcomes. "
             "Moving forward, we will utilize best practices to ensure synergy."
@@ -40,6 +38,6 @@ def run_agent_humanizer_skill_yaml():
 
 
 if __name__ == "__main__":
-    print("=== Humanizer skill (YAML DAG) ===\n")
-    run_agent_humanizer_skill_yaml()
+    print("=== Humanizer skill (YAML DAG, Local registry) ===\n")
+    run_agent_local_skill_yaml()
     print("\nDone.")

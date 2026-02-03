@@ -7,7 +7,7 @@ def extract_skill_content_slice(
     """Extract a slice of skill instructions by section header or line range.
 
     Args:
-        instructions: Full skill body (e.g. from Skill.instructions).
+        instructions: Full skill instructions (e.g. from SkillInstructions.instructions).
         section: Markdown header to extract (e.g. "Welcome messages"); first # or ## match.
         line_start: 1-based start line (inclusive).
         line_end: 1-based end line (inclusive).
