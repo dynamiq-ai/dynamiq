@@ -9,11 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validat
 
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import HTTPMethod
-from dynamiq.skills.models import (
-    SkillInstructions,
-    SkillMetadata,
-    SkillRegistryError,
-)
+from dynamiq.skills.models import SkillInstructions, SkillMetadata, SkillRegistryError
 from dynamiq.utils.logger import logger
 
 
@@ -67,29 +63,20 @@ class Dynamiq(BaseSkillRegistry):
 
     def get_skill_instructions(self, name: str) -> SkillInstructions:
         entry = self._get_whitelist_entry_by_name(name)
-        data = self._fetch_skill_payload(entry.id, entry.version_id)
-        resolved_name = data.get("name") or entry.name or entry.id
-        description = data.get("description")
-        instructions = data.get("instructions") or ""
-        return SkillInstructions(name=resolved_name, description=description, instructions=instructions)
+        instructions = self._fetch_skill_instructions(entry.id, entry.version_id)
+        return SkillInstructions(name=entry.name, description=entry.description, instructions=instructions)
 
-    def _fetch_skill_payload(self, skill_id: str, version_id: str) -> dict[str, Any]:
+    def _fetch_skill_instructions(self, skill_id: str, version_id: str) -> str:
         response = self._request(
             HTTPMethod.GET,
             f"/v1/skills/{skill_id}/versions/{version_id}/instructions",
         )
-        if not isinstance(response, dict):
+        if not isinstance(response, str):
             raise SkillRegistryError(
-                "Unexpected response from Dynamiq skills API.",
-                details={"skill_id": skill_id, "version_id": version_id, "response": response},
+                "Unexpected response from Dynamiq skills API. Expected SKILL.md text.",
+                details={"skill_id": skill_id, "version_id": version_id, "response_type": type(response).__name__},
             )
-        data = response.get("data") if isinstance(response.get("data"), dict) else response
-        if not isinstance(data, dict):
-            raise SkillRegistryError(
-                "Skill payload is missing expected data object.",
-                details={"skill_id": skill_id, "version_id": version_id, "response": response},
-            )
-        return data
+        return response
 
     def _get_whitelist_entry_by_name(self, name: str) -> DynamiqSkillWhitelistEntry:
         for entry in self.whitelist:
