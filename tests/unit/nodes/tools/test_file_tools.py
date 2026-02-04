@@ -5,9 +5,89 @@ import pytest
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms import OpenAI
-from dynamiq.nodes.tools.file_tools import EXTRACTED_TEXT_SUFFIX, FileListTool, FileReadTool, FileType, FileWriteTool
+from dynamiq.nodes.tools.file_tools import (
+    EXTRACTED_TEXT_SUFFIX,
+    FileListTool,
+    FileReadInputSchema,
+    FileReadTool,
+    FileType,
+    FileWriteInputSchema,
+    FileWriteTool,
+    validate_file_path,
+)
 from dynamiq.runnables import RunnableResult, RunnableStatus
 from dynamiq.storages.file.in_memory import InMemoryFileStore
+
+
+@pytest.mark.parametrize(
+    "path,expected",
+    [
+        ("file.txt", "file.txt"),
+        ("subdir/file.txt", "subdir/file.txt"),
+        ("a/b/c/file.txt", "a/b/c/file.txt"),
+        ("", ""),
+        ("subdir/./file.txt", "subdir/file.txt"),
+    ],
+)
+def test_validate_file_path_valid_paths(path, expected):
+    """Valid paths should be allowed and normalized."""
+    assert validate_file_path(path) == expected
+
+
+@pytest.mark.parametrize(
+    "path,error_match",
+    [
+        ("../etc/passwd", "Path traversal"),
+        ("subdir/../../../etc/passwd", "Path traversal"),
+        ("a/b/c/../../../../../../../etc/passwd", "Path traversal"),
+        ("/etc/passwd", "Absolute paths"),
+        ("C:\\Windows\\System32\\config", "Absolute paths"),
+    ],
+)
+def test_validate_file_path_rejects_dangerous_paths(path, error_match):
+    """Dangerous paths (traversal, absolute) should be rejected."""
+    with pytest.raises(ValueError, match=error_match):
+        validate_file_path(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../../../etc/passwd",
+        "/etc/passwd",
+        "subdir/../../../secret.txt",
+    ],
+)
+def test_file_read_input_schema_rejects_dangerous_paths(path):
+    """FileReadInputSchema should reject path traversal and absolute paths."""
+    with pytest.raises(ValueError):
+        FileReadInputSchema(file_path=path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../../../tmp/malicious.sh",
+        "/tmp/file.txt",
+        "subdir/../../../secret.txt",
+    ],
+)
+def test_file_write_input_schema_rejects_dangerous_paths(path):
+    """FileWriteInputSchema should reject path traversal and absolute paths."""
+    with pytest.raises(ValueError):
+        FileWriteInputSchema(file_path=path, content="content")
+
+
+def test_file_read_input_schema_valid_path_is_accepted():
+    """Valid relative paths should be accepted."""
+    schema = FileReadInputSchema(file_path="documents/report.pdf")
+    assert schema.file_path == "documents/report.pdf"
+
+
+def test_file_write_input_schema_valid_path_is_accepted():
+    """Valid relative paths should be accepted."""
+    schema = FileWriteInputSchema(file_path="output/result.json", content="test")
+    assert schema.file_path == "output/result.json"
 
 
 @pytest.fixture
