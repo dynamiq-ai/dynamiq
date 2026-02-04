@@ -160,6 +160,7 @@ cython_debug/
 .DS_Store
 .local
 sandbox
+!dynamiq/sandbox/
 
 # Chainlit
 .chainlit
