@@ -11,11 +11,11 @@ from pydantic import ConfigDict
 
 from dynamiq.utils.logger import logger
 
-from .base import FileInfo, FileNotFoundError, FileStore, StorageError
+from .base import FileInfo, FileNotFoundError, Sandbox, StorageError
 
 
-class InMemoryFileStore(FileStore):
-    """In-memory file storage implementation.
+class InMemorySandbox(Sandbox):
+    """In-memory sandbox implementation.
 
     This implementation stores files in memory using Python dictionaries.
     Files are lost when the process terminates.
@@ -155,3 +155,7 @@ class InMemoryFileStore(FileStore):
             metadata=file_data.get("metadata", {}),
             content=file_data["content"],
         )
+
+
+# Backwards compatibility alias
+InMemoryFileStore = InMemorySandbox

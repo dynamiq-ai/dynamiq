@@ -1,13 +1,13 @@
 import pytest
 
+from dynamiq.storages.file import InMemorySandbox
 from dynamiq.storages.file.base import FileInfo, FileNotFoundError
-from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
 @pytest.fixture
 def storage():
-    """Create a fresh storage instance for each test."""
-    return InMemoryFileStore()
+    """Create a fresh sandbox instance for each test."""
+    return InMemorySandbox()
 
 
 @pytest.fixture

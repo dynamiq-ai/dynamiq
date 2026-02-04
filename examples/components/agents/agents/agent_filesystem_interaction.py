@@ -5,8 +5,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file.base import FileStoreConfig
-from dynamiq.storages.file.in_memory import InMemoryFileStore
+from dynamiq.storages.file import InMemorySandbox, SandboxConfig
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
@@ -32,13 +31,13 @@ def setup_agent() -> Agent:
 
     llm = setup_llm(model_provider="claude", model_name="claude-3-5-sonnet-20241022", temperature=0.2)
 
-    file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore(), agent_file_write_enabled=True)
+    sandbox = SandboxConfig(enabled=True, backend=InMemorySandbox(), agent_file_write_enabled=True)
 
     agent = Agent(
         name="AgentFileInteractionWithMemory",
         id="AgentFileInteractionWithMemory",
         llm=llm,
-        file_store=file_store,
+        sandbox=sandbox,
         role=AGENT_ROLE,
         inference_mode=InferenceMode.DEFAULT,
         max_loops=5,

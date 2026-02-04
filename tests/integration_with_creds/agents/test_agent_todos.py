@@ -10,8 +10,7 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.storages.file import FileStoreConfig
-from dynamiq.storages.file.in_memory import InMemoryFileStore
+from dynamiq.storages.file import InMemorySandbox, SandboxConfig
 from dynamiq.utils.logger import logger
 
 
@@ -40,10 +39,10 @@ def test_agent_todo_state_updates(openai_llm, run_config):
     """Test that Agent todo state is updated when using TodoWriteTool."""
     from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH, TodoWriteTool
 
-    file_store_backend = InMemoryFileStore()
-    file_store_config = FileStoreConfig(
+    sandbox_backend = InMemorySandbox()
+    sandbox_config = SandboxConfig(
         enabled=True,
-        backend=file_store_backend,
+        backend=sandbox_backend,
         todo_enabled=True,
     )
 
@@ -53,7 +52,7 @@ def test_agent_todo_state_updates(openai_llm, run_config):
         llm=openai_llm,
         role="A helpful assistant that creates todo lists for tasks.",
         inference_mode=InferenceMode.XML,
-        file_store=file_store_config,
+        sandbox=sandbox_config,
         tools=[],
         max_loops=5,
         verbose=True,
@@ -79,11 +78,11 @@ def test_agent_todo_state_updates(openai_llm, run_config):
     agent_output = result.output[agent.id]["output"]["content"]
     logger.info(f"Agent output: {agent_output}")
 
-    # Check that todos were created in the file store
-    assert file_store_backend.exists(TODOS_FILE_PATH), "Todos file should exist in file store"
+    # Check that todos were created in the sandbox
+    assert sandbox_backend.exists(TODOS_FILE_PATH), "Todos file should exist in sandbox"
 
     # Verify the agent state has exactly 3 todos
-    todos_content = file_store_backend.retrieve(TODOS_FILE_PATH).decode("utf-8")
+    todos_content = sandbox_backend.retrieve(TODOS_FILE_PATH).decode("utf-8")
     todos_data = json.loads(todos_content)
     assert "todos" in todos_data, "Todos data should have 'todos' key"
     assert len(todos_data["todos"]) == 3, f"Should have exactly 3 todos, got {len(todos_data['todos'])}"

@@ -6,7 +6,7 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.tools.http_api_call import HttpApiCall, ResponseType
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file import FileStoreConfig, InMemoryFileStore
+from dynamiq.storages.file import InMemorySandbox, SandboxConfig
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
@@ -23,7 +23,7 @@ if __name__ == "__main__":
         method="POST",
         url=f"https://localhost:{PORT}/upload",
     )
-    file_storage = InMemoryFileStore()
+    file_storage = InMemorySandbox()
 
     file_upload_api = HttpApiCall(
         id="file-upload-api",
@@ -41,7 +41,7 @@ if __name__ == "__main__":
         llm=llm,
         tools=[file_upload_api],
         role=AGENT_ROLE,
-        file_store=FileStoreConfig(enabled=True, backend=file_storage, agent_file_write_enabled=True),
+        sandbox=SandboxConfig(enabled=True, backend=file_storage, agent_file_write_enabled=True),
         max_loops=30,
         inference_mode=InferenceMode.FUNCTION_CALLING,
     )

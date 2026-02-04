@@ -12,8 +12,7 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Gemini, OpenAI
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
-from dynamiq.storages.file import FileStoreConfig
-from dynamiq.storages.file.in_memory import InMemoryFileStore
+from dynamiq.storages.file import InMemorySandbox, SandboxConfig
 from dynamiq.utils.logger import logger
 
 
@@ -131,7 +130,7 @@ def _run_and_assert_agent(agent, input_data, expected_keywords, run_config, expe
         logger.info(f"Agent output: {result.output[agent.id]['output']}")
         agent_output = result.output[agent.id]["output"]["content"]
         agent_output_files = result.output[agent.id]["output"].get("files", [])
-        logger.info(f"files: {len(agent.file_store.backend._files)}")
+        logger.info(f"files: {len(agent.sandbox.backend._files)}")
         logger.info(f"Agent output: {agent_output}")
         logger.info(f"Agent output files: {len(agent_output_files) if agent_output_files else 0} file(s)")
 
@@ -185,10 +184,10 @@ def test_agent_filestore_multiple_files(
     # Get the LLM instance from the fixture name
     llm = request.getfixturevalue(llm_fixture)
 
-    file_store_backend = InMemoryFileStore()
-    file_store_config = FileStoreConfig(
+    sandbox_backend = InMemorySandbox()
+    sandbox_config = SandboxConfig(
         enabled=True,
-        backend=file_store_backend,
+        backend=sandbox_backend,
         agent_file_write_enabled=True,
     )
 
@@ -198,7 +197,7 @@ def test_agent_filestore_multiple_files(
         llm=llm,
         role=agent_role,
         inference_mode=InferenceMode.XML,
-        file_store=file_store_config,
+        sandbox=sandbox_config,
         tools=[],
         verbose=True,
     )

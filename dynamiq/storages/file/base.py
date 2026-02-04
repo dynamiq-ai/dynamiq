@@ -9,6 +9,8 @@ from typing import Any, BinaryIO
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from dynamiq.nodes.node import Node
+
 
 class FileInfo(BaseModel):
     """Information about a stored file."""
@@ -50,11 +52,13 @@ class PermissionError(StorageError):
     pass
 
 
-class FileStore(abc.ABC, BaseModel):
-    """Abstract base class for file storage implementations.
+class Sandbox(abc.ABC, BaseModel):
+    """Abstract base class for sandbox implementations.
 
     This interface provides a unified way to interact with different
-    file storage backends (in-memory, file system, cloud storage, etc.).
+    sandbox backends (in-memory, file system, E2B, Docker, etc.).
+    Sandboxes provide file storage and can be extended to support
+    code execution and other isolated environment capabilities.
     """
 
     @computed_field
@@ -64,10 +68,10 @@ class FileStore(abc.ABC, BaseModel):
         return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
     def to_dict(self, **kwargs) -> dict[str, Any]:
-        """Convert the FileStore instance to a dictionary.
+        """Convert the Sandbox instance to a dictionary.
 
         Returns:
-            dict: Dictionary representation of the FileStore instance.
+            dict: Dictionary representation of the Sandbox instance.
         """
         for param in ("include_secure_params", "for_tracing"):
             kwargs.pop(param, None)
@@ -171,22 +175,61 @@ class FileStore(abc.ABC, BaseModel):
         """
         pass
 
+    def get_tools(
+        self,
+        llm: Any = None,
+        file_write_enabled: bool = False,
+        todo_enabled: bool = False,
+    ) -> list[Node]:
+        """Return tools this sandbox provides for agent use.
 
-class FileStoreConfig(BaseModel):
-    """Configuration for file storage and related features.
+        Base implementation returns file tools. Subclasses can override
+        to add additional tools (e.g., code execution) by calling
+        super().get_tools() and extending the list.
+
+        Args:
+            llm: LLM instance for tools that need it (e.g., FileReadTool).
+            file_write_enabled: Whether to include file write tool.
+            todo_enabled: Whether to include todo management tool.
+
+        Returns:
+            List of tool instances (Node objects).
+        """
+        # Lazy imports to avoid circular dependencies
+        from dynamiq.nodes.tools.file_tools import FileListTool, FileReadTool, FileSearchTool, FileWriteTool
+
+        tools: list[Any] = [
+            FileReadTool(file_store=self, llm=llm),
+            FileSearchTool(file_store=self),
+            FileListTool(file_store=self),
+        ]
+
+        if file_write_enabled:
+            tools.append(FileWriteTool(file_store=self))
+
+        if todo_enabled:
+            from dynamiq.nodes.tools.todo_tools import TodoWriteTool
+
+            tools.append(TodoWriteTool(file_store=self))
+
+        return tools
+
+
+class SandboxConfig(BaseModel):
+    """Configuration for sandbox and related features.
 
     Attributes:
-        enabled: Whether file storage is enabled.
-        backend: The file storage backend to use.
+        enabled: Whether sandbox is enabled.
+        backend: The sandbox backend to use.
         agent_file_write_enabled: Whether the agent can write files.
         todo_enabled: Whether to enable todo management tools (stored in ._agent/todos.json).
         config: Additional configuration options.
     """
 
     enabled: bool = False
-    backend: FileStore = Field(..., description="File storage to use.")
+    backend: Sandbox = Field(..., description="Sandbox backend to use.")
     agent_file_write_enabled: bool = Field(
-        default=False, description="Whether the agent is permitted to write files to the file store."
+        default=False, description="Whether the agent is permitted to write files to the sandbox."
     )
     todo_enabled: bool = Field(
         default=False, description="Whether to enable todo management tools (todos stored in ._agent/todos.json)."
@@ -196,7 +239,7 @@ class FileStoreConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def to_dict(self, **kwargs) -> dict[str, Any]:
-        """Convert the FileStoreConfig instance to a dictionary."""
+        """Convert the SandboxConfig instance to a dictionary."""
         for_tracing = kwargs.pop("for_tracing", False)
         if for_tracing and not self.enabled:
             return {"enabled": False}
@@ -204,3 +247,8 @@ class FileStoreConfig(BaseModel):
         config_data = self.model_dump(exclude={"backend"}, **kwargs)
         config_data["backend"] = self.backend.to_dict()
         return config_data
+
+
+# Backwards compatibility aliases
+FileStoreConfig = SandboxConfig
+FileStore = Sandbox

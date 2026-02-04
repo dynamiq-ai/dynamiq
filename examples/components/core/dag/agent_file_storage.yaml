@@ -28,10 +28,10 @@ nodes:
         description: "Python tool for analysis of filesystem. Use it to check if file exists"
         is_files_allowed: true
     role: "a helpful assistant capable of retaining context and answering questions effectively using file storage."
-    file_store:
+    sandbox:
       enabled: true
       backend:
-        type: dynamiq.storages.file.InMemoryFileStore
+        type: dynamiq.storages.file.InMemorySandbox
       agent_file_write_enabled: true
     max_loops: 15
     inference_mode: XML

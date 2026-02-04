@@ -13,8 +13,7 @@ from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file import FileStoreConfig
-from dynamiq.storages.file.in_memory import InMemoryFileStore
+from dynamiq.storages.file import InMemorySandbox, SandboxConfig
 from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
 
@@ -90,8 +89,8 @@ def create_agent():
         budget_tokens=4000,
     )
 
-    file_store_backend = InMemoryFileStore()
-    file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
+    sandbox_backend = InMemorySandbox()
+    sandbox_config = SandboxConfig(enabled=True, backend=sandbox_backend, agent_file_write_enabled=True)
 
     tool = PythonCodeExecutor(name="code-executor")
 
@@ -102,7 +101,7 @@ def create_agent():
         role=AGENT_ROLE,
         max_loops=10,
         inference_mode=InferenceMode.XML,
-        file_store=file_store_config,
+        sandbox=sandbox_config,
     )
 
     return agent_software
