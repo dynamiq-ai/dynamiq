@@ -83,7 +83,7 @@ class HumanFeedbackInputSchema(BaseModel):
     """Input schema for HumanFeedbackTool."""
 
     action: HumanFeedbackAction = Field(
-        default=HumanFeedbackAction.INFO,
+        default=HumanFeedbackAction.ASK,
         description="Action to perform: 'ask' to request input from user, 'info' to just send a message.",
     )
     model_config = ConfigDict(extra="allow")
@@ -107,15 +107,20 @@ class HumanFeedbackTool(Node):
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "message_sender"
-    description: str = """Tool for human interaction - asking questions or sending info messages.
+    description: str = """A tool for gathering approval, confirmation, clarification, or information from user and
+  sending status updates.
 
-Actions:
-- "ask": Request input from the user (clarifications, confirmations, missing info)
-- "info": Send an info message without waiting for response (notifications, status updates)
+Use 'ask' action to request input - workflow WAITS for user response before continuing.
+Use 'info' action to send notification - workflow continues immediately without waiting.
 
-Usage:
-- Ask user: {"action": "ask", "input": "What is your preference?"}
-- Send info: {"action": "info", "input": "Task completed successfully!"}
+Examples:
+- {"action": "ask", "input": "Should I proceed? (yes/no)"}
+- {"action": "info", "input": "Task completed."}
+
+Important:
+- Use 'ask' for approval, confirmation, clarification, or information.
+- The user can only provide text responses - they can not perform actions.
+- This tool should be used to gather information from user and send status updates during agent execution.
 """
     input_method: FeedbackMethod | InputMethodCallable = FeedbackMethod.CONSOLE
     output_method: FeedbackMethod | OutputMethodCallable = FeedbackMethod.CONSOLE
