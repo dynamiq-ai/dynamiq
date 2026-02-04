@@ -107,7 +107,7 @@ class SkillsTool(Node):
                 line_end=line_end,
             )
             out = {
-                "skill_name": instructions.name,
+                "name": instructions.name,
                 "description": instructions.description,
                 "instructions": sliced,
                 "section_used": section_used,
@@ -128,7 +128,7 @@ class SkillsTool(Node):
         )
         return {
             "content": {
-                "skill_name": instructions.name,
+                "name": instructions.name,
                 "description": instructions.description,
                 "instructions": instructions.instructions,
             }

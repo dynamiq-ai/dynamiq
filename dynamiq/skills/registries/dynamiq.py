@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import HTTPMethod
-from dynamiq.connections.managers import ConnectionManager
 from dynamiq.skills.models import SkillInstructions, SkillMetadata, SkillRegistryError
 from dynamiq.skills.registries.base import BaseSkillRegistry
 from dynamiq.utils.logger import logger
@@ -34,17 +33,10 @@ class Dynamiq(BaseSkillRegistry):
 
     @field_validator("connection", mode="before")
     @classmethod
-    def resolve_connection(cls, v: Any) -> Any:
+    def default_connection(cls, v: Any) -> Any:
         if v is None:
             return DynamiqConnection()
-        if not isinstance(v, dict):
-            return v
-        conn_type = v.get("type")
-        if not conn_type:
-            return v
-        conn_cls = ConnectionManager.get_connection_by_type(conn_type)
-        init_data = {k: val for k, val in v.items() if k != "type"}
-        return conn_cls(**init_data)
+        return v
 
     @field_validator("whitelist", mode="before")
     @classmethod
@@ -56,7 +48,7 @@ class Dynamiq(BaseSkillRegistry):
     def get_skills_metadata(self) -> list[SkillMetadata]:
         metadata: list[SkillMetadata] = []
         for entry in self.whitelist:
-            metadata.append(SkillMetadata(name=entry.name or entry.id, description=entry.description))
+            metadata.append(SkillMetadata(name=entry.name, description=entry.description))
         return metadata
 
     def get_skill_instructions(self, name: str) -> SkillInstructions:
@@ -91,7 +83,7 @@ class Dynamiq(BaseSkillRegistry):
 
     def _get_whitelist_entry_by_name(self, name: str) -> DynamiqSkillWhitelistEntry:
         for entry in self.whitelist:
-            if name == (entry.name or entry.id):
+            if name == entry.name:
                 return entry
         raise SkillRegistryError("Skill not found in whitelist.", details={"name": name})
 
@@ -137,12 +129,4 @@ class Dynamiq(BaseSkillRegistry):
             logger.debug("Dynamiq skills API returned empty response for %s", url)
             return ""
 
-        try:
-            return response.json()
-        except ValueError:
-            logger.debug(
-                "Received non-JSON response from Dynamiq skills API for %s: %s",
-                url,
-                response.text,
-            )
-            return response.text
+        return response.text

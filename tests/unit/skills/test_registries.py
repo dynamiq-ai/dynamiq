@@ -157,8 +157,8 @@ class TestDynamiqRegistry:
         call_args = client.request.call_args
         assert "/v1/skills/skill-id/versions/ver-id/instructions" in call_args[0][1]
 
-    def test_get_skill_instructions_lookup_by_id_when_name_none(self):
-        """Dynamiq.get_skill_instructions finds entry by id when entry.name is None."""
+    def test_get_skill_instructions_lookup_by_name(self):
+        """Dynamiq.get_skill_instructions finds entry by name and fetches instructions."""
         conn = MagicMock()
         conn.conn_params = {"api_base": "https://api.example.com"}
         resp = MagicMock()
@@ -176,7 +176,7 @@ class TestDynamiqRegistry:
                 DynamiqSkillWhitelistEntry(
                     id="skill-by-id",
                     version_id="ver-id",
-                    name=None,
+                    name="skill-by-id",
                     description="Cached description",
                 ),
             ],

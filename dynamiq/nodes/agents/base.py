@@ -460,11 +460,7 @@ class Agent(Node):
 
         lines = []
         for skill in metadata:
-            description = skill.description or ""
-            if description:
-                lines.append(f"- **{skill.name}**: {description}")
-            else:
-                lines.append(f"- **{skill.name}**")
+            lines.append(f"- **{skill.name}**: {skill.description}")
         return "\n".join(lines)
 
     def set_block(self, block_name: str, content: str):
