@@ -48,7 +48,8 @@ class Dynamiq(BaseSkillRegistry):
     def get_skills_metadata(self) -> list[SkillMetadata]:
         metadata: list[SkillMetadata] = []
         for entry in self.whitelist:
-            metadata.append(SkillMetadata(name=entry.name, description=entry.description))
+            name = entry.name if entry.name is not None else entry.id
+            metadata.append(SkillMetadata(name=name, description=entry.description))
         return metadata
 
     def get_skill_instructions(self, name: str) -> SkillInstructions:
@@ -83,7 +84,7 @@ class Dynamiq(BaseSkillRegistry):
 
     def _get_whitelist_entry_by_name(self, name: str) -> DynamiqSkillWhitelistEntry:
         for entry in self.whitelist:
-            if name == entry.name:
+            if name == (entry.name if entry.name is not None else entry.id):
                 return entry
         raise SkillRegistryError("Skill not found in whitelist.", details={"name": name})
 
