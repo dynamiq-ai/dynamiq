@@ -1,6 +1,88 @@
+import io
+import os
+import tempfile
+
+import pytest
+
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor, PythonCodeExecutorFileWorkspace
 from dynamiq.runnables import RunnableStatus
 from dynamiq.storages.file.in_memory import InMemoryFileStore
+
+
+def _create_executor():
+    """Create a PythonCodeExecutor instance for testing."""
+    file_store = InMemoryFileStore()
+    return PythonCodeExecutor(file_store=file_store)
+
+
+@pytest.mark.parametrize(
+    "path,should_contain",
+    [
+        ("data.txt", "data.txt"),
+        ("subdir/file.txt", "subdir"),
+        ("./normal/../file.txt", "file.txt"),
+    ],
+)
+def test_sanitize_workspace_path_valid_paths_allowed(path, should_contain):
+    """Valid paths should be allowed and returned as absolute paths within workspace."""
+    executor = _create_executor()
+    with tempfile.TemporaryDirectory() as workspace_dir:
+        result = executor._sanitize_workspace_path(path, workspace_dir, "fallback")
+        assert result is not None
+        assert should_contain in result
+        assert result.startswith(workspace_dir)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../etc/passwd",
+        "subdir/../../../etc/passwd",
+        "a/b/c/../../../../../../../etc/passwd",
+    ],
+)
+def test_sanitize_workspace_path_traversal_is_blocked(path):
+    """Paths with path traversal should be blocked."""
+    executor = _create_executor()
+    with tempfile.TemporaryDirectory() as workspace_dir:
+        result = executor._sanitize_workspace_path(path, workspace_dir, "fallback")
+        assert result is None
+
+
+def test_sanitize_workspace_path_absolute_path_is_handled():
+    """Absolute paths should be converted to relative and validated."""
+    executor = _create_executor()
+    with tempfile.TemporaryDirectory() as workspace_dir:
+        result = executor._sanitize_workspace_path("/etc/passwd", workspace_dir, "fallback")
+        # After lstrip(os.sep), it becomes "etc/passwd" which should be within workspace
+        assert result is not None
+        assert result.startswith(workspace_dir)
+
+
+def test_sanitize_workspace_path_empty_path_returns_workspace_dir():
+    """Empty paths after normalization should return the workspace itself."""
+    executor = _create_executor()
+    with tempfile.TemporaryDirectory() as workspace_dir:
+        result = executor._sanitize_workspace_path("", workspace_dir, "fallback_file")
+        assert result is not None
+        assert result == os.path.abspath(workspace_dir)
+
+
+def test_materialize_inline_files_malicious_filename_is_sanitized():
+    """Files with path traversal in name should not escape workspace."""
+    executor = _create_executor()
+    with tempfile.TemporaryDirectory() as workspace_dir:
+        malicious_file = io.BytesIO(b"malicious content")
+        malicious_file.name = "../../../etc/cron.d/malicious"
+
+        executor._materialize_inline_files([malicious_file], workspace_dir)
+
+        assert not os.path.exists("/etc/cron.d/malicious")
+
+        for root, dirs, files in os.walk(workspace_dir):
+            for f in files:
+                full_path = os.path.join(root, f)
+                assert full_path.startswith(workspace_dir)
 
 
 def test_code_executor_captures_stdout_without_print_errors():
