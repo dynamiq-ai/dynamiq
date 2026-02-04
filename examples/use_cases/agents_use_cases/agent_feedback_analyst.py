@@ -14,7 +14,8 @@ from dynamiq.nodes.llms.togetherai import TogetherAI
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file import InMemorySandbox, SandboxConfig
+from dynamiq.storages.file import FileStoreConfig
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
 
@@ -58,8 +59,8 @@ def _create_agent() -> Agent:
         max_tokens=4096,
         temperature=0.1,
     )
-    sandbox_backend = InMemorySandbox()
-    sandbox_config = SandboxConfig(enabled=True, backend=sandbox_backend, agent_file_write_enabled=True)
+    file_store_backend = InMemoryFileStore()
+    file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 
     code_tool = PythonCodeExecutor(name="code-executor")
 
@@ -70,7 +71,7 @@ def _create_agent() -> Agent:
         role=AGENT_ROLE,
         inference_mode=InferenceMode.XML,
         max_loops=8,
-        sandbox=sandbox_config,
+        file_store=file_store_config,
     )
 
 

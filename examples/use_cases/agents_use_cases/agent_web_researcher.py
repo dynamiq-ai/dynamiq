@@ -13,7 +13,8 @@ from dynamiq.nodes.tools.exa_search import ExaTool
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
-from dynamiq.storages.file import InMemorySandbox, SandboxConfig
+from dynamiq.storages.file import FileStoreConfig
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils import JsonWorkflowEncoder
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
@@ -46,8 +47,8 @@ Open Questions, and References.
 
 def _create_agent() -> Agent:
     llm = setup_llm(model_provider="gpt", model_name="o4-mini", temperature=0.4)
-    sandbox_backend = InMemorySandbox()
-    sandbox_config = SandboxConfig(enabled=True, backend=sandbox_backend, agent_file_write_enabled=True)
+    file_store_backend = InMemoryFileStore()
+    file_store_config = FileStoreConfig(enabled=True, backend=file_store_backend, agent_file_write_enabled=True)
 
     exa_tool = ExaTool(connection=ExaConnection(), name="exa-search")
     code_tool = PythonCodeExecutor(name="code-executor")
@@ -59,7 +60,7 @@ def _create_agent() -> Agent:
         role=AGENT_ROLE,
         inference_mode=InferenceMode.XML,
         max_loops=15,
-        sandbox=sandbox_config,
+        file_store=file_store_config,
     )
 
 

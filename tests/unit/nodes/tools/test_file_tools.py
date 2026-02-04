@@ -7,13 +7,13 @@ from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.file_tools import EXTRACTED_TEXT_SUFFIX, FileListTool, FileReadTool, FileType, FileWriteTool
 from dynamiq.runnables import RunnableResult, RunnableStatus
-from dynamiq.storages.file import InMemorySandbox
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
 @pytest.fixture
 def file_store():
     """Create an in-memory file storage instance for testing."""
-    return InMemorySandbox()
+    return InMemoryFileStore()
 
 
 @pytest.fixture
@@ -141,7 +141,7 @@ def test_file_tools_integration(file_store, llm_model):
     assert read_result.output["content"] == "Integration test content"
 
     # Test different storage instances
-    storage2 = InMemorySandbox()
+    storage2 = InMemoryFileStore()
     storage2.store("test.txt", "Content from storage 2")
 
     read_tool2 = FileReadTool(file_store=storage2, llm=llm_model)

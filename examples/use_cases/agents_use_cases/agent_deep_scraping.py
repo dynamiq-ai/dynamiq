@@ -4,7 +4,8 @@ from dynamiq.nodes.agents.utils import SummarizationConfig
 from dynamiq.nodes.tools.e2b_sandbox import E2BInterpreterTool
 from dynamiq.nodes.tools.scale_serp import ScaleSerpTool
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.storages.file import InMemorySandbox, SandboxConfig
+from dynamiq.storages.file import InMemoryFileStore
+from dynamiq.storages.file.base import FileStoreConfig
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
@@ -27,7 +28,7 @@ if __name__ == "__main__":
     tool_code = E2BInterpreterTool(connection=e2b)
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0)
 
-    storage = InMemorySandbox()
+    storage = InMemoryFileStore()
 
     agent = Agent(
         name="Agent",
@@ -37,7 +38,7 @@ if __name__ == "__main__":
         role=AGENT_ROLE,
         max_loops=30,
         inference_mode=InferenceMode.XML,
-        sandbox=SandboxConfig(enabled=True, backend=storage, agent_file_write_enabled=True),
+        file_store=FileStoreConfig(enabled=True, backend=storage, agent_file_write_enabled=True),
         summarization_config=SummarizationConfig(enabled=True, max_token_context_length=100000),
     )
 

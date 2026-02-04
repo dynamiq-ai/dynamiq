@@ -1,2 +1,2 @@
-from .base import FileInfo, FileStore, FileStoreConfig, Sandbox, SandboxConfig, StorageError
-from .in_memory import InMemoryFileStore, InMemorySandbox
+from .base import FileInfo, FileStore, FileStoreConfig, StorageError
+from .in_memory import InMemoryFileStore

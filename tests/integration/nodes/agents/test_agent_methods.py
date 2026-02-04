@@ -20,7 +20,8 @@ from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.storages.file import InMemorySandbox, SandboxConfig
+from dynamiq.storages.file.base import FileStoreConfig
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
 @pytest.fixture
@@ -467,42 +468,43 @@ def test_generate_function_calling_schemas(openai_node, mock_tool):
         assert "properties" in schema["function"]["parameters"]
 
 
-def test_agent_injects_sandbox_into_python_code_executor(openai_node, mock_llm_executor):
-    """Regression test: Agent should inject sandbox into PythonCodeExecutor tools at runtime."""
+def test_agent_injects_file_store_into_python_code_executor(openai_node, mock_llm_executor):
+    """Regression test: Agent should inject file_store into PythonCodeExecutor tools at runtime."""
     from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
-    from dynamiq.storages.file import InMemorySandbox, SandboxConfig
+    from dynamiq.storages.file.base import FileStoreConfig
+    from dynamiq.storages.file.in_memory import InMemoryFileStore
 
     executor = PythonCodeExecutor(name="TestExecutor")
     assert executor.file_store is None, "PythonCodeExecutor should allow None file_store"
 
-    sandbox_backend = InMemorySandbox()
+    file_store_backend = InMemoryFileStore()
     agent = Agent(
         name="TestAgent",
         llm=openai_node,
         tools=[executor],
-        sandbox=SandboxConfig(enabled=True, backend=sandbox_backend),
+        file_store=FileStoreConfig(enabled=True, backend=file_store_backend),
     )
 
-    assert agent.sandbox_backend is sandbox_backend
+    assert agent.file_store_backend is file_store_backend
 
     tool = next((t for t in agent.tools if isinstance(t, PythonCodeExecutor)), None)
     assert tool is not None, "PythonCodeExecutor should be in agent's tools"
 
     if not tool.file_store:
-        tool.file_store = agent.sandbox_backend
+        tool.file_store = agent.file_store_backend
 
-    assert tool.file_store is sandbox_backend, "Agent should inject sandbox into PythonCodeExecutor"
+    assert tool.file_store is file_store_backend, "Agent should inject file_store into PythonCodeExecutor"
 
 
 def test_todo_tools_added_when_enabled(openai_node, mock_llm_executor):
-    """Test that todo tools are added and instructions included when sandbox.todo_enabled is True."""
+    """Test that todo tools are added and instructions included when file_store.todo_enabled is True."""
 
-    sandbox_config = SandboxConfig(enabled=True, backend=InMemorySandbox(), todo_enabled=True)
+    file_store_config = FileStoreConfig(enabled=True, backend=InMemoryFileStore(), todo_enabled=True)
     agent = Agent(
         name="Todo Agent",
         llm=openai_node,
         tools=[],
-        sandbox=sandbox_config,
+        file_store=file_store_config,
         inference_mode=InferenceMode.DEFAULT,
     )
 

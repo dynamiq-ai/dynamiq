@@ -109,10 +109,10 @@ nodes:
       - Include the image files from the tool output
       - Mention any artistic choices you made
     max_loops: 20
-    sandbox:
+    file_store:
       enabled: true
       backend:
-        type: dynamiq.storages.file.InMemorySandbox
+        type: dynamiq.storages.file.InMemoryFileStore
     error_handling:
       timeout_seconds: 300
       max_retries: 1

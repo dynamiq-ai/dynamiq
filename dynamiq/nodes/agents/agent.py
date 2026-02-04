@@ -21,7 +21,7 @@ from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLP
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema
-from dynamiq.nodes.tools.todo_tools import TodoItem
+from dynamiq.nodes.tools.todo_tools import TodoItem, TodoWriteTool
 from dynamiq.nodes.types import Behavior, InferenceMode
 from dynamiq.prompts import Message, MessageRole, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig
@@ -220,6 +220,25 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     )
         except Exception as e:
             logger.error(f"Failed to ensure ContextManagerTool: {e}")
+        return self
+
+    @model_validator(mode="after")
+    def _ensure_todo_tools(self):
+        """Automatically add TodoWriteTool when todo is enabled in file_store config."""
+        try:
+            if self.file_store.enabled and self.file_store.todo_enabled:
+                has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
+
+                if not has_todo_write:
+                    self.tools.append(
+                        TodoWriteTool(
+                            name="todo-write",
+                            file_store=self.file_store.backend,
+                        )
+                    )
+                    logger.info("Agent: Added TodoWriteTool")
+        except Exception as e:
+            logger.error(f"Failed to ensure TodoWriteTool: {e}")
         return self
 
     def _append_recovery_instruction(
@@ -1124,13 +1143,13 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self.state.update_loop(loop_num)
 
         # Update todos
-        if self.sandbox.enabled and self.sandbox.todo_enabled:
+        if self.file_store.enabled and self.file_store.todo_enabled:
             try:
                 from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
 
-                sandbox = self.sandbox.backend
-                if sandbox.exists(TODOS_FILE_PATH):
-                    content = sandbox.retrieve(TODOS_FILE_PATH)
+                file_store = self.file_store.backend
+                if file_store.exists(TODOS_FILE_PATH):
+                    content = file_store.retrieve(TODOS_FILE_PATH)
                     data = json.loads(content.decode("utf-8"))
                     self.state.update_todos(data.get("todos", []))
             except Exception as e:
@@ -1158,7 +1177,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             has_tools=bool(self.tools),
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,
-            todo_management_enabled=self.sandbox.enabled and self.sandbox.todo_enabled,
+            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
         )
 
         # Only auto-wrap the entire role in a raw block if the user did not

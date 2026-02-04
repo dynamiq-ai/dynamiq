@@ -6,7 +6,8 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms import Anthropic as AnthropicLLM
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
-from dynamiq.storages.file import InMemorySandbox, SandboxConfig
+from dynamiq.storages.file import FileStoreConfig
+from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
 
 AGENT_ROLE = """
@@ -174,7 +175,7 @@ def create_agent():
         budget_tokens=4000,
     )
 
-    sandbox_config = SandboxConfig(enabled=True, backend=InMemorySandbox())
+    file_store_config = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
 
     agent_software = Agent(
         name="Agent",
@@ -183,7 +184,7 @@ def create_agent():
         role=AGENT_ROLE,
         max_loops=10,
         inference_mode=InferenceMode.FUNCTION_CALLING,
-        sandbox=sandbox_config,
+        file_store=file_store_config,
     )
 
     return agent_software
