@@ -469,7 +469,7 @@ class PythonCodeExecutor(Node):
             logger.warning("Path traversal detected in file path: %s", file_path)
             return
 
-        if not normalized:
+        if not normalized or normalized == ".":
             normalized = fallback_name
 
         final_path = os.path.abspath(os.path.join(workspace_dir, normalized))

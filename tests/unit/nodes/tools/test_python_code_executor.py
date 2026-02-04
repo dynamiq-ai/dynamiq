@@ -59,13 +59,22 @@ def test_sanitize_workspace_path_absolute_path_is_handled():
         assert result.startswith(workspace_dir)
 
 
-def test_sanitize_workspace_path_empty_path_returns_workspace_dir():
-    """Empty paths after normalization should return the workspace itself."""
+def test_sanitize_workspace_path_empty_path_uses_fallback():
+    """Empty paths after normalization should use the fallback name."""
     executor = _create_executor()
     with tempfile.TemporaryDirectory() as workspace_dir:
         result = executor._sanitize_workspace_path("", workspace_dir, "fallback_file")
         assert result is not None
-        assert result == os.path.abspath(workspace_dir)
+        assert result == os.path.join(os.path.abspath(workspace_dir), "fallback_file")
+
+
+def test_sanitize_workspace_path_dot_path_uses_fallback():
+    """Dot path (current directory) should use the fallback name to avoid IsADirectoryError."""
+    executor = _create_executor()
+    with tempfile.TemporaryDirectory() as workspace_dir:
+        result = executor._sanitize_workspace_path(".", workspace_dir, "fallback_file")
+        assert result is not None
+        assert result == os.path.join(os.path.abspath(workspace_dir), "fallback_file")
 
 
 def test_materialize_inline_files_malicious_filename_is_sanitized():
