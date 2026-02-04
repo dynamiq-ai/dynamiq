@@ -5,7 +5,7 @@ import re
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
@@ -29,6 +29,38 @@ from dynamiq.utils.file_types import EXTENSION_MAP, FileType
 logger = logging.getLogger(__name__)
 
 EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
+
+
+def validate_file_path(file_path: str) -> str:
+    """
+    Validate a file path to prevent path traversal attacks.
+
+    Args:
+        file_path: The file path to validate.
+
+    Returns:
+        The validated (normalized) file path.
+
+    Raises:
+        ValueError: If the path contains path traversal sequences or is absolute.
+    """
+    if not file_path:
+        return file_path
+
+    normalized = os.path.normpath(file_path)
+
+    if os.path.isabs(normalized):
+        raise ValueError(f"Absolute paths are not allowed: {file_path}")
+
+    path_parts = normalized.split(os.sep)
+    if ".." in path_parts:
+        raise ValueError(f"Path traversal sequences are not allowed: {file_path}")
+
+    # Also check for Windows-style absolute paths (e.g., C:\)
+    if len(normalized) >= 2 and normalized[1] == ":":
+        raise ValueError(f"Absolute paths are not allowed: {file_path}")
+
+    return normalized
 
 
 def detect_file_type(file: BytesIO, filename: str) -> FileType | None:
@@ -112,6 +144,12 @@ class FileReadInputSchema(BaseModel):
         description="For PDF-like documents, 'page' keeps content separated per page (with metadata).",
     )
 
+    @field_validator("file_path")
+    @classmethod
+    def validate_path(cls, v: str) -> str:
+        """Validate file_path to prevent path traversal attacks."""
+        return validate_file_path(v)
+
 
 class FileWriteInputSchema(BaseModel):
     """Schema for file write input parameters."""
@@ -138,6 +176,12 @@ class FileWriteInputSchema(BaseModel):
         description="If True, append to the existing file instead of replacing it. "
         "Falls back to overwrite when file is missing.",
     )
+
+    @field_validator("file_path")
+    @classmethod
+    def validate_path(cls, v: str) -> str:
+        """Validate file_path to prevent path traversal attacks."""
+        return validate_file_path(v)
 
 
 class FileReadTool(Node):
