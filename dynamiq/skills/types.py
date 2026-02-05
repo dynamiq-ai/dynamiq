@@ -19,6 +19,14 @@ class SkillMetadata(BaseModel):
 
 
 class SkillInstructions(SkillMetadata):
-    """Unified instructions shape for skills (registry API)."""
+    """Unified instructions shape for skills (registry API).
 
-    instructions: str = Field(default="", description="Full skill instructions.")
+    Supports both plain-text instructions and API responses that include
+    an instructions field plus optional metadata (e.g. version, format).
+    """
+
+    instructions: str = Field(default="", description="Full skill instructions (e.g. SKILL.md content).")
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional metadata from the registry API (e.g. version, content_type).",
+    )

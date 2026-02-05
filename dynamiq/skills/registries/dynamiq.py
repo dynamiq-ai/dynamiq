@@ -60,28 +60,48 @@ class Dynamiq(BaseSkillRegistry):
 
     def get_skill_instructions(self, name: str) -> SkillInstructions:
         entry = self._get_entry_by_name(name)
-        instructions = self._fetch_skill_instructions(entry.id, entry.version_id)
+        instructions_text, instructions_metadata = self._fetch_skill_instructions(entry.id, entry.version_id)
         return SkillInstructions(
             name=entry.name,
             description=entry.description,
-            instructions=instructions,
+            instructions=instructions_text,
+            metadata=instructions_metadata,
         )
 
-    def _fetch_skill_instructions(self, skill_id: str, version_id: str) -> str:
+    def _fetch_skill_instructions(self, skill_id: str, version_id: str) -> tuple[str, dict[str, Any] | None]:
+        """Fetch skill instructions from the API.
+
+        Supports both plain-text (legacy) and JSON responses. JSON shape should follow
+        common API style: {"instructions": "...", "metadata": {...} optional}.
+        """
         response = self._request(
             HTTPMethod.GET,
             f"/v1/skills/{skill_id}/versions/{version_id}/instructions",
         )
-        if not isinstance(response, str):
-            raise SkillRegistryError(
-                "Unexpected response from Dynamiq skills API. Expected SKILL.md text.",
-                details={
-                    "skill_id": skill_id,
-                    "version_id": version_id,
-                    "response_type": type(response).__name__,
-                },
-            )
-        return response
+        if isinstance(response, str):
+            return response, None
+        if isinstance(response, dict):
+            instructions = response.get("instructions") or response.get("content") or ""
+            if not isinstance(instructions, str):
+                raise SkillRegistryError(
+                    "Dynamiq skills API returned object but 'instructions'/'content' is not a string.",
+                    details={
+                        "skill_id": skill_id,
+                        "version_id": version_id,
+                    },
+                )
+            metadata = response.get("metadata")
+            if metadata is not None and not isinstance(metadata, dict):
+                metadata = None
+            return instructions, metadata
+        raise SkillRegistryError(
+            "Unexpected response from Dynamiq skills API. Expected plain text or JSON object with 'instructions'.",
+            details={
+                "skill_id": skill_id,
+                "version_id": version_id,
+                "response_type": type(response).__name__,
+            },
+        )
 
     def _get_entry_by_name(self, name: str) -> DynamiqSkillEntry:
         for entry in self.allowed_skills:
@@ -131,4 +151,13 @@ class Dynamiq(BaseSkillRegistry):
             logger.debug("Dynamiq skills API returned empty response for %s", url)
             return ""
 
+        content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if content_type == "application/json":
+            try:
+                return response.json()
+            except Exception as e:
+                raise SkillRegistryError(
+                    "Dynamiq skills API returned application/json but body is not valid JSON.",
+                    details={"path": path, "error": str(e)},
+                ) from e
         return response.text

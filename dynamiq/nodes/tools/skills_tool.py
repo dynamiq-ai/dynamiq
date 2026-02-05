@@ -107,6 +107,18 @@ class SkillsTool(Node):
         except Exception as e:
             raise ToolExecutionException(f"Failed to get skill '{skill_name}': {e}", recoverable=True) from e
 
+        def _content_dict(sliced_instructions: str, section_used: str | None = None) -> dict[str, Any]:
+            out: dict[str, Any] = {
+                "name": instructions.name,
+                "description": instructions.description,
+                "instructions": sliced_instructions,
+            }
+            if section_used is not None:
+                out["section_used"] = section_used
+            if instructions.metadata:
+                out["metadata"] = instructions.metadata
+            return out
+
         if section is not None or line_start is not None or line_end is not None:
             sliced, section_used = extract_skill_content_slice(
                 instructions.instructions,
@@ -114,30 +126,25 @@ class SkillsTool(Node):
                 line_start=line_start,
                 line_end=line_end,
             )
-            out = {
-                "name": instructions.name,
-                "description": instructions.description,
-                "instructions": sliced,
-                "section_used": section_used,
-            }
+            one_line = sliced.replace("\n", " ").strip()
+            preview = (one_line[:50] + "...") if len(one_line) > 50 else one_line
             logger.info(
-                "SkillsTool - get: skill=%s (section=%s, lines=%s-%s) -> content received",
+                "SkillsTool - get: skill=%s (section=%s, lines=%s-%s) -> content received (%d chars), preview: %s",
                 skill_name,
                 section,
                 line_start,
                 line_end,
+                len(sliced),
+                preview,
             )
-            return {"content": out}
+            return {"content": _content_dict(sliced, section_used)}
 
+        one_line = instructions.instructions.replace("\n", " ").strip()
+        preview = (one_line[:50] + "...") if len(one_line) > 50 else one_line
         logger.info(
-            "SkillsTool - get: skill=%s -> content received (%d chars)",
+            "SkillsTool - get: skill=%s -> content received (%d chars), preview: %s",
             skill_name,
             len(instructions.instructions),
+            preview,
         )
-        return {
-            "content": {
-                "name": instructions.name,
-                "description": instructions.description,
-                "instructions": instructions.instructions,
-            }
-        }
+        return {"content": _content_dict(instructions.instructions)}

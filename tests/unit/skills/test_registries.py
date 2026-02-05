@@ -147,6 +147,38 @@ class TestDynamiqRegistry:
         call_args = client.request.call_args
         assert "/v1/skills/skill-id/versions/ver-id/instructions" in call_args[0][1]
 
+    def test_get_skill_instructions_success_json_response(self):
+        """Dynamiq.get_skill_instructions accepts JSON response with instructions and optional metadata."""
+        conn = MagicMock()
+        conn.conn_params = {"api_base": "https://api.example.com"}
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = b'{"instructions": "# JSON skill", "metadata": {"version": "1.0"}}'
+        resp.headers = {"content-type": "application/json"}
+        resp.json.return_value = {
+            "instructions": "# JSON skill",
+            "metadata": {"version": "1.0", "content_type": "markdown"},
+        }
+        client = MagicMock()
+        client.request.return_value = resp
+        conn.connect.return_value = client
+
+        registry = Dynamiq.model_construct(
+            connection=conn,
+            allowed_skills=[
+                DynamiqSkillEntry(
+                    id="skill-json",
+                    version_id="ver-id",
+                    name="json-skill",
+                    description="JSON skill",
+                ),
+            ],
+        )
+        instructions = registry.get_skill_instructions("json-skill")
+        assert instructions.name == "json-skill"
+        assert instructions.instructions == "# JSON skill"
+        assert instructions.metadata == {"version": "1.0", "content_type": "markdown"}
+
     def test_get_skill_instructions_lookup_by_name(self):
         """Dynamiq.get_skill_instructions finds entry by name and fetches instructions."""
         conn = MagicMock()
