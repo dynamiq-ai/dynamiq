@@ -302,8 +302,6 @@ class Agent(Node):
 
             tools = self.sandbox.backend.get_tools(
                 llm=self.llm,
-                file_write_enabled=self.sandbox.agent_file_write_enabled,
-                todo_enabled=self.sandbox.todo_enabled,
             )
             self.tools.extend(tools)
 
@@ -460,6 +458,7 @@ class Agent(Node):
 
         logger.info(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
+
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -1254,6 +1253,22 @@ class Agent(Node):
             child_context["metadata"] = metadata
 
         return child_context
+
+    def cleanup(self) -> None:
+        """Cleanup agent resources (sandbox, etc.)."""
+        if self.sandbox and hasattr(self.sandbox.backend, "close"):
+            try:
+                self.sandbox.backend.close()
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to close sandbox: {e}")
+
+    def __del__(self):
+        """Destructor - attempt to cleanup on garbage collection."""
+        try:
+            self.cleanup()
+        except Exception:
+            # Cannot reliably log in __del__, just suppress
+            ...  # noqa: E701
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         base = super().get_clone_attr_initializers()

@@ -1,2 +1,9 @@
-from .base import FileInfo, FileStore, FileStoreConfig, Sandbox, SandboxConfig, StorageError
-from .in_memory import InMemoryFileStore, InMemorySandbox
+from .base import Sandbox, SandboxConfig, ShellCommandResult
+from .e2b import E2BSandbox
+
+__all__ = [
+    "Sandbox",
+    "SandboxConfig",
+    "ShellCommandResult",
+    "E2BSandbox",
+]
