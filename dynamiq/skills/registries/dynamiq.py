@@ -14,8 +14,8 @@ from dynamiq.skills.types import SkillInstructions, SkillMetadata, SkillRegistry
 from dynamiq.utils.logger import logger
 
 
-class DynamiqSkillWhitelistEntry(BaseModel):
-    """Whitelist entry describing which skills are available to the agent."""
+class DynamiqSkillEntry(BaseModel):
+    """Allowed skill entry describing which skills are available to the agent."""
 
     id: str = Field(..., min_length=1, description="Skill identifier.")
     version_id: str = Field(..., min_length=1, description="Skill version identifier.")
@@ -28,7 +28,7 @@ class Dynamiq(BaseSkillRegistry):
 
     connection: DynamiqConnection = Field(default_factory=DynamiqConnection)
     timeout: float = Field(default=10, description="Timeout in seconds for API requests.")
-    whitelist: list[DynamiqSkillWhitelistEntry] = Field(default_factory=list)
+    allowed_skills: list[DynamiqSkillEntry] = Field(default_factory=list)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -45,21 +45,21 @@ class Dynamiq(BaseSkillRegistry):
             return conn_cls(**{k: val for k, val in v.items() if k != "type"})
         return v
 
-    @field_validator("whitelist", mode="before")
+    @field_validator("allowed_skills", mode="before")
     @classmethod
-    def normalize_whitelist(cls, v: Any) -> Any:
+    def normalize_allowed_skills(cls, v: Any) -> Any:
         if v is None:
             return []
         return v
 
     def get_skills_metadata(self) -> list[SkillMetadata]:
         metadata: list[SkillMetadata] = []
-        for entry in self.whitelist:
+        for entry in self.allowed_skills:
             metadata.append(SkillMetadata(name=entry.name, description=entry.description))
         return metadata
 
     def get_skill_instructions(self, name: str) -> SkillInstructions:
-        entry = self._get_whitelist_entry_by_name(name)
+        entry = self._get_entry_by_name(name)
         instructions = self._fetch_skill_instructions(entry.id, entry.version_id)
         return SkillInstructions(
             name=entry.name,
@@ -83,11 +83,11 @@ class Dynamiq(BaseSkillRegistry):
             )
         return response
 
-    def _get_whitelist_entry_by_name(self, name: str) -> DynamiqSkillWhitelistEntry:
-        for entry in self.whitelist:
+    def _get_entry_by_name(self, name: str) -> DynamiqSkillEntry:
+        for entry in self.allowed_skills:
             if name == entry.name:
                 return entry
-        raise SkillRegistryError("Skill not found in whitelist.", details={"name": name})
+        raise SkillRegistryError("Skill not in allowed skills.", details={"name": name})
 
     def _request(
         self,

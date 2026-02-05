@@ -221,7 +221,7 @@ class Agent(Node):
     )
     skills: SkillsConfig = Field(
         default_factory=SkillsConfig,
-        description="Skills config. When enabled and source registry is set, skills are on (Dynamiq or Local).",
+        description="Skills config. When enabled and source registry is set, skills are on (Dynamiq or FileSystem).",
     )
 
     input_message: Message | VisionMessage | None = None

@@ -1,10 +1,10 @@
-"""Unit tests for SkillsConfig (source-based: Dynamiq and Local registries)."""
+"""Unit tests for SkillsConfig (source-based: Dynamiq and FileSystem registries)."""
 
 import pytest
 
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.skills.config import SkillsConfig
-from dynamiq.skills.registries import Dynamiq, Local
+from dynamiq.skills.registries import Dynamiq, FileSystem
 from dynamiq.skills.types import SkillRegistryError
 
 
@@ -47,9 +47,9 @@ def test_skills_config_source_malformed_type_raises():
             {
                 "enabled": True,
                 "source": {
-                    "type": "Local",
+                    "type": "FileSystem",
                     "base_path": "/tmp",
-                    "whitelist": [],
+                    "allowed_skills": [],
                 },
             }
         )
@@ -64,7 +64,7 @@ def test_skills_config_source_resolved_from_dict_dynamiq():
             "source": {
                 "type": "dynamiq.skills.registries.Dynamiq",
                 "connection": conn,
-                "whitelist": [
+                "allowed_skills": [
                     {"id": "sid", "version_id": "vid", "name": "foo", "description": "Foo skill"},
                 ],
             },
@@ -74,42 +74,42 @@ def test_skills_config_source_resolved_from_dict_dynamiq():
     assert cfg.source is not None
     assert isinstance(cfg.source, Dynamiq)
     assert cfg.source.connection is conn
-    assert len(cfg.source.whitelist) == 1
-    assert cfg.source.whitelist[0].name == "foo"
+    assert len(cfg.source.allowed_skills) == 1
+    assert cfg.source.allowed_skills[0].name == "foo"
     metadata = cfg.get_skills_metadata()
     assert len(metadata) == 1
     assert metadata[0].name == "foo"
     assert metadata[0].description == "Foo skill"
 
 
-def test_skills_config_source_resolved_from_dict_local():
-    """SkillsConfig resolves source from dict with type dynamiq.skills.registries.Local."""
+def test_skills_config_source_resolved_from_dict_filesystem():
+    """SkillsConfig resolves source from dict with type dynamiq.skills.registries.FileSystem."""
     cfg = SkillsConfig.model_validate(
         {
             "enabled": True,
             "source": {
-                "type": "dynamiq.skills.registries.Local",
+                "type": "dynamiq.skills.registries.FileSystem",
                 "base_path": "~/.dynamiq/skills",
-                "whitelist": [
-                    {"name": "local-skill", "description": "Local skill"},
+                "allowed_skills": [
+                    {"name": "fs-skill", "description": "Filesystem skill"},
                 ],
             },
         }
     )
     assert cfg.enabled is True
     assert cfg.source is not None
-    assert isinstance(cfg.source, Local)
+    assert isinstance(cfg.source, FileSystem)
     assert cfg.source.base_path == "~/.dynamiq/skills"
-    assert len(cfg.source.whitelist) == 1
-    assert cfg.source.whitelist[0].name == "local-skill"
+    assert len(cfg.source.allowed_skills) == 1
+    assert cfg.source.allowed_skills[0].name == "fs-skill"
     metadata = cfg.get_skills_metadata()
     assert len(metadata) == 1
-    assert metadata[0].name == "local-skill"
-    assert metadata[0].description == "Local skill"
+    assert metadata[0].name == "fs-skill"
+    assert metadata[0].description == "Filesystem skill"
 
 
 def test_skills_config_source_instance_unchanged():
     """When source is already a BaseSkillRegistry instance, it is not re-resolved."""
-    registry = Local(base_path="/tmp/skills", whitelist=[])
+    registry = FileSystem(base_path="/tmp/skills", allowed_skills=[])
     cfg = SkillsConfig(enabled=True, source=registry)
     assert cfg.source is registry

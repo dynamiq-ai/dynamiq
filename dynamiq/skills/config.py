@@ -1,4 +1,4 @@
-"""Skills configuration: enabled + source registry (Dynamiq or Local)."""
+"""Skills configuration: enabled + source registry (Dynamiq or FileSystem)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class SkillsConfig(BaseModel):
     enabled: bool = Field(default=False, description="Enable skill support for the agent.")
     source: BaseSkillRegistry | None = Field(
         default=None,
-        description="Registry providing skills (Dynamiq or Local).",
+        description="Registry providing skills (Dynamiq or FileSystem).",
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -33,7 +33,8 @@ class SkillsConfig(BaseModel):
                 return v
             if "." not in registry_type:
                 raise SkillRegistryError(
-                    "Registry type must be a fully qualified class name (e.g. dynamiq.skills.registries.local.Local).",
+                    "Registry type must be a fully qualified class name"
+                    " (e.g. dynamiq.skills.registries.filesystem.FileSystem).",
                     details={"type": registry_type},
                 )
             module_name, class_name = registry_type.rsplit(".", 1)

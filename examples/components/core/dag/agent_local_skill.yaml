@@ -16,9 +16,9 @@ nodes:
     skills:
       enabled: true
       source:
-        type: dynamiq.skills.registries.Local
+        type: dynamiq.skills.registries.FileSystem
         base_path: ".skills"
-        whitelist:
+        allowed_skills:
           - name: humanizer
             description: Remove signs of AI-generated writing from text. Use when editing or reviewing text to make it sound more natural and human-written.
     max_loops: 10
@@ -26,7 +26,7 @@ nodes:
 
 flows:
   humanizer-agent-flow:
-    name: Humanizer Skill Flow (Local)
+    name: Humanizer Skill Flow (FileSystem)
     nodes:
       - humanizer-agent
 

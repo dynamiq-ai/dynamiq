@@ -22,7 +22,7 @@ nodes:
         type: dynamiq.skills.registries.Dynamiq
         connection:
           type: dynamiq.connections.Dynamiq
-        whitelist:
+        allowed_skills:
           - id: cfb2ddd9-7b5b-457f-9ef6-666db9c45eb3
             version_id: adcf8695-31b0-4a50-ba68-3606b5158e7c
             name: humanizer

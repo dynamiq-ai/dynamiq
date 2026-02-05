@@ -9,7 +9,7 @@ PROJECT_ROOT = EXAMPLES_DIR.parent.parent.parent.parent
 
 
 def run_agent_local_skill_yaml():
-    """Load workflow from YAML, run humanizer skill agent (Local registry)."""
+    """Load workflow from YAML, run humanizer skill agent (FileSystem registry)."""
     import os
 
     os.chdir(PROJECT_ROOT)
@@ -38,6 +38,6 @@ def run_agent_local_skill_yaml():
 
 
 if __name__ == "__main__":
-    print("=== Humanizer skill (YAML DAG, Local registry) ===\n")
+    print("=== Humanizer skill (YAML DAG, FileSystem registry) ===\n")
     run_agent_local_skill_yaml()
     print("\nDone.")

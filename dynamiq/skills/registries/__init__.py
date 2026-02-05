@@ -1,13 +1,13 @@
-"""Skill registries: Dynamiq (API) and Local (filesystem)."""
+"""Skill registries: Dynamiq (API) and FileSystem (filesystem)."""
 
 from dynamiq.skills.registries.base import BaseSkillRegistry
-from dynamiq.skills.registries.dynamiq import Dynamiq, DynamiqSkillWhitelistEntry
-from dynamiq.skills.registries.local import Local, LocalSkillWhitelistEntry
+from dynamiq.skills.registries.dynamiq import Dynamiq, DynamiqSkillEntry
+from dynamiq.skills.registries.filesystem import FileSystem, FileSystemSkillEntry
 
 __all__ = [
     "BaseSkillRegistry",
     "Dynamiq",
-    "DynamiqSkillWhitelistEntry",
-    "Local",
-    "LocalSkillWhitelistEntry",
+    "DynamiqSkillEntry",
+    "FileSystem",
+    "FileSystemSkillEntry",
 ]

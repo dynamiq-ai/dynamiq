@@ -1,4 +1,4 @@
-"""Unit tests for skill registries (Dynamiq and Local)."""
+"""Unit tests for skill registries (Dynamiq and FileSystem)."""
 
 import tempfile
 from pathlib import Path
@@ -6,22 +6,22 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dynamiq.skills.registries import Dynamiq, Local
-from dynamiq.skills.registries.dynamiq import DynamiqSkillWhitelistEntry
-from dynamiq.skills.registries.local import LocalSkillWhitelistEntry
+from dynamiq.skills.registries import Dynamiq, FileSystem
+from dynamiq.skills.registries.dynamiq import DynamiqSkillEntry
+from dynamiq.skills.registries.filesystem import FileSystemSkillEntry
 from dynamiq.skills.types import SkillRegistryError
 
 
-class TestLocalRegistry:
-    """Tests for Local skill registry."""
+class TestFileSystemRegistry:
+    """Tests for FileSystem skill registry."""
 
     def test_get_skills_metadata(self):
-        """Local.get_skills_metadata returns metadata from whitelist."""
-        registry = Local(
+        """FileSystem.get_skills_metadata returns metadata from allowed_skills."""
+        registry = FileSystem(
             base_path="/nonexistent",
-            whitelist=[
-                LocalSkillWhitelistEntry(name="a", description="A"),
-                LocalSkillWhitelistEntry(name="b", description=None),
+            allowed_skills=[
+                FileSystemSkillEntry(name="a", description="A"),
+                FileSystemSkillEntry(name="b", description=None),
             ],
         )
         metadata = registry.get_skills_metadata()
@@ -32,55 +32,57 @@ class TestLocalRegistry:
         assert metadata[1].description is None
 
     def test_get_skill_instructions_not_found_raises(self):
-        """Local.get_skill_instructions raises when skill path does not exist."""
+        """FileSystem.get_skill_instructions raises when skill path does not exist."""
         with tempfile.TemporaryDirectory() as tmp:
-            registry = Local(base_path=tmp, whitelist=[LocalSkillWhitelistEntry(name="missing", description=None)])
+            registry = FileSystem(
+                base_path=tmp, allowed_skills=[FileSystemSkillEntry(name="missing", description=None)]
+            )
             with pytest.raises(SkillRegistryError, match="not found"):
                 registry.get_skill_instructions("missing")
 
     def test_get_skill_instructions_found(self):
-        """Local.get_skill_instructions returns content from SKILL.md."""
+        """FileSystem.get_skill_instructions returns content from SKILL.md."""
         with tempfile.TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / "my-skill"
             skill_dir.mkdir()
             (skill_dir / "SKILL.md").write_text("# My Skill\n\nDo something.", encoding="utf-8")
-            registry = Local(
+            registry = FileSystem(
                 base_path=tmp,
-                whitelist=[LocalSkillWhitelistEntry(name="my-skill", description="My skill")],
+                allowed_skills=[FileSystemSkillEntry(name="my-skill", description="My skill")],
             )
             instructions = registry.get_skill_instructions("my-skill")
             assert instructions.name == "my-skill"
             assert instructions.description == "My skill"
             assert instructions.instructions == "# My Skill\n\nDo something."
 
-    def test_get_skill_instructions_not_in_whitelist_raises(self):
-        """Local.get_skill_instructions raises when skill name not in whitelist."""
+    def test_get_skill_instructions_not_in_allowed_skills_raises(self):
+        """FileSystem.get_skill_instructions raises when skill name not in allowed_skills."""
         with tempfile.TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / "other-skill"
             skill_dir.mkdir()
             (skill_dir / "SKILL.md").write_text("content", encoding="utf-8")
-            registry = Local(
+            registry = FileSystem(
                 base_path=tmp,
-                whitelist=[LocalSkillWhitelistEntry(name="my-skill", description=None)],
+                allowed_skills=[FileSystemSkillEntry(name="my-skill", description=None)],
             )
-            with pytest.raises(SkillRegistryError, match="not found in whitelist"):
+            with pytest.raises(SkillRegistryError, match="not in allowed skills"):
                 registry.get_skill_instructions("other-skill")
 
     def test_get_skill_instructions_path_traversal_raises(self):
-        """Local.get_skill_instructions rejects skill names with path components."""
+        """FileSystem.get_skill_instructions rejects skill names with path components."""
         with tempfile.TemporaryDirectory() as tmp:
             for invalid_name in ("../other", "foo/bar", "..", "a\\b"):
-                registry = Local(
+                registry = FileSystem(
                     base_path=tmp,
-                    whitelist=[LocalSkillWhitelistEntry(name=invalid_name, description=None)],
+                    allowed_skills=[FileSystemSkillEntry(name=invalid_name, description=None)],
                 )
                 with pytest.raises(SkillRegistryError, match="Invalid skill name|outside base"):
                     registry.get_skill_instructions(invalid_name)
 
     def test_type_computed_field(self):
-        """Local registry has type computed field with module and class name."""
-        registry = Local(base_path="/tmp", whitelist=[])
-        assert "Local" in registry.type
+        """FileSystem registry has type computed field with module and class name."""
+        registry = FileSystem(base_path="/tmp", allowed_skills=[])
+        assert "FileSystem" in registry.type
         assert "dynamiq.skills.registries" in registry.type
 
 
@@ -88,12 +90,12 @@ class TestDynamiqRegistry:
     """Tests for Dynamiq skill registry."""
 
     def test_get_skills_metadata(self):
-        """Dynamiq.get_skills_metadata returns metadata from whitelist."""
+        """Dynamiq.get_skills_metadata returns metadata from allowed_skills."""
         conn = MagicMock()
         registry = Dynamiq.model_construct(
             connection=conn,
-            whitelist=[
-                DynamiqSkillWhitelistEntry(
+            allowed_skills=[
+                DynamiqSkillEntry(
                     id="i1",
                     version_id="v1",
                     name="skill1",
@@ -106,11 +108,11 @@ class TestDynamiqRegistry:
         assert metadata[0].name == "skill1"
         assert metadata[0].description == "First"
 
-    def test_get_skill_instructions_not_in_whitelist_raises(self):
-        """Dynamiq.get_skill_instructions raises when skill name not in whitelist."""
+    def test_get_skill_instructions_not_in_allowed_skills_raises(self):
+        """Dynamiq.get_skill_instructions raises when skill name not in allowed_skills."""
         conn = MagicMock()
-        registry = Dynamiq.model_construct(connection=conn, whitelist=[])
-        with pytest.raises(SkillRegistryError, match="not found in whitelist"):
+        registry = Dynamiq.model_construct(connection=conn, allowed_skills=[])
+        with pytest.raises(SkillRegistryError, match="not in allowed skills"):
             registry.get_skill_instructions("unknown")
 
     def test_get_skill_instructions_success(self):
@@ -128,8 +130,8 @@ class TestDynamiqRegistry:
 
         registry = Dynamiq.model_construct(
             connection=conn,
-            whitelist=[
-                DynamiqSkillWhitelistEntry(
+            allowed_skills=[
+                DynamiqSkillEntry(
                     id="skill-id",
                     version_id="ver-id",
                     name="my-skill",
@@ -160,8 +162,8 @@ class TestDynamiqRegistry:
 
         registry = Dynamiq.model_construct(
             connection=conn,
-            whitelist=[
-                DynamiqSkillWhitelistEntry(
+            allowed_skills=[
+                DynamiqSkillEntry(
                     id="skill-by-id",
                     version_id="ver-id",
                     name="skill-by-id",

@@ -35,7 +35,7 @@ class SkillsToolInputSchema(BaseModel):
 
 
 class SkillsTool(Node):
-    """Tool for skills: discover and get content from a skill registry (Dynamiq or Local).
+    """Tool for skills: discover and get content from a skill registry (Dynamiq or FileSystem).
 
     After get, apply the skill's instructions yourself and provide the result in your final answer.
     """
@@ -54,7 +54,7 @@ class SkillsTool(Node):
 
     skill_registry: BaseSkillRegistry = Field(
         ...,
-        description="Registry providing skills (Dynamiq or Local).",
+        description="Registry providing skills (Dynamiq or FileSystem).",
     )
     input_schema: ClassVar[type[SkillsToolInputSchema]] = SkillsToolInputSchema
 
@@ -105,7 +105,7 @@ class SkillsTool(Node):
         try:
             instructions = self.skill_registry.get_skill_instructions(skill_name)
         except Exception as e:
-            raise ToolExecutionException(f"Skill '{skill_name}' not found: {e}", recoverable=True) from e
+            raise ToolExecutionException(f"Failed to get skill '{skill_name}': {e}", recoverable=True) from e
 
         if section is not None or line_start is not None or line_end is not None:
             sliced, section_used = extract_skill_content_slice(

@@ -1,4 +1,4 @@
-"""Local filesystem-backed skill registry."""
+"""Filesystem-backed skill registry."""
 
 from __future__ import annotations
 
@@ -10,38 +10,38 @@ from dynamiq.skills.registries.base import BaseSkillRegistry
 from dynamiq.skills.types import SkillInstructions, SkillMetadata, SkillRegistryError
 
 
-class LocalSkillWhitelistEntry(BaseModel):
-    """Whitelist entry for local skill registry."""
+class FileSystemSkillEntry(BaseModel):
+    """Allowed skill entry for filesystem skill registry."""
 
     name: str = Field(..., min_length=1, description="Skill name.")
     description: str | None = Field(default=None, description="Optional cached skill description.")
 
 
-class Local(BaseSkillRegistry):
-    """Local filesystem-backed skill registry."""
+class FileSystem(BaseSkillRegistry):
+    """Filesystem-backed skill registry."""
 
     base_path: str = Field(
         default="~/.dynamiq/skills",
-        description="Base path for local skills.",
+        description="Base path for skills on the filesystem.",
     )
     skill_filename: str = Field(
         default="SKILL.md",
         description="Filename for skill instructions within each skill directory.",
     )
-    whitelist: list[LocalSkillWhitelistEntry] = Field(default_factory=list)
+    allowed_skills: list[FileSystemSkillEntry] = Field(default_factory=list)
 
     def get_skills_metadata(self) -> list[SkillMetadata]:
         metadata: list[SkillMetadata] = []
-        for entry in self.whitelist:
+        for entry in self.allowed_skills:
             metadata.append(SkillMetadata(name=entry.name, description=entry.description))
         return metadata
 
     def get_skill_instructions(self, name: str) -> SkillInstructions:
-        entry = self._get_whitelist_entry_by_name(name)
+        entry = self._get_entry_by_name(name)
         skill_path = self._resolve_skill_path(name)
         if not skill_path.exists():
             raise SkillRegistryError(
-                "Local skill instructions not found.",
+                "Skill instructions file not found.",
                 details={"name": name, "path": str(skill_path)},
             )
         instructions = skill_path.read_text(encoding="utf-8")
@@ -51,11 +51,11 @@ class Local(BaseSkillRegistry):
             instructions=instructions,
         )
 
-    def _get_whitelist_entry_by_name(self, name: str) -> LocalSkillWhitelistEntry:
-        for entry in self.whitelist:
+    def _get_entry_by_name(self, name: str) -> FileSystemSkillEntry:
+        for entry in self.allowed_skills:
             if entry.name == name:
                 return entry
-        raise SkillRegistryError("Skill not found in whitelist.", details={"name": name})
+        raise SkillRegistryError("Skill not in allowed skills.", details={"name": name})
 
     def _resolve_skill_path(self, skill_name: str) -> Path:
         if "/" in skill_name or "\\" in skill_name or ".." in skill_name:
