@@ -22,7 +22,7 @@ class SandboxShellInputSchema(BaseModel):
         default=60,
         description="Timeout in seconds for command execution.",
     )
-    background: bool = Field(
+    run_in_background_enabled: bool = Field(
         default=False,
         description="If True, run the command in background without waiting for output.",
     )
@@ -55,7 +55,7 @@ class SandboxShellTool(Node):
         "Parameters:\n"
         "- command: The shell command to execute\n"
         "- timeout: Maximum time to wait for command completion (default: 60s)\n"
-        "- background: Run command in background without waiting (default: false)"
+        "- run_in_background_enabled: Run command in background without waiting (default: false)"
     )
 
     sandbox: Sandbox = Field(..., description="Sandbox backend to execute commands in.")
@@ -69,6 +69,18 @@ class SandboxShellTool(Node):
     )
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[SandboxShellInputSchema]] = SandboxShellInputSchema
+
+    @property
+    def to_dict_exclude_params(self):
+        return super().to_dict_exclude_params | {"sandbox": True}
+
+    def to_dict(self, **kwargs) -> dict:
+        """Converts the instance to a dictionary."""
+        # Extract for_tracing before super() consumes it to preserve original value.
+        for_tracing = kwargs.get("for_tracing", False)
+        data = super().to_dict(**kwargs)
+        data["sandbox"] = self.sandbox.to_dict(for_tracing=for_tracing, **kwargs) if self.sandbox else None
+        return data
 
     def _validate_command(self, command: str) -> None:
         """Validate command against allowed/blocked lists."""
@@ -128,7 +140,7 @@ class SandboxShellTool(Node):
             result = self.sandbox.run_command(
                 command=input_data.command,
                 timeout=input_data.timeout,
-                background=input_data.background,
+                background=input_data.run_in_background_enabled,
             )
 
             output = {

@@ -51,7 +51,7 @@ class E2BSandbox(Sandbox):
         self,
         command: str,
         timeout: int = 60,
-        background: bool = False,
+        run_in_background_enabled: bool = False,
     ) -> ShellCommandResult:
         """Execute a shell command in the E2B sandbox.
 
@@ -67,7 +67,7 @@ class E2BSandbox(Sandbox):
         logger.debug(f"E2BSandbox running command: {command[:100]}...")
 
         try:
-            if background:
+            if run_in_background_enabled:
                 sandbox.commands.run(command, background=True)
                 return ShellCommandResult(
                     stdout=f"Command started in background: {command}",

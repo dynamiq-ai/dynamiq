@@ -297,9 +297,9 @@ class Agent(Node):
 
         self.tools = expanded_tools
 
-        if self.sandbox and self.sandbox.enabled:
+        if self.sandbox_backend:
             # Add sandbox tools when sandbox is enabled
-            tools = self.sandbox.backend.get_tools()
+            tools = self.sandbox_backend.get_tools()
             self.tools.extend(tools)
 
         elif self.file_store_backend:
@@ -346,6 +346,7 @@ class Agent(Node):
             "files": True,
             "images": True,
             "file_store": True,
+            "sandbox": True,
             "system_prompt_manager": True,  # Runtime state container, not serializable
         }
 
@@ -364,6 +365,7 @@ class Agent(Node):
             data["images"] = [{"name": getattr(f, "name", f"image_{i}")} for i, f in enumerate(self.images)]
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
+        data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
 
         return data
 
@@ -499,7 +501,7 @@ class Agent(Node):
 
         files = input_data.files
         uploaded_file_names: set[str] = set()
-        if files:
+        if files and not self.sandbox_backend:
             if not self.file_store_backend:
                 self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
                 # Add file tools
@@ -979,7 +981,7 @@ class Agent(Node):
         return tool_result_content_processed, output_files
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
-        """Ensure all uploaded files have name and description attributes and store them in file store if available."""
+        """Ensure all uploaded files have name and description attributes and store them in storage backend."""
         named = []
         for i, f in enumerate(files):
             if isinstance(f, bytes):
@@ -1208,6 +1210,11 @@ class Agent(Node):
         return self.file_store.backend if self.file_store.enabled else None
 
     @property
+    def sandbox_backend(self):
+        """Get the sandbox backend from the configuration if enabled."""
+        return self.sandbox.backend if self.sandbox and self.sandbox.enabled else None
+
+    @property
     def tool_description(self) -> str:
         """Returns a description of the tools available to the agent."""
         return "\n".join([f"- {tool.name}: {tool.description.strip()}" for tool in self.tools]) if self.tools else ""
@@ -1253,9 +1260,9 @@ class Agent(Node):
 
     def cleanup(self) -> None:
         """Cleanup agent resources (sandbox, etc.)."""
-        if self.sandbox and self.sandbox.enabled:
+        if self.sandbox_backend and hasattr(self.sandbox_backend, "close"):
             try:
-                self.sandbox.backend.close()
+                self.sandbox_backend.close()
             except Exception as e:
                 logger.warning(f"Agent {self.name} - {self.id}: failed to close sandbox: {e}")
 

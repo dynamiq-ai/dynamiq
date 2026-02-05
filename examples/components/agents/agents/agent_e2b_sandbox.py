@@ -55,33 +55,26 @@ def setup_agent(e2b_api_key: str = None) -> tuple[Agent, E2BSandbox]:
     Returns:
         tuple: (Agent, E2BSandbox) - Configured agent and sandbox backend.
     """
-    # Get API key from parameter or environment
     api_key = e2b_api_key or os.getenv("E2B_API_KEY")
     if not api_key:
         raise ValueError("E2B API key is required. Set E2B_API_KEY environment variable or pass it directly.")
 
-    # Set up LLM
     llm = setup_llm(model_provider="gpt", model_name="gpt-4o", temperature=0.2)
 
-    # Create E2B connection
     e2b_connection = E2BConnection(api_key=api_key)
 
     # Create E2B sandbox backend
     e2b_sandbox = E2BSandbox(
         connection=e2b_connection,
         timeout=3600,  # 1 hour timeout
-        base_path="/home/user",  # Base path for file operations
+        base_path="/home/user",
     )
 
-    # Configure sandbox
     sandbox_config = SandboxConfig(
         enabled=True,
         backend=e2b_sandbox,
     )
 
-    # Create shell tool that uses the sandbox
-
-    # Create agent with sandbox and shell tool
     agent = Agent(
         name="E2BSandboxAgent",
         id="e2b-sandbox-agent",
@@ -133,7 +126,6 @@ def run_workflow(
         return f"Error: {e}"
 
     finally:
-        # Clean up E2B sandbox
         if sandbox:
             try:
                 sandbox.close()
@@ -145,7 +137,6 @@ def run_workflow(
 if __name__ == "__main__":
     print("=== E2B Sandbox Agent Example ===\n")
 
-    # Check for API key
     if not os.getenv("E2B_API_KEY"):
         print("Warning: E2B_API_KEY environment variable not set.")
         print("Please set it before running this example:")

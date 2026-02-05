@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from dynamiq.connections.connections import BaseConnection
 from dynamiq.nodes.node import Node
 
 
@@ -26,6 +27,8 @@ class Sandbox(abc.ABC, BaseModel):
     code execution and other isolated environment capabilities.
     """
 
+    connection: BaseConnection | None = Field(default=None, description="Connection to the sandbox backend.")
+
     @computed_field
     @cached_property
     def type(self) -> str:
@@ -35,20 +38,30 @@ class Sandbox(abc.ABC, BaseModel):
     def to_dict(self, **kwargs) -> dict[str, Any]:
         """Convert the Sandbox instance to a dictionary.
 
+        Args:
+            for_tracing: If True, exclude sensitive fields like connection credentials.
+
         Returns:
             dict: Dictionary representation of the Sandbox instance.
         """
-        for param in ("include_secure_params", "for_tracing"):
-            kwargs.pop(param, None)
-        data = self.model_dump(**kwargs)
+        for_tracing = kwargs.pop("for_tracing", False)
+        kwargs.pop("include_secure_params", None)
+
+        has_connection = getattr(self, "connection", None) is not None
+        exclude_fields = {"connection"} if has_connection else set()
+        data = self.model_dump(exclude=exclude_fields, **kwargs)
         data["type"] = self.type
+
+        if has_connection:
+            data["connection"] = self.connection.to_dict(for_tracing=for_tracing, **kwargs)
+
         return data
 
     def run_command(
         self,
         command: str,
         timeout: int = 60,
-        background: bool = False,
+        run_in_background_enabled: bool = False,
     ) -> ShellCommandResult:
         """Execute a shell command in the sandbox.
 
@@ -58,7 +71,7 @@ class Sandbox(abc.ABC, BaseModel):
         Args:
             command: Shell command or script to execute.
             timeout: Timeout in seconds (default 60).
-            background: If True, run command in background (no output).
+            run_in_background_enabled: If True, run command in background (no output).
 
         Returns:
             ShellCommandResult with stdout, stderr, and exit_code.
@@ -112,9 +125,9 @@ class SandboxConfig(BaseModel):
     def to_dict(self, **kwargs) -> dict[str, Any]:
         """Convert the SandboxConfig instance to a dictionary."""
         for_tracing = kwargs.pop("for_tracing", False)
+        kwargs.pop("include_secure_params", None)
         if for_tracing and not self.enabled:
             return {"enabled": False}
-        kwargs.pop("include_secure_params", None)
         config_data = self.model_dump(exclude={"backend"}, **kwargs)
-        config_data["backend"] = self.backend.to_dict()
+        config_data["backend"] = self.backend.to_dict(for_tracing=for_tracing, **kwargs)
         return config_data
