@@ -89,30 +89,18 @@ class E2BSandbox(Sandbox):
                 exit_code=1,
             )
 
-    def get_tools(
-        self,
-        llm: Any = None,
-        file_write_enabled: bool = False,
-    ) -> list[Node]:
+    def get_tools(self) -> list[Node]:
         """Return tools this sandbox provides for agent use.
 
-        Extends base Sandbox tools with E2B-specific capabilities.
+        Returns shell tool for command execution in the E2B sandbox.
 
         Args:
-            llm: LLM instance for tools that need it (e.g., FileReadTool).
-            file_write_enabled: Whether to include file write tool.
-            todo_enabled: Whether to include todo management tool.
+            llm: LLM instance for tools that need it.
 
         Returns:
             List of tool instances (Node objects).
         """
-        # Get base file tools from parent
-        tools = super().get_tools(
-            llm=llm,
-            file_write_enabled=file_write_enabled,
-        )
-
-        return tools
+        return super().get_tools()
 
     def close(self) -> None:
         """Close and kill the E2B sandbox."""

@@ -71,19 +71,11 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports shell commands (e.g., E2BSandbox)."
         )
 
-    def get_tools(
-        self,
-        llm: Any = None,
-        file_write_enabled: bool = False,
-    ) -> list[Node]:
+    def get_tools(self) -> list[Node]:
         """Return tools this sandbox provides for agent use.
 
-        Base implementation returns an empty list. Subclasses can override
-        to add tools specific to their sandbox type (e.g., shell execution).
-
-        Args:
-            llm: LLM instance for tools that need it.
-            file_write_enabled: Whether to include file write tool.
+        Base implementation returns shell tool. Subclasses can override
+        to add or replace tools specific to their sandbox type.
 
         Returns:
             List of tool instances (Node objects).
@@ -97,6 +89,10 @@ class Sandbox(abc.ABC, BaseModel):
         )
         return [shell_tool]
 
+    def close(self) -> None:
+        """Close the sandbox."""
+        raise NotImplementedError(f"Implementation of close() is not implemented for {self.__class__.__name__}")
+
 
 class SandboxConfig(BaseModel):
     """Configuration for sandbox and related features.
@@ -104,16 +100,11 @@ class SandboxConfig(BaseModel):
     Attributes:
         enabled: Whether sandbox is enabled.
         backend: The sandbox backend to use.
-        agent_file_write_enabled: Whether the agent can write files.
-        todo_enabled: Whether to enable todo management tools (stored in ._agent/todos.json).
         config: Additional configuration options.
     """
 
     enabled: bool = False
     backend: Sandbox = Field(..., description="Sandbox backend to use.")
-    todo_enabled: bool = Field(
-        default=False, description="Whether to enable todo management tools (todos stored in ._agent/todos.json)."
-    )
     config: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

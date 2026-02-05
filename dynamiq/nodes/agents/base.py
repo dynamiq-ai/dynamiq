@@ -213,7 +213,7 @@ class Agent(Node):
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
-    sandbox: SandboxConfig = Field(default=None, description="Configuration for sandbox used by the agent.")
+    sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
     file_attachment_preview_bytes: int = Field(
         default=512,
         description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
@@ -297,12 +297,9 @@ class Agent(Node):
 
         self.tools = expanded_tools
 
-        if self.sandbox:
+        if self.sandbox and self.sandbox.enabled:
             # Add sandbox tools when sandbox is enabled
-
-            tools = self.sandbox.backend.get_tools(
-                llm=self.llm,
-            )
+            tools = self.sandbox.backend.get_tools()
             self.tools.extend(tools)
 
         elif self.file_store_backend:
@@ -1256,7 +1253,7 @@ class Agent(Node):
 
     def cleanup(self) -> None:
         """Cleanup agent resources (sandbox, etc.)."""
-        if self.sandbox and hasattr(self.sandbox.backend, "close"):
+        if self.sandbox and self.sandbox.enabled:
             try:
                 self.sandbox.backend.close()
             except Exception as e:

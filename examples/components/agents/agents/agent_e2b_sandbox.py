@@ -73,11 +73,10 @@ def setup_agent(e2b_api_key: str = None) -> tuple[Agent, E2BSandbox]:
         base_path="/home/user",  # Base path for file operations
     )
 
-    # Configure sandbox with file write enabled
+    # Configure sandbox
     sandbox_config = SandboxConfig(
         enabled=True,
         backend=e2b_sandbox,
-        agent_file_write_enabled=True,  # Allow agent to write files
     )
 
     # Create shell tool that uses the sandbox
@@ -123,11 +122,6 @@ def run_workflow(
             input_data={"input": input_prompt},
             config=RunnableConfig(callbacks=[tracing]),
         )
-
-        # Print files in sandbox after workflow
-        print("\n=== Files in E2B Sandbox ===")
-        for file_info in sandbox.list_files():
-            print(f"  - {file_info.path} ({file_info.size} bytes)")
 
         output = result.output[agent.id]["output"]["content"]
         print(f"\n=== Agent Output ===\n{output}")
