@@ -17,7 +17,7 @@ from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 
 HOST = "127.0.0.1"
-PORT = 6001
+PORT = 6010
 
 WF_ID = "dd643e12-fe89-4eef-b48c-050f01c74517"
 app = FastAPI()
@@ -51,11 +51,11 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
     Returns:
         dict: Agent final output.
     """
-    llm = setup_llm()
+    llm = setup_llm(model_name="gpt-5.1")
 
     email_sender_tool = Python(
         name="EmailSenderTool",
-        description="Sends email. Put all email in string under 'email' key. ",
+        description="Sends email to the user. Put all email in string under 'email' key.",
         code=PYTHON_TOOL_CODE,
         approval=ApprovalConfig(
             enabled=True,
@@ -71,8 +71,6 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
 
     human_feedback_tool = HumanFeedbackTool(
         name="human-feedback",
-        description="Tool for human interaction. Use action='ask' to request clarifications, action='info' "
-        "to notify user.",
         input_method=FeedbackMethod.STREAM,
         output_method=FeedbackMethod.STREAM,
         streaming=StreamingConfig(enabled=True, input_queue=input_queue),
@@ -80,20 +78,13 @@ def run_agent(request: str, input_queue: Queue, send_handler: AsyncStreamingIter
 
     agent = Agent(
         name="research_agent",
-        role=(
-            "You are a helpful assistant that has access to the internet using Tavily Tool."
-            "You can request clarifications or send messages using human-feedback tool with action='ask' "
-            "or action='info'."
-        ),
+        role=("helpful AI assistant, that send draft only after getting approval from user."),
         llm=llm,
         tools=[email_sender_tool, human_feedback_tool],
     )
 
     return agent.run(
-        input_data={
-            "input": f"Write and send email: {request}. Notify user about status using human-feedback tool "
-            " with action='info'."
-        },
+        input_data={"input": f"Write and send email: {request}. When email is sent notify user using the tool."},
         config=RunnableConfig(callbacks=[send_handler]),
     ).output["content"]
 
