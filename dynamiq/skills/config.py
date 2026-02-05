@@ -7,8 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from dynamiq.skills.models import SkillInstructions, SkillMetadata, SkillRegistryError
 from dynamiq.skills.registries import BaseSkillRegistry
+from dynamiq.skills.types import SkillInstructions, SkillMetadata, SkillRegistryError
 
 
 class SkillsConfig(BaseModel):
@@ -58,3 +58,11 @@ class SkillsConfig(BaseModel):
         if not self.enabled or self.source is None:
             raise SkillRegistryError("Skills are disabled for this agent.")
         return self.source.get_skill_instructions(name)
+
+    def to_dict(self, **kwargs: Any) -> dict[str, Any]:
+        """Serialize config to dict for YAML/JSON. Source connection is serialized via connection.to_dict."""
+        data = self.model_dump()
+        if self.source is not None and getattr(self.source, "connection", None) is not None:
+            if "source" in data:
+                data["source"]["connection"] = self.source.connection.to_dict(**kwargs)
+        return data

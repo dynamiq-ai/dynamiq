@@ -6,8 +6,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from dynamiq.skills.models import SkillInstructions, SkillMetadata, SkillRegistryError
 from dynamiq.skills.registries.base import BaseSkillRegistry
+from dynamiq.skills.types import SkillInstructions, SkillMetadata, SkillRegistryError
 
 
 class LocalSkillWhitelistEntry(BaseModel):
@@ -23,6 +23,10 @@ class Local(BaseSkillRegistry):
     base_path: str = Field(
         default="~/.dynamiq/skills",
         description="Base path for local skills.",
+    )
+    skill_filename: str = Field(
+        default="SKILL.md",
+        description="Filename for skill instructions within each skill directory.",
     )
     whitelist: list[LocalSkillWhitelistEntry] = Field(default_factory=list)
 
@@ -60,7 +64,7 @@ class Local(BaseSkillRegistry):
                 details={"name": skill_name},
             )
         base = Path(self.base_path).expanduser().resolve()
-        full_path = (base / skill_name / "SKILL.md").resolve()
+        full_path = (base / skill_name / self.skill_filename).resolve()
         try:
             full_path.relative_to(base)
         except ValueError:

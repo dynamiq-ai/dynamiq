@@ -9,8 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import HTTPMethod
 from dynamiq.connections.managers import ConnectionManager
-from dynamiq.skills.models import SkillInstructions, SkillMetadata, SkillRegistryError
 from dynamiq.skills.registries.base import BaseSkillRegistry
+from dynamiq.skills.types import SkillInstructions, SkillMetadata, SkillRegistryError
 from dynamiq.utils.logger import logger
 
 
@@ -18,8 +18,8 @@ class DynamiqSkillWhitelistEntry(BaseModel):
     """Whitelist entry describing which skills are available to the agent."""
 
     id: str = Field(..., min_length=1, description="Skill identifier.")
-    version_id: str | None = Field(default=None, description="Skill version identifier.")
-    name: str | None = Field(default=None, description="Optional cached skill name.")
+    version_id: str = Field(..., min_length=1, description="Skill version identifier.")
+    name: str = Field(..., min_length=1, description="Skill name.")
     description: str | None = Field(default=None, description="Optional cached skill description.")
 
 
@@ -55,25 +55,19 @@ class Dynamiq(BaseSkillRegistry):
     def get_skills_metadata(self) -> list[SkillMetadata]:
         metadata: list[SkillMetadata] = []
         for entry in self.whitelist:
-            name = entry.name if entry.name is not None else entry.id
-            metadata.append(SkillMetadata(name=name, description=entry.description))
+            metadata.append(SkillMetadata(name=entry.name, description=entry.description))
         return metadata
 
     def get_skill_instructions(self, name: str) -> SkillInstructions:
         entry = self._get_whitelist_entry_by_name(name)
         instructions = self._fetch_skill_instructions(entry.id, entry.version_id)
         return SkillInstructions(
-            name=entry.name or name,
+            name=entry.name,
             description=entry.description,
             instructions=instructions,
         )
 
-    def _fetch_skill_instructions(self, skill_id: str, version_id: str | None) -> str:
-        if not version_id:
-            raise SkillRegistryError(
-                "Skill whitelist entry is missing version_id.",
-                details={"skill_id": skill_id},
-            )
+    def _fetch_skill_instructions(self, skill_id: str, version_id: str) -> str:
         response = self._request(
             HTTPMethod.GET,
             f"/v1/skills/{skill_id}/versions/{version_id}/instructions",
@@ -91,7 +85,7 @@ class Dynamiq(BaseSkillRegistry):
 
     def _get_whitelist_entry_by_name(self, name: str) -> DynamiqSkillWhitelistEntry:
         for entry in self.whitelist:
-            if name == (entry.name if entry.name is not None else entry.id):
+            if name == entry.name:
                 return entry
         raise SkillRegistryError("Skill not found in whitelist.", details={"name": name})
 

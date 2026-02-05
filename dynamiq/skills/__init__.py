@@ -1,7 +1,7 @@
-# Public API: config, models, registries only.
+# Public API: config, types, registries only.
 from dynamiq.skills.config import SkillsConfig
-from dynamiq.skills.models import SkillInstructions, SkillMetadata, SkillRegistryError
 from dynamiq.skills.registries import BaseSkillRegistry, Dynamiq, Local
+from dynamiq.skills.types import SkillInstructions, SkillMetadata, SkillRegistryError
 
 __all__ = [
     "BaseSkillRegistry",

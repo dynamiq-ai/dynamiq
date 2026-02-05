@@ -34,10 +34,11 @@ from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
+from dynamiq.nodes.tools.skills_tool import SkillsTool
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.skills.config import SkillsConfig
-from dynamiq.skills.models import SkillMetadata
+from dynamiq.skills.types import SkillMetadata
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -321,17 +322,6 @@ class Agent(Node):
         if self._skills_should_init():
             self._apply_skills_to_prompt()
 
-    @model_validator(mode="before")
-    @classmethod
-    def coerce_skills_config(cls, data: Any) -> Any:
-        """Coerce skills dict (from YAML/JSON) to SkillsConfig."""
-        if isinstance(data, dict) and "skills" in data:
-            if isinstance(data["skills"], dict):
-                data = {**data, "skills": SkillsConfig.model_validate(data["skills"])}
-            elif data["skills"] is None:
-                data = {**data, "skills": SkillsConfig()}
-        return data
-
     @model_validator(mode="after")
     def validate_input_fields(self):
         if self.input_message:
@@ -378,11 +368,7 @@ class Agent(Node):
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
 
-        data["skills"] = self.skills.model_dump() if self.skills else None
-        if self.skills and self.skills.source is not None:
-            source = self.skills.source
-            if "source" in data["skills"] and getattr(source, "connection", None) is not None:
-                data["skills"]["source"]["connection"] = source.connection.to_dict(**kwargs)
+        data["skills"] = self.skills.to_dict(**kwargs)
 
         return data
 
@@ -422,7 +408,6 @@ class Agent(Node):
 
     def _init_skills(self) -> None:
         """Add SkillsTool to self.tools so it is included in function-calling and structured-output schemas."""
-        from dynamiq.nodes.tools.skills_tool import SkillsTool
 
         source = self.skills.source
         if source is None:

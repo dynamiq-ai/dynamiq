@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
@@ -10,10 +11,17 @@ from dynamiq.skills.utils import extract_skill_content_slice
 from dynamiq.utils.logger import logger
 
 
+class SkillsToolAction(str, Enum):
+    """Action for the Skills tool."""
+
+    LIST = "list"
+    GET = "get"
+
+
 class SkillsToolInputSchema(BaseModel):
     """Input schema for Skills tool. Actions: list (discover), get (full or partial content)."""
 
-    action: Literal["list", "get"] = Field(
+    action: SkillsToolAction = Field(
         ...,
         description="Action: 'list' discover skills, 'get' full or partial skill content.",
     )
@@ -60,11 +68,11 @@ class SkillsTool(Node):
         self, input_data: SkillsToolInputSchema, config: RunnableConfig | None = None, **kwargs
     ) -> dict[str, Any]:
         action = input_data.action
-        logger.info("SkillsTool - action=%s", action)
+        logger.info("SkillsTool - action=%s", action.value)
 
-        if action == "list":
+        if action == SkillsToolAction.LIST:
             return self._list_skills()
-        if action == "get":
+        if action == SkillsToolAction.GET:
             if not input_data.skill_name:
                 raise ToolExecutionException("skill_name required for get", recoverable=True)
             return self._get_skill(
@@ -73,7 +81,7 @@ class SkillsTool(Node):
                 line_start=input_data.line_start,
                 line_end=input_data.line_end,
             )
-        raise ToolExecutionException(f"Unknown action: {action}", recoverable=True)
+        raise ToolExecutionException(f"Unknown action: {action.value}", recoverable=True)
 
     def _list_skills(self) -> dict[str, Any]:
         metadata_list = self.skill_registry.get_skills_metadata()

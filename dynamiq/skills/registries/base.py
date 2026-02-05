@@ -5,7 +5,7 @@ from functools import cached_property
 
 from pydantic import BaseModel, ConfigDict, computed_field
 
-from dynamiq.skills.models import SkillInstructions, SkillMetadata
+from dynamiq.skills.types import SkillInstructions, SkillMetadata
 
 
 class BaseSkillRegistry(ABC, BaseModel):

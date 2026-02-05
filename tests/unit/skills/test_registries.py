@@ -6,10 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dynamiq.skills.models import SkillRegistryError
 from dynamiq.skills.registries import Dynamiq, Local
 from dynamiq.skills.registries.dynamiq import DynamiqSkillWhitelistEntry
 from dynamiq.skills.registries.local import LocalSkillWhitelistEntry
+from dynamiq.skills.types import SkillRegistryError
 
 
 class TestLocalRegistry:
@@ -106,43 +106,12 @@ class TestDynamiqRegistry:
         assert metadata[0].name == "skill1"
         assert metadata[0].description == "First"
 
-    def test_get_skills_metadata_uses_id_when_name_is_none(self):
-        """Dynamiq.get_skills_metadata uses entry.id when entry.name is None (no ValidationError)."""
-        conn = MagicMock()
-        registry = Dynamiq.model_construct(
-            connection=conn,
-            whitelist=[
-                DynamiqSkillWhitelistEntry(
-                    id="skill-without-name",
-                    version_id="v1",
-                    name=None,
-                    description="Cached description",
-                ),
-            ],
-        )
-        metadata = registry.get_skills_metadata()
-        assert len(metadata) == 1
-        assert metadata[0].name == "skill-without-name"
-        assert metadata[0].description == "Cached description"
-
     def test_get_skill_instructions_not_in_whitelist_raises(self):
         """Dynamiq.get_skill_instructions raises when skill name not in whitelist."""
         conn = MagicMock()
         registry = Dynamiq.model_construct(connection=conn, whitelist=[])
         with pytest.raises(SkillRegistryError, match="not found in whitelist"):
             registry.get_skill_instructions("unknown")
-
-    def test_get_skill_instructions_missing_version_id_raises(self):
-        """Dynamiq.get_skill_instructions raises when whitelist entry has no version_id."""
-        conn = MagicMock()
-        registry = Dynamiq.model_construct(
-            connection=conn,
-            whitelist=[
-                DynamiqSkillWhitelistEntry(id="i1", version_id=None, name="x", description="X"),
-            ],
-        )
-        with pytest.raises(SkillRegistryError, match="version_id"):
-            registry.get_skill_instructions("x")
 
     def test_get_skill_instructions_success(self):
         """Dynamiq.get_skill_instructions fetches and returns instructions."""

@@ -4,8 +4,8 @@ import pytest
 
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.skills.config import SkillsConfig
-from dynamiq.skills.models import SkillRegistryError
 from dynamiq.skills.registries import Dynamiq, Local
+from dynamiq.skills.types import SkillRegistryError
 
 
 def test_skills_config_defaults():
