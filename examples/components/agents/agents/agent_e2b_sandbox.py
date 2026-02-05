@@ -19,8 +19,8 @@ from dynamiq.flows import Flow
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig
-from dynamiq.sandbox import SandboxConfig
-from dynamiq.sandbox.e2b import E2BSandbox
+from dynamiq.sandboxes import SandboxConfig
+from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.utils.logger import logger
 from examples.llm_setup import setup_llm
 

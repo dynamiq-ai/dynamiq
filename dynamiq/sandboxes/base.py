@@ -57,7 +57,7 @@ class Sandbox(abc.ABC, BaseModel):
 
         return data
 
-    def run_command(
+    def run_command_shell(
         self,
         command: str,
         timeout: int = 60,
@@ -94,7 +94,7 @@ class Sandbox(abc.ABC, BaseModel):
             List of tool instances (Node objects).
         """
         # Lazy import to avoid circular dependency
-        from dynamiq.sandbox.tools.shell import SandboxShellTool
+        from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
         shell_tool = SandboxShellTool(
             name="shell",

@@ -9,7 +9,7 @@ from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
-from dynamiq.sandbox.base import Sandbox
+from dynamiq.sandboxes.base import Sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -129,18 +129,11 @@ class SandboxShellTool(Node):
             # Validate command against security rules
             self._validate_command(input_data.command)
 
-            # Check if sandbox supports command execution
-            if not hasattr(self.sandbox, "run_command"):
-                raise ToolExecutionException(
-                    f"Sandbox backend {type(self.sandbox).__name__} does not support command execution.",
-                    recoverable=False,
-                )
-
             # Execute command via sandbox
-            result = self.sandbox.run_command(
+            result = self.sandbox.run_command_shell(
                 command=input_data.command,
                 timeout=input_data.timeout,
-                background=input_data.run_in_background_enabled,
+                run_in_background_enabled=input_data.run_in_background_enabled,
             )
 
             output = {

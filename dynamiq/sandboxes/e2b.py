@@ -7,7 +7,7 @@ from pydantic import ConfigDict, PrivateAttr
 
 from dynamiq.connections import E2B
 from dynamiq.nodes import Node
-from dynamiq.sandbox.base import Sandbox, ShellCommandResult
+from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
 from dynamiq.utils.logger import logger
 
 
@@ -47,7 +47,7 @@ class E2BSandbox(Sandbox):
             logger.debug(f"E2B sandbox created: {self._sandbox_id}")
         return self._sandbox
 
-    def run_command(
+    def run_command_shell(
         self,
         command: str,
         timeout: int = 60,
