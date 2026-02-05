@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.connections import HTTPMethod
+from dynamiq.connections.managers import ConnectionManager
 from dynamiq.skills.models import SkillInstructions, SkillMetadata, SkillRegistryError
 from dynamiq.skills.registries.base import BaseSkillRegistry
 from dynamiq.utils.logger import logger
@@ -33,9 +34,15 @@ class Dynamiq(BaseSkillRegistry):
 
     @field_validator("connection", mode="before")
     @classmethod
-    def default_connection(cls, v: Any) -> Any:
+    def resolve_connection(cls, v: Any) -> Any:
+        """Resolve connection same way as memory backends: None -> default, inline dict -> build instance."""
         if v is None:
             return DynamiqConnection()
+        if isinstance(v, DynamiqConnection):
+            return v
+        if isinstance(v, dict) and v.get("type"):
+            conn_cls = ConnectionManager.get_connection_by_type(v["type"])
+            return conn_cls(**{k: val for k, val in v.items() if k != "type"})
         return v
 
     @field_validator("whitelist", mode="before")

@@ -7,7 +7,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from dynamiq.connections.managers import ConnectionManager
 from dynamiq.skills.models import SkillInstructions, SkillMetadata, SkillRegistryError
 from dynamiq.skills.registries import BaseSkillRegistry
 
@@ -41,11 +40,6 @@ class SkillsConfig(BaseModel):
             module = importlib.import_module(module_name)
             registry_cls = getattr(module, class_name)
             init_data = {k: val for k, val in v.items() if k != "type"}
-            conn = init_data.get("connection")
-            if isinstance(conn, dict) and conn.get("type"):
-                conn_type = conn.get("type")
-                conn_cls = ConnectionManager.get_connection_by_type(conn_type)
-                init_data = {**init_data, "connection": conn_cls(**{k: val for k, val in conn.items() if k != "type"})}
             return registry_cls(**init_data)
         return v
 

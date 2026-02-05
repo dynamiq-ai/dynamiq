@@ -72,18 +72,19 @@ class WorkflowYAMLLoader:
     @staticmethod
     def is_node_type(type_value: str | None) -> bool:
         """
-        Check if the type value represents a node type (dotted path like 'module.ClassName').
+        Check if the type value represents a node type (dotted path under dynamiq.nodes).
 
-        Node types use dotted path format (e.g., 'dynamiq.nodes.agents.Agent'),
-        while other types (e.g., JSON schema types like 'string', 'object') don't contain dots.
+        Only types under 'dynamiq.nodes.' are treated as nodes so that nested configs
+        (e.g. dynamiq.skills.registries.*, dynamiq.connections.*) are not turned into
+        nodes and passed to get_node_connection.
 
         Args:
             type_value: The type string to check.
 
         Returns:
-            True if the type value is a node type (contains a dot), False otherwise.
+            True if the type value is a node type (dynamiq.nodes.*), False otherwise.
         """
-        return bool(type_value and "." in type_value)
+        return bool(type_value and type_value.startswith("dynamiq.nodes."))
 
     @classmethod
     def apply_resolved_requirements(
