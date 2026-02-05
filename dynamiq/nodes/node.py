@@ -913,8 +913,8 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
         except Exception as e:
             self.run_on_node_error(callbacks=config.callbacks, error=e, input_data=transformed_input, **merged_kwargs)
             logger.error(
-                f"Node {self.name} - {self.id}: execution failed in {e}"
-                f"{format_duration(time_start, datetime.now())}."
+                f"Node {self.name} - {self.id}: execution failed in "
+                f"{format_duration(time_start, datetime.now())}. {e}"
             )
 
             recoverable = isinstance(e, RecoverableAgentException)

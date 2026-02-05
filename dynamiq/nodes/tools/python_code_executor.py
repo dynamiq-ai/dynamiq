@@ -450,6 +450,37 @@ class PythonCodeExecutor(Node):
         available_args.update(context_payload)
         return available_args
 
+    def _sanitize_workspace_path(self, file_path: str, workspace_dir: str, fallback_name: str) -> str | None:
+        """
+        Sanitize a file path to ensure it stays within the workspace directory.
+
+        Args:
+            file_path: The raw file path to sanitize.
+            workspace_dir: The base workspace directory.
+            fallback_name: Fallback name to use if the path is empty after sanitization.
+
+        Returns:
+            The sanitized absolute path within the workspace, or None if the path is unsafe.
+        """
+        normalized = os.path.normpath(file_path).lstrip(os.sep)
+
+        path_parts = normalized.split(os.sep)
+        if ".." in path_parts:
+            logger.warning("Path traversal detected in file path: %s", file_path)
+            return
+
+        if not normalized or normalized == ".":
+            normalized = fallback_name
+
+        final_path = os.path.abspath(os.path.join(workspace_dir, normalized))
+        workspace_abs = os.path.abspath(workspace_dir)
+
+        if not final_path.startswith(workspace_abs + os.sep) and final_path != workspace_abs:
+            logger.warning("Path escapes workspace: %s -> %s", file_path, final_path)
+            return
+
+        return final_path
+
     def _materialize_inline_files(self, files: list[Any], workspace_dir: str) -> None:
         """
         Persist in-memory file-like inputs (e.g., BytesIO objects) into the workspace filesystem.
@@ -462,11 +493,13 @@ class PythonCodeExecutor(Node):
                 continue
 
             file_name = getattr(file_obj, "name", f"inline_file_{idx}")
-            sanitized_name = os.path.normpath(file_name).lstrip(os.sep)
-            if sanitized_name.startswith(".."):
-                sanitized_name = sanitized_name.replace("..", "")
-            sanitized_name = sanitized_name or f"inline_file_{idx}"
-            destination = os.path.join(workspace_dir, sanitized_name)
+            fallback_name = f"inline_file_{idx}"
+
+            destination = self._sanitize_workspace_path(file_name, workspace_dir, fallback_name)
+            if destination is None:
+                logger.error("Skipping file with unsafe path: %s", file_name)
+                continue
+
             destination_dir = os.path.dirname(destination) or workspace_dir
             os.makedirs(destination_dir, exist_ok=True)
 
@@ -480,15 +513,15 @@ class PythonCodeExecutor(Node):
                     payload = payload.encode("utf-8")
                 with open(destination, "wb") as handle:
                     handle.write(payload)
-                logger.debug("Materialized inline file %s into isolated workspace", sanitized_name)
+                logger.debug("Materialized inline file %s into isolated workspace", os.path.basename(destination))
             except Exception as exc:
-                logger.debug("Failed to materialize inline file %s: %s", sanitized_name, exc)
+                logger.error("Failed to materialize inline file %s: %s", file_name, exc)
             finally:
                 if position is not None:
                     try:
                         file_obj.seek(position)
                     except Exception as exc:
-                        logger.debug("Failed to restore inline file pointer %s: %s", sanitized_name, exc)
+                        logger.debug("Failed to restore inline file pointer %s: %s", file_name, exc)
 
     def _materialize_file_store_contents(self, workspace_dir: str, store_paths: list[str] | None = None) -> None:
         """
@@ -509,13 +542,18 @@ class PythonCodeExecutor(Node):
                 return
 
         for relative_path in sorted(target_paths):
+            # Validate path to prevent path traversal attacks
+            absolute_path = self._sanitize_workspace_path(relative_path, workspace_dir, f"file_{hash(relative_path)}")
+            if absolute_path is None:
+                logger.error("Skipping file store entry with unsafe path: %s", relative_path)
+                continue
+
             try:
                 payload = self.file_store.retrieve(relative_path)
             except Exception as exc:
                 logger.debug("Failed to retrieve %s for workspace materialization: %s", relative_path, exc)
                 continue
 
-            absolute_path = os.path.join(workspace_dir, relative_path)
             os.makedirs(os.path.dirname(absolute_path) or workspace_dir, exist_ok=True)
             try:
                 with open(absolute_path, "wb") as file_handle:
