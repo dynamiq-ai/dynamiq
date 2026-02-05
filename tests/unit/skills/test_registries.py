@@ -40,6 +40,19 @@ class TestFileSystemRegistry:
             with pytest.raises(SkillRegistryError, match="not found"):
                 registry.get_skill_instructions("missing")
 
+    def test_get_skill_instructions_path_is_directory_raises(self):
+        """FileSystem.get_skill_instructions raises when skill path is a directory (e.g. SKILL.md is a dir)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / "my-skill"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").mkdir()
+            registry = FileSystem(
+                base_path=tmp,
+                allowed_skills=[FileSystemSkillEntry(name="my-skill", description="My skill")],
+            )
+            with pytest.raises(SkillRegistryError, match="not found|not a file"):
+                registry.get_skill_instructions("my-skill")
+
     def test_get_skill_instructions_found(self):
         """FileSystem.get_skill_instructions returns content from SKILL.md."""
         with tempfile.TemporaryDirectory() as tmp:

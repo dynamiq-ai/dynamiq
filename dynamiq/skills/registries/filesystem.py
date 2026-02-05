@@ -39,9 +39,9 @@ class FileSystem(BaseSkillRegistry):
     def get_skill_instructions(self, name: str) -> SkillInstructions:
         entry = self._get_entry_by_name(name)
         skill_path = self._resolve_skill_path(name)
-        if not skill_path.exists():
+        if not skill_path.is_file():
             raise SkillRegistryError(
-                "Skill instructions file not found.",
+                "Skill instructions file not found or path is not a file.",
                 details={"name": name, "path": str(skill_path)},
             )
         instructions = skill_path.read_text(encoding="utf-8")
