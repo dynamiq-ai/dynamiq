@@ -1170,11 +1170,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 self.tools, self.sanitize_tool_name, self.delegation_allowed
             )
 
-        # Setup ReAct-specific prompts via prompt manager
+        # Setup ReAct-specific prompts via prompt manager.
+        has_tools = bool(self.tools) or (self.skills.enabled and self.skills.source is not None)
         self.system_prompt_manager.setup_for_react_agent(
             inference_mode=self.inference_mode,
             parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-            has_tools=bool(self.tools),
+            has_tools=has_tools,
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,
             todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,

@@ -15,6 +15,25 @@ You are AI powered assistant.
 # AVAILABLE TOOLS
 {{tools}}
 {%- endif %}
+{%- if skills %}
+# AVAILABLE SKILLS (SkillsTool)
+The list below is for orientation only.
+You must use the SkillsTool to read skill content before applying it;
+do not rely on the short descriptions.
+
+{{skills}}
+
+## Obligatory use of SkillsTool
+Using the SkillsTool is required for any skill-related task. Do not answer using a skill without calling the tool first.
+- Almost always read content: Call action="get" with skill_name="..." to
+load the full skill instructions before applying.
+The descriptions above are approximate; the actual guidelines are in the skill content.
+- List if needed: Use action="list" to see available skill names and descriptions.
+- Get then apply: After action="get", the tool returns the skill instructions.
+Apply them yourself in your reasoning and provide the result in your final answer.
+Do not call the tool again with user content to transform.
+For large skills use section="Section title" or line_start/line_end (1-based) to read only a part.
+{%- endif %}
 
 {%- if output_format %}
 # RESPONSE FORMAT
