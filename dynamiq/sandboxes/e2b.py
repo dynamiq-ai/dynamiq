@@ -1,13 +1,13 @@
-"""E2B file storage implementation."""
+"""E2B sandbox implementation."""
 
-from typing import Any
+from typing import Any, ClassVar
 
 from e2b_desktop import Sandbox as E2BDesktopSandbox
 from pydantic import ConfigDict, PrivateAttr
 
 from dynamiq.connections import E2B
 from dynamiq.nodes import Node
-from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
+from dynamiq.sandboxes.base import Sandbox, SandboxTool, ShellCommandResult
 from dynamiq.utils.logger import logger
 
 
@@ -18,8 +18,16 @@ class E2BSandbox(Sandbox):
     Files persist for the lifetime of the sandbox session.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    # Registry mapping tool types to (tool_class_path, config_keys)
+    # Each sandbox implementation can define its own supported tools
+    TOOL_REGISTRY: ClassVar[dict[SandboxTool, tuple[str, list[str]]]] = {
+        SandboxTool.SHELL: (
+            "dynamiq.sandboxes.tools.shell.SandboxShellTool",
+            ["allowed_commands", "blocked_commands"],
+        ),
+    }
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     connection: E2B
     timeout: int = 3600
     base_path: str = "/home/user"
@@ -92,15 +100,32 @@ class E2BSandbox(Sandbox):
     def get_tools(self) -> list[Node]:
         """Return tools this sandbox provides for agent use.
 
-        Returns shell tool for command execution in the E2B sandbox.
-
-        Args:
-            llm: LLM instance for tools that need it.
+        Creates tools based on tools config and TOOL_REGISTRY.
+        Each tool is enabled by default unless explicitly disabled.
 
         Returns:
             List of tool instances (Node objects).
         """
-        return super().get_tools()
+        from dynamiq.nodes.managers import NodeManager
+
+        result = []
+        for tool_type, (tool_class_path, config_keys) in self.TOOL_REGISTRY.items():
+            tool_config = self.tools.get(tool_type, {})
+            # Tools are enabled by default unless explicitly disabled
+            if not tool_config.get("enabled", True):
+                continue
+
+            # Build tool kwargs from config
+            tool_kwargs = {"sandbox": self}
+            for key in config_keys:
+                if key in tool_config:
+                    tool_kwargs[key] = tool_config[key]
+
+            # Get tool class from NodeManager and instantiate
+            tool_class = NodeManager.get_node_by_type(tool_class_path)
+            result.append(tool_class(**tool_kwargs))
+
+        return result
 
     def close(self) -> None:
         """Close and kill the E2B sandbox."""

@@ -1,6 +1,7 @@
-"""Base file storage interface and common data structures."""
+"""Base sandbox interface and common data structures."""
 
 import abc
+from enum import Enum
 from functools import cached_property
 from typing import Any
 
@@ -8,6 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from dynamiq.connections.connections import BaseConnection
 from dynamiq.nodes.node import Node
+
+
+class SandboxTool(str, Enum):
+    """Enum for sandbox tool types."""
+
+    SHELL = "shell"
+    # Future tools can be added here:
+    # FILE_READ = "file_read"
+    # FILE_WRITE = "file_write"
+    # CODE_EXECUTOR = "code_executor"
 
 
 class ShellCommandResult(BaseModel):
@@ -28,6 +39,10 @@ class Sandbox(abc.ABC, BaseModel):
     """
 
     connection: BaseConnection | None = Field(default=None, description="Connection to the sandbox backend.")
+    tools: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Configuration for sandbox tools. Keys are tool names (e.g., 'shell'), values are tool configs.",
+    )
 
     @computed_field
     @cached_property
@@ -84,23 +99,17 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports shell commands (e.g., E2BSandbox)."
         )
 
+    @abc.abstractmethod
     def get_tools(self) -> list[Node]:
         """Return tools this sandbox provides for agent use.
 
-        Base implementation returns shell tool. Subclasses can override
-        to add or replace tools specific to their sandbox type.
+        Subclasses must implement this method to return tools specific
+        to their sandbox type. Tools are configured via the `tools` field.
 
         Returns:
             List of tool instances (Node objects).
         """
-        # Lazy import to avoid circular dependency
-        from dynamiq.sandboxes.tools.shell import SandboxShellTool
-
-        shell_tool = SandboxShellTool(
-            name="shell",
-            sandbox=self,
-        )
-        return [shell_tool]
+        ...
 
     def close(self) -> None:
         """Close the sandbox."""

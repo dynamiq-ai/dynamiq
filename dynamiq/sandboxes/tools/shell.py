@@ -76,9 +76,9 @@ class SandboxShellTool(Node):
 
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
-        # Extract for_tracing before super() consumes it to preserve original value.
-        for_tracing = kwargs.get("for_tracing", False)
-        data = super().to_dict(**kwargs)
+        # Pop for_tracing to avoid passing it twice (explicitly and in **kwargs).
+        for_tracing = kwargs.pop("for_tracing", False)
+        data = super().to_dict(for_tracing=for_tracing, **kwargs)
         data["sandbox"] = self.sandbox.to_dict(for_tracing=for_tracing, **kwargs) if self.sandbox else None
         return data
 
