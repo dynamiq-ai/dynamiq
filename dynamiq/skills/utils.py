@@ -42,6 +42,7 @@ def extract_skill_content_slice(
         if start_i is not None:
             instructions = "\n".join(lines[start_i:end_i])
         else:
+            instructions = ""
             section_used = None
     elif line_start is not None or line_end is not None:
         start = max(0, (line_start or 1) - 1)

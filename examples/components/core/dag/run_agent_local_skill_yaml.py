@@ -24,7 +24,7 @@ def run_agent_local_skill_yaml():
         )
 
         prompt = (
-            "Show skills, then humanize text:"
+            "Show skills, then humanize text: "
             "In conclusion, it is important to note that leveraging cutting-edge solutions "
             "can help stakeholders unlock value and drive transformative outcomes. "
             "Moving forward, we will utilize best practices to ensure synergy."

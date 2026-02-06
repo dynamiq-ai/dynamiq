@@ -25,7 +25,7 @@ def run_agent_humanizer_skill_yaml():
         )
 
         prompt = (
-            "Show your skills"
+            "Show your skills "
             "Humanize this text: "
             "In conclusion, it is important to note that leveraging cutting-edge solutions "
             "can help stakeholders unlock value and drive transformative outcomes. "

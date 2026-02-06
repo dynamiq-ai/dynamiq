@@ -126,6 +126,11 @@ class SkillsTool(Node):
                 line_start=line_start,
                 line_end=line_end,
             )
+            if section is not None and section_used is None:
+                raise ToolExecutionException(
+                    f"Section '{section}' not found in skill '{skill_name}'.",
+                    recoverable=True,
+                )
             one_line = sliced.replace("\n", " ").strip()
             preview = (one_line[:50] + "...") if len(one_line) > 50 else one_line
             logger.info(
