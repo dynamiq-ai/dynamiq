@@ -36,6 +36,7 @@ from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
+from dynamiq.sandboxes.base import SandboxConfig
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -212,6 +213,7 @@ class Agent(Node):
         default_factory=lambda: FileStoreConfig(enabled=False, backend=InMemoryFileStore()),
         description="Configuration for file storage used by the agent.",
     )
+    sandbox: SandboxConfig | None = Field(default=None, description="Configuration for sandbox used by the agent.")
     file_attachment_preview_bytes: int = Field(
         default=512,
         description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
@@ -295,13 +297,22 @@ class Agent(Node):
 
         self.tools = expanded_tools
 
-        if self.file_store_backend:
+        if self.sandbox_backend:
+            # Add sandbox tools when sandbox is enabled
+            tools = self.sandbox_backend.get_tools()
+            self.tools.extend(tools)
+
+        elif self.file_store_backend:
+            # Add file tools when file store is enabled
+            self.tools.extend(
+                [
+                    FileReadTool(file_store=self.file_store_backend, llm=self.llm),
+                    FileSearchTool(file_store=self.file_store_backend),
+                    FileListTool(file_store=self.file_store_backend),
+                ]
+            )
             if self.file_store.agent_file_write_enabled:
                 self.tools.append(FileWriteTool(file_store=self.file_store_backend))
-
-            self.tools.append(FileReadTool(file_store=self.file_store_backend, llm=self.llm))
-            self.tools.append(FileSearchTool(file_store=self.file_store_backend))
-            self.tools.append(FileListTool(file_store=self.file_store_backend))
 
         if self.parallel_tool_calls_enabled:
             # Filter out any user tools with the reserved parallel tool name
@@ -335,6 +346,7 @@ class Agent(Node):
             "files": True,
             "images": True,
             "file_store": True,
+            "sandbox": True,
             "system_prompt_manager": True,  # Runtime state container, not serializable
         }
 
@@ -353,6 +365,7 @@ class Agent(Node):
             data["images"] = [{"name": getattr(f, "name", f"image_{i}")} for i, f in enumerate(self.images)]
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
+        data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
 
         return data
 
@@ -444,6 +457,7 @@ class Agent(Node):
 
         logger.info(f"Agent {self.name} - {self.id}: started with input {log_data}")
         self.reset_run_state()
+
         config = ensure_config(config)
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
@@ -487,12 +501,17 @@ class Agent(Node):
 
         files = input_data.files
         uploaded_file_names: set[str] = set()
-        if files:
+        if files and not self.sandbox_backend:
             if not self.file_store_backend:
                 self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
-                self.tools.append(FileReadTool(file_store=self.file_store.backend, llm=self.llm))
-                self.tools.append(FileSearchTool(file_store=self.file_store.backend))
-                self.tools.append(FileListTool(file_store=self.file_store.backend))
+                # Add file tools
+                self.tools.extend(
+                    [
+                        FileReadTool(file_store=self.file_store_backend, llm=self.llm),
+                        FileSearchTool(file_store=self.file_store_backend),
+                        FileListTool(file_store=self.file_store_backend),
+                    ]
+                )
 
                 new_tool_description = self.tool_description
                 self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
@@ -546,7 +565,7 @@ class Agent(Node):
             if filtered_files:
                 execution_result["files"] = filtered_files
                 logger.info(
-                    f"Agent {self.name} - {self.id}: returning {len(filtered_files)} generated file(s) in FileStore"
+                    f"Agent {self.name} - {self.id}: returning {len(filtered_files)} generated file(s) in file store"
                 )
 
         logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
@@ -962,7 +981,7 @@ class Agent(Node):
         return tool_result_content_processed, output_files
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
-        """Ensure all uploaded files have name and description attributes and store them in file_store if available."""
+        """Ensure all uploaded files have name and description attributes and store them in storage backend."""
         named = []
         for i, f in enumerate(files):
             if isinstance(f, bytes):
@@ -980,7 +999,7 @@ class Agent(Node):
                             overwrite=True,
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to store file {bio.name} in file_store: {e}")
+                        logger.warning(f"Failed to store file {bio.name} in file store: {e}")
 
                 named.append(bio)
             elif isinstance(f, io.BytesIO):
@@ -1002,7 +1021,7 @@ class Agent(Node):
                             overwrite=True,
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to store file {f.name} in file_store: {e}")
+                        logger.warning(f"Failed to store file {f.name} in file store: {e}")
 
                 named.append(f)
             else:
@@ -1191,6 +1210,11 @@ class Agent(Node):
         return self.file_store.backend if self.file_store.enabled else None
 
     @property
+    def sandbox_backend(self):
+        """Get the sandbox backend from the configuration if enabled."""
+        return self.sandbox.backend if self.sandbox and self.sandbox.enabled else None
+
+    @property
     def tool_description(self) -> str:
         """Returns a description of the tools available to the agent."""
         return "\n".join([f"- {tool.name}: {tool.description.strip()}" for tool in self.tools]) if self.tools else ""
@@ -1233,6 +1257,22 @@ class Agent(Node):
             child_context["metadata"] = metadata
 
         return child_context
+
+    def cleanup(self) -> None:
+        """Cleanup agent resources (sandbox, etc.)."""
+        if self.sandbox_backend and hasattr(self.sandbox_backend, "close"):
+            try:
+                self.sandbox_backend.close()
+            except Exception as e:
+                logger.warning(f"Agent {self.name} - {self.id}: failed to close sandbox: {e}")
+
+    def __del__(self):
+        """Destructor - attempt to cleanup on garbage collection."""
+        try:
+            self.cleanup()
+        except Exception:
+            # Cannot reliably log in __del__, just suppress
+            ...  # noqa: E701
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         base = super().get_clone_attr_initializers()
