@@ -44,8 +44,6 @@ class E2BSandbox(Sandbox):
     def _ensure_sandbox(self) -> "E2BDesktopSandbox":
         """Lazily initialize the E2B sandbox."""
         if self._sandbox is None:
-            if E2BDesktopSandbox is None:
-                raise ImportError("e2b_desktop is required for E2BSandbox. " "Install it with: pip install e2b-desktop")
             self._sandbox = E2BDesktopSandbox.create(
                 api_key=self.connection.api_key,
                 timeout=self.timeout,
