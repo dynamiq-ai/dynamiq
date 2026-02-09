@@ -22,7 +22,6 @@ nodes:
         tools:
           shell:
             enabled: true
-            allowed_commands: ["python", "pip", "ls", "cat", "echo", "pwd"]
             blocked_commands: ["rm -rf", "sudo"]
     max_loops: 15
     inference_mode: XML

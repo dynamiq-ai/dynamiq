@@ -501,44 +501,68 @@ class Agent(Node):
 
         files = input_data.files
         uploaded_file_names: set[str] = set()
-        if files and not self.sandbox_backend:
-            if not self.file_store_backend:
-                self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
-                # Add file tools
-                self.tools.extend(
-                    [
-                        FileReadTool(file_store=self.file_store_backend, llm=self.llm),
-                        FileSearchTool(file_store=self.file_store_backend),
-                        FileListTool(file_store=self.file_store_backend),
-                    ]
-                )
-
-                new_tool_description = self.tool_description
-                self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
-
-                # Update prompt blocks if agent was created with no tools
-                if self.system_prompt_manager._prompt_blocks.get("tools") == "":
-                    # Check if this is a ReAct Agent
-                    from dynamiq.nodes.agents.agent import Agent
-
-                    if isinstance(self, Agent):
-                        # For ReAct agents, re-run setup with has_tools=True
-                        self.system_prompt_manager.setup_for_react_agent(
-                            inference_mode=self.inference_mode,
-                            parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-                            has_tools=True,
-                            delegation_allowed=self.delegation_allowed,
-                            context_compaction_enabled=self.summarization_config.enabled,
-                            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
-                        )
-
+        if files:
             normalized_files = self._ensure_named_files(files)
             uploaded_file_names = {
                 getattr(f, "name", None)
                 for f in normalized_files
                 if hasattr(f, "name") and getattr(f, "name") is not None
             }
-            input_message = self._inject_attached_files_into_message(input_message, normalized_files)
+
+            if self.sandbox_backend:
+                # Upload files to sandbox
+                for file_obj in normalized_files:
+                    file_name = getattr(file_obj, "name", None)
+                    if file_name and hasattr(file_obj, "read"):
+                        try:
+                            # Read file content
+                            position = file_obj.tell() if hasattr(file_obj, "tell") else None
+                            content = file_obj.read()
+                            if isinstance(content, str):
+                                content = content.encode("utf-8")
+                            # Upload to sandbox
+                            self.sandbox_backend.upload_file(file_name, content)
+                            # Restore file position
+                            if position is not None and hasattr(file_obj, "seek"):
+                                file_obj.seek(position)
+                        except Exception as e:
+                            logger.warning(f"Failed to upload file {file_name} to sandbox: {e}")
+                # Inject file info into message so agent knows about uploaded files
+                input_message = self._inject_attached_files_into_message(input_message, normalized_files)
+
+            else:
+                # Use file store for non-sandbox mode
+                if not self.file_store_backend:
+                    self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
+                    # Add file tools
+                    self.tools.extend(
+                        [
+                            FileReadTool(file_store=self.file_store_backend, llm=self.llm),
+                            FileSearchTool(file_store=self.file_store_backend),
+                            FileListTool(file_store=self.file_store_backend),
+                        ]
+                    )
+
+                    new_tool_description = self.tool_description
+                    self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
+
+                    # Update prompt blocks if agent was created with no tools
+                    if self.system_prompt_manager._prompt_blocks.get("tools") == "":
+                        # Check if this is a ReAct Agent
+                        from dynamiq.nodes.agents.agent import Agent
+
+                        if isinstance(self, Agent):
+                            # For ReAct agents, re-run setup with has_tools=True
+                            self.system_prompt_manager.setup_for_react_agent(
+                                inference_mode=self.inference_mode,
+                                parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
+                                has_tools=True,
+                                delegation_allowed=self.delegation_allowed,
+                                context_compaction_enabled=self.summarization_config.enabled,
+                                todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
+                            )
+
+                input_message = self._inject_attached_files_into_message(input_message, normalized_files)
 
         if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
@@ -1257,22 +1281,6 @@ class Agent(Node):
             child_context["metadata"] = metadata
 
         return child_context
-
-    def cleanup(self) -> None:
-        """Cleanup agent resources (sandbox, etc.)."""
-        if self.sandbox_backend and hasattr(self.sandbox_backend, "close"):
-            try:
-                self.sandbox_backend.close()
-            except Exception as e:
-                logger.warning(f"Agent {self.name} - {self.id}: failed to close sandbox: {e}")
-
-    def __del__(self):
-        """Destructor - attempt to cleanup on garbage collection."""
-        try:
-            self.cleanup()
-        except Exception:
-            # Cannot reliably log in __del__, just suppress
-            ...  # noqa: E701
 
     def get_clone_attr_initializers(self) -> dict[str, Callable[[Node], Any]]:
         base = super().get_clone_attr_initializers()

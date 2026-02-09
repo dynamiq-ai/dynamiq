@@ -37,7 +37,6 @@ class SandboxShellTool(Node):
 
     Attributes:
         sandbox: The sandbox backend to execute commands in.
-        allowed_commands: Optional list of allowed command prefixes for security.
         blocked_commands: Optional list of blocked command prefixes for security.
     """
 
@@ -59,10 +58,6 @@ class SandboxShellTool(Node):
     )
 
     sandbox: Sandbox = Field(..., description="Sandbox backend to execute commands in.")
-    allowed_commands: list[str] | None = Field(
-        default=None,
-        description="Optional list of allowed command prefixes. If set, only these commands are permitted.",
-    )
     blocked_commands: list[str] | None = Field(
         default=None,
         description="Optional list of blocked command prefixes. These commands are never permitted.",
@@ -83,7 +78,7 @@ class SandboxShellTool(Node):
         return data
 
     def _validate_command(self, command: str) -> None:
-        """Validate command against allowed/blocked lists."""
+        """Validate command against blocked list."""
         cmd_lower = command.strip().lower()
 
         # Check blocked commands
@@ -94,15 +89,6 @@ class SandboxShellTool(Node):
                         f"Command '{command}' is blocked for security reasons.",
                         recoverable=True,
                     )
-
-        # Check allowed commands
-        if self.allowed_commands:
-            is_allowed = any(cmd_lower.startswith(allowed.lower()) for allowed in self.allowed_commands)
-            if not is_allowed:
-                raise ToolExecutionException(
-                    f"Command '{command}' is not in the allowed commands list.",
-                    recoverable=True,
-                )
 
     def execute(
         self,

@@ -3,7 +3,7 @@
 from typing import Any, ClassVar
 
 from e2b_desktop import Sandbox as E2BDesktopSandbox
-from pydantic import ConfigDict, PrivateAttr
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from dynamiq.connections import E2B
 from dynamiq.nodes import Node
@@ -16,6 +16,8 @@ class E2BSandbox(Sandbox):
 
     This implementation stores files in E2B remote sandbox filesystem.
     Files persist for the lifetime of the sandbox session.
+
+    Supports reconnecting to existing sandboxes by providing sandbox_id.
     """
 
     # Registry mapping tool types to (tool_class_path, config_keys)
@@ -23,7 +25,7 @@ class E2BSandbox(Sandbox):
     TOOL_REGISTRY: ClassVar[dict[SandboxTool, tuple[str, list[str]]]] = {
         SandboxTool.SHELL: (
             "dynamiq.sandboxes.tools.shell.SandboxShellTool",
-            ["allowed_commands", "blocked_commands"],
+            ["blocked_commands"],
         ),
     }
 
@@ -31,8 +33,11 @@ class E2BSandbox(Sandbox):
     connection: E2B
     timeout: int = 3600
     base_path: str = "/home/user"
+    sandbox_id: str | None = Field(
+        default=None,
+        description="Existing sandbox ID to reconnect to. If None, a new sandbox is created.",
+    )
     _sandbox: E2BDesktopSandbox | None = PrivateAttr(default=None)
-    _sandbox_id: str | None = PrivateAttr(default=None)
     # Local cache for metadata (E2B doesn't store custom metadata)
     _file_metadata: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
 
@@ -41,16 +46,32 @@ class E2BSandbox(Sandbox):
         super().__init__(**kwargs)
         self._file_metadata = {}
 
-    def _ensure_sandbox(self) -> "E2BDesktopSandbox":
-        """Lazily initialize the E2B sandbox."""
+    @property
+    def current_sandbox_id(self) -> str | None:
+        """Get the current sandbox ID (for saving/reconnecting later)."""
+        return self.sandbox_id
+
+    def _ensure_sandbox(self) -> E2BDesktopSandbox:
+        """Lazily initialize or reconnect to E2B sandbox."""
         if self._sandbox is None:
-            self._sandbox = E2BDesktopSandbox.create(
-                api_key=self.connection.api_key,
-                timeout=self.timeout,
-                domain=getattr(self.connection, "domain", None),
-            )
-            self._sandbox_id = self._sandbox.sandbox_id
-            logger.debug(f"E2B sandbox created: {self._sandbox_id}")
+            if self.sandbox_id:
+                # Reconnect to existing sandbox
+                logger.debug(f"Reconnecting to E2B sandbox: {self.sandbox_id}")
+                self._sandbox = E2BDesktopSandbox.connect(
+                    sandbox_id=self.sandbox_id,
+                    api_key=self.connection.api_key,
+                    domain=getattr(self.connection, "domain", None),
+                )
+                logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
+            else:
+                # Create new sandbox
+                self._sandbox = E2BDesktopSandbox.create(
+                    api_key=self.connection.api_key,
+                    timeout=self.timeout,
+                    domain=getattr(self.connection, "domain", None),
+                )
+                self.sandbox_id = self._sandbox.sandbox_id
+                logger.debug(f"E2B sandbox created: {self.sandbox_id}")
         return self._sandbox
 
     def run_command_shell(
@@ -95,6 +116,30 @@ class E2BSandbox(Sandbox):
                 exit_code=1,
             )
 
+    def upload_file(self, file_name: str, content: bytes, destination_path: str | None = None) -> str:
+        """Upload a file to the E2B sandbox.
+
+        Args:
+            file_name: Name of the file.
+            content: File content as bytes.
+            destination_path: Optional destination path in sandbox. If None, uses base_path/file_name.
+
+        Returns:
+            The path where the file was uploaded in the sandbox.
+        """
+        sandbox = self._ensure_sandbox()
+
+        if destination_path is None:
+            destination_path = f"{self.base_path}/{file_name}"
+
+        try:
+            sandbox.files.write(destination_path, content)
+            logger.debug(f"E2BSandbox uploaded file: {destination_path}")
+            return destination_path
+        except Exception as e:
+            logger.error(f"Failed to upload file {file_name}: {e}")
+            raise
+
     def get_tools(self) -> list[Node]:
         """Return tools this sandbox provides for agent use.
 
@@ -125,17 +170,25 @@ class E2BSandbox(Sandbox):
 
         return result
 
-    def close(self) -> None:
-        """Close and kill the E2B sandbox."""
+    def close(self, kill: bool = True) -> None:
+        """Close the E2B sandbox connection.
+
+        Args:
+            kill: If True (default), kills the sandbox. If False, just disconnects
+                  but keeps the sandbox alive for reconnection using sandbox_id.
+        """
         if self._sandbox:
             try:
-                self._sandbox.kill()
-                logger.debug(f"E2B sandbox killed: {self._sandbox_id}")
+                if kill:
+                    self._sandbox.kill()
+                    logger.debug(f"E2B sandbox killed: {self.sandbox_id}")
+                    self.sandbox_id = None
+                else:
+                    logger.debug(f"E2B sandbox disconnected (kept alive): {self.sandbox_id}")
             except Exception as e:
                 logger.warning(f"E2BSandbox close() failed: {e}")
             finally:
                 self._sandbox = None
-                self._sandbox_id = None
                 self._file_metadata.clear()
 
     def __enter__(self):

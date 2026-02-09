@@ -15,10 +15,6 @@ class SandboxTool(str, Enum):
     """Enum for sandbox tool types."""
 
     SHELL = "shell"
-    # Future tools can be added here:
-    # FILE_READ = "file_read"
-    # FILE_WRITE = "file_write"
-    # CODE_EXECUTOR = "code_executor"
 
 
 class ShellCommandResult(BaseModel):
@@ -110,6 +106,25 @@ class Sandbox(abc.ABC, BaseModel):
             List of tool instances (Node objects).
         """
         ...
+
+    def upload_file(self, file_name: str, content: bytes, destination_path: str | None = None) -> str:
+        """Upload a file to the sandbox.
+
+        Args:
+            file_name: Name of the file.
+            content: File content as bytes.
+            destination_path: Optional destination path in sandbox. If None, uses base_path/file_name.
+
+        Returns:
+            The path where the file was uploaded in the sandbox.
+
+        Raises:
+            NotImplementedError: If the sandbox does not support file uploads.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support file uploads. "
+            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
+        )
 
     def close(self) -> None:
         """Close the sandbox."""
