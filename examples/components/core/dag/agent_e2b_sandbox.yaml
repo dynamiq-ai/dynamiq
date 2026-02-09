@@ -3,7 +3,7 @@ connections:
     type: dynamiq.connections.OpenAI
   e2b-conn:
     type: dynamiq.connections.E2B
-    api_key: <E2B_API_KEY>
+    api_key: ${oc.env:E2B_API_KEY}
 
 nodes:
   sandbox-agent:

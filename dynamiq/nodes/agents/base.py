@@ -36,7 +36,7 @@ from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
-from dynamiq.sandboxes.base import SandboxConfig
+from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -1234,7 +1234,7 @@ class Agent(Node):
         return self.file_store.backend if self.file_store.enabled else None
 
     @property
-    def sandbox_backend(self):
+    def sandbox_backend(self) -> Sandbox | None:
         """Get the sandbox backend from the configuration if enabled."""
         return self.sandbox.backend if self.sandbox and self.sandbox.enabled else None
 
