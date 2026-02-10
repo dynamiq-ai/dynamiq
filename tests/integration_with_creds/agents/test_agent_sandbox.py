@@ -1,4 +1,4 @@
-"""Integration tests for agent with sandbox (OPENAI_API_KEY required)."""
+"""Integration tests for agent with sandbox (OPENAI_API_KEY required; E2B tests also need E2B_API_KEY)."""
 
 import os
 
@@ -47,6 +47,18 @@ def openai_llm():
     )
 
 
+@pytest.fixture(scope="module")
+def e2b_connection():
+    """E2B connection from E2B_API_KEY; skip if not set."""
+    pytest.importorskip("e2b_desktop")
+    from dynamiq.connections import E2B
+
+    api_key = os.environ.get("E2B_API_KEY")
+    if not api_key:
+        pytest.skip("E2B_API_KEY is not set; skipping E2B sandbox test.")
+    return E2B(api_key=api_key)
+
+
 @pytest.mark.integration
 def test_agent_with_sandbox_executes_shell(openai_llm):
     """Agent with sandbox runs a simple shell command via sandbox tools; LLM required."""
@@ -74,3 +86,36 @@ def test_agent_with_sandbox_executes_shell(openai_llm):
     content = result.output.get(agent.id, {}).get("output", {}).get("content", "")
     assert content is not None
     assert "hello from SANDBOX" in str(content), f"Expected 'hello from SANDBOX' in output, got: {content[:500]}"
+
+
+@pytest.mark.integration
+def test_agent_with_e2b_sandbox_executes_shell(openai_llm, e2b_connection):
+    """Agent with E2B sandbox runs a simple shell command via sandbox tools; OPENAI_API_KEY and E2B_API_KEY required."""
+    if not os.getenv("OPENAI_API_KEY"):
+        pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
+
+    from dynamiq.sandboxes.e2b import E2BSandbox
+
+    sandbox = E2BSandbox(connection=e2b_connection, timeout=300)
+    try:
+        agent = Agent(
+            name="E2B Sandbox Agent",
+            llm=openai_llm,
+            sandbox=SandboxConfig(enabled=True, backend=sandbox),
+            inference_mode=InferenceMode.XML,
+            max_loops=5,
+            role="You are a helpful assistant that can run commands in the sandbox.",
+        )
+
+        wf = Workflow(flow=Flow(nodes=[agent]))
+
+        result = wf.run(
+            input_data={"input": "Run this command in the sandbox and tell me the output: echo hello"},
+            config=RunnableConfig(),
+        )
+        assert result.status == RunnableStatus.SUCCESS
+        content = result.output.get(agent.id, {}).get("output", {}).get("content", "")
+        assert content is not None
+        assert "hello" in str(content), f"Expected 'hello' in E2B output, got: {content[:500]}"
+    finally:
+        sandbox.close(kill=True)
