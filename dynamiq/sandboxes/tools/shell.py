@@ -37,7 +37,7 @@ class SandboxShellTool(Node):
 
     Attributes:
         sandbox: The sandbox backend to execute commands in.
-        blocked_commands: Optional list of blocked command prefixes for security.
+        blocked_commands: Optional list of blocked substrings; command is blocked if it contains any (case-insensitive).
     """
 
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
@@ -60,7 +60,8 @@ class SandboxShellTool(Node):
     sandbox: Sandbox = Field(..., description="Sandbox backend to execute commands in.")
     blocked_commands: list[str] | None = Field(
         default=None,
-        description="Optional list of blocked command prefixes. These commands are never permitted.",
+        description="Optional list of blocked substrings. A command is blocked if"
+        " it contains any of these strings (case-insensitive).",
     )
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[SandboxShellInputSchema]] = SandboxShellInputSchema
@@ -78,7 +79,8 @@ class SandboxShellTool(Node):
         return data
 
     def _validate_command(self, command: str) -> None:
-        """Validate command against blocked list."""
+        """Validate command against blocked list. Blocked entries are matched as substrings
+        (case-insensitive): if the command contains any blocked string, it is rejected."""
         cmd_lower = command.strip().lower()
 
         # Check blocked commands

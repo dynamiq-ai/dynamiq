@@ -1,28 +1,27 @@
-"""Integration tests for agent with sandbox"""
+"""Integration tests for agent with sandbox (OPENAI_API_KEY required)."""
 
 import os
 
 import pytest
+from pydantic import Field
 
 from dynamiq import Workflow
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
+from dynamiq.nodes import Node
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.openai import OpenAI
-from dynamiq.nodes.node import Node
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes import SandboxConfig
-from dynamiq.sandboxes.base import ShellCommandResult
+from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
 from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
 
-class TestSandbox:
-    """Minimal sandbox for tests; no real E2B VM is created."""
+class TestSandbox(Sandbox):
+    """Minimal sandbox for tests; no real E2B VM. Subclasses Sandbox for Pydantic/typing."""
 
-    def __init__(self, connection=None, timeout: int = 300):
-        self.connection = connection
-        self.timeout = timeout
+    timeout: int = Field(default=300, description="Timeout (compatibility with E2B-style backends).")
 
     def run_command_shell(
         self,
@@ -31,7 +30,6 @@ class TestSandbox:
         run_in_background_enabled: bool = False,
     ) -> ShellCommandResult:
         if command.strip().startswith("echo"):
-            # "echo hello from SANDBOX" -> stdout "hello from SANDBOX"
             parts = command.strip().split(maxsplit=1)
             stdout = (parts[1] + " from SANDBOX") if len(parts) > 1 else " from SANDBOX"
             return ShellCommandResult(stdout=stdout, stderr="", exit_code=0)
@@ -55,7 +53,7 @@ def test_agent_with_sandbox_executes_shell(openai_llm):
     if not os.getenv("OPENAI_API_KEY"):
         pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
 
-    sandbox = TestSandbox(connection=None, timeout=300)
+    sandbox = TestSandbox(timeout=300)
 
     agent = Agent(
         name="Sandbox Agent",
