@@ -120,8 +120,8 @@ class WorkflowYAMLLoader:
             Single extracted value after applying the JSONPath.
 
         Raises:
-            WorkflowYAMLLoaderException: If value_path doesn't match, matches multiple values,
-                or resolved_value is not a dict/list.
+            WorkflowYAMLLoaderException: If value_path is an invalid JSONPath expression,
+                doesn't match, matches multiple values, or resolved_value is not a dict/list.
         """
         if not isinstance(resolved_value, (dict, list)):
             raise WorkflowYAMLLoaderException(
@@ -129,7 +129,11 @@ class WorkflowYAMLLoader:
                 f"resolved value must be a dict or list, got {type(resolved_value).__name__}"
             )
 
-        matches = jsonpath_filter_all(resolved_value, value_path)
+        try:
+            matches = jsonpath_filter_all(resolved_value, value_path)
+        except ValueError:
+            raise WorkflowYAMLLoaderException(f"Invalid value_path '{value_path}' for requirement '{requirement_id}'")
+
         if len(matches) == 0:
             raise WorkflowYAMLLoaderException(
                 f"value_path '{value_path}' did not match any value in resolved requirement '{requirement_id}'"

@@ -565,3 +565,17 @@ def test_apply_resolved_mixed_with_and_without_value_path():
 
     assert data["nodes"][NODE_1]["connection"] == resolved_connection
     assert data["nodes"][NODE_1]["user_id"] == EXTERNAL_USER_ID
+
+
+def test_apply_resolved_value_path_invalid_jsonpath_raises():
+    """Verify invalid JSONPath in value_path raises WorkflowYAMLLoaderException, not ValueError."""
+    data = {
+        "nodes": {
+            NODE_1: {
+                "field": {"$type": "requirement", "$id": REQ_1, "value_path": "$[invalid jsonpath"},
+            }
+        }
+    }
+
+    with pytest.raises(WorkflowYAMLLoaderException, match="Invalid value_path"):
+        WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: {"key": "value"}})
