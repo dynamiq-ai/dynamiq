@@ -375,9 +375,6 @@ def test_apply_resolved_in_list_raises_on_missing():
     assert REQ_MISSING in str(exc_info.value)
 
 
-# --- value_path tests ---
-
-
 def test_requirement_data_with_value_path():
     """Verify RequirementData captures value_path when present."""
     req = RequirementData.model_validate({"$type": "requirement", "$id": REQ_1, "value_path": VP_ACCOUNT_ID})
