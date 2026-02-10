@@ -34,9 +34,12 @@ from dynamiq.nodes.tools.mcp import MCPServer
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsTool
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.python_code_executor import PythonCodeExecutor
+from dynamiq.nodes.tools.skills_tool import SkillsTool
 from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionMessageTextContent
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
+from dynamiq.skills.config import SkillsConfig
+from dynamiq.skills.types import SkillMetadata
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -218,6 +221,10 @@ class Agent(Node):
         default=512,
         description="Maximum number of bytes/characters from each uploaded file to surface as an inline preview.",
     )
+    skills: SkillsConfig = Field(
+        default_factory=SkillsConfig,
+        description="Skills config. When enabled and source registry is set, skills are on (Dynamiq or FileSystem).",
+    )
 
     input_message: Message | VisionMessage | None = None
     role: str | None = Field(
@@ -229,6 +236,7 @@ class Agent(Node):
     description: str | None = Field(default=None, description="Short human-readable description of the agent.")
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
+    _skills_tool_ids: list[str] = PrivateAttr(default_factory=list)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _history_offset: int = PrivateAttr(
         default=2,  # Offset to the first message (default: 2 — system and initial user messages).
@@ -318,7 +326,11 @@ class Agent(Node):
             self.tools = [t for t in self.tools if t.name != PARALLEL_TOOL_NAME]
             self.tools.append(ParallelToolCallsTool())
 
+        if self._skills_should_init():
+            self._init_skills()
         self._init_prompt_blocks()
+        if self._skills_should_init():
+            self._apply_skills_to_prompt()
 
     @model_validator(mode="after")
     def validate_input_fields(self):
@@ -345,6 +357,7 @@ class Agent(Node):
             "files": True,
             "images": True,
             "file_store": True,
+            "skills": True,
             "sandbox": True,
             "system_prompt_manager": True,  # Runtime state container, not serializable
         }
@@ -354,6 +367,8 @@ class Agent(Node):
         if tool.id in self._mcp_server_tool_ids:
             return True
         if sandbox_tool_names and tool.name in sandbox_tool_names:
+            return True
+        if tool.id in self._skills_tool_ids:
             return True
         return False
 
@@ -378,7 +393,6 @@ class Agent(Node):
             data["images"] = [{"name": getattr(f, "name", f"image_{i}")} for i, f in enumerate(self.images)]
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
-        data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
 
         return data
 
@@ -411,6 +425,52 @@ class Agent(Node):
 
         self.system_prompt_manager = AgentPromptManager(model_name=model_name, tool_description=self.tool_description)
         self.system_prompt_manager.setup_for_base_agent()
+
+    def _skills_should_init(self) -> bool:
+        """True if skills support should be initialized (enabled and source set)."""
+        return self.skills.enabled and self.skills.source is not None
+
+    def _init_skills(self) -> None:
+        """Add SkillsTool to self.tools so it is included in function-calling and structured-output schemas."""
+
+        source = self.skills.source
+        if source is None:
+            logger.warning("Skills config missing or invalid (source required); skipping skills init")
+            return
+        skills_tool = SkillsTool(skill_registry=source)
+        self.tools.append(skills_tool)
+        self._skills_tool_ids.append(skills_tool.id)
+
+    def _apply_skills_to_prompt(self) -> None:
+        """Set skills block and tool_description on the prompt manager after _init_prompt_blocks()."""
+        source = self.skills.source
+        if source is None:
+            return
+        metadata = self.skills.get_skills_metadata()
+        skills_summary = self._format_skills_summary(metadata)
+        self.system_prompt_manager.set_block("skills", skills_summary)
+        self.system_prompt_manager.set_initial_variable("tool_description", self.tool_description)
+        logger.info(
+            f"Agent {self.name} - {self.id}: initialized with {len(metadata)} skills "
+            f"(source={source.__class__.__name__})"
+        )
+
+    def _format_skills_summary(self, metadata: list[SkillMetadata]) -> str:
+        """Format skills summary for prompt.
+
+        Args:
+            metadata: List of SkillMetadata objects.
+
+        Returns:
+            Formatted string with skill information.
+        """
+        if not metadata:
+            return ""
+
+        lines = []
+        for skill in metadata:
+            lines.append(f"- **{skill.name}**: {skill.description}")
+        return "\n".join(lines)
 
     def set_block(self, block_name: str, content: str):
         """Adds or updates a prompt block."""
