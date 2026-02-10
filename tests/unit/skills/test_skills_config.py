@@ -49,7 +49,7 @@ def test_skills_config_source_malformed_type_raises():
                 "source": {
                     "type": "FileSystem",
                     "base_path": "/tmp",
-                    "allowed_skills": [],
+                    "skills": [],
                 },
             }
         )
@@ -64,7 +64,7 @@ def test_skills_config_source_resolved_from_dict_dynamiq():
             "source": {
                 "type": "dynamiq.skills.registries.Dynamiq",
                 "connection": conn,
-                "allowed_skills": [
+                "skills": [
                     {"id": "sid", "version_id": "vid", "name": "foo", "description": "Foo skill"},
                 ],
             },
@@ -74,8 +74,8 @@ def test_skills_config_source_resolved_from_dict_dynamiq():
     assert cfg.source is not None
     assert isinstance(cfg.source, Dynamiq)
     assert cfg.source.connection is conn
-    assert len(cfg.source.allowed_skills) == 1
-    assert cfg.source.allowed_skills[0].name == "foo"
+    assert len(cfg.source.skills) == 1
+    assert cfg.source.skills[0].name == "foo"
     metadata = cfg.get_skills_metadata()
     assert len(metadata) == 1
     assert metadata[0].name == "foo"
@@ -90,7 +90,7 @@ def test_skills_config_source_resolved_from_dict_filesystem():
             "source": {
                 "type": "dynamiq.skills.registries.FileSystem",
                 "base_path": "~/.dynamiq/skills",
-                "allowed_skills": [
+                "skills": [
                     {"name": "fs-skill", "description": "Filesystem skill"},
                 ],
             },
@@ -100,8 +100,8 @@ def test_skills_config_source_resolved_from_dict_filesystem():
     assert cfg.source is not None
     assert isinstance(cfg.source, FileSystem)
     assert cfg.source.base_path == "~/.dynamiq/skills"
-    assert len(cfg.source.allowed_skills) == 1
-    assert cfg.source.allowed_skills[0].name == "fs-skill"
+    assert len(cfg.source.skills) == 1
+    assert cfg.source.skills[0].name == "fs-skill"
     metadata = cfg.get_skills_metadata()
     assert len(metadata) == 1
     assert metadata[0].name == "fs-skill"
@@ -110,6 +110,6 @@ def test_skills_config_source_resolved_from_dict_filesystem():
 
 def test_skills_config_source_instance_unchanged():
     """When source is already a BaseSkillRegistry instance, it is not re-resolved."""
-    registry = FileSystem(base_path="/tmp/skills", allowed_skills=[])
+    registry = FileSystem(base_path="/tmp/skills", skills=[])
     cfg = SkillsConfig(enabled=True, source=registry)
     assert cfg.source is registry

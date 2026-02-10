@@ -18,7 +18,7 @@ nodes:
       source:
         type: dynamiq.skills.registries.FileSystem
         base_path: ".skills"
-        allowed_skills:
+        skills:
           - name: humanizer
             description: Remove signs of AI-generated writing from text. Use when editing or reviewing text to make it sound more natural and human-written.
     max_loops: 10

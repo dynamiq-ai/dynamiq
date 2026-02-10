@@ -16,9 +16,9 @@ class BaseSkillRegistry(ABC, BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    allowed_skills: list[Any] = Field(
+    skills: list[Any] = Field(
         default_factory=list,
-        description="Allowed skills for this registry.",
+        description="Skills available in this registry.",
     )
 
     @computed_field

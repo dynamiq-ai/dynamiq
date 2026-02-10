@@ -16,10 +16,10 @@ class TestFileSystemRegistry:
     """Tests for FileSystem skill registry."""
 
     def test_get_skills_metadata(self):
-        """FileSystem.get_skills_metadata returns metadata from allowed_skills."""
+        """FileSystem.get_skills_metadata returns metadata from skills."""
         registry = FileSystem(
             base_path="/nonexistent",
-            allowed_skills=[
+            skills=[
                 FileSystemSkillEntry(name="a", description="A"),
                 FileSystemSkillEntry(name="b", description=None),
             ],
@@ -34,9 +34,7 @@ class TestFileSystemRegistry:
     def test_get_skill_instructions_not_found_raises(self):
         """FileSystem.get_skill_instructions raises when skill path does not exist."""
         with tempfile.TemporaryDirectory() as tmp:
-            registry = FileSystem(
-                base_path=tmp, allowed_skills=[FileSystemSkillEntry(name="missing", description=None)]
-            )
+            registry = FileSystem(base_path=tmp, skills=[FileSystemSkillEntry(name="missing", description=None)])
             with pytest.raises(SkillRegistryError, match="not found"):
                 registry.get_skill_instructions("missing")
 
@@ -48,7 +46,7 @@ class TestFileSystemRegistry:
             (skill_dir / "SKILL.md").mkdir()
             registry = FileSystem(
                 base_path=tmp,
-                allowed_skills=[FileSystemSkillEntry(name="my-skill", description="My skill")],
+                skills=[FileSystemSkillEntry(name="my-skill", description="My skill")],
             )
             with pytest.raises(SkillRegistryError, match="not found|not a file"):
                 registry.get_skill_instructions("my-skill")
@@ -61,24 +59,24 @@ class TestFileSystemRegistry:
             (skill_dir / "SKILL.md").write_text("# My Skill\n\nDo something.", encoding="utf-8")
             registry = FileSystem(
                 base_path=tmp,
-                allowed_skills=[FileSystemSkillEntry(name="my-skill", description="My skill")],
+                skills=[FileSystemSkillEntry(name="my-skill", description="My skill")],
             )
             instructions = registry.get_skill_instructions("my-skill")
             assert instructions.name == "my-skill"
             assert instructions.description == "My skill"
             assert instructions.instructions == "# My Skill\n\nDo something."
 
-    def test_get_skill_instructions_not_in_allowed_skills_raises(self):
-        """FileSystem.get_skill_instructions raises when skill name not in allowed_skills."""
+    def test_get_skill_instructions_not_in_skills_raises(self):
+        """FileSystem.get_skill_instructions raises when skill name not in skills."""
         with tempfile.TemporaryDirectory() as tmp:
             skill_dir = Path(tmp) / "other-skill"
             skill_dir.mkdir()
             (skill_dir / "SKILL.md").write_text("content", encoding="utf-8")
             registry = FileSystem(
                 base_path=tmp,
-                allowed_skills=[FileSystemSkillEntry(name="my-skill", description=None)],
+                skills=[FileSystemSkillEntry(name="my-skill", description=None)],
             )
-            with pytest.raises(SkillRegistryError, match="not in allowed skills"):
+            with pytest.raises(SkillRegistryError, match="not in skills"):
                 registry.get_skill_instructions("other-skill")
 
     def test_get_skill_instructions_path_traversal_raises(self):
@@ -87,14 +85,14 @@ class TestFileSystemRegistry:
             for invalid_name in ("../other", "foo/bar", "..", "a\\b"):
                 registry = FileSystem(
                     base_path=tmp,
-                    allowed_skills=[FileSystemSkillEntry(name=invalid_name, description=None)],
+                    skills=[FileSystemSkillEntry(name=invalid_name, description=None)],
                 )
                 with pytest.raises(SkillRegistryError, match="Invalid skill name|outside base"):
                     registry.get_skill_instructions(invalid_name)
 
     def test_type_computed_field(self):
         """FileSystem registry has type computed field with module and class name."""
-        registry = FileSystem(base_path="/tmp", allowed_skills=[])
+        registry = FileSystem(base_path="/tmp", skills=[])
         assert "FileSystem" in registry.type
         assert "dynamiq.skills.registries" in registry.type
 
@@ -103,11 +101,11 @@ class TestDynamiqRegistry:
     """Tests for Dynamiq skill registry."""
 
     def test_get_skills_metadata(self):
-        """Dynamiq.get_skills_metadata returns metadata from allowed_skills."""
+        """Dynamiq.get_skills_metadata returns metadata from skills."""
         conn = MagicMock()
         registry = Dynamiq.model_construct(
             connection=conn,
-            allowed_skills=[
+            skills=[
                 DynamiqSkillEntry(
                     id="i1",
                     version_id="v1",
@@ -121,11 +119,11 @@ class TestDynamiqRegistry:
         assert metadata[0].name == "skill1"
         assert metadata[0].description == "First"
 
-    def test_get_skill_instructions_not_in_allowed_skills_raises(self):
-        """Dynamiq.get_skill_instructions raises when skill name not in allowed_skills."""
+    def test_get_skill_instructions_not_in_skills_raises(self):
+        """Dynamiq.get_skill_instructions raises when skill name not in skills."""
         conn = MagicMock()
-        registry = Dynamiq.model_construct(connection=conn, allowed_skills=[])
-        with pytest.raises(SkillRegistryError, match="not in allowed skills"):
+        registry = Dynamiq.model_construct(connection=conn, skills=[])
+        with pytest.raises(SkillRegistryError, match="not in skills"):
             registry.get_skill_instructions("unknown")
 
     def test_get_skill_instructions_success(self):
@@ -143,7 +141,7 @@ class TestDynamiqRegistry:
 
         registry = Dynamiq.model_construct(
             connection=conn,
-            allowed_skills=[
+            skills=[
                 DynamiqSkillEntry(
                     id="skill-id",
                     version_id="ver-id",
@@ -178,7 +176,7 @@ class TestDynamiqRegistry:
 
         registry = Dynamiq.model_construct(
             connection=conn,
-            allowed_skills=[
+            skills=[
                 DynamiqSkillEntry(
                     id="skill-json",
                     version_id="ver-id",
@@ -207,7 +205,7 @@ class TestDynamiqRegistry:
 
         registry = Dynamiq.model_construct(
             connection=conn,
-            allowed_skills=[
+            skills=[
                 DynamiqSkillEntry(
                     id="skill-by-id",
                     version_id="ver-id",

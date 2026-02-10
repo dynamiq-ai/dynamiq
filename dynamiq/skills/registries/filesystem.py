@@ -28,11 +28,11 @@ class FileSystem(BaseSkillRegistry):
         default="SKILL.md",
         description="Filename for skill instructions within each skill directory.",
     )
-    allowed_skills: list[FileSystemSkillEntry] = Field(default_factory=list)
+    skills: list[FileSystemSkillEntry] = Field(default_factory=list)
 
     def get_skills_metadata(self) -> list[SkillMetadata]:
         metadata: list[SkillMetadata] = []
-        for entry in self.allowed_skills:
+        for entry in self.skills:
             metadata.append(SkillMetadata(name=entry.name, description=entry.description))
         return metadata
 
@@ -52,10 +52,10 @@ class FileSystem(BaseSkillRegistry):
         )
 
     def _get_entry_by_name(self, name: str) -> FileSystemSkillEntry:
-        for entry in self.allowed_skills:
+        for entry in self.skills:
             if entry.name == name:
                 return entry
-        raise SkillRegistryError("Skill not in allowed skills.", details={"name": name})
+        raise SkillRegistryError("Skill not in skills.", details={"name": name})
 
     def _resolve_skill_path(self, skill_name: str) -> Path:
         if "/" in skill_name or "\\" in skill_name or ".." in skill_name:
