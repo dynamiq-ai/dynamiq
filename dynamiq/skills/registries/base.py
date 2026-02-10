@@ -1,7 +1,5 @@
 """Base skill registry interface."""
 
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from functools import cached_property
 from typing import Any
