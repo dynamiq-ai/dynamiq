@@ -12,6 +12,7 @@ from dynamiq.nodes.node import ConnectionNode, NodeDependency
 from dynamiq.prompts import Prompt
 from dynamiq.serializers.types import RequirementData, WorkflowYamlData
 from dynamiq.utils import generate_uuid
+from dynamiq.utils.jsonpath import filter as jsonpath_filter
 from dynamiq.utils.logger import logger
 
 
@@ -106,6 +107,71 @@ class WorkflowYAMLLoader:
         """
         cls._apply_requirements_to_dict(data, resolved_requirements)
 
+    @staticmethod
+    def _apply_value_path(resolved_value: Any, value_path: str, requirement_id: str) -> Any:
+        """Apply JSONPath expression to resolved requirement value to extract a single field.
+
+        Args:
+            resolved_value: The full resolved value from the external API.
+            value_path: JSONPath expression (e.g., "$.account_id").
+            requirement_id: Requirement $id for error messages.
+
+        Returns:
+            Single extracted value after applying the JSONPath.
+
+        Raises:
+            WorkflowYAMLLoaderException: If value_path doesn't match, matches multiple values,
+                or resolved_value is not a dict/list.
+        """
+        if not isinstance(resolved_value, (dict, list)):
+            raise WorkflowYAMLLoaderException(
+                f"Cannot apply value_path '{value_path}' to requirement '{requirement_id}': "
+                f"resolved value must be a dict or list, got {type(resolved_value).__name__}"
+            )
+
+        result = jsonpath_filter(resolved_value, value_path)
+        if result is None:
+            raise WorkflowYAMLLoaderException(
+                f"value_path '{value_path}' did not match any value in resolved requirement '{requirement_id}'"
+            )
+        if isinstance(result, list):
+            raise WorkflowYAMLLoaderException(
+                f"value_path '{value_path}' matched multiple values in resolved requirement '{requirement_id}'. "
+                f"Expected a single value, got {len(result)} matches."
+            )
+        return result
+
+    @classmethod
+    def _resolve_requirement_value(
+        cls,
+        requirement: RequirementData,
+        resolved_requirements: dict[str, Any],
+    ) -> Any:
+        """Look up and optionally apply value_path to a resolved requirement.
+
+        Args:
+            requirement: Parsed requirement with id and optional value_path.
+            resolved_requirements: Mapping of $id to resolved data.
+
+        Returns:
+            Final resolved value (with value_path applied if specified).
+
+        Raises:
+            WorkflowYAMLLoaderException: If $id is missing or value_path extraction fails.
+        """
+        if requirement.id not in resolved_requirements:
+            raise WorkflowYAMLLoaderException(
+                f"Cannot resolve $id '{requirement.id}': not found in resolved_requirements. "
+                f"Use get_requirements() to get requirements and resolve them before parsing."
+            )
+
+        resolved_value = resolved_requirements[requirement.id]
+
+        if requirement.value_path:
+            resolved_value = cls._apply_value_path(resolved_value, requirement.value_path, requirement.id)
+
+        return resolved_value
+
     @classmethod
     def _apply_requirements_to_dict(
         cls,
@@ -115,7 +181,8 @@ class WorkflowYAMLLoader:
         """Recursively apply requirements to a dictionary and its nested structures.
 
         When a requirement dict is found (has both $type and $id), it is completely
-        replaced with the resolved data at the parent level.
+        replaced with the resolved data at the parent level. If the requirement
+        specifies a value_path, the JSONPath is applied to extract a specific value.
         """
         for key, value in list(data.items()):
             # Skip fields that use 'type'/'object' keywords for different purposes (JSON Schema, prompts)
@@ -124,12 +191,7 @@ class WorkflowYAMLLoader:
 
             if isinstance(value, dict):
                 if requirement := RequirementData.from_dict(value):
-                    if requirement.id not in resolved_requirements:
-                        raise WorkflowYAMLLoaderException(
-                            f"Cannot resolve $id '{requirement.id}': not found in resolved_requirements. "
-                            f"Use get_requirements() to get requirements and resolve them before parsing."
-                        )
-                    data[key] = resolved_requirements[requirement.id]
+                    data[key] = cls._resolve_requirement_value(requirement, resolved_requirements)
                 else:
                     cls._apply_requirements_to_dict(value, resolved_requirements)
             elif isinstance(value, list):
@@ -145,12 +207,7 @@ class WorkflowYAMLLoader:
         for i, item in enumerate(items):
             if isinstance(item, dict):
                 if requirement := RequirementData.from_dict(item):
-                    if requirement.id not in resolved_requirements:
-                        raise WorkflowYAMLLoaderException(
-                            f"Cannot resolve $id '{requirement.id}': not found in resolved_requirements. "
-                            f"Use get_requirements() to get requirements and resolve them before parsing."
-                        )
-                    items[i] = resolved_requirements[requirement.id]
+                    items[i] = cls._resolve_requirement_value(requirement, resolved_requirements)
                 else:
                     cls._apply_requirements_to_dict(item, resolved_requirements)
             elif isinstance(item, list):

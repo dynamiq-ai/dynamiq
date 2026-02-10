@@ -22,6 +22,20 @@ REQ_OTHER = "other"
 API_KEY = "test-api-key"
 MODEL_GPT = "gpt-4o"
 
+# value_path test constants
+EXTERNAL_USER_ID = "user-abc-123"
+ACCOUNT_ID = "acc-456"
+SECRET_TOKEN = "secret-token-123"
+REFRESH_TOKEN = "refresh-xyz"
+EXTRACTED_NAME = "extracted-name"
+CONN_ID_RESOLVED = "conn-id-123"
+
+VP_EXTERNAL_USER_ID = "$.external_user_id"
+VP_ACCOUNT_ID = "$.account_id"
+VP_CREDENTIALS_TOKEN = "$.credentials.token"
+
+RESOLVED_USER_REQUIREMENT = {"external_user_id": EXTERNAL_USER_ID, "account_id": ACCOUNT_ID}
+
 
 @pytest.fixture
 def single_requirement_data():
@@ -179,7 +193,7 @@ def test_requirement_data_from_dict_returns_none_for_empty():
 
 def test_apply_resolved_replaces_requirement_dict(single_requirement_data):
     """Verify that requirement dict is completely replaced with resolved data."""
-    resolved_data = {"type": OPENAI_CONN, "api_key": API_KEY, "id": "conn-id-123"}
+    resolved_data = {"type": OPENAI_CONN, "api_key": API_KEY, "id": CONN_ID_RESOLVED}
     WorkflowYAMLLoader.apply_resolved_requirements(single_requirement_data, {REQ_1: resolved_data})
 
     connection = single_requirement_data["nodes"][NODE_1]["connection"]
@@ -360,3 +374,158 @@ def test_apply_resolved_in_list_raises_on_missing():
         WorkflowYAMLLoader.apply_resolved_requirements(data, {})
 
     assert REQ_MISSING in str(exc_info.value)
+
+
+# --- value_path tests ---
+
+
+def test_requirement_data_with_value_path():
+    """Verify RequirementData captures value_path when present."""
+    req = RequirementData.model_validate({"$type": "requirement", "$id": REQ_1, "value_path": VP_ACCOUNT_ID})
+
+    assert req.type == "requirement"
+    assert req.id == REQ_1
+    assert req.value_path == VP_ACCOUNT_ID
+
+
+def test_requirement_data_without_value_path():
+    """Verify RequirementData defaults value_path to None when absent."""
+    req = RequirementData.model_validate({"$type": "connection", "$id": REQ_1})
+
+    assert req.value_path is None
+
+
+def test_get_requirements_extracts_value_path():
+    """Verify get_requirements captures value_path from requirement dicts."""
+    data = {
+        "nodes": {
+            NODE_1: {
+                "external_user_id": {"$type": "requirement", "$id": REQ_1, "value_path": VP_EXTERNAL_USER_ID},
+            }
+        }
+    }
+    requirements = WorkflowYAMLLoader.get_requirements(data)
+
+    assert len(requirements) == 1
+    assert requirements[0].id == REQ_1
+    assert requirements[0].value_path == VP_EXTERNAL_USER_ID
+
+
+def test_apply_resolved_with_value_path_extracts_field():
+    """Verify value_path extracts a specific field from the resolved dict."""
+    data = {
+        "nodes": {
+            NODE_1: {
+                "external_user_id": {"$type": "requirement", "$id": REQ_1, "value_path": VP_EXTERNAL_USER_ID},
+            }
+        }
+    }
+
+    WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: RESOLVED_USER_REQUIREMENT})
+
+    assert data["nodes"][NODE_1]["external_user_id"] == EXTERNAL_USER_ID
+
+
+def test_apply_resolved_with_value_path_nested_field():
+    """Verify value_path works with nested JSON paths."""
+    data = {
+        "nodes": {
+            NODE_1: {
+                "token": {"$type": "requirement", "$id": REQ_1, "value_path": VP_CREDENTIALS_TOKEN},
+            }
+        }
+    }
+    resolved_value = {"credentials": {"token": SECRET_TOKEN, "refresh_token": REFRESH_TOKEN}}
+
+    WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: resolved_value})
+
+    assert data["nodes"][NODE_1]["token"] == SECRET_TOKEN
+
+
+def test_apply_resolved_same_id_different_value_paths():
+    """Verify same $id with different value_paths extracts different values."""
+    data = {
+        "nodes": {
+            NODE_1: {
+                "external_user_id": {"$type": "requirement", "$id": REQ_1, "value_path": VP_EXTERNAL_USER_ID},
+                "configurable_props": {
+                    "auth_provision_id": {"$type": "requirement", "$id": REQ_1, "value_path": VP_ACCOUNT_ID},
+                },
+            }
+        }
+    }
+
+    WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: RESOLVED_USER_REQUIREMENT})
+
+    assert data["nodes"][NODE_1]["external_user_id"] == EXTERNAL_USER_ID
+    assert data["nodes"][NODE_1]["configurable_props"]["auth_provision_id"] == ACCOUNT_ID
+
+
+def test_apply_resolved_value_path_no_match_raises():
+    """Verify value_path that doesn't match raises exception."""
+    data = {
+        "nodes": {
+            NODE_1: {
+                "field": {"$type": "requirement", "$id": REQ_1, "value_path": "$.nonexistent"},
+            }
+        }
+    }
+
+    with pytest.raises(WorkflowYAMLLoaderException, match="value_path"):
+        WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: {"other_field": "value"}})
+
+
+def test_apply_resolved_value_path_on_non_dict_raises():
+    """Verify value_path on a non-dict/list resolved value raises exception."""
+    data = {
+        "nodes": {
+            NODE_1: {
+                "field": {"$type": "requirement", "$id": REQ_1, "value_path": "$.key"},
+            }
+        }
+    }
+
+    with pytest.raises(WorkflowYAMLLoaderException, match="must be a dict or list"):
+        WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: "plain-string"})
+
+
+def test_apply_resolved_value_path_multiple_matches_raises():
+    """Verify value_path that matches multiple values raises exception."""
+    data = {
+        "nodes": {
+            NODE_1: {
+                "field": {"$type": "requirement", "$id": REQ_1, "value_path": "$.items[*].id"},
+            }
+        }
+    }
+    resolved_value = {"items": [{"id": "a"}, {"id": "b"}, {"id": "c"}]}
+
+    with pytest.raises(WorkflowYAMLLoaderException, match="matched multiple values"):
+        WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: resolved_value})
+
+
+def test_apply_resolved_value_path_in_list():
+    """Verify value_path works for requirements inside lists."""
+    data = {"items": [{"$type": "requirement", "$id": REQ_1, "value_path": "$.name"}]}
+
+    WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: {"name": EXTRACTED_NAME, "age": 30}})
+
+    assert data["items"] == [EXTRACTED_NAME]
+
+
+def test_apply_resolved_mixed_with_and_without_value_path():
+    """Verify requirements with and without value_path coexist correctly."""
+    data = {
+        "nodes": {
+            NODE_1: {
+                "connection": {"$type": "connection", "$id": REQ_1},
+                "user_id": {"$type": "requirement", "$id": REQ_2, "value_path": VP_EXTERNAL_USER_ID},
+            }
+        }
+    }
+    resolved_connection = {"type": OPENAI_CONN, "api_key": API_KEY, "id": CONN_ID_RESOLVED}
+
+    WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: resolved_connection, REQ_2: RESOLVED_USER_REQUIREMENT})
+
+    assert data["nodes"][NODE_1]["connection"] == resolved_connection
+    assert data["nodes"][NODE_1]["user_id"] == EXTERNAL_USER_ID
