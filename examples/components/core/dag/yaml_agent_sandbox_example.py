@@ -20,7 +20,7 @@ from dynamiq.utils.logger import logger
 INPUT_DATA = "List files in the current directory and show system information using shell commands."
 
 
-def run_yaml_sandbox_agent_example():
+def run_workflow():
     """
     Run the agent example using YAML configuration with E2B sandbox.
 
@@ -70,9 +70,4 @@ if __name__ == "__main__":
     print("The agent uses E2B sandbox for executing shell commands.")
     print()
 
-    try:
-        wf, traces = run_yaml_sandbox_agent_example()
-        print(f"\nWorkflow {wf.id} completed successfully!")
-        print(f"Generated {len(traces)} traces for graph visualization.")
-    except Exception as e:
-        print(f"Error: {e}")
+    run_workflow()
