@@ -1,7 +1,9 @@
 """Sandbox file tools for reading, writing, and listing files."""
 
+import json
 import logging
 from enum import Enum
+from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,6 +15,12 @@ from dynamiq.runnables import RunnableConfig
 from dynamiq.sandboxes.base import Sandbox
 
 logger = logging.getLogger(__name__)
+
+# Path where the helper script is uploaded in the sandbox
+_HELPER_SCRIPT_PATH = "/home/user/.dynamiq/sys_tools/_file_helper.py"
+
+# Load the helper script content from the adjacent file
+_HELPER_SCRIPT = (Path(__file__).parent / "_file_helper.py").read_text()
 
 
 class SandboxFileAction(str, Enum):
@@ -48,9 +56,9 @@ class SandboxFilesInputSchema(BaseModel):
 class SandboxFilesTool(Node):
     """A tool for reading, writing, and listing files in a sandbox environment.
 
-    This tool delegates file operations to the sandbox backend,
-    allowing the sandbox to determine how files are managed
-    (e.g., locally, in a container, or in a remote E2B environment).
+    This tool uploads a Python helper script to the sandbox on first use,
+    then delegates file operations to it via shell commands. This avoids
+    direct use of sandbox file APIs and handles content safely via stdin.
 
     Attributes:
         sandbox: The sandbox backend to perform file operations in.
@@ -81,6 +89,7 @@ class SandboxFilesTool(Node):
     )
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[SandboxFilesInputSchema]] = SandboxFilesInputSchema
+    _helper_uploaded: bool = False
 
     @property
     def to_dict_exclude_params(self):
@@ -92,6 +101,44 @@ class SandboxFilesTool(Node):
         data = super().to_dict(for_tracing=for_tracing, **kwargs)
         data["sandbox"] = self.sandbox.to_dict(for_tracing=for_tracing, **kwargs) if self.sandbox else None
         return data
+
+    def _ensure_helper(self) -> None:
+        """Upload the Python helper script to the sandbox if not already done."""
+        if self._helper_uploaded:
+            return
+
+        # Create directory and upload helper via heredoc (avoids file API)
+        self.sandbox.run_command_shell(f"mkdir -p $(dirname {_HELPER_SCRIPT_PATH})")
+        command = f"cat << 'DYNAMIQ_HELPER_EOF' > {_HELPER_SCRIPT_PATH}\n{_HELPER_SCRIPT}DYNAMIQ_HELPER_EOF"
+        result = self.sandbox.run_command_shell(command)
+        if result.exit_code and result.exit_code != 0:
+            raise ToolExecutionException(
+                f"Failed to upload file helper script: {result.stderr}",
+                recoverable=False,
+            )
+        # Make the helper script read-only to prevent agent from modifying it
+        self.sandbox.run_command_shell(f"chmod 444 {_HELPER_SCRIPT_PATH}")
+        self._helper_uploaded = True
+        logger.debug(f"Tool {self.name} - {self.id}: helper script uploaded to {_HELPER_SCRIPT_PATH}")
+
+    def _run_helper(self, command: str) -> dict[str, Any]:
+        """Run the helper script and parse JSON output."""
+        self._ensure_helper()
+        result = self.sandbox.run_command_shell(command)
+
+        if result.exit_code and result.exit_code != 0:
+            raise ToolExecutionException(
+                f"Helper script failed: {result.stderr}",
+                recoverable=True,
+            )
+
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError:
+            raise ToolExecutionException(
+                f"Invalid helper output: {result.stdout[:200]}",
+                recoverable=True,
+            )
 
     def _validate_path(self, path: str) -> None:
         """Validate path against blocked list."""
@@ -149,37 +196,49 @@ class SandboxFilesTool(Node):
             )
 
     def _execute_read(self, path: str) -> dict[str, Any]:
-        """Read file content from sandbox."""
-        content_bytes = self.sandbox.read_file(path)
-        try:
-            content = content_bytes.decode("utf-8")
-        except UnicodeDecodeError:
-            content = f"(binary file, {len(content_bytes)} bytes)"
+        """Read file content from sandbox via helper script."""
+        data = self._run_helper(f"python3 {_HELPER_SCRIPT_PATH} read {path}")
 
-        logger.info(f"Tool {self.name} - {self.id}: read {len(content_bytes)} bytes from {path}")
+        if not data.get("ok"):
+            raise ToolExecutionException(
+                f"Failed to read file '{path}': {data.get('error', 'unknown error')}",
+                recoverable=True,
+            )
+
+        logger.info(f"Tool {self.name} - {self.id}: read {data['size']} chars from {path}")
         return {
-            "content": content,
+            "content": data["content"],
             "path": path,
-            "size": len(content_bytes),
+            "size": data["size"],
             "action": "read",
         }
 
     def _execute_write(self, path: str, content: str | None) -> dict[str, Any]:
-        """Write content to a file in sandbox."""
+        """Write content to a file in sandbox via helper script.
+
+        Content is passed via stdin to avoid shell escaping issues.
+        """
         if content is None:
             raise ToolExecutionException(
                 "Content is required for 'write' action.",
                 recoverable=True,
             )
 
-        content_bytes = content.encode("utf-8")
-        written_path = self.sandbox.write_file(path, content_bytes)
+        # Pipe content via heredoc to stdin of the helper script
+        command = f"cat << 'DYNAMIQ_EOF' | python3 {_HELPER_SCRIPT_PATH} write {path}\n" f"{content}\n" f"DYNAMIQ_EOF"
+        data = self._run_helper(command)
 
-        logger.info(f"Tool {self.name} - {self.id}: wrote {len(content_bytes)} bytes to {written_path}")
+        if not data.get("ok"):
+            raise ToolExecutionException(
+                f"Failed to write file '{path}': {data.get('error', 'unknown error')}",
+                recoverable=True,
+            )
+
+        logger.info(f"Tool {self.name} - {self.id}: wrote {data['size']} chars to {path}")
         return {
-            "content": f"File written successfully to {written_path} ({len(content_bytes)} bytes)",
-            "path": written_path,
-            "size": len(content_bytes),
+            "content": f"File written successfully to {path} ({data['size']} bytes)",
+            "path": path,
+            "size": data["size"],
             "action": "write",
         }
 
