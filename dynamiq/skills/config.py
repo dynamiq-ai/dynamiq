@@ -32,10 +32,9 @@ class SkillsConfig(BaseModel):
             if not registry_type:
                 return v
             if "." not in registry_type:
-                raise SkillRegistryError(
+                raise ValueError(
                     "Registry type must be a fully qualified class name"
-                    " (e.g. dynamiq.skills.registries.filesystem.FileSystem).",
-                    details={"type": registry_type},
+                    " (e.g. dynamiq.skills.registries.filesystem.FileSystem)."
                 )
             module_name, class_name = registry_type.rsplit(".", 1)
             module = importlib.import_module(module_name)
@@ -47,7 +46,7 @@ class SkillsConfig(BaseModel):
     @model_validator(mode="after")
     def validate_enabled_source(self) -> SkillsConfig:
         if self.enabled and self.source is None:
-            raise SkillRegistryError("Skills are enabled but no source registry is configured.")
+            raise ValueError("Skills are enabled but no source registry is configured.")
         return self
 
     def get_skills_metadata(self) -> list[SkillMetadata]:

@@ -1,6 +1,7 @@
 """Unit tests for SkillsConfig (source-based: Dynamiq and FileSystem registries)."""
 
 import pytest
+from pydantic import ValidationError
 
 from dynamiq.connections import Dynamiq as DynamiqConnection
 from dynamiq.skills.config import SkillsConfig
@@ -16,8 +17,8 @@ def test_skills_config_defaults():
 
 
 def test_skills_config_enabled_without_source_raises():
-    """SkillsConfig raises when enabled=True and source is None."""
-    with pytest.raises(SkillRegistryError, match="enabled but no source"):
+    """SkillsConfig raises ValidationError when enabled=True and source is None."""
+    with pytest.raises(ValidationError, match="enabled but no source"):
         SkillsConfig(enabled=True, source=None)
 
 
@@ -41,8 +42,8 @@ def test_skills_config_get_skill_instructions_disabled_raises():
 
 
 def test_skills_config_source_malformed_type_raises():
-    """SkillsConfig raises when source type string has no module path (no dot)."""
-    with pytest.raises(SkillRegistryError, match="fully qualified class name"):
+    """SkillsConfig raises ValidationError when source type string has no module path (no dot)."""
+    with pytest.raises(ValidationError, match="fully qualified class name"):
         SkillsConfig.model_validate(
             {
                 "enabled": True,
