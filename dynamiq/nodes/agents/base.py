@@ -393,6 +393,8 @@ class Agent(Node):
             data["images"] = [{"name": getattr(f, "name", f"image_{i}")} for i, f in enumerate(self.images)]
 
         data["file_store"] = self.file_store.to_dict(**kwargs) if self.file_store else None
+        data["sandbox"] = self.sandbox.to_dict(**kwargs) if self.sandbox else None
+        data["skills"] = self.skills.to_dict(**kwargs)
 
         return data
 
