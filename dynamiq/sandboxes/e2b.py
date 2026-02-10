@@ -1,7 +1,5 @@
 """E2B sandbox implementation."""
 
-from typing import ClassVar
-
 from e2b.exceptions import RateLimitException as E2BRateLimitException
 from e2b_desktop import Sandbox as E2BDesktopSandbox
 from pydantic import ConfigDict, Field, PrivateAttr
@@ -10,7 +8,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from dynamiq.connections import E2B
 from dynamiq.nodes import Node
 from dynamiq.nodes.tools.e2b_sandbox import SandboxCreationErrorHandling
-from dynamiq.sandboxes.base import Sandbox, SandboxTool, ShellCommandResult
+from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
 from dynamiq.sandboxes.exceptions import SandboxConnectionError
 from dynamiq.utils.logger import logger
 
@@ -23,15 +21,6 @@ class E2BSandbox(Sandbox):
 
     Supports reconnecting to existing sandboxes by providing sandbox_id.
     """
-
-    # Registry mapping tool types to (tool_class_path, config_keys)
-    # Each sandbox implementation can define its own supported tools
-    TOOL_REGISTRY: ClassVar[dict[SandboxTool, tuple[str, list[str]]]] = {
-        SandboxTool.SHELL: (
-            "dynamiq.sandboxes.tools.shell.SandboxShellTool",
-            ["blocked_commands"],
-        ),
-    }
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     connection: E2B
@@ -203,28 +192,11 @@ class E2BSandbox(Sandbox):
         Returns:
             List of tool instances (Node objects).
         """
-        from dynamiq.nodes.managers import NodeManager
+        from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
-        result = []
-        for tool_type, (tool_class_path, config_keys) in self.TOOL_REGISTRY.items():
-            tool_config = self.tools.get(tool_type, {})
-            # Tools are enabled by default unless explicitly disabled
-            if not tool_config.get("enabled", True):
-                continue
+        return [SandboxShellTool(sandbox=self)]
 
-            # Build tool kwargs from config
-            tool_kwargs = {"sandbox": self}
-            for key in config_keys:
-                if key in tool_config:
-                    tool_kwargs[key] = tool_config[key]
-
-            # Get tool class from NodeManager and instantiate
-            tool_class = NodeManager.get_node_by_type(tool_class_path)
-            result.append(tool_class(**tool_kwargs))
-
-        return result
-
-    def close(self, kill: bool = True) -> None:
+    def close(self, kill: bool = False) -> None:
         """Close the E2B sandbox connection.
 
         Args:

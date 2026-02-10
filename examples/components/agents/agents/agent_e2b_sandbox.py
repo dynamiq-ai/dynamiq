@@ -128,7 +128,7 @@ def run_workflow(
     finally:
         if sandbox:
             try:
-                sandbox.close()
+                sandbox.close(kill=True)
                 print("\nE2B sandbox closed successfully.")
             except Exception as e:
                 logger.warning(f"Failed to close E2B sandbox: {e}")

@@ -515,65 +515,19 @@ class Agent(Node):
         files = input_data.files
         uploaded_file_names: set[str] = set()
         if files:
-            # Create file store before _ensure_named_files in non-sandbox mode so uploaded
-            # files are stored and file tools (FileReadTool, etc.) can access them.
-            if not self.sandbox_backend and not self.file_store_backend:
-                self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
-                self.tools.extend(
-                    [
-                        FileReadTool(file_store=self.file_store_backend, llm=self.llm),
-                        FileSearchTool(file_store=self.file_store_backend),
-                        FileListTool(file_store=self.file_store_backend),
-                    ]
-                )
-                new_tool_description = self.tool_description
-                self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
-                if self.system_prompt_manager._prompt_blocks.get("tools") == "":
-                    from dynamiq.nodes.agents.agent import Agent
-
-                    if isinstance(self, Agent):
-                        self.system_prompt_manager.setup_for_react_agent(
-                            inference_mode=self.inference_mode,
-                            parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-                            has_tools=True,
-                            delegation_allowed=self.delegation_allowed,
-                            context_compaction_enabled=self.summarization_config.enabled,
-                            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
-                        )
-
             normalized_files = self._ensure_named_files(files)
             uploaded_file_names = {
                 getattr(f, "name", None)
                 for f in normalized_files
                 if hasattr(f, "name") and getattr(f, "name") is not None
             }
-
             if self.sandbox_backend:
-                # Upload files to sandbox
-                for file_obj in normalized_files:
-                    file_name = getattr(file_obj, "name", None)
-                    if file_name and hasattr(file_obj, "read"):
-                        try:
-                            # Read file content from start (BytesIO may have cursor at end)
-                            position = file_obj.tell() if hasattr(file_obj, "tell") else None
-                            if hasattr(file_obj, "seek"):
-                                file_obj.seek(0)
-                            content = file_obj.read()
-                            if isinstance(content, str):
-                                content = content.encode("utf-8")
-                            # Upload to sandbox
-                            self.sandbox_backend.upload_file(file_name, content)
-                            # Restore file position
-                            if position is not None and hasattr(file_obj, "seek"):
-                                file_obj.seek(position)
-                        except Exception as e:
-                            logger.warning(f"Failed to upload file {file_name} to sandbox: {e}")
-                # Inject file info into message so agent knows about uploaded files
-                input_message = self._inject_attached_files_into_message(input_message, normalized_files)
-
-            else:
-                # Use file store for non-sandbox mode (store already created above when files present)
-                input_message = self._inject_attached_files_into_message(input_message, normalized_files)
+                self._upload_files_to_sandbox(normalized_files)
+            elif not self.file_store_backend:
+                self._setup_in_memory_file_store_and_tools()
+            if self.file_store_backend:
+                self._upload_files_to_file_store(normalized_files)
+            input_message = self._inject_attached_files_into_message(input_message, normalized_files)
 
         if input_data.tool_params:
             kwargs["tool_params"] = input_data.tool_params
@@ -1016,48 +970,19 @@ class Agent(Node):
         return tool_result_content_processed, output_files
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
-        """Ensure all uploaded files have name and description attributes and store them in storage backend."""
+        """Ensure all uploaded files have name and description attributes."""
         named = []
         for i, f in enumerate(files):
             if isinstance(f, bytes):
                 bio = io.BytesIO(f)
                 bio.name = f"file_{i}.bin"
                 bio.description = "User-provided file"
-
-                if self.file_store_backend:
-                    try:
-                        self.file_store_backend.store(
-                            file_path=bio.name,
-                            content=f,
-                            content_type="application/octet-stream",
-                            metadata={"description": bio.description, "source": "user_upload"},
-                            overwrite=True,
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to store file {bio.name} in file store: {e}")
-
                 named.append(bio)
             elif isinstance(f, io.BytesIO):
                 if not hasattr(f, "name"):
                     f.name = f"file_{i}"
                 if not hasattr(f, "description"):
                     f.description = "User-provided file"
-
-                if self.file_store_backend:
-                    try:
-                        content = f.read()
-                        f.seek(0)
-
-                        self.file_store_backend.store(
-                            file_path=f.name,
-                            content=content,
-                            content_type="application/octet-stream",
-                            metadata={"description": f.description, "source": "user_upload"},
-                            overwrite=True,
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to store file {f.name} in file store: {e}")
-
                 named.append(f)
             else:
                 named.append(f)
@@ -1143,6 +1068,75 @@ class Agent(Node):
             if (not uploaded_names) or (base_name in uploaded_names):
                 return True
         return False
+
+    def _upload_files_to_sandbox(self, normalized_files: list) -> None:
+        """Upload file-like objects to the sandbox backend; preserves read position."""
+        for file_obj in normalized_files:
+            file_name = getattr(file_obj, "name", None)
+            if file_name and hasattr(file_obj, "read"):
+                try:
+                    position = file_obj.tell() if hasattr(file_obj, "tell") else None
+                    if hasattr(file_obj, "seek"):
+                        file_obj.seek(0)
+                    content = file_obj.read()
+                    if isinstance(content, str):
+                        content = content.encode("utf-8")
+                    self.sandbox_backend.upload_file(file_name, content)
+                    if position is not None and hasattr(file_obj, "seek"):
+                        file_obj.seek(position)
+                except Exception as e:
+                    logger.warning(f"Failed to upload file {file_name} to sandbox: {e}")
+
+    def _upload_files_to_file_store(self, normalized_files: list) -> None:
+        """Store file-like objects in the file store backend; preserves read position."""
+        for file_obj in normalized_files:
+            file_name = getattr(file_obj, "name", None)
+            if not file_name or not hasattr(file_obj, "read"):
+                continue
+            try:
+                position = file_obj.tell() if hasattr(file_obj, "tell") else None
+                if hasattr(file_obj, "seek"):
+                    file_obj.seek(0)
+                content = file_obj.read()
+                if isinstance(content, str):
+                    content = content.encode("utf-8")
+                if position is not None and hasattr(file_obj, "seek"):
+                    file_obj.seek(position)
+                description = getattr(file_obj, "description", "User-provided file")
+                self.file_store_backend.store(
+                    file_path=file_name,
+                    content=content,
+                    content_type="application/octet-stream",
+                    metadata={"description": description, "source": "user_upload"},
+                    overwrite=True,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to store file {file_name} in file store: {e}")
+
+    def _setup_in_memory_file_store_and_tools(self) -> None:
+        """Create in-memory file store and file tools when files are uploaded and no sandbox/file store exists."""
+        self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
+        self.tools.extend(
+            [
+                FileReadTool(file_store=self.file_store_backend, llm=self.llm),
+                FileSearchTool(file_store=self.file_store_backend),
+                FileListTool(file_store=self.file_store_backend),
+            ]
+        )
+        new_tool_description = self.tool_description
+        self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
+        if self.system_prompt_manager._prompt_blocks.get("tools") == "":
+            from dynamiq.nodes.agents.agent import Agent
+
+            if isinstance(self, Agent):
+                self.system_prompt_manager.setup_for_react_agent(
+                    inference_mode=self.inference_mode,
+                    parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
+                    has_tools=True,
+                    delegation_allowed=self.delegation_allowed,
+                    context_compaction_enabled=self.summarization_config.enabled,
+                    todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
+                )
 
     def _inject_attached_files_into_message(
         self, input_message: Message | VisionMessage, files: list[io.BytesIO]
