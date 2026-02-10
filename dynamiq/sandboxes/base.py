@@ -15,6 +15,7 @@ class SandboxTool(str, Enum):
     """Enum for sandbox tool types."""
 
     SHELL = "shell"
+    FILES = "files"
 
 
 class ShellCommandResult(BaseModel):
@@ -23,6 +24,15 @@ class ShellCommandResult(BaseModel):
     stdout: str
     stderr: str
     exit_code: int | None
+
+
+class FileEntry(BaseModel):
+    """Entry representing a file or directory in the sandbox."""
+
+    name: str
+    path: str
+    is_dir: bool = False
+    size: int | None = None
 
 
 class Sandbox(abc.ABC, BaseModel):
@@ -106,6 +116,58 @@ class Sandbox(abc.ABC, BaseModel):
             List of tool instances (Node objects).
         """
         ...
+
+    def read_file(self, path: str) -> bytes:
+        """Read a file from the sandbox.
+
+        Args:
+            path: Path of the file in the sandbox.
+
+        Returns:
+            File content as bytes.
+
+        Raises:
+            NotImplementedError: If the sandbox does not support file reads.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support file reads. "
+            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
+        )
+
+    def write_file(self, path: str, content: bytes) -> str:
+        """Write a file to the sandbox.
+
+        Args:
+            path: Destination path in the sandbox.
+            content: File content as bytes.
+
+        Returns:
+            The path where the file was written.
+
+        Raises:
+            NotImplementedError: If the sandbox does not support file writes.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support file writes. "
+            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
+        )
+
+    def list_files(self, path: str) -> list[FileEntry]:
+        """List files and directories at the given path in the sandbox.
+
+        Args:
+            path: Directory path in the sandbox.
+
+        Returns:
+            List of FileEntry objects.
+
+        Raises:
+            NotImplementedError: If the sandbox does not support file listing.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support file listing. "
+            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
+        )
 
     def upload_file(self, file_name: str, content: bytes, destination_path: str | None = None) -> str:
         """Upload a file to the sandbox.

@@ -10,9 +10,12 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from dynamiq.connections import E2B
 from dynamiq.nodes import Node
 from dynamiq.nodes.tools.e2b_sandbox import SandboxCreationErrorHandling
-from dynamiq.sandboxes.base import Sandbox, SandboxTool, ShellCommandResult
+from dynamiq.sandboxes.base import FileEntry, Sandbox, SandboxTool, ShellCommandResult
 from dynamiq.sandboxes.exceptions import SandboxConnectionError
 from dynamiq.utils.logger import logger
+
+# Default timeout (in seconds) for E2B file operations (read, write, list, upload)
+E2B_FILE_OPERATION_TIMEOUT = 60
 
 
 class E2BSandbox(Sandbox):
@@ -30,6 +33,10 @@ class E2BSandbox(Sandbox):
         SandboxTool.SHELL: (
             "dynamiq.sandboxes.tools.shell.SandboxShellTool",
             ["blocked_commands"],
+        ),
+        SandboxTool.FILES: (
+            "dynamiq.sandboxes.tools.files.SandboxFilesTool",
+            ["blocked_paths"],
         ),
     }
 
@@ -170,6 +177,73 @@ class E2BSandbox(Sandbox):
                 exit_code=1,
             )
 
+    def read_file(self, path: str) -> bytes:
+        """Read a file from the E2B sandbox.
+
+        Args:
+            path: Path of the file in the sandbox.
+
+        Returns:
+            File content as bytes.
+        """
+        sandbox = self._ensure_sandbox()
+        try:
+            content = sandbox.files.read(path, request_timeout=E2B_FILE_OPERATION_TIMEOUT)
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+            logger.debug(f"E2BSandbox read file: {path} ({len(content)} bytes)")
+            return content
+        except Exception as e:
+            logger.error(f"Failed to read file {path}: {e}")
+            raise
+
+    def write_file(self, path: str, content: bytes) -> str:
+        """Write a file to the E2B sandbox.
+
+        Args:
+            path: Destination path in the sandbox.
+            content: File content as bytes.
+
+        Returns:
+            The path where the file was written.
+        """
+        sandbox = self._ensure_sandbox()
+        try:
+            sandbox.files.write(path, content, request_timeout=E2B_FILE_OPERATION_TIMEOUT)
+            logger.debug(f"E2BSandbox wrote file: {path} ({len(content)} bytes)")
+            return path
+        except Exception as e:
+            logger.error(f"Failed to write file {path}: {e}")
+            raise
+
+    def list_files(self, path: str) -> list[FileEntry]:
+        """List files and directories at the given path in the E2B sandbox.
+
+        Args:
+            path: Directory path in the sandbox.
+
+        Returns:
+            List of FileEntry objects.
+        """
+        sandbox = self._ensure_sandbox()
+        try:
+            entries = sandbox.files.list(path, request_timeout=E2B_FILE_OPERATION_TIMEOUT)
+            result = []
+            for entry in entries:
+                result.append(
+                    FileEntry(
+                        name=getattr(entry, "name", str(entry)),
+                        path=f"{path.rstrip('/')}/{getattr(entry, 'name', str(entry))}",
+                        is_dir=getattr(entry, "is_dir", False),
+                        size=getattr(entry, "size", None),
+                    )
+                )
+            logger.debug(f"E2BSandbox listed {len(result)} entries at: {path}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to list files at {path}: {e}")
+            raise
+
     def upload_file(self, file_name: str, content: bytes, destination_path: str | None = None) -> str:
         """Upload a file to the E2B sandbox.
 
@@ -187,7 +261,7 @@ class E2BSandbox(Sandbox):
             destination_path = f"{self.base_path}/{file_name}"
 
         try:
-            sandbox.files.write(destination_path, content)
+            sandbox.files.write(destination_path, content, request_timeout=E2B_FILE_OPERATION_TIMEOUT)
             logger.debug(f"E2BSandbox uploaded file: {destination_path}")
             return destination_path
         except Exception as e:

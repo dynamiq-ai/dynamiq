@@ -22,7 +22,13 @@ from dynamiq.utils.logger import logger
 load_dotenv()
 
 # Input data for the workflow
-INPUT_DATA = "List files in the current directory and show system information using shell commands."
+INPUT_DATA = (
+    "Create file with python code that prints 'Hello, World!'. "
+    "Execute this script and save results in file 'result.txt'. "
+    "List all files in the current directory to verify there are two files. One for script one for result of execution."
+    "Return created script and the result of execution. "
+    "Always use relative paths or /home/user/ as the working directory. Use python3 instead of python."
+)
 
 
 def run_workflow():
