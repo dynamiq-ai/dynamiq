@@ -1,0 +1,36 @@
+connections:
+  openai-conn:
+    type: dynamiq.connections.OpenAI
+  e2b-conn:
+    type: dynamiq.connections.E2B
+    api_key: ${oc.env:E2B_API_KEY}
+
+nodes:
+  sandbox-agent:
+    type: dynamiq.nodes.agents.Agent
+    llm:
+      id: sandbox-agent-llm
+      type: dynamiq.nodes.llms.OpenAI
+      connection: openai-conn
+      model: gpt-4o
+    role: "a helpful assistant that can execute shell commands in a sandbox environment."
+    sandbox:
+      enabled: true
+      backend:
+        type: dynamiq.sandboxes.E2BSandbox
+        connection: e2b-conn
+    max_loops: 15
+    inference_mode: XML
+    summarization_config:
+      enabled: true
+
+flows:
+  sandbox-agent-flow:
+    name: Sandbox Agent Flow
+    nodes:
+      - sandbox-agent
+
+workflows:
+  sandbox-agent-workflow:
+    flow: sandbox-agent-flow
+    version: 1
