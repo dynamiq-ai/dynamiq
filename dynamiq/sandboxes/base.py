@@ -35,10 +35,6 @@ class Sandbox(abc.ABC, BaseModel):
     """
 
     connection: BaseConnection | None = Field(default=None, description="Connection to the sandbox backend.")
-    tools: dict[str, dict[str, Any]] = Field(
-        default_factory=dict,
-        description="Configuration for sandbox tools. Keys are tool names (e.g., 'shell'), values are tool configs.",
-    )
 
     @computed_field
     @cached_property
