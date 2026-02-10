@@ -509,6 +509,46 @@ def test_apply_resolved_value_path_in_list():
     assert data["items"] == [EXTRACTED_NAME]
 
 
+def test_apply_resolved_value_path_single_match_list_value():
+    """Verify value_path correctly returns a list value from a single JSONPath match.
+
+    Regression: previously isinstance(result, list) was used to detect multiple matches,
+    which conflated a single match whose value is a list with multiple matches.
+    """
+    data = {
+        "nodes": {
+            NODE_1: {
+                "tags": {"$type": "requirement", "$id": REQ_1, "value_path": "$.tags"},
+            }
+        }
+    }
+    resolved_value = {"tags": ["alpha", "beta", "gamma"], "name": "test"}
+
+    WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: resolved_value})
+
+    assert data["nodes"][NODE_1]["tags"] == ["alpha", "beta", "gamma"]
+
+
+def test_apply_resolved_value_path_single_match_none_value():
+    """Verify value_path correctly returns None from a single JSONPath match.
+
+    Regression: previously `result is None` was used to detect no matches,
+    which conflated a single match whose value is None with no match found.
+    """
+    data = {
+        "nodes": {
+            NODE_1: {
+                "optional_field": {"$type": "requirement", "$id": REQ_1, "value_path": "$.optional_field"},
+            }
+        }
+    }
+    resolved_value = {"optional_field": None, "name": "test"}
+
+    WorkflowYAMLLoader.apply_resolved_requirements(data, {REQ_1: resolved_value})
+
+    assert data["nodes"][NODE_1]["optional_field"] is None
+
+
 def test_apply_resolved_mixed_with_and_without_value_path():
     """Verify requirements with and without value_path coexist correctly."""
     data = {

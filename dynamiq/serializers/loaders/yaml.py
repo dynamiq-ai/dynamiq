@@ -12,7 +12,7 @@ from dynamiq.nodes.node import ConnectionNode, NodeDependency
 from dynamiq.prompts import Prompt
 from dynamiq.serializers.types import RequirementData, WorkflowYamlData
 from dynamiq.utils import generate_uuid
-from dynamiq.utils.jsonpath import filter as jsonpath_filter
+from dynamiq.utils.jsonpath import filter_all as jsonpath_filter_all
 from dynamiq.utils.logger import logger
 
 
@@ -129,17 +129,17 @@ class WorkflowYAMLLoader:
                 f"resolved value must be a dict or list, got {type(resolved_value).__name__}"
             )
 
-        result = jsonpath_filter(resolved_value, value_path)
-        if result is None:
+        matches = jsonpath_filter_all(resolved_value, value_path)
+        if len(matches) == 0:
             raise WorkflowYAMLLoaderException(
                 f"value_path '{value_path}' did not match any value in resolved requirement '{requirement_id}'"
             )
-        if isinstance(result, list):
+        if len(matches) > 1:
             raise WorkflowYAMLLoaderException(
                 f"value_path '{value_path}' matched multiple values in resolved requirement '{requirement_id}'. "
-                f"Expected a single value, got {len(result)} matches."
+                f"Expected a single value, got {len(matches)} matches."
             )
-        return result
+        return matches[0]
 
     @classmethod
     def _resolve_requirement_value(
