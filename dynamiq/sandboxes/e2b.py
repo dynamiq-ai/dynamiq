@@ -204,8 +204,8 @@ class E2BSandbox(Sandbox):
         """Close the E2B sandbox connection.
 
         Args:
-            kill: If True (default), kills the sandbox. If False, just disconnects
-                  but keeps the sandbox alive for reconnection using sandbox_id.
+            kill: If False (default), just disconnects
+                  but keeps the sandbox alive for reconnection using sandbox_id. If True, kills the sandbox.
         """
         if self._sandbox:
             try:
