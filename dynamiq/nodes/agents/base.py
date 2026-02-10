@@ -1132,38 +1132,32 @@ class Agent(Node):
         return False
 
     def _upload_files_to_sandbox(self, normalized_files: list) -> None:
-        """Upload file-like objects to the sandbox backend; preserves read position."""
+        """Upload file-like objects to the sandbox backend."""
         for file_obj in normalized_files:
             file_name = getattr(file_obj, "name", None)
             if file_name and hasattr(file_obj, "read"):
                 try:
-                    position = file_obj.tell() if hasattr(file_obj, "tell") else None
                     if hasattr(file_obj, "seek"):
                         file_obj.seek(0)
                     content = file_obj.read()
                     if isinstance(content, str):
                         content = content.encode("utf-8")
                     self.sandbox_backend.upload_file(file_name, content)
-                    if position is not None and hasattr(file_obj, "seek"):
-                        file_obj.seek(position)
                 except Exception as e:
                     logger.warning(f"Failed to upload file {file_name} to sandbox: {e}")
 
     def _upload_files_to_file_store(self, normalized_files: list) -> None:
-        """Store file-like objects in the file store backend; preserves read position."""
+        """Store file-like objects in the file store backend."""
         for file_obj in normalized_files:
             file_name = getattr(file_obj, "name", None)
             if not file_name or not hasattr(file_obj, "read"):
                 continue
             try:
-                position = file_obj.tell() if hasattr(file_obj, "tell") else None
                 if hasattr(file_obj, "seek"):
                     file_obj.seek(0)
                 content = file_obj.read()
                 if isinstance(content, str):
                     content = content.encode("utf-8")
-                if position is not None and hasattr(file_obj, "seek"):
-                    file_obj.seek(position)
                 description = getattr(file_obj, "description", "User-provided file")
                 self.file_store_backend.store(
                     file_path=file_name,

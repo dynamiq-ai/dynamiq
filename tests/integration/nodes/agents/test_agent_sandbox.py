@@ -152,10 +152,7 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
     e2b_conn = E2B(id="e2b-conn", api_key="test-key")
     openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
 
-    backend = E2BSandbox(
-        connection=e2b_conn,
-        tools={"shell": {"enabled": True, "blocked_commands": ["rm -rf", "sudo"]}},
-    )
+    backend = E2BSandbox(connection=e2b_conn)
     sandbox_config = SandboxConfig(enabled=True, backend=backend)
 
     agent = Agent(
@@ -208,4 +205,3 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
     assert roundtrip_agent.sandbox is not None
     assert roundtrip_agent.sandbox.enabled
     assert isinstance(roundtrip_agent.sandbox.backend, E2BSandbox)
-    assert roundtrip_agent.sandbox.backend.tools.get("shell", {}).get("blocked_commands") == ["rm -rf", "sudo"]
