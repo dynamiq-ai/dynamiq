@@ -22,7 +22,6 @@ REQ_OTHER = "other"
 API_KEY = "test-api-key"
 MODEL_GPT = "gpt-4o"
 
-# value_path test constants
 EXTERNAL_USER_ID = "user-abc-123"
 ACCOUNT_ID = "acc-456"
 SECRET_TOKEN = "secret-token-123"
