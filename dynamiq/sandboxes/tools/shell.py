@@ -84,7 +84,7 @@ class SandboxShellTool(Node):
         # Check blocked commands
         if self.blocked_commands:
             for blocked in self.blocked_commands:
-                if cmd_lower.startswith(blocked.lower()):
+                if blocked.lower() in cmd_lower:
                     raise ToolExecutionException(
                         f"Command '{command}' is blocked for security reasons.",
                         recoverable=True,

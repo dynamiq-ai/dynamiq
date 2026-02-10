@@ -1,13 +1,17 @@
 """E2B sandbox implementation."""
 
-from typing import Any, ClassVar
+from typing import ClassVar
 
+from e2b.exceptions import RateLimitException as E2BRateLimitException
 from e2b_desktop import Sandbox as E2BDesktopSandbox
 from pydantic import ConfigDict, Field, PrivateAttr
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
 from dynamiq.connections import E2B
 from dynamiq.nodes import Node
+from dynamiq.nodes.tools.e2b_sandbox import SandboxCreationErrorHandling
 from dynamiq.sandboxes.base import Sandbox, SandboxTool, ShellCommandResult
+from dynamiq.sandboxes.exceptions import SandboxConnectionError
 from dynamiq.utils.logger import logger
 
 
@@ -37,14 +41,15 @@ class E2BSandbox(Sandbox):
         default=None,
         description="Existing sandbox ID to reconnect to. If None, a new sandbox is created.",
     )
+    creation_error_handling: SandboxCreationErrorHandling = Field(
+        default_factory=SandboxCreationErrorHandling,
+        description="Retry and backoff config for sandbox creation and reconnection (rate-limit and transient errors).",
+    )
     _sandbox: E2BDesktopSandbox | None = PrivateAttr(default=None)
-    # Local cache for metadata (E2B doesn't store custom metadata)
-    _file_metadata: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
 
     def __init__(self, **kwargs):
         """Initialize the E2B sandbox storage."""
         super().__init__(**kwargs)
-        self._file_metadata = {}
 
     @property
     def current_sandbox_id(self) -> str | None:
@@ -52,27 +57,76 @@ class E2BSandbox(Sandbox):
         return self.sandbox_id
 
     def _ensure_sandbox(self) -> E2BDesktopSandbox:
-        """Lazily initialize or reconnect to E2B sandbox."""
-        if self._sandbox is None:
-            if self.sandbox_id:
-                # Reconnect to existing sandbox
-                logger.debug(f"Reconnecting to E2B sandbox: {self.sandbox_id}")
-                self._sandbox = E2BDesktopSandbox.connect(
-                    sandbox_id=self.sandbox_id,
-                    api_key=self.connection.api_key,
-                    domain=getattr(self.connection, "domain", None),
-                )
+        """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors."""
+        if self._sandbox is not None:
+            return self._sandbox
+
+        if self.sandbox_id:
+            try:
+                self._sandbox = self._reconnect_with_retry()
                 logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
-            else:
-                # Create new sandbox
-                self._sandbox = E2BDesktopSandbox.create(
+                return self._sandbox
+            except Exception as e:
+                raise SandboxConnectionError(self.sandbox_id, cause=e) from e
+
+        # Create new sandbox (no sandbox_id)
+        self._sandbox = self._create_with_retry()
+        self.sandbox_id = self._sandbox.sandbox_id
+        logger.debug(f"E2B sandbox created: {self.sandbox_id}")
+        return self._sandbox
+
+    def _reconnect_with_retry(self) -> E2BDesktopSandbox:
+        """Reconnect to existing sandbox with exponential backoff on rate-limit."""
+        cfg = self.creation_error_handling
+
+        @retry(
+            retry=retry_if_exception_type(E2BRateLimitException),
+            stop=stop_after_attempt(cfg.max_retries),
+            wait=wait_exponential_jitter(
+                initial=cfg.initial_wait_seconds,
+                max=cfg.max_wait_seconds,
+                exp_base=cfg.exponential_base,
+                jitter=cfg.jitter,
+            ),
+            reraise=True,
+        )
+        def connect() -> E2BDesktopSandbox:
+            logger.debug(f"Reconnecting to E2B sandbox: {self.sandbox_id}")
+            return E2BDesktopSandbox.connect(
+                sandbox_id=self.sandbox_id,
+                api_key=self.connection.api_key,
+                domain=getattr(self.connection, "domain", None),
+            )
+
+        return connect()
+
+    def _create_with_retry(self) -> E2BDesktopSandbox:
+        """Create a new sandbox with exponential backoff on rate-limit."""
+        cfg = self.creation_error_handling
+
+        @retry(
+            retry=retry_if_exception_type(E2BRateLimitException),
+            stop=stop_after_attempt(cfg.max_retries),
+            wait=wait_exponential_jitter(
+                initial=cfg.initial_wait_seconds,
+                max=cfg.max_wait_seconds,
+                exp_base=cfg.exponential_base,
+                jitter=cfg.jitter,
+            ),
+            reraise=True,
+        )
+        def create() -> E2BDesktopSandbox:
+            try:
+                return E2BDesktopSandbox.create(
                     api_key=self.connection.api_key,
                     timeout=self.timeout,
                     domain=getattr(self.connection, "domain", None),
                 )
-                self.sandbox_id = self._sandbox.sandbox_id
-                logger.debug(f"E2B sandbox created: {self.sandbox_id}")
-        return self._sandbox
+            except E2BRateLimitException:
+                logger.warning("E2B sandbox creation rate-limited. Retrying with exponential backoff.")
+                raise
+
+        return create()
 
     def run_command_shell(
         self,
@@ -189,7 +243,6 @@ class E2BSandbox(Sandbox):
                 logger.warning(f"E2BSandbox close() failed: {e}")
             finally:
                 self._sandbox = None
-                self._file_metadata.clear()
 
     def __enter__(self):
         """Context manager entry."""

@@ -502,6 +502,32 @@ class Agent(Node):
         files = input_data.files
         uploaded_file_names: set[str] = set()
         if files:
+            # Create file store before _ensure_named_files in non-sandbox mode so uploaded
+            # files are stored and file tools (FileReadTool, etc.) can access them.
+            if not self.sandbox_backend and not self.file_store_backend:
+                self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
+                self.tools.extend(
+                    [
+                        FileReadTool(file_store=self.file_store_backend, llm=self.llm),
+                        FileSearchTool(file_store=self.file_store_backend),
+                        FileListTool(file_store=self.file_store_backend),
+                    ]
+                )
+                new_tool_description = self.tool_description
+                self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
+                if self.system_prompt_manager._prompt_blocks.get("tools") == "":
+                    from dynamiq.nodes.agents.agent import Agent
+
+                    if isinstance(self, Agent):
+                        self.system_prompt_manager.setup_for_react_agent(
+                            inference_mode=self.inference_mode,
+                            parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
+                            has_tools=True,
+                            delegation_allowed=self.delegation_allowed,
+                            context_compaction_enabled=self.summarization_config.enabled,
+                            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
+                        )
+
             normalized_files = self._ensure_named_files(files)
             uploaded_file_names = {
                 getattr(f, "name", None)
@@ -531,37 +557,7 @@ class Agent(Node):
                 input_message = self._inject_attached_files_into_message(input_message, normalized_files)
 
             else:
-                # Use file store for non-sandbox mode
-                if not self.file_store_backend:
-                    self.file_store = FileStoreConfig(enabled=True, backend=InMemoryFileStore())
-                    # Add file tools
-                    self.tools.extend(
-                        [
-                            FileReadTool(file_store=self.file_store_backend, llm=self.llm),
-                            FileSearchTool(file_store=self.file_store_backend),
-                            FileListTool(file_store=self.file_store_backend),
-                        ]
-                    )
-
-                    new_tool_description = self.tool_description
-                    self.system_prompt_manager.set_initial_variable("tool_description", new_tool_description)
-
-                    # Update prompt blocks if agent was created with no tools
-                    if self.system_prompt_manager._prompt_blocks.get("tools") == "":
-                        # Check if this is a ReAct Agent
-                        from dynamiq.nodes.agents.agent import Agent
-
-                        if isinstance(self, Agent):
-                            # For ReAct agents, re-run setup with has_tools=True
-                            self.system_prompt_manager.setup_for_react_agent(
-                                inference_mode=self.inference_mode,
-                                parallel_tool_calls_enabled=self.parallel_tool_calls_enabled,
-                                has_tools=True,
-                                delegation_allowed=self.delegation_allowed,
-                                context_compaction_enabled=self.summarization_config.enabled,
-                                todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
-                            )
-
+                # Use file store for non-sandbox mode (store already created above when files present)
                 input_message = self._inject_attached_files_into_message(input_message, normalized_files)
 
         if input_data.tool_params:
