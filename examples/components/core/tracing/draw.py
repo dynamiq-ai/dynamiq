@@ -256,9 +256,9 @@ def draw_agent_tool_parallel_workflow_graph_in_png(
 def draw_agent_sandbox_workflow_graph_in_png(
     output_path: str = os.path.join(os.path.dirname(__file__), "agent_sandbox_workflow_graph.png")
 ) -> None:
+    """Draw the execution graph of the agent-with-sandbox workflow."""
     from examples.components.core.dag.yaml_agent_sandbox_example import run_workflow
 
-    """Draw the execution graph of the agent-with-sandbox workflow."""
     output, traces = run_workflow()
     graph = get_graph_by_traces([run for _, run in traces.items()])
     draw_graph_in_png(graph, output_path)

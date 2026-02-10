@@ -46,6 +46,11 @@ class Sandbox(abc.ABC, BaseModel):
         """Returns the backend type as a string."""
         return f"{self.__module__.rsplit('.', 1)[0]}.{self.__class__.__name__}"
 
+    @property
+    def to_dict_exclude_params(self) -> dict[str, bool]:
+        """Define parameters to exclude during serialization."""
+        return {"connection": True}
+
     def to_dict(self, **kwargs) -> dict[str, Any]:
         """Convert the Sandbox instance to a dictionary.
 
@@ -57,10 +62,10 @@ class Sandbox(abc.ABC, BaseModel):
         """
         for_tracing = kwargs.pop("for_tracing", False)
         kwargs.pop("include_secure_params", None)
+        exclude = kwargs.pop("exclude", self.to_dict_exclude_params)
 
         has_connection = getattr(self, "connection", None) is not None
-        exclude_fields = {"connection"} if has_connection else set()
-        data = self.model_dump(exclude=exclude_fields, **kwargs)
+        data = self.model_dump(exclude=exclude, **kwargs)
         data["type"] = self.type
 
         if has_connection:
@@ -146,12 +151,16 @@ class SandboxConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    @property
+    def to_dict_exclude_params(self) -> dict[str, bool]:
+        """Define parameters to exclude during serialization."""
+        return {"backend": True}
+
     def to_dict(self, **kwargs) -> dict[str, Any]:
         """Convert the SandboxConfig instance to a dictionary."""
         for_tracing = kwargs.pop("for_tracing", False)
         kwargs.pop("include_secure_params", None)
-        if for_tracing and not self.enabled:
-            return {"enabled": False}
-        config_data = self.model_dump(exclude={"backend"}, **kwargs)
+        exclude = kwargs.pop("exclude", self.to_dict_exclude_params)
+        config_data = self.model_dump(exclude=exclude, **kwargs)
         config_data["backend"] = self.backend.to_dict(for_tracing=for_tracing, **kwargs)
         return config_data

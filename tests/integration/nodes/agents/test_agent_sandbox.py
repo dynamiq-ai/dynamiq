@@ -4,6 +4,8 @@ import pytest
 from pydantic import Field
 
 from dynamiq import Workflow, connections
+from dynamiq.connections import E2B
+from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes import Node
 from dynamiq.nodes.agents import Agent
@@ -12,6 +14,7 @@ from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes import SandboxConfig
 from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
+from dynamiq.sandboxes.e2b import E2BSandbox
 from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
 
@@ -113,9 +116,7 @@ def test_agent_with_sandbox_executes_shell_tool(mock_llm_sandbox_shell_response,
 
 
 def test_map_agent_with_sandbox_executes_shell_tool(mock_llm_sandbox_shell_response, mock_sandbox):
-    """Map over agent with sandbox: each item gets a shell tool call; MockSandbox records commands.
-    Each agent share sandbox instance.
-    """
+    """Map over agent with sandbox: each item gets a shell tool call; MockSandbox records commands."""
     from dynamiq.nodes.operators import Map
 
     sandbox = mock_sandbox
@@ -140,3 +141,71 @@ def test_map_agent_with_sandbox_executes_shell_tool(mock_llm_sandbox_shell_respo
     )
 
     assert result.status == RunnableStatus.SUCCESS
+
+
+def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
+    """Roundtrip: to_yaml_file → from_yaml_file → to_yaml_file → from_yaml_file with init_components.
+
+    Ensures sandbox tools (e.g. SandboxShellTool) are not duplicated when they were
+    already present in the serialized tools list from a previous to_dict.
+    """
+    e2b_conn = E2B(id="e2b-conn", api_key="test-key")
+    openai_conn = OpenAIConnection(id="openai-conn", api_key="test-key")
+
+    backend = E2BSandbox(
+        connection=e2b_conn,
+        tools={"shell": {"enabled": True, "blocked_commands": ["rm -rf", "sudo"]}},
+    )
+    sandbox_config = SandboxConfig(enabled=True, backend=backend)
+
+    agent = Agent(
+        id="sandbox-agent",
+        name="Sandbox Agent",
+        llm=OpenAI(
+            id="sandbox-agent-llm",
+            connection=openai_conn,
+            model="gpt-4o",
+        ),
+        role="a helpful assistant that can execute shell commands in a sandbox.",
+        sandbox=sandbox_config,
+        max_loops=15,
+    )
+
+    workflow = Workflow(
+        id="sandbox-workflow",
+        flow=Flow(id="sandbox-flow", name="Sandbox Agent Flow", nodes=[agent]),
+        version="1",
+    )
+
+    yaml_path = tmp_path / "agent_e2b_sandbox.yaml"
+    workflow.to_yaml_file(yaml_path)
+
+    loaded = Workflow.from_yaml_file(str(yaml_path), init_components=True)
+    assert len(loaded.flow.nodes) == 1
+    loaded_agent = loaded.flow.nodes[0]
+    assert isinstance(loaded_agent, Agent)
+    assert loaded_agent.sandbox is not None
+    assert loaded_agent.sandbox.enabled
+    assert isinstance(loaded_agent.sandbox.backend, E2BSandbox)
+
+    shell_tool_name = "SandboxShellTool"
+    shell_tools_first = [t for t in loaded_agent.tools if t.name == shell_tool_name]
+    assert len(shell_tools_first) == 1, "First load should have exactly one SandboxShellTool"
+
+    roundtrip_path = tmp_path / "agent_e2b_sandbox_roundtrip.yaml"
+    loaded.to_yaml_file(roundtrip_path)
+    roundtrip = Workflow.from_yaml_file(str(roundtrip_path), init_components=True)
+
+    roundtrip_agent = roundtrip.flow.nodes[0]
+    assert isinstance(roundtrip_agent, Agent)
+
+    shell_tools_roundtrip = [t for t in roundtrip_agent.tools if t.name == shell_tool_name]
+    assert len(shell_tools_roundtrip) == 1, (
+        "After roundtrip, SandboxShellTool must not be duplicated: "
+        "to_dict serializes tools including sandbox tools, then __init__ must not add them again."
+    )
+
+    assert roundtrip_agent.sandbox is not None
+    assert roundtrip_agent.sandbox.enabled
+    assert isinstance(roundtrip_agent.sandbox.backend, E2BSandbox)
+    assert roundtrip_agent.sandbox.backend.tools.get("shell", {}).get("blocked_commands") == ["rm -rf", "sudo"]

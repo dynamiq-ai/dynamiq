@@ -298,9 +298,8 @@ class Agent(Node):
         self.tools = expanded_tools
 
         if self.sandbox_backend:
-            # Add sandbox tools when sandbox is enabled
-            tools = self.sandbox_backend.get_tools()
-            self.tools.extend(tools)
+            # Add sandbox tools when sandbox is enabled (not serialized; recreated from sandbox config on load)
+            self.tools.extend(self.sandbox_backend.get_tools())
 
         elif self.file_store_backend:
             # Add file tools when file store is enabled
@@ -350,12 +349,26 @@ class Agent(Node):
             "system_prompt_manager": True,  # Runtime state container, not serializable
         }
 
+    def _is_tool_excluded_from_serialization(self, tool: Node, sandbox_tool_names: set[str] | None = None) -> bool:
+        """Return True if this tool should not be serialized (recreated from config on load)."""
+        if tool.id in self._mcp_server_tool_ids:
+            return True
+        if sandbox_tool_names and tool.name in sandbox_tool_names:
+            return True
+        return False
+
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
 
-        data["tools"] = [tool.to_dict(**kwargs) for tool in self.tools if tool.id not in self._mcp_server_tool_ids]
+        sandbox_tool_names = {t.name for t in self.sandbox_backend.get_tools()} if self.sandbox_backend else set()
+        tools_to_serialize = [
+            t
+            for t in self.tools
+            if not self._is_tool_excluded_from_serialization(t, sandbox_tool_names=sandbox_tool_names)
+        ]
+        data["tools"] = [tool.to_dict(**kwargs) for tool in tools_to_serialize]
         data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_servers]
 
         data["memory"] = self.memory.to_dict(**kwargs) if self.memory else None
