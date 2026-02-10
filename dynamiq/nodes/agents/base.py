@@ -541,8 +541,10 @@ class Agent(Node):
                     file_name = getattr(file_obj, "name", None)
                     if file_name and hasattr(file_obj, "read"):
                         try:
-                            # Read file content
+                            # Read file content from start (BytesIO may have cursor at end)
                             position = file_obj.tell() if hasattr(file_obj, "tell") else None
+                            if hasattr(file_obj, "seek"):
+                                file_obj.seek(0)
                             content = file_obj.read()
                             if isinstance(content, str):
                                 content = content.encode("utf-8")
