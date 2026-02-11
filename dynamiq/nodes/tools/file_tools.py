@@ -525,6 +525,7 @@ class FileReadTool(Node):
         """
         return super().to_dict_exclude_params | {
             "llm": True,
+            "file_store": True,
             "converter_mapping": True,
         }
 
@@ -536,6 +537,7 @@ class FileReadTool(Node):
         """
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
+        data["file_store"] = self.file_store.to_dict(**kwargs)
         if self.converter_mapping:
             data["converter_mapping"] = {
                 file_type.value: converter.to_dict(**kwargs) for file_type, converter in self.converter_mapping.items()
