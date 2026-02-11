@@ -1,6 +1,9 @@
 """Base sandbox interface and common data structures."""
 
 import abc
+import io
+import logging
+import mimetypes
 from enum import Enum
 from functools import cached_property
 from typing import Any
@@ -35,6 +38,15 @@ class Sandbox(abc.ABC, BaseModel):
     """
 
     connection: BaseConnection | None = Field(default=None, description="Connection to the sandbox backend.")
+    base_path: str = Field(default="/home/user", description="Base path in the sandbox filesystem.")
+    max_output_files: int = Field(
+        default=50, description="Maximum number of files to collect from the output directory."
+    )
+
+    @property
+    def output_dir(self) -> str:
+        """Absolute path to the output directory inside the sandbox."""
+        return f"{self.base_path}/output"
 
     @computed_field
     @cached_property
@@ -129,6 +141,84 @@ class Sandbox(abc.ABC, BaseModel):
             f"{self.__class__.__name__} does not support file uploads. "
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
+
+    def list_output_files(self) -> list[str]:
+        """List files in the sandbox output directory.
+
+        Implementations should respect ``max_output_files`` when scanning
+        for files.
+
+        Returns:
+            List of absolute file paths found in the output directory.
+
+        Raises:
+            NotImplementedError: If the sandbox does not support file listing.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support file listing. "
+            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
+        )
+
+    def download_file(self, path: str) -> bytes:
+        """Download a file from the sandbox.
+
+        Args:
+            path: Absolute path of the file in the sandbox.
+
+        Returns:
+            The file content as bytes.
+
+        Raises:
+            NotImplementedError: If the sandbox does not support file downloads.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support file downloads. "
+            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
+        )
+
+    def is_output_empty(self) -> bool:
+        """Check whether the sandbox output directory contains any files.
+
+        Returns:
+            True if the output directory is empty or does not exist, False otherwise.
+        """
+        try:
+            return len(self.list_output_files()) == 0
+        except NotImplementedError:
+            return True
+
+    def collect_output_files(self) -> list[io.BytesIO]:
+        """Collect output files from the sandbox output directory as BytesIO objects.
+
+        Only files placed in the dedicated output directory are collected.
+
+        Returns:
+            List of BytesIO objects with name, description, and content_type attributes.
+        """
+        file_paths = self.list_output_files()
+
+        if not file_paths:
+            return []
+
+        result_files: list[io.BytesIO] = []
+        for file_path in file_paths:
+            file_name = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
+            try:
+                content = self.download_file(file_path)
+                content_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+
+                file_bytesio = io.BytesIO(content)
+                file_bytesio.name = file_name
+                file_bytesio.description = f"Generated file from sandbox: {file_path}"
+                file_bytesio.content_type = content_type
+                file_bytesio.seek(0)
+
+                result_files.append(file_bytesio)
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Failed to download file '{file_path}': {e}")
+                continue
+
+        return result_files
 
     def exists(self, file_path: str) -> bool:
         """Check whether a file exists in the sandbox filesystem.

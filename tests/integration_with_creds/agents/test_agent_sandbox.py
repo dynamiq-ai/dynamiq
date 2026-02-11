@@ -35,6 +35,12 @@ class TestSandbox(Sandbox):
             return ShellCommandResult(stdout=stdout, stderr="", exit_code=0)
         return ShellCommandResult(stdout="", stderr="Command not found", exit_code=1)
 
+    def list_output_files(self) -> list[str]:
+        return []
+
+    def download_file(self, path: str) -> bytes:
+        raise FileNotFoundError(f"Test sandbox does not store files: {path}")
+
     def get_tools(self) -> list[Node]:
         return [SandboxShellTool(sandbox=self)]
 

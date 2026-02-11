@@ -25,6 +25,7 @@ from dynamiq.nodes.agents.prompts.secondary_instructions import (
     DELEGATION_INSTRUCTIONS,
     DELEGATION_INSTRUCTIONS_XML,
     REACT_BLOCK_MULTI_TOOL_PLANNING,
+    SANDBOX_INSTRUCTIONS_TEMPLATE,
     TODO_TOOLS_INSTRUCTIONS,
 )
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
@@ -213,6 +214,7 @@ class AgentPromptManager:
         delegation_allowed: bool = False,
         context_compaction_enabled: bool = False,
         todo_management_enabled: bool = False,
+        sandbox_output_dir: str | None = None,
     ) -> None:
         """
         Setup prompts for ReAct-style Agent.
@@ -228,6 +230,7 @@ class AgentPromptManager:
             delegation_allowed=delegation_allowed,
             context_compaction_enabled=context_compaction_enabled,
             todo_management_enabled=todo_management_enabled,
+            sandbox_output_dir=sandbox_output_dir,
         )
 
         # Update prompt blocks
@@ -255,6 +258,7 @@ def get_model_specific_prompts(
     delegation_allowed: bool = False,
     context_compaction_enabled: bool = False,
     todo_management_enabled: bool = False,
+    sandbox_output_dir: str | None = None,
 ) -> tuple[dict[str, str], str]:
     """
     Get model-specific prompts based on the model name and agent configuration.
@@ -345,6 +349,8 @@ def get_model_specific_prompts(
         secondary_parts.append(CONTEXT_MANAGER_INSTRUCTIONS)
     if todo_management_enabled:
         secondary_parts.append(TODO_TOOLS_INSTRUCTIONS)
+    if sandbox_output_dir:
+        secondary_parts.append(SANDBOX_INSTRUCTIONS_TEMPLATE.format(output_dir=sandbox_output_dir))
 
     if secondary_parts:
         prompt_blocks["secondary_instructions"] = "\n\n".join(secondary_parts)
