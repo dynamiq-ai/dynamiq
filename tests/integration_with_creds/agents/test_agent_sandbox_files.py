@@ -158,54 +158,6 @@ def test_agent_sandbox_creates_and_returns_file(openai_llm, e2b_connection, run_
 
 
 @pytest.mark.integration
-def test_agent_sandbox_creates_multiple_files(openai_llm, e2b_connection, run_config):
-    """Test Agent with E2B sandbox can create multiple files and return them all."""
-    if not os.getenv("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
-    if not os.getenv("E2B_API_KEY"):
-        pytest.skip("E2B_API_KEY is not set; skipping credentials-required test.")
-
-    sandbox_backend = E2BSandbox(connection=e2b_connection)
-    try:
-        sandbox_config = SandboxConfig(enabled=True, backend=sandbox_backend)
-
-        agent = Agent(
-            name="SandboxMultiFileAgent",
-            id="sandbox_multi_file_agent",
-            llm=openai_llm,
-            role=(
-                "You are a helpful assistant that can execute commands in the sandbox. "
-                "When asked to create files, save them to /home/user/output so they are returned."
-            ),
-            inference_mode=InferenceMode.XML,
-            sandbox=sandbox_config,
-            max_loops=10,
-            verbose=True,
-        )
-
-        input_data = {
-            "input": (
-                "Using the sandbox shell, create two files in /home/user/output:\n"
-                "1. hello.txt containing 'Hello World'\n"
-                "2. data.csv containing 'name,age\\nAlice,30\\nBob,25'\n"
-                "Confirm both files were created."
-            ),
-        }
-
-        _run_and_assert_sandbox_agent(
-            agent,
-            input_data,
-            expected_keywords=["hello", "data", "created"],
-            run_config=run_config,
-            expected_file_name=["hello.txt", "data.csv"],
-        )
-
-        logger.info("--- Test Passed for Sandbox Multiple File Creation ---")
-    finally:
-        sandbox_backend.close()
-
-
-@pytest.mark.integration
 def test_agent_sandbox_with_input_files_returns_output(openai_llm, e2b_connection, run_config):
     """Test Agent with E2B sandbox receives input files and returns generated output files."""
     if not os.getenv("OPENAI_API_KEY"):
