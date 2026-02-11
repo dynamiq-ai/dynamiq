@@ -5,6 +5,7 @@ import pytest
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.file_tools import (
     EXTRACTED_TEXT_SUFFIX,
     FileListTool,
@@ -16,6 +17,7 @@ from dynamiq.nodes.tools.file_tools import (
     validate_file_path,
 )
 from dynamiq.runnables import RunnableResult, RunnableStatus
+from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
@@ -284,9 +286,8 @@ def test_file_read_tool_limits_spreadsheet_preview(file_store, llm_model):
 def test_file_read_tool_with_sandbox_like_backend(llm_model):
     """FileReadTool should work with sandbox-style storage backend."""
 
-    class FakeSandboxStorage:
-        def __init__(self):
-            self._data: dict[str, bytes] = {}
+    class FakeSandbox(Sandbox):
+        _data: dict[str, bytes] = {}
 
         def exists(self, file_path: str) -> bool:
             return file_path in self._data
@@ -294,15 +295,13 @@ def test_file_read_tool_with_sandbox_like_backend(llm_model):
         def retrieve(self, file_path: str) -> bytes:
             return self._data[file_path]
 
-        def store(self, file_path: str, content: bytes | str, **kwargs):
-            del kwargs
-            self._data[file_path] = content.encode("utf-8") if isinstance(content, str) else content
-            return {"file_path": file_path}
+        def get_tools(self, llm=None) -> list[Node]:
+            return []
 
-    sandbox_storage = FakeSandboxStorage()
-    sandbox_storage.store("notes/readme.txt", "sandbox text content")
+    sandbox = FakeSandbox()
+    sandbox._data["notes/readme.txt"] = b"sandbox text content"
 
-    tool = FileReadTool(file_store=sandbox_storage, llm=llm_model)
+    tool = FileReadTool(file_store=sandbox, llm=llm_model)
     result = tool.run({"file_path": "notes/readme.txt"})
 
     assert result.status == RunnableStatus.SUCCESS

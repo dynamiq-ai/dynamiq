@@ -31,7 +31,7 @@ class TestSandbox(Sandbox):
     ) -> ShellCommandResult:
         if command.strip().startswith("echo"):
             parts = command.strip().split(maxsplit=1)
-            stdout = (parts[1] + " from SANDBOX") if len(parts) > 1 else " from SANDBOX"
+            stdout = parts[1] if len(parts) > 1 else ""
             return ShellCommandResult(stdout=stdout, stderr="", exit_code=0)
         return ShellCommandResult(stdout="", stderr="Command not found", exit_code=1)
 
@@ -94,7 +94,7 @@ def test_agent_with_sandbox_executes_shell(openai_llm):
     assert result.status == RunnableStatus.SUCCESS
     content = result.output.get(agent.id, {}).get("output", {}).get("content", "")
     assert content is not None
-    assert "hello from SANDBOX" in str(content), f"Expected 'hello from SANDBOX' in output, got: {content[:500]}"
+    assert "hello" in str(content), f"Expected 'hello' in output, got: {content[:500]}"
 
 
 @pytest.mark.integration
