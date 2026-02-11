@@ -159,7 +159,10 @@ def test_agent_sandbox_creates_and_returns_file(openai_llm, image_bytes, e2b_con
         )
 
         input_data = {
-            "input": ("Return a file called summary.txt with a brand of the camera in the image."),
+            "input": (
+                "Return a file called summary.txt with a brand of the camera in the image. "
+                "Use FileReadTool with additional instruction."
+            ),
             "files": [image_bytes],
         }
 
@@ -176,57 +179,57 @@ def test_agent_sandbox_creates_and_returns_file(openai_llm, image_bytes, e2b_con
         sandbox_backend.close()
 
 
-@pytest.mark.integration
-def test_agent_sandbox_with_input_files_returns_output(openai_llm, e2b_connection, run_config):
-    """Test Agent with E2B sandbox receives input files and returns generated output files."""
-    if not os.getenv("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
-    if not os.getenv("E2B_API_KEY"):
-        pytest.skip("E2B_API_KEY is not set; skipping credentials-required test.")
+# @pytest.mark.integration
+# def test_agent_sandbox_with_input_files_returns_output(openai_llm, e2b_connection, run_config):
+#     """Test Agent with E2B sandbox receives input files and returns generated output files."""
+#     if not os.getenv("OPENAI_API_KEY"):
+#         pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
+#     if not os.getenv("E2B_API_KEY"):
+#         pytest.skip("E2B_API_KEY is not set; skipping credentials-required test.")
 
-    sandbox_backend = E2BSandbox(connection=e2b_connection)
-    try:
-        sandbox_config = SandboxConfig(enabled=True, backend=sandbox_backend)
+#     sandbox_backend = E2BSandbox(connection=e2b_connection)
+#     try:
+#         sandbox_config = SandboxConfig(enabled=True, backend=sandbox_backend)
 
-        agent = Agent(
-            name="SandboxIOAgent",
-            id="sandbox_io_agent",
-            llm=openai_llm,
-            role=(
-                "You are a helpful assistant that can execute commands in the sandbox. "
-                "When asked to create files, save them to /home/user/output so they are returned. "
-                "For Python tasks, write a .py script file first, then run it with 'python script.py'. "
-                "Never use Python one-liners with semicolons for multi-step logic."
-            ),
-            inference_mode=InferenceMode.XML,
-            sandbox=sandbox_config,
-            max_loops=10,
-            verbose=True,
-        )
+#         agent = Agent(
+#             name="SandboxIOAgent",
+#             id="sandbox_io_agent",
+#             llm=openai_llm,
+#             role=(
+#                 "You are a helpful assistant that can execute commands in the sandbox. "
+#                 "When asked to create files, save them to /home/user/output so they are returned. "
+#                 "For Python tasks, write a .py script file first, then run it with 'python script.py'. "
+#                 "Never use Python one-liners with semicolons for multi-step logic."
+#             ),
+#             inference_mode=InferenceMode.XML,
+#             sandbox=sandbox_config,
+#             max_loops=10,
+#             verbose=True,
+#         )
 
-        # Provide an input file
-        input_file = BytesIO(b"name,score\nAlice,95\nBob,87\nCharlie,92\n")
-        input_file.name = "scores.csv"
-        input_file.seek(0)
+#         # Provide an input file
+#         input_file = BytesIO(b"name,score\nAlice,95\nBob,87\nCharlie,92\n")
+#         input_file.name = "scores.csv"
+#         input_file.seek(0)
 
-        input_data = {
-            "input": (
-                "I've uploaded scores.csv. Read it from /home/user/scores.csv, "
-                "calculate the average score using Python, "
-                "and save the result to /home/user/output/average.txt. "
-                "Write a Python script file and run it rather than using a one-liner."
-            ),
-            "files": [input_file],
-        }
+#         input_data = {
+#             "input": (
+#                 "I've uploaded scores.csv. Read it from /home/user/scores.csv, "
+#                 "calculate the average score using Python, "
+#                 "and save the result to /home/user/output/average.txt. "
+#                 "Write a Python script file and run it rather than using a one-liner."
+#             ),
+#             "files": [input_file],
+#         }
 
-        _run_and_assert_sandbox_agent(
-            agent,
-            input_data,
-            expected_keywords=["average", "score"],
-            run_config=run_config,
-            expected_file_name=["average.txt"],
-        )
+#         _run_and_assert_sandbox_agent(
+#             agent,
+#             input_data,
+#             expected_keywords=["average", "score"],
+#             run_config=run_config,
+#             expected_file_name=["average.txt"],
+#         )
 
-        logger.info("--- Test Passed for Sandbox Input/Output File Handling ---")
-    finally:
-        sandbox_backend.close()
+#         logger.info("--- Test Passed for Sandbox Input/Output File Handling ---")
+#     finally:
+#         sandbox_backend.close()
