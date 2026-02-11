@@ -97,11 +97,14 @@ class Sandbox(abc.ABC, BaseModel):
         )
 
     @abc.abstractmethod
-    def get_tools(self) -> list[Node]:
+    def get_tools(self, llm: Any = None) -> list[Node]:
         """Return tools this sandbox provides for agent use.
 
         Subclasses must implement this method to return tools specific
         to their sandbox type. Tools are configured via the `tools` field.
+
+        Args:
+            llm: Optional LLM instance passed to tools that require one (e.g. FileReadTool).
 
         Returns:
             List of tool instances (Node objects).

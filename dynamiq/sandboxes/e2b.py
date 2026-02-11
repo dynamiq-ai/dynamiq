@@ -1,5 +1,8 @@
 """E2B sandbox implementation."""
 
+import shlex
+from typing import Any
+
 from e2b.exceptions import RateLimitException as E2BRateLimitException
 from e2b_desktop import Sandbox as E2BDesktopSandbox
 from pydantic import ConfigDict, Field, PrivateAttr
@@ -197,8 +200,7 @@ class E2BSandbox(Sandbox):
         """Return True when file exists in sandbox filesystem."""
         sandbox = self._ensure_sandbox()
         resolved_path = self._resolve_path(file_path)
-        safe_path = resolved_path.replace("'", "'\"'\"'")
-        check_cmd = f"test -f '{safe_path}'"
+        check_cmd = f"test -f {shlex.quote(resolved_path)}"
         result = sandbox.commands.run(check_cmd)
         return getattr(result, "exit_code", 1) == 0
 
@@ -208,11 +210,14 @@ class E2BSandbox(Sandbox):
         resolved_path = self._resolve_path(file_path)
         return sandbox.files.read(resolved_path, "bytes")
 
-    def get_tools(self) -> list[Node]:
+    def get_tools(self, llm: Any = None) -> list[Node]:
         """Return tools this sandbox provides for agent use.
 
         Creates tools based on tools config and TOOL_REGISTRY.
         Each tool is enabled by default unless explicitly disabled.
+
+        Args:
+            llm: Optional LLM instance passed to tools that require one (e.g. FileReadTool).
 
         Returns:
             List of tool instances (Node objects).
@@ -220,7 +225,10 @@ class E2BSandbox(Sandbox):
         from dynamiq.nodes.tools.file_tools import FileReadTool
         from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
-        return [SandboxShellTool(sandbox=self), FileReadTool(file_store=self)]
+        if llm is not None:
+            return [SandboxShellTool(sandbox=self), FileReadTool(file_store=self, llm=llm)]
+        else:
+            return [SandboxShellTool(sandbox=self)]
 
     def close(self, kill: bool = False) -> None:
         """Close the E2B sandbox connection.

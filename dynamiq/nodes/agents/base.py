@@ -307,7 +307,7 @@ class Agent(Node):
 
         if self.sandbox_backend:
             # Add sandbox tools when sandbox is enabled (not serialized; recreated from sandbox config on load)
-            self.tools.extend(self.sandbox_backend.get_tools())
+            self.tools.extend(self.sandbox_backend.get_tools(llm=self.llm))
 
         elif self.file_store_backend:
             # Add file tools when file store is enabled
@@ -377,7 +377,9 @@ class Agent(Node):
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
 
-        sandbox_tool_names = {t.name for t in self.sandbox_backend.get_tools()} if self.sandbox_backend else set()
+        sandbox_tool_names = (
+            {t.name for t in self.sandbox_backend.get_tools(llm=self.llm)} if self.sandbox_backend else set()
+        )
         tools_to_serialize = [
             t
             for t in self.tools
