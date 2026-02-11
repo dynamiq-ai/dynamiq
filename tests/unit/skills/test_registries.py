@@ -96,6 +96,42 @@ class TestFileSystemRegistry:
         assert "FileSystem" in registry.type
         assert "dynamiq.skills.registries" in registry.type
 
+    def test_get_skill_scripts_path_returns_dir_when_exists(self):
+        """FileSystem.get_skill_scripts_path returns absolute path when skill has scripts/."""
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / "my-skill"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir()
+            (scripts_dir / "run.py").write_text("", encoding="utf-8")
+            registry = FileSystem(
+                base_path=tmp,
+                skills=[FileSystemSkillEntry(name="my-skill", description="My skill")],
+            )
+            path = registry.get_skill_scripts_path("my-skill")
+            assert path is not None
+            assert path.endswith("my-skill" + "/scripts") or path.endswith("my-skill\\scripts")
+            assert Path(path).is_dir()
+
+    def test_get_skill_scripts_path_returns_none_when_no_scripts_dir(self):
+        """FileSystem.get_skill_scripts_path returns None when skill has no scripts/."""
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / "no-scripts"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("# Skill", encoding="utf-8")
+            registry = FileSystem(
+                base_path=tmp,
+                skills=[FileSystemSkillEntry(name="no-scripts", description=None)],
+            )
+            assert registry.get_skill_scripts_path("no-scripts") is None
+
+    def test_get_skill_scripts_path_returns_none_when_skill_unknown(self):
+        """FileSystem.get_skill_scripts_path returns None when skill name not in registry."""
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = FileSystem(base_path=tmp, skills=[])
+            assert registry.get_skill_scripts_path("unknown") is None
+
 
 class TestDynamiqRegistry:
     """Tests for Dynamiq skill registry."""
