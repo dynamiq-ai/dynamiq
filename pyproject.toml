@@ -75,6 +75,7 @@ pyyaml = "6.0.1"
 e2b = "2.8.0"
 tiktoken = "0.12.0"
 neo4j = "^6.0.3"
+e2b-desktop = "^2.2.0"
 
 [tool.poetry.group.dev.dependencies]
 setuptools = "~78.1.1"

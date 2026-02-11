@@ -195,12 +195,18 @@ class FileStoreConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    @property
+    def to_dict_exclude_params(self) -> dict[str, bool]:
+        """Define parameters to exclude during serialization."""
+        return {"backend": True}
+
     def to_dict(self, **kwargs) -> dict[str, Any]:
         """Convert the FileStoreConfig instance to a dictionary."""
         for_tracing = kwargs.pop("for_tracing", False)
         if for_tracing and not self.enabled:
             return {"enabled": False}
         kwargs.pop("include_secure_params", None)
-        config_data = self.model_dump(exclude={"backend"}, **kwargs)
+        exclude = kwargs.pop("exclude", self.to_dict_exclude_params)
+        config_data = self.model_dump(exclude=exclude, **kwargs)
         config_data["backend"] = self.backend.to_dict()
         return config_data
