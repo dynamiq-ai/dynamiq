@@ -269,7 +269,10 @@ class E2BSandbox(Sandbox):
         from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
         if llm is not None:
-            return [SandboxShellTool(sandbox=self), FileReadTool(file_store=self, llm=llm)]
+            return [
+                SandboxShellTool(sandbox=self),
+                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, allow_absolute_paths=True),
+            ]
         else:
             return [SandboxShellTool(sandbox=self)]
 

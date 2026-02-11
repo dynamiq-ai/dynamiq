@@ -5,7 +5,7 @@ import re
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
@@ -32,18 +32,22 @@ logger = logging.getLogger(__name__)
 EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
 
 
-def validate_file_path(file_path: str) -> str:
+def validate_file_path(file_path: str, allow_absolute: bool = False) -> str:
     """
     Validate a file path to prevent path traversal attacks.
 
     Args:
         file_path: The file path to validate.
+        allow_absolute: If True, absolute paths are permitted (e.g. when the
+            tool is backed by a Sandbox and the LLM discovers absolute paths
+            from shell output).
 
     Returns:
         The validated (normalized) file path.
 
     Raises:
-        ValueError: If the path contains path traversal sequences or is absolute.
+        ValueError: If the path contains path traversal sequences or is
+            absolute (when *allow_absolute* is False).
     """
     if not file_path:
         return file_path
@@ -51,7 +55,9 @@ def validate_file_path(file_path: str) -> str:
     normalized = os.path.normpath(file_path)
 
     if os.path.isabs(normalized):
-        raise ValueError(f"Absolute paths are not allowed: {file_path}")
+        if not allow_absolute:
+            raise ValueError(f"Absolute paths are not allowed: {file_path}")
+        return normalized
 
     path_parts = normalized.split(os.sep)
     if ".." in path_parts:
@@ -59,7 +65,8 @@ def validate_file_path(file_path: str) -> str:
 
     # Also check for Windows-style absolute paths (e.g., C:\)
     if len(normalized) >= 2 and normalized[1] == ":":
-        raise ValueError(f"Absolute paths are not allowed: {file_path}")
+        if not allow_absolute:
+            raise ValueError(f"Absolute paths are not allowed: {file_path}")
 
     return normalized
 
@@ -147,9 +154,10 @@ class FileReadInputSchema(BaseModel):
 
     @field_validator("file_path")
     @classmethod
-    def validate_path(cls, v: str) -> str:
+    def validate_path(cls, v: str, info: ValidationInfo) -> str:
         """Validate file_path to prevent path traversal attacks."""
-        return validate_file_path(v)
+        allow_absolute = bool((info.context or {}).get("allow_absolute_paths"))
+        return validate_file_path(v, allow_absolute=allow_absolute)
 
 
 class FileWriteInputSchema(BaseModel):
@@ -249,10 +257,14 @@ class FileReadTool(Node):
     spreadsheet_preview_max_chars: int = Field(
         default=8000, description="Maximum characters to emit per sheet preview to avoid massive outputs."
     )
+    allow_absolute_paths: bool = Field(default=False, description="Whether to allow absolute paths.")
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileReadInputSchema]] = FileReadInputSchema
     _connection_manager: ConnectionManager | None = PrivateAttr(default=None)
     _page_converter_cache: dict[FileType, Node] = PrivateAttr(default_factory=dict)
+
+    def get_context_for_input_schema(self) -> dict:
+        return {"allow_absolute_paths": self.allow_absolute_paths}
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """

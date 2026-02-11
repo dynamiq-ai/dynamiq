@@ -133,9 +133,9 @@ def run(input_data):
 
 def test_react_agent_with_structured_python_tool(string_handler_python_tool):
     """Test ReAct agent using Python tool with structured output (content + raw_response)."""
-    llm = OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(), temperature=0.1)
+    llm = OpenAI(model="gpt-5-mini", connection=connections.OpenAI(), temperature=0.1)
 
-    agent = Agent(name="Text Assistant", llm=llm, tools=[string_handler_python_tool], max_loops=5)
+    agent = Agent(name="Text Assistant", llm=llm, tools=[string_handler_python_tool], max_loops=10)
 
     tracing_handler = TracingCallbackHandler()
     config = RunnableConfig(callbacks=[tracing_handler])

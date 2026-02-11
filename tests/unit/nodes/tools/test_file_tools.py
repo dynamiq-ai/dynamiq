@@ -300,9 +300,16 @@ def test_file_read_tool_with_sandbox_like_backend(llm_model):
 
     sandbox = FakeSandbox()
     sandbox._data["notes/readme.txt"] = b"sandbox text content"
+    sandbox._data["/home/user/scores.csv"] = b"name,score\nAlice,95"
 
-    tool = FileReadTool(file_store=sandbox, llm=llm_model)
+    tool = FileReadTool(file_store=sandbox, llm=llm_model, allow_absolute_paths=True)
+
+    # Relative path
     result = tool.run({"file_path": "notes/readme.txt"})
-
     assert result.status == RunnableStatus.SUCCESS
     assert result.output["content"] == "sandbox text content"
+
+    # Absolute path — allowed via allow_absolute_paths=True
+    result = tool.run({"file_path": "/home/user/scores.csv"})
+    assert result.status == RunnableStatus.SUCCESS
+    assert "Alice" in result.output["content"]
