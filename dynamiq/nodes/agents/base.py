@@ -432,7 +432,11 @@ class Agent(Node):
         try:
             if hasattr(self.sandbox_backend, "_ensure_sandbox"):
                 self.sandbox_backend._ensure_sandbox()
-            ingest_skills_into_sandbox(self.sandbox_backend, source)
+            ingest_skills_into_sandbox(
+                self.sandbox_backend,
+                source,
+                sandbox_skills_base_path=source.sandbox_skills_base_path,
+            )
             logger.info("Agent %s: skills ingested into sandbox at init", self.name)
         except Exception as e:
             logger.warning("Agent %s: skills ingestion into sandbox failed: %s", self.name, e)
