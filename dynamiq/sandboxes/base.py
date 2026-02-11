@@ -40,6 +40,9 @@ class Sandbox(abc.ABC, BaseModel):
     OUTPUT_DIR_NAME: ClassVar[str] = "output"
 
     connection: BaseConnection | None = Field(default=None, description="Connection to the sandbox backend.")
+    max_output_files: int = Field(
+        default=50, description="Maximum number of files to collect from the output directory."
+    )
 
     @computed_field
     @cached_property
@@ -134,6 +137,9 @@ class Sandbox(abc.ABC, BaseModel):
 
     def list_output_files(self) -> list[str]:
         """List files in the sandbox output directory.
+
+        Implementations should respect ``max_output_files`` when scanning
+        for files.
 
         Returns:
             List of absolute file paths found in the output directory.

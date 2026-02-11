@@ -207,8 +207,8 @@ class E2BSandbox(Sandbox):
     def list_output_files(self) -> list[str]:
         """List files in the E2B sandbox output directory.
 
-        Searches for files in the output directory (``{base_path}/output``)
-        up to 3 levels deep, returning at most 50 file paths.
+        Searches for files in the output directory (``{base_path}/output``),
+        returning at most ``max_output_files`` file paths.
 
         Returns:
             List of absolute file paths found in the output directory.
@@ -223,8 +223,8 @@ class E2BSandbox(Sandbox):
             if check_result.exit_code != 0 or "exists" not in (check_result.stdout or ""):
                 return []
 
-            # List files recursively (max depth 3, max 50 files)
-            cmd = f"find {target_dir} -maxdepth 3 -type f 2>/dev/null | head -50"
+            # List files recursively (configurable limit)
+            cmd = f"find {target_dir} -type f 2>/dev/null | head -{self.max_output_files}"
             result = sandbox.commands.run(cmd)
             if result.exit_code != 0 or not (result.stdout or "").strip():
                 return []
