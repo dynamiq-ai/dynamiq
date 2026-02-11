@@ -271,7 +271,7 @@ class E2BSandbox(Sandbox):
         if llm is not None:
             return [
                 SandboxShellTool(sandbox=self),
-                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, allow_absolute_paths=True),
+                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
             ]
         else:
             return [SandboxShellTool(sandbox=self)]

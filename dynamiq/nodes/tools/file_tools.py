@@ -156,7 +156,7 @@ class FileReadInputSchema(BaseModel):
     @classmethod
     def validate_path(cls, v: str, info: ValidationInfo) -> str:
         """Validate file_path to prevent path traversal attacks."""
-        allow_absolute = bool((info.context or {}).get("allow_absolute_paths"))
+        allow_absolute = bool((info.context or {}).get("absolute_file_paths_allowed"))
         return validate_file_path(v, allow_absolute=allow_absolute)
 
 
@@ -257,14 +257,14 @@ class FileReadTool(Node):
     spreadsheet_preview_max_chars: int = Field(
         default=8000, description="Maximum characters to emit per sheet preview to avoid massive outputs."
     )
-    allow_absolute_paths: bool = Field(default=False, description="Whether to allow absolute paths.")
+    absolute_file_paths_allowed: bool = Field(default=False, description="Whether to allow absolute paths.")
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileReadInputSchema]] = FileReadInputSchema
     _connection_manager: ConnectionManager | None = PrivateAttr(default=None)
     _page_converter_cache: dict[FileType, Node] = PrivateAttr(default_factory=dict)
 
     def get_context_for_input_schema(self) -> dict:
-        return {"allow_absolute_paths": self.allow_absolute_paths}
+        return {"absolute_file_paths_allowed": self.absolute_file_paths_allowed}
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """

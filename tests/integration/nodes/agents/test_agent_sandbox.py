@@ -205,8 +205,8 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
     file_read_tools_first = [t for t in loaded_agent.tools if isinstance(t, FileReadTool)]
     assert len(file_read_tools_first) == 1, "First load should have exactly one FileReadTool"
     assert (
-        file_read_tools_first[0].allow_absolute_paths is True
-    ), "Sandbox-backed FileReadTool must have allow_absolute_paths=True"
+        file_read_tools_first[0].absolute_file_paths_allowed is True
+    ), "Sandbox-backed FileReadTool must have absolute_file_paths_allowed=True"
 
     roundtrip_path = tmp_path / "agent_e2b_sandbox_roundtrip.yaml"
     loaded.to_yaml_file(roundtrip_path)
@@ -226,7 +226,7 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
         "After roundtrip, FileReadTool must not be duplicated: "
         "sandbox tools are excluded from serialization and recreated from sandbox config on load."
     )
-    assert file_read_tools_roundtrip[0].allow_absolute_paths is True
+    assert file_read_tools_roundtrip[0].absolute_file_paths_allowed is True
 
     assert roundtrip_agent.sandbox is not None
     assert roundtrip_agent.sandbox.enabled
