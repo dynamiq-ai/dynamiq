@@ -11,10 +11,16 @@ class RequirementData(BaseModel):
 
     This model tracks any dict in YAML that has both $type and $id fields,
     which indicates it needs to be resolved via an external API before workflow initialization.
+
+    Optionally, `value_path` specifies a JSONPath expression to extract a specific
+    value from the resolved requirement data (e.g., "$.account_id").
     """
 
     type: str = Field(..., alias="$type", description="The $type field value")
     id: str = Field(..., alias="$id", description="The $id field - unique identifier for external resolution")
+    value_path: str | None = Field(
+        None, description="Optional JSONPath expression to extract a specific value from the resolved requirement"
+    )
 
     @classmethod
     def from_dict(cls, data: dict) -> "RequirementData | None":
