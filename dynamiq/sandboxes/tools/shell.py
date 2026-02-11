@@ -43,18 +43,40 @@ class SandboxShellTool(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "SandboxShellTool"
     description: str = (
-        "Execute shell commands in a sandbox environment.\n\n"
-        "Use this tool to run shell commands, scripts, or system utilities.\n"
-        "The command runs in an isolated sandbox environment.\n\n"
-        "Examples:\n"
+        "Execute shell commands in an isolated sandbox environment.\n\n"
+        "## Output Files\n"
+        "Save any files for the user to /home/user/output/ (already created). "
+        "Files in this directory are automatically collected and returned.\n\n"
+        "## Rules\n"
+        "1. Use 'python3' instead of 'python'.\n"
+        "2. For Python tasks: write a .py script file first, then run it. "
+        "NEVER use one-liners with semicolons — compound statements "
+        "(with, for, if/else) cause SyntaxError after semicolons.\n"
+        "3. Always add output to confirm success of script execution — "
+        "use print() in Python scripts or echo in shell commands "
+        "(e.g. print('Done'), echo 'File created successfully').\n\n"
+        "## How to Write and Run a Script\n"
+        "Use a heredoc to create the file, with && to chain execution. "
+        "The && and script runner go on the FIRST line. EOF must be ALONE on its own line:\n"
+        '  {"command": "cat <<\'EOF\' > script.py && python3 script.py\\n'
+        "...your code here...\\n"
+        "print('Script completed successfully')\\n"
+        'EOF"}\n\n'
+        "## Parameters\n"
+        "- command (str, required): The shell command to execute.\n"
+        "- timeout (int, default 60): Max seconds to wait for completion.\n"
+        "- run_in_background_enabled (bool, default false): Run without waiting for output.\n\n"
+        "## Examples\n"
         '- {"command": "ls -la"}\n'
-        '- {"command": "python script.py"}\n'
         '- {"command": "echo Hello World"}\n'
-        '- {"command": "pip install pandas", "timeout": 120}\n\n'
-        "Parameters:\n"
-        "- command: The shell command to execute\n"
-        "- timeout: Maximum time to wait for command completion (default: 60s)\n"
-        "- run_in_background_enabled: Run command in background without waiting (default: false)"
+        '- {"command": "pip install pandas", "timeout": 120}\n'
+        '- {"command": "cp result.csv /home/user/output/"}\n'
+        '- {"command": "cat <<\'EOF\' > script.py && python3 script.py\\nimport csv\\n'
+        "with open('data.csv') as f:\\n"
+        "    reader = csv.reader(f)\\n"
+        "    print(list(reader))\\n"
+        "print('Done')\\n"
+        'EOF"}'
     )
 
     sandbox: Sandbox = Field(..., description="Sandbox backend to execute commands in.")
@@ -125,7 +147,7 @@ class SandboxShellTool(Node):
             )
 
             # Handle None exit_code: treat as success unless stderr indicates error
-            is_success = result.exit_code is None or result.exit_code == 0
+            is_success = result.exit_code is None or result.exit_code == 0 or result.stderr == ""
             output = {
                 "content": result.stdout if result.stdout else "(no output)",
                 "stdout": result.stdout,

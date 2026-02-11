@@ -619,6 +619,14 @@ class Agent(Node):
                     f"Agent {self.name} - {self.id}: returning {len(filtered_files)} generated file(s) in file store"
                 )
 
+        if self.sandbox_backend:
+            sandbox_files = self._collect_files_from_sandbox()
+            if sandbox_files:
+                execution_result["files"] = sandbox_files
+                logger.info(
+                    f"Agent {self.name} - {self.id}: returning {len(sandbox_files)} generated file(s) from sandbox"
+                )
+
         logger.info(f"Node {self.name} - {self.id}: finished with RESULT:\n{str(result)[:200]}...")
 
         return execution_result
@@ -1130,6 +1138,23 @@ class Agent(Node):
             if (not uploaded_names) or (base_name in uploaded_names):
                 return True
         return False
+
+    def _collect_files_from_sandbox(self) -> list[io.BytesIO]:
+        """Collect output files from the sandbox backend.
+
+        Downloads all files from the sandbox output directory.
+
+        Returns:
+            List of BytesIO objects with name, description, and content_type attributes.
+        """
+        if not self.sandbox_backend:
+            return []
+
+        try:
+            return self.sandbox_backend.collect_output_files()
+        except Exception as e:
+            logger.warning(f"Agent {self.name} - {self.id}: failed to collect files from sandbox: {e}")
+            return []
 
     def _upload_files_to_sandbox(self, normalized_files: list) -> None:
         """Upload file-like objects to the sandbox backend."""
