@@ -85,7 +85,10 @@ def test_agent_with_sandbox_executes_shell(openai_llm):
     wf = Workflow(flow=Flow(nodes=[agent]))
 
     result = wf.run(
-        input_data={"input": "Run this command in the sandbox and tell me the output: echo hello"},
+        input_data={
+            "input": "Run this command in the sandbox and tell me the output: echo hello."
+            " Use sandbox command tool and return its exact result."
+        },
         config=RunnableConfig(),
     )
     assert result.status == RunnableStatus.SUCCESS

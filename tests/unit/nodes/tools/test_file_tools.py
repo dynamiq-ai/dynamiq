@@ -281,8 +281,8 @@ def test_file_read_tool_limits_spreadsheet_preview(file_store, llm_model):
     assert "showing up to 5 row(s)" in content
 
 
-def test_file_read_tool_with_sandbox_like_backend():
-    """FileReadTool should work with sandbox-style storage backend (no LLM required)."""
+def test_file_read_tool_with_sandbox_like_backend(llm_model):
+    """FileReadTool should work with sandbox-style storage backend."""
 
     class FakeSandboxStorage:
         def __init__(self):
@@ -302,7 +302,7 @@ def test_file_read_tool_with_sandbox_like_backend():
     sandbox_storage = FakeSandboxStorage()
     sandbox_storage.store("notes/readme.txt", "sandbox text content")
 
-    tool = FileReadTool(file_store=sandbox_storage)
+    tool = FileReadTool(file_store=sandbox_storage, llm=llm_model)
     result = tool.run({"file_path": "notes/readme.txt"})
 
     assert result.status == RunnableStatus.SUCCESS
