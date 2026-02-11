@@ -233,24 +233,6 @@ class E2BSandbox(Sandbox):
             logger.warning(f"E2BSandbox list_files failed for {target_dir}: {e}")
             return []
 
-    def download_file(self, path: str) -> bytes:
-        """Download a file from the E2B sandbox.
-
-        Args:
-            path: Absolute path of the file in the sandbox.
-
-        Returns:
-            The file content as bytes.
-        """
-        sandbox = self._ensure_sandbox()
-        try:
-            content = sandbox.files.read(path, "bytes")
-            logger.debug(f"E2BSandbox downloaded file: {path} ({len(content)} bytes)")
-            return content
-        except Exception as e:
-            logger.error(f"E2BSandbox failed to download file {path}: {e}")
-            raise
-
     def _resolve_path(self, file_path: str) -> str:
         """Resolve relative file paths against sandbox base path."""
         if file_path.startswith("/"):

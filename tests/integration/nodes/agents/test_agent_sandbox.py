@@ -52,12 +52,12 @@ class MockSandbox(Sandbox):
     def list_output_files(self) -> list[str]:
         return list(self.mock_files.keys())
 
-    def download_file(self, path: str) -> bytes:
-        if path in self.mock_files:
-            return self.mock_files[path]
-        raise FileNotFoundError(f"Mock file not found: {path}")
+    def retrieve(self, file_path: str) -> bytes:
+        if file_path in self.mock_files:
+            return self.mock_files[file_path]
+        raise FileNotFoundError(f"Mock file not found: {file_path}")
 
-    def get_tools(self) -> list[Node]:
+    def get_tools(self, llm=None) -> list[Node]:
         return [SandboxShellTool(sandbox=self)]
 
 

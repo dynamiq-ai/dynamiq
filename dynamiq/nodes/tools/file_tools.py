@@ -276,9 +276,6 @@ class FileReadTool(Node):
             self.converter_mapping = {}
             for file_type, converter_class in DEFAULT_FILE_TYPE_TO_CONVERTER_CLASS_MAP.items():
                 if file_type == FileType.IMAGE and converter_class == LLMImageConverter:
-                    # Image conversion relies on an LLM; skip this converter when no LLM is provided.
-                    if self.llm is None:
-                        continue
                     self.converter_mapping[file_type] = converter_class(llm=self.llm)
                 else:
                     self.converter_mapping[file_type] = converter_class()
@@ -360,12 +357,6 @@ class FileReadTool(Node):
                     return None, None
 
                 if detected_type == FileType.IMAGE and instructions:
-                    if self.llm is None:
-                        logger.warning(
-                            "FileReadTool received image instructions but no LLM is configured; "
-                            "falling back to raw content."
-                        )
-                        return None, None
                     converter = LLMImageConverter(llm=self.llm, extraction_instruction=instructions)
                     converter_name = f"{converter.name} (with custom instructions)"
                 else:
@@ -532,7 +523,7 @@ class FileReadTool(Node):
             dict: A dictionary representation of the instance.
         """
         data = super().to_dict(**kwargs)
-        data["llm"] = self.llm.to_dict(**kwargs) if self.llm else None
+        data["llm"] = self.llm.to_dict(**kwargs)
         if self.converter_mapping:
             data["converter_mapping"] = {
                 file_type.value: converter.to_dict(**kwargs) for file_type, converter in self.converter_mapping.items()

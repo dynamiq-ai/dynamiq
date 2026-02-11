@@ -38,10 +38,10 @@ class TestSandbox(Sandbox):
     def list_output_files(self) -> list[str]:
         return []
 
-    def download_file(self, path: str) -> bytes:
-        raise FileNotFoundError(f"Test sandbox does not store files: {path}")
+    def retrieve(self, file_path: str) -> bytes:
+        raise FileNotFoundError(f"Test sandbox does not store files: {file_path}")
 
-    def get_tools(self) -> list[Node]:
+    def get_tools(self, llm=None) -> list[Node]:
         return [SandboxShellTool(sandbox=self)]
 
 

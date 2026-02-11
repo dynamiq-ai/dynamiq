@@ -159,23 +159,6 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
-    def download_file(self, path: str) -> bytes:
-        """Download a file from the sandbox.
-
-        Args:
-            path: Absolute path of the file in the sandbox.
-
-        Returns:
-            The file content as bytes.
-
-        Raises:
-            NotImplementedError: If the sandbox does not support file downloads.
-        """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support file downloads. "
-            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
-        )
-
     def is_output_empty(self) -> bool:
         """Check whether the sandbox output directory contains any files.
 
@@ -204,7 +187,7 @@ class Sandbox(abc.ABC, BaseModel):
         for file_path in file_paths:
             file_name = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
             try:
-                content = self.download_file(file_path)
+                content = self.retrieve(file_path)
                 content_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
 
                 file_bytesio = io.BytesIO(content)
