@@ -564,7 +564,7 @@ class FileReadTool(Node):
             content_size = len(content)
 
             cached_text, cached_path = (None, None)
-            if allow_cache:
+            if allow_cache and not isinstance(self.file_store, Sandbox):
                 cached_text, cached_path = self._load_cached_text(input_data.file_path)
 
             if cached_text:
