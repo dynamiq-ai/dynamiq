@@ -47,6 +47,7 @@ class SandboxShellTool(Node):
         "## Output Files\n"
         "Save any files for the user to /home/user/output/ (already created). "
         "Files in this directory are automatically collected and returned.\n\n"
+        "Ensure that this folder contains only the files you want to return to the user.\n\n"
         "## Rules\n"
         "1. Use 'python3' instead of 'python'.\n"
         "2. For Python tasks: write a .py script file first, then run it. "
