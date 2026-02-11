@@ -5,7 +5,7 @@ from io import BytesIO
 
 import pytest
 
-from dynamiq import Workflow
+from dynamiq import ROOT_PATH, Workflow
 from dynamiq.callbacks import TracingCallbackHandler
 from dynamiq.connections import E2B as E2BConnection
 from dynamiq.connections import OpenAI as OpenAIConnection
@@ -27,6 +27,34 @@ def openai_llm():
         max_tokens=3000,
         temperature=0.1,
     )
+
+
+# Path fixtures
+@pytest.fixture(scope="module")
+def data_folder_path():
+    return os.path.join(os.path.dirname(ROOT_PATH), "examples", "components", "data")
+
+
+@pytest.fixture(scope="module")
+def image_file_path(data_folder_path):
+    return os.path.join(data_folder_path, "img.jpeg")
+
+
+@pytest.fixture(scope="function")
+def image_bytes(image_file_path):
+    """Load image and return as BytesIO file object.
+
+    Uses function scope to ensure each test gets a fresh BytesIO with stream position at 0.
+    This prevents issues when multiple LLM fixtures are parametrized and the stream is consumed.
+    """
+    with open(image_file_path, "rb") as f:
+        image_data = f.read()
+
+    # Create BytesIO object with the image data
+    image_file = BytesIO(image_data)
+    image_file.name = "img.jpeg"
+    image_file.seek(0)  # Reset position to beginning
+    return image_file
 
 
 @pytest.fixture(scope="module")
@@ -79,20 +107,16 @@ def _run_and_assert_sandbox_agent(
     assert isinstance(agent_output_files, list), f"Agent output files should be a list, got {type(agent_output_files)}"
 
     if expected_file_name:
-        assert len(agent_output_files) >= len(expected_file_name), (
-            f"Expected at least {len(expected_file_name)} file(s), got {len(agent_output_files)}"
-        )
+        assert len(agent_output_files) >= len(
+            expected_file_name
+        ), f"Expected at least {len(expected_file_name)} file(s), got {len(agent_output_files)}"
 
         returned_names = {f.name for f in agent_output_files}
         for name in expected_file_name:
-            assert name in returned_names, (
-                f"Expected file '{name}' not found in returned files: {returned_names}"
-            )
+            assert name in returned_names, f"Expected file '{name}' not found in returned files: {returned_names}"
 
         for returned_file in agent_output_files:
-            assert isinstance(returned_file, BytesIO), (
-                f"Agent should return file as BytesIO, got {type(returned_file)}"
-            )
+            assert isinstance(returned_file, BytesIO), f"Agent should return file as BytesIO, got {type(returned_file)}"
             file_content = returned_file.read()
             assert file_content is not None, "File content should not be None"
             assert len(file_content) > 0, f"File content for '{returned_file.name}' should not be empty"
@@ -112,8 +136,8 @@ def _run_and_assert_sandbox_agent(
 
 
 @pytest.mark.integration
-def test_agent_sandbox_creates_and_returns_file(openai_llm, e2b_connection, run_config):
-    """Test Agent with E2B sandbox can create a file and return it in output."""
+def test_agent_sandbox_creates_and_returns_file(openai_llm, image_bytes, e2b_connection, run_config):
+    """Test Agent with E2B sandbox can return a file in output and process vision data."""
     if not os.getenv("OPENAI_API_KEY"):
         pytest.skip("OPENAI_API_KEY is not set; skipping credentials-required test.")
     if not os.getenv("E2B_API_KEY"):
@@ -127,10 +151,7 @@ def test_agent_sandbox_creates_and_returns_file(openai_llm, e2b_connection, run_
             name="SandboxFileAgent",
             id="sandbox_file_agent",
             llm=openai_llm,
-            role=(
-                "You are a helpful assistant that can execute commands in the sandbox. "
-                "When asked to create files, save them to /home/user/output so they are returned."
-            ),
+            role=("You are a helpful assistant that can execute commands in the sandbox. "),
             inference_mode=InferenceMode.XML,
             sandbox=sandbox_config,
             max_loops=10,
@@ -139,15 +160,16 @@ def test_agent_sandbox_creates_and_returns_file(openai_llm, e2b_connection, run_
 
         input_data = {
             "input": (
-                "Create a file called summary.txt in the /home/user/output directory "
-                "with the text 'Hello from sandbox'. Then confirm the file was created."
+                "Return a file called summary.txt with a brand of the camera in the image. "
+                "Use FileReadTool with additional instruction."
             ),
+            "files": [image_bytes],
         }
 
         _run_and_assert_sandbox_agent(
             agent,
             input_data,
-            expected_keywords=["summary", "created", "file"],
+            expected_keywords=["canon", "camera", "manufacturer", "dslr", "photography", "equipment"],
             run_config=run_config,
             expected_file_name=["summary.txt"],
         )

@@ -12,6 +12,7 @@ from dynamiq.flows import Flow
 from dynamiq.nodes import Node
 from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.llms.openai import OpenAI
+from dynamiq.nodes.tools.file_tools import FileReadTool
 from dynamiq.nodes.types import InferenceMode
 from dynamiq.runnables import RunnableConfig, RunnableStatus
 from dynamiq.sandboxes import SandboxConfig
@@ -52,12 +53,12 @@ class MockSandbox(Sandbox):
     def list_output_files(self) -> list[str]:
         return list(self.mock_files.keys())
 
-    def download_file(self, path: str) -> bytes:
-        if path in self.mock_files:
-            return self.mock_files[path]
-        raise FileNotFoundError(f"Mock file not found: {path}")
+    def retrieve(self, file_path: str) -> bytes:
+        if file_path in self.mock_files:
+            return self.mock_files[file_path]
+        raise FileNotFoundError(f"Mock file not found: {file_path}")
 
-    def get_tools(self) -> list[Node]:
+    def get_tools(self, llm=None) -> list[Node]:
         return [SandboxShellTool(sandbox=self)]
 
 
@@ -198,9 +199,14 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
     assert loaded_agent.sandbox.enabled
     assert isinstance(loaded_agent.sandbox.backend, E2BSandbox)
 
-    shell_tool_name = "SandboxShellTool"
-    shell_tools_first = [t for t in loaded_agent.tools if t.name == shell_tool_name]
+    shell_tools_first = [t for t in loaded_agent.tools if isinstance(t, SandboxShellTool)]
     assert len(shell_tools_first) == 1, "First load should have exactly one SandboxShellTool"
+
+    file_read_tools_first = [t for t in loaded_agent.tools if isinstance(t, FileReadTool)]
+    assert len(file_read_tools_first) == 1, "First load should have exactly one FileReadTool"
+    assert (
+        file_read_tools_first[0].absolute_file_paths_allowed is True
+    ), "Sandbox-backed FileReadTool must have absolute_file_paths_allowed=True"
 
     roundtrip_path = tmp_path / "agent_e2b_sandbox_roundtrip.yaml"
     loaded.to_yaml_file(roundtrip_path)
@@ -209,11 +215,18 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
     roundtrip_agent = roundtrip.flow.nodes[0]
     assert isinstance(roundtrip_agent, Agent)
 
-    shell_tools_roundtrip = [t for t in roundtrip_agent.tools if t.name == shell_tool_name]
+    shell_tools_roundtrip = [t for t in roundtrip_agent.tools if isinstance(t, SandboxShellTool)]
     assert len(shell_tools_roundtrip) == 1, (
         "After roundtrip, SandboxShellTool must not be duplicated: "
         "to_dict serializes tools including sandbox tools, then __init__ must not add them again."
     )
+
+    file_read_tools_roundtrip = [t for t in roundtrip_agent.tools if isinstance(t, FileReadTool)]
+    assert len(file_read_tools_roundtrip) == 1, (
+        "After roundtrip, FileReadTool must not be duplicated: "
+        "sandbox tools are excluded from serialization and recreated from sandbox config on load."
+    )
+    assert file_read_tools_roundtrip[0].absolute_file_paths_allowed is True
 
     assert roundtrip_agent.sandbox is not None
     assert roundtrip_agent.sandbox.enabled

@@ -5,7 +5,7 @@ import re
 from io import BytesIO
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator
 
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
@@ -23,6 +23,7 @@ from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.file_types import EXTENSION_MAP, FileType
 
@@ -31,18 +32,22 @@ logger = logging.getLogger(__name__)
 EXTRACTED_TEXT_SUFFIX = ".extracted.txt"
 
 
-def validate_file_path(file_path: str) -> str:
+def validate_file_path(file_path: str, allow_absolute: bool = False) -> str:
     """
     Validate a file path to prevent path traversal attacks.
 
     Args:
         file_path: The file path to validate.
+        allow_absolute: If True, absolute paths are permitted (e.g. when the
+            tool is backed by a Sandbox and the LLM discovers absolute paths
+            from shell output).
 
     Returns:
         The validated (normalized) file path.
 
     Raises:
-        ValueError: If the path contains path traversal sequences or is absolute.
+        ValueError: If the path contains path traversal sequences or is
+            absolute (when *allow_absolute* is False).
     """
     if not file_path:
         return file_path
@@ -50,7 +55,9 @@ def validate_file_path(file_path: str) -> str:
     normalized = os.path.normpath(file_path)
 
     if os.path.isabs(normalized):
-        raise ValueError(f"Absolute paths are not allowed: {file_path}")
+        if not allow_absolute:
+            raise ValueError(f"Absolute paths are not allowed: {file_path}")
+        return normalized
 
     path_parts = normalized.split(os.sep)
     if ".." in path_parts:
@@ -58,7 +65,8 @@ def validate_file_path(file_path: str) -> str:
 
     # Also check for Windows-style absolute paths (e.g., C:\)
     if len(normalized) >= 2 and normalized[1] == ":":
-        raise ValueError(f"Absolute paths are not allowed: {file_path}")
+        if not allow_absolute:
+            raise ValueError(f"Absolute paths are not allowed: {file_path}")
 
     return normalized
 
@@ -146,9 +154,10 @@ class FileReadInputSchema(BaseModel):
 
     @field_validator("file_path")
     @classmethod
-    def validate_path(cls, v: str) -> str:
+    def validate_path(cls, v: str, info: ValidationInfo) -> str:
         """Validate file_path to prevent path traversal attacks."""
-        return validate_file_path(v)
+        allow_absolute = bool((info.context or {}).get("absolute_file_paths_allowed"))
+        return validate_file_path(v, allow_absolute=allow_absolute)
 
 
 class FileWriteInputSchema(BaseModel):
@@ -237,8 +246,8 @@ class FileReadTool(Node):
               "<original_path>.extracted.txt" inside the same file store so FileSearchTool can reuse it without
               re-running converters.
     """
-    llm: BaseLLM = Field(..., description="LLM that will be used to process files.")
-    file_store: FileStore = Field(..., description="File storage to read from.")
+    llm: BaseLLM = Field(..., description="LLM used for image-aware file processing.")
+    file_store: FileStore | Sandbox = Field(..., description="File storage to read from.")
     max_size: int = Field(default=10000, description="Maximum size in bytes before chunking (default: 10000)")
     chunk_size: int = Field(default=1000, description="Size of each chunk in bytes (default: 1000)")
     converter_mapping: dict[FileType, Node] | None = None
@@ -248,10 +257,14 @@ class FileReadTool(Node):
     spreadsheet_preview_max_chars: int = Field(
         default=8000, description="Maximum characters to emit per sheet preview to avoid massive outputs."
     )
+    absolute_file_paths_allowed: bool = Field(default=False, description="Whether to allow absolute paths.")
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileReadInputSchema]] = FileReadInputSchema
     _connection_manager: ConnectionManager | None = PrivateAttr(default=None)
     _page_converter_cache: dict[FileType, Node] = PrivateAttr(default_factory=dict)
+
+    def get_context_for_input_schema(self) -> dict:
+        return {"absolute_file_paths_allowed": self.absolute_file_paths_allowed}
 
     def init_components(self, connection_manager: ConnectionManager | None = None):
         """
@@ -512,6 +525,7 @@ class FileReadTool(Node):
         """
         return super().to_dict_exclude_params | {
             "llm": True,
+            "file_store": True,
             "converter_mapping": True,
         }
 
@@ -523,6 +537,7 @@ class FileReadTool(Node):
         """
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
+        data["file_store"] = self.file_store.to_dict(**kwargs)
         if self.converter_mapping:
             data["converter_mapping"] = {
                 file_type.value: converter.to_dict(**kwargs) for file_type, converter in self.converter_mapping.items()
@@ -563,7 +578,7 @@ class FileReadTool(Node):
             content_size = len(content)
 
             cached_text, cached_path = (None, None)
-            if allow_cache:
+            if allow_cache and not isinstance(self.file_store, Sandbox):
                 cached_text, cached_path = self._load_cached_text(input_data.file_path)
 
             if cached_text:
@@ -603,7 +618,7 @@ class FileReadTool(Node):
 
                         cached_path = None
                         hint_enabled = False
-                        if allow_cache:
+                        if allow_cache and not isinstance(self.file_store, Sandbox):
                             cached_path = self._persist_extracted_text(input_data.file_path, text_content)
                             hint_enabled = detected_type not in {FileType.TEXT, FileType.MARKDOWN}
 
