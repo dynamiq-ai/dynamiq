@@ -26,6 +26,23 @@ TODO_TOOLS_INSTRUCTIONS = """TODO MANAGEMENT:
 - Only mark completed when FULLY done; if blocked, keep in_progress"""
 
 
+SANDBOX_INSTRUCTIONS_TEMPLATE = """SANDBOX EXECUTION ENVIRONMENT:
+Output Files:
+- Save any files for the user to {output_dir}/ (already created).
+  Files in this directory are automatically collected and returned.
+- Ensure that this folder contains only the files you want to return to the user.
+
+Rules:
+1. Use 'python3' instead of 'python'.
+2. For Python tasks: write a .py script file first, then run it. \
+NEVER use one-liners with semicolons — compound statements \
+(with, for, if/else) cause SyntaxError after semicolons.
+3. Always add output to confirm success of script execution — \
+use print() in Python scripts or echo in shell commands \
+(e.g. print('Done'), echo 'File created successfully').
+"""
+
+
 REACT_BLOCK_MULTI_TOOL_PLANNING = """
 MULTI-TOOL PLANNING AND STRATEGY:
 

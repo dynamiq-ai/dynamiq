@@ -1,6 +1,6 @@
 """E2B sandbox implementation."""
 
-from typing import ClassVar
+import shlex
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
 from e2b_desktop import Sandbox as E2BDesktopSandbox
@@ -24,12 +24,10 @@ class E2BSandbox(Sandbox):
     Supports reconnecting to existing sandboxes by providing sandbox_id.
     """
 
-    OUTPUT_DIR_NAME: ClassVar[str] = "output"
-
     model_config = ConfigDict(arbitrary_types_allowed=True)
     connection: E2B
     timeout: int = 3600
-    base_path: str = "/home/user"
+
     template: str | None = Field(
         default=None, description="Template to use for sandbox creation. " "If None, the default template is used."
     )
@@ -46,11 +44,6 @@ class E2BSandbox(Sandbox):
     def __init__(self, **kwargs):
         """Initialize the E2B sandbox storage."""
         super().__init__(**kwargs)
-
-    @property
-    def output_dir(self) -> str:
-        """Absolute path to the output directory inside the sandbox."""
-        return f"{self.base_path}/{self.OUTPUT_DIR_NAME}"
 
     @property
     def current_sandbox_id(self) -> str | None:
@@ -83,7 +76,7 @@ class E2BSandbox(Sandbox):
         if self._sandbox is None:
             return
         try:
-            self._sandbox.commands.run(f"mkdir -p {self.output_dir}")
+            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.output_dir)}")
             logger.debug(f"E2BSandbox ensured output dir exists: {self.output_dir}")
         except Exception as e:
             logger.warning(f"E2BSandbox failed to create output dir {self.output_dir}: {e}")
@@ -222,13 +215,13 @@ class E2BSandbox(Sandbox):
 
         try:
             # Check if the directory exists
-            check_cmd = f"test -d {target_dir} && echo exists"
+            check_cmd = f"test -d {shlex.quote(target_dir)} && echo exists"
             check_result = sandbox.commands.run(check_cmd)
             if check_result.exit_code != 0 or "exists" not in (check_result.stdout or ""):
                 return []
 
             # List files recursively (configurable limit)
-            cmd = f"find {target_dir} -type f 2>/dev/null | head -{self.max_output_files}"
+            cmd = f"find {shlex.quote(target_dir)} -type f 2>/dev/null | head -{self.max_output_files}"
             result = sandbox.commands.run(cmd)
             if result.exit_code != 0 or not (result.stdout or "").strip():
                 return []

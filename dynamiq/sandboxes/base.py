@@ -37,9 +37,15 @@ class Sandbox(abc.ABC, BaseModel):
     code execution and other isolated environment capabilities.
     """
     connection: BaseConnection | None = Field(default=None, description="Connection to the sandbox backend.")
+    base_path: str = Field(default="/home/user", description="Base path in the sandbox filesystem.")
     max_output_files: int = Field(
         default=50, description="Maximum number of files to collect from the output directory."
     )
+
+    @property
+    def output_dir(self) -> str:
+        """Absolute path to the output directory inside the sandbox."""
+        return f"{self.base_path}/output"
 
     @computed_field
     @cached_property
