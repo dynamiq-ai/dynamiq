@@ -1,0 +1,57 @@
+connections:
+  anthropic-conn:
+    type: dynamiq.connections.Anthropic
+    api_key: ${oc.env:ANTHROPIC_API_KEY}
+  e2b-conn:
+    type: dynamiq.connections.E2B
+    api_key: ${oc.env:E2B_API_KEY}
+  dynamiq-api-conn:
+    type: dynamiq.connections.Dynamiq
+    url: ${oc.env:DYNAMIQ_URL,}
+    api_key: ${oc.env:DYNAMIQ_API_KEY,}
+
+nodes:
+  registry-skills-agent:
+    type: dynamiq.nodes.agents.Agent
+    llm:
+      id: registry-skills-agent-llm
+      type: dynamiq.nodes.llms.Anthropic
+      connection: anthropic-conn
+      model: claude-sonnet-4-20250514
+    tools: []
+    role: |
+      You have access to skills (SkillsTool) and a sandbox. Each skill has a skill id and
+      version id in the registry; once ingested, they appear under /home/user/skills/<name>/.
+      Use SkillsTool action="list" then action="get" with skill_name="..." to load a skill.
+      When get returns "scripts_path", run scripts in the sandbox at that path
+      (e.g. /home/user/skills/mermaid-tools/scripts/). Use the sandbox tool for shell or Python.
+      Uploaded files go to /home/user/input; write outputs to /home/user/output (they are collected).
+    sandbox:
+      enabled: true
+      backend:
+        type: dynamiq.sandboxes.E2BSandbox
+        connection: e2b-conn
+    skills:
+      enabled: true
+      source:
+        type: dynamiq.skills.registries.Dynamiq
+        connection: dynamiq-api-conn
+        sandbox_skills_base_path: "/home/user/skills"
+        skills:
+          - id: "c4ce8af8-8f08-426a-be85-35e75c288d16"
+            version_id: "e0a3a68c-b3b6-4834-87f9-b8be7c8b8602"
+            name: mermaid-tools
+            description: Extract Mermaid diagrams from markdown and generate PNG images.
+    max_loops: 15
+    inference_mode: XML
+
+flows:
+  registry-skills-flow:
+    name: Registry skills + E2B sandbox
+    nodes:
+      - registry-skills-agent
+
+workflows:
+  registry-skills-sandbox-workflow:
+    flow: registry-skills-flow
+    version: 1

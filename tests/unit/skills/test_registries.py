@@ -259,3 +259,27 @@ class TestDynamiqRegistry:
         client.request.assert_called_once()
         call_args = client.request.call_args
         assert "/v1/skills/skill-by-id/versions/ver-id/instructions" in call_args[0][1]
+
+    def test_get_skill_scripts_path_returns_none_when_sandbox_base_not_set(self):
+        """Dynamiq.get_skill_scripts_path returns None when sandbox_skills_base_path is not set."""
+        conn = MagicMock()
+        registry = Dynamiq.model_construct(
+            connection=conn,
+            skills=[
+                DynamiqSkillEntry(id="sid", version_id="vid", name="my-skill", description=None),
+            ],
+        )
+        assert registry.get_skill_scripts_path("my-skill") is None
+
+    def test_get_skill_scripts_path_returns_sandbox_path_when_base_set(self):
+        """Dynamiq.get_skill_scripts_path returns sandbox scripts path when sandbox_skills_base_path is set."""
+        conn = MagicMock()
+        registry = Dynamiq.model_construct(
+            connection=conn,
+            skills=[
+                DynamiqSkillEntry(id="sid", version_id="vid", name="my-skill", description=None),
+            ],
+            sandbox_skills_base_path="/home/user/skills",
+        )
+        assert registry.get_skill_scripts_path("my-skill") == "/home/user/skills/my-skill/scripts"
+        assert registry.get_skill_scripts_path("unknown") is None

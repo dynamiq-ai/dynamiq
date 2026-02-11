@@ -26,6 +26,11 @@ class Dynamiq(BaseSkillRegistry):
     connection: DynamiqConnection = Field(default_factory=DynamiqConnection)
     timeout: float = Field(default=10, description="Timeout in seconds for API requests.")
     skills: list[DynamiqSkillEntry] = Field(default_factory=list)
+    sandbox_skills_base_path: str | None = Field(
+        default=None,
+        description="When set, get_skill_scripts_path returns "
+        "sandbox path for ingested skills (e.g. /home/user/skills).",
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -92,6 +97,66 @@ class Dynamiq(BaseSkillRegistry):
             if name == entry.name:
                 return entry
         raise SkillRegistryError("Skill not in skills.", details={"name": name})
+
+    def get_skill_scripts_path(self, name: str) -> str | None:
+        """Return sandbox path to the skill's scripts directory when skills are ingested into sandbox.
+
+        Used by SkillsTool so the agent knows where to run scripts inside the sandbox
+        (e.g. /home/user/skills/mermaid-tools/scripts). Only returns a path when
+        sandbox_skills_base_path is set.
+        """
+        if not self.sandbox_skills_base_path:
+            return None
+        try:
+            self._get_entry_by_name(name)
+        except SkillRegistryError:
+            return None
+        base = self.sandbox_skills_base_path.rstrip("/")
+        return f"{base}/{name}/scripts"
+
+    def download_skill_archive(self, skill_id: str, version_id: str) -> bytes:
+        """Download skill version as a zip archive from the API.
+
+        API is assumed to expose GET /v1/skills/{skill_id}/versions/{version_id}/download
+        returning the zip (SKILL.md + scripts/ etc.). Caller should unzip and upload to sandbox.
+        """
+        response = self._request_bytes(
+            "GET",
+            f"/v1/skills/{skill_id}/versions/{version_id}/download",
+        )
+        return response
+
+    def _request_bytes(self, method: str, path: str) -> bytes:
+        """Perform a request that returns raw bytes (e.g. zip download)."""
+        conn_params = self.connection.conn_params
+        base_url = (conn_params.get("api_base") or "").rstrip("/")
+        if not base_url:
+            raise SkillRegistryError("Dynamiq API base URL is not configured.")
+
+        url = f"{base_url}/{path.lstrip('/')}"
+        headers: dict[str, str] = {}
+        conn_headers = conn_params.get("headers")
+        if isinstance(conn_headers, dict):
+            headers.update(conn_headers)
+
+        client = self.connection.connect()
+        try:
+            response = client.request(
+                method,
+                url,
+                headers=headers,
+                timeout=self.timeout,
+            )
+        except Exception as exc:
+            raise SkillRegistryError(f"Failed to call Dynamiq skills API: {exc}") from exc
+
+        if response.status_code >= 400:
+            raise SkillRegistryError(
+                f"Request to Dynamiq skills API failed: {response.status_code} {response.text}",
+                details={"path": path},
+            )
+
+        return response.content
 
     def _request(
         self,

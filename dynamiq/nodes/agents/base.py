@@ -415,6 +415,28 @@ class Agent(Node):
                 tool.init_components(connection_manager)
             tool.is_optimized_for_agents = True
 
+        self._ensure_skills_ingested_for_sandbox()
+
+    def _ensure_skills_ingested_for_sandbox(self) -> None:
+        """When skills source is Dynamiq with sandbox_skills_base_path and sandbox is enabled, ingest skills at init."""
+        if not self.sandbox_backend or not self._skills_should_init():
+            return
+        source = self.skills.source
+        if source is None:
+            return
+        from dynamiq.skills.ingestion import ingest_skills_into_sandbox
+        from dynamiq.skills.registries.dynamiq import Dynamiq
+
+        if not isinstance(source, Dynamiq) or not source.sandbox_skills_base_path:
+            return
+        try:
+            if hasattr(self.sandbox_backend, "_ensure_sandbox"):
+                self.sandbox_backend._ensure_sandbox()
+            ingest_skills_into_sandbox(self.sandbox_backend, source)
+            logger.info("Agent %s: skills ingested into sandbox at init", self.name)
+        except Exception as e:
+            logger.warning("Agent %s: skills ingestion into sandbox failed: %s", self.name, e)
+
     def sanitize_tool_name(self, s: str):
         """Sanitize tool name to follow [^a-zA-Z0-9_-]."""
         s = s.replace(" ", "-")
