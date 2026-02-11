@@ -1179,6 +1179,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,
             todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
+            sandbox_output_dir=self.sandbox_backend.output_dir if self.sandbox_backend else None,
         )
 
         # Only auto-wrap the entire role in a raw block if the user did not

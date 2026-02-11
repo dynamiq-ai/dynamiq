@@ -1,5 +1,7 @@
 """E2B sandbox implementation."""
 
+import shlex
+
 from e2b.exceptions import RateLimitException as E2BRateLimitException
 from e2b_desktop import Sandbox as E2BDesktopSandbox
 from pydantic import ConfigDict, Field, PrivateAttr
@@ -25,7 +27,7 @@ class E2BSandbox(Sandbox):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     connection: E2B
     timeout: int = 3600
-    base_path: str = "/home/user"
+
     template: str | None = Field(
         default=None, description="Template to use for sandbox creation. " "If None, the default template is used."
     )
@@ -57,6 +59,7 @@ class E2BSandbox(Sandbox):
             try:
                 self._sandbox = self._reconnect_with_retry()
                 logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
+                self._ensure_output_dir()
                 return self._sandbox
             except Exception as e:
                 raise SandboxConnectionError(self.sandbox_id, cause=e) from e
@@ -65,7 +68,18 @@ class E2BSandbox(Sandbox):
         self._sandbox = self._create_with_retry()
         self.sandbox_id = self._sandbox.sandbox_id
         logger.debug(f"E2B sandbox created: {self.sandbox_id}")
+        self._ensure_output_dir()
         return self._sandbox
+
+    def _ensure_output_dir(self) -> None:
+        """Create the output directory inside the sandbox if it does not exist."""
+        if self._sandbox is None:
+            return
+        try:
+            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.output_dir)}")
+            logger.debug(f"E2BSandbox ensured output dir exists: {self.output_dir}")
+        except Exception as e:
+            logger.warning(f"E2BSandbox failed to create output dir {self.output_dir}: {e}")
 
     def _reconnect_with_retry(self) -> E2BDesktopSandbox:
         """Reconnect to existing sandbox with exponential backoff on rate-limit."""
@@ -185,6 +199,55 @@ class E2BSandbox(Sandbox):
             return destination_path
         except Exception as e:
             logger.error(f"Failed to upload file {file_name}: {e}")
+            raise
+
+    def list_output_files(self) -> list[str]:
+        """List files in the E2B sandbox output directory.
+
+        Searches for files in the output directory (``{base_path}/output``),
+        returning at most ``max_output_files`` file paths.
+
+        Returns:
+            List of absolute file paths found in the output directory.
+        """
+        sandbox = self._ensure_sandbox()
+        target_dir = self.output_dir
+
+        try:
+            # Check if the directory exists
+            check_cmd = f"test -d {shlex.quote(target_dir)} && echo exists"
+            check_result = sandbox.commands.run(check_cmd)
+            if check_result.exit_code != 0 or "exists" not in (check_result.stdout or ""):
+                return []
+
+            # List files recursively (configurable limit)
+            cmd = f"find {shlex.quote(target_dir)} -type f 2>/dev/null | head -{self.max_output_files}"
+            result = sandbox.commands.run(cmd)
+            if result.exit_code != 0 or not (result.stdout or "").strip():
+                return []
+
+            return [f.strip() for f in result.stdout.splitlines() if f.strip()]
+
+        except Exception as e:
+            logger.warning(f"E2BSandbox list_files failed for {target_dir}: {e}")
+            return []
+
+    def download_file(self, path: str) -> bytes:
+        """Download a file from the E2B sandbox.
+
+        Args:
+            path: Absolute path of the file in the sandbox.
+
+        Returns:
+            The file content as bytes.
+        """
+        sandbox = self._ensure_sandbox()
+        try:
+            content = sandbox.files.read(path, "bytes")
+            logger.debug(f"E2BSandbox downloaded file: {path} ({len(content)} bytes)")
+            return content
+        except Exception as e:
+            logger.error(f"E2BSandbox failed to download file {path}: {e}")
             raise
 
     def get_tools(self) -> list[Node]:

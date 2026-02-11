@@ -1,5 +1,7 @@
 """Integration tests for Agent with Sandbox (mocked sandbox and LLM)."""
 
+from typing import ClassVar
+
 import pytest
 from pydantic import Field
 
@@ -25,7 +27,10 @@ class MockSandbox(Sandbox):
     """
 
     commands_called: list[dict] = Field(default_factory=list, description="Record of run_command_shell calls.")
-    _shared_calls: list[dict] | None = None  # Class-level: set in Map test to collect calls from clones
+    mock_files: dict[str, bytes] = Field(
+        default_factory=dict, description="Mock files available in the sandbox (path -> content)."
+    )
+    _shared_calls: ClassVar[list[dict] | None] = None  # Class-level: set in Map test to collect calls from clones
 
     def run_command_shell(
         self,
@@ -39,10 +44,18 @@ class MockSandbox(Sandbox):
             "run_in_background_enabled": run_in_background_enabled,
         }
         self.commands_called.append(rec)
-        shared = getattr(MockSandbox, "_shared_calls", None)
+        shared = MockSandbox._shared_calls
         if shared is not None:
             shared.append(rec)
         return ShellCommandResult(stdout="hello from sandbox", stderr="", exit_code=0)
+
+    def list_output_files(self) -> list[str]:
+        return list(self.mock_files.keys())
+
+    def download_file(self, path: str) -> bytes:
+        if path in self.mock_files:
+            return self.mock_files[path]
+        raise FileNotFoundError(f"Mock file not found: {path}")
 
     def get_tools(self) -> list[Node]:
         return [SandboxShellTool(sandbox=self)]
@@ -205,3 +218,50 @@ def test_agent_e2b_sandbox_yaml_roundtrip_no_duplicate_tools(tmp_path):
     assert roundtrip_agent.sandbox is not None
     assert roundtrip_agent.sandbox.enabled
     assert isinstance(roundtrip_agent.sandbox.backend, E2BSandbox)
+
+
+def test_agent_with_sandbox_returns_files(mock_llm_sandbox_shell_response):
+    """Agent with sandbox collects and returns files from the output directory."""
+    sandbox = MockSandbox(
+        mock_files={
+            "/home/user/output/result.txt": b"Hello, this is the result.",
+            "/home/user/output/data.csv": b"col1,col2\n1,2\n3,4\n",
+        }
+    )
+
+    agent = Agent(
+        name="Sandbox Agent",
+        llm=OpenAI(
+            model="gpt-4o-mini",
+            connection=connections.OpenAI(api_key="test-api-key"),
+        ),
+        inference_mode=InferenceMode.XML,
+        sandbox=SandboxConfig(enabled=True, backend=sandbox),
+        max_loops=5,
+    )
+
+    wf = Workflow(flow=Flow(nodes=[agent]))
+    result = wf.run(
+        input_data={"input": "Run a shell command that echoes hello."},
+        config=RunnableConfig(),
+    )
+
+    assert result.status == RunnableStatus.SUCCESS
+
+    output = result.output[agent.id]["output"]
+    assert "hello from sandbox" in output["content"]
+
+    # Verify files from sandbox output directory are returned
+    files = output.get("files", [])
+    assert len(files) == 2
+
+    file_names = {f.name for f in files}
+    assert file_names == {"result.txt", "data.csv"}
+
+    # Verify file content is correct
+    for f in files:
+        f.seek(0)
+        if f.name == "result.txt":
+            assert f.read() == b"Hello, this is the result."
+        elif f.name == "data.csv":
+            assert f.read() == b"col1,col2\n1,2\n3,4\n"

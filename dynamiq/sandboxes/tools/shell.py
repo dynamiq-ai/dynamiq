@@ -43,18 +43,22 @@ class SandboxShellTool(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "SandboxShellTool"
     description: str = (
-        "Execute shell commands in a sandbox environment.\n\n"
-        "Use this tool to run shell commands, scripts, or system utilities.\n"
-        "The command runs in an isolated sandbox environment.\n\n"
+        "Execute shell commands in an isolated sandbox environment.\n\n"
+        "Parameters:\n"
+        "- command (str, required): The shell command to execute.\n"
+        "- timeout (int, default 60): Max seconds to wait for completion.\n"
+        "- run_in_background_enabled (bool, default false): Run without waiting for output.\n\n"
         "Examples:\n"
         '- {"command": "ls -la"}\n'
-        '- {"command": "python script.py"}\n'
         '- {"command": "echo Hello World"}\n'
-        '- {"command": "pip install pandas", "timeout": 120}\n\n'
-        "Parameters:\n"
-        "- command: The shell command to execute\n"
-        "- timeout: Maximum time to wait for command completion (default: 60s)\n"
-        "- run_in_background_enabled: Run command in background without waiting (default: false)"
+        '- {"command": "pip install pandas", "timeout": 120}\n'
+        '- {"command": "cp result.csv /home/user/output/"}\n'
+        '- {"command": "cat <<\'EOF\' > script.py && python3 script.py\\nimport csv\\n'
+        "with open('data.csv') as f:\\n"
+        "    reader = csv.reader(f)\\n"
+        "    print(list(reader))\\n"
+        "print('Done')\\n"
+        'EOF"}'
     )
 
     sandbox: Sandbox = Field(..., description="Sandbox backend to execute commands in.")
@@ -125,7 +129,7 @@ class SandboxShellTool(Node):
             )
 
             # Handle None exit_code: treat as success unless stderr indicates error
-            is_success = result.exit_code is None or result.exit_code == 0
+            is_success = result.exit_code == 0 or (result.exit_code is None and not result.stderr)
             output = {
                 "content": result.stdout if result.stdout else "(no output)",
                 "stdout": result.stdout,
