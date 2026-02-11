@@ -187,6 +187,27 @@ class E2BSandbox(Sandbox):
             logger.error(f"Failed to upload file {file_name}: {e}")
             raise
 
+    def _resolve_path(self, file_path: str) -> str:
+        """Resolve relative file paths against sandbox base path."""
+        if file_path.startswith("/"):
+            return file_path
+        return f"{self.base_path.rstrip('/')}/{file_path.lstrip('/')}"
+
+    def exists(self, file_path: str) -> bool:
+        """Return True when file exists in sandbox filesystem."""
+        sandbox = self._ensure_sandbox()
+        resolved_path = self._resolve_path(file_path)
+        safe_path = resolved_path.replace("'", "'\"'\"'")
+        check_cmd = f"test -f '{safe_path}'"
+        result = sandbox.commands.run(check_cmd)
+        return getattr(result, "exit_code", 1) == 0
+
+    def retrieve(self, file_path: str) -> bytes:
+        """Read file bytes from sandbox filesystem."""
+        sandbox = self._ensure_sandbox()
+        resolved_path = self._resolve_path(file_path)
+        return sandbox.files.read(resolved_path, "bytes")
+
     def get_tools(self) -> list[Node]:
         """Return tools this sandbox provides for agent use.
 
@@ -196,9 +217,10 @@ class E2BSandbox(Sandbox):
         Returns:
             List of tool instances (Node objects).
         """
+        from dynamiq.nodes.tools.file_tools import FileReadTool
         from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
-        return [SandboxShellTool(sandbox=self)]
+        return [SandboxShellTool(sandbox=self), FileReadTool(file_store=self)]
 
     def close(self, kill: bool = False) -> None:
         """Close the E2B sandbox connection.

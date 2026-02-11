@@ -279,3 +279,31 @@ def test_file_read_tool_limits_spreadsheet_preview(file_store, llm_model):
     assert "Spreadsheet preview" in content
     assert "Rows: 60" in content
     assert "showing up to 5 row(s)" in content
+
+
+def test_file_read_tool_with_sandbox_like_backend():
+    """FileReadTool should work with sandbox-style storage backend (no LLM required)."""
+
+    class FakeSandboxStorage:
+        def __init__(self):
+            self._data: dict[str, bytes] = {}
+
+        def exists(self, file_path: str) -> bool:
+            return file_path in self._data
+
+        def retrieve(self, file_path: str) -> bytes:
+            return self._data[file_path]
+
+        def store(self, file_path: str, content: bytes | str, **kwargs):
+            del kwargs
+            self._data[file_path] = content.encode("utf-8") if isinstance(content, str) else content
+            return {"file_path": file_path}
+
+    sandbox_storage = FakeSandboxStorage()
+    sandbox_storage.store("notes/readme.txt", "sandbox text content")
+
+    tool = FileReadTool(file_store=sandbox_storage)
+    result = tool.run({"file_path": "notes/readme.txt"})
+
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "sandbox text content"

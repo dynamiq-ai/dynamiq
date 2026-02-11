@@ -127,6 +127,44 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
+    def exists(self, file_path: str) -> bool:
+        """Check whether a file exists in the sandbox filesystem.
+
+        Required for FileReadTool compatibility.
+
+        Args:
+            file_path: Path to the file (relative or absolute).
+
+        Returns:
+            True if the file exists, False otherwise.
+
+        Raises:
+            NotImplementedError: If the sandbox does not support file existence checks.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support file existence checks. "
+            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
+        )
+
+    def retrieve(self, file_path: str) -> bytes:
+        """Read file content from the sandbox filesystem.
+
+        Required for FileReadTool compatibility.
+
+        Args:
+            file_path: Path to the file (relative or absolute).
+
+        Returns:
+            The file content as bytes.
+
+        Raises:
+            NotImplementedError: If the sandbox does not support file retrieval.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support file retrieval. "
+            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
+        )
+
     def close(self) -> None:
         """Close the sandbox."""
         raise NotImplementedError(f"Implementation of close() is not implemented for {self.__class__.__name__}")

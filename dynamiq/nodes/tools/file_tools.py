@@ -23,6 +23,7 @@ from dynamiq.nodes.llms.base import BaseLLM
 from dynamiq.nodes.node import ensure_config
 from dynamiq.nodes.types import ActionType
 from dynamiq.runnables import RunnableConfig, RunnableStatus
+from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.file_types import EXTENSION_MAP, FileType
 
@@ -237,8 +238,8 @@ class FileReadTool(Node):
               "<original_path>.extracted.txt" inside the same file store so FileSearchTool can reuse it without
               re-running converters.
     """
-    llm: BaseLLM = Field(..., description="LLM that will be used to process files.")
-    file_store: FileStore = Field(..., description="File storage to read from.")
+    llm: BaseLLM = Field(..., description="LLM used for image-aware file processing.")
+    file_store: FileStore | Sandbox = Field(default=None, description="File storage to read from.")
     max_size: int = Field(default=10000, description="Maximum size in bytes before chunking (default: 10000)")
     chunk_size: int = Field(default=1000, description="Size of each chunk in bytes (default: 1000)")
     converter_mapping: dict[FileType, Node] | None = None
