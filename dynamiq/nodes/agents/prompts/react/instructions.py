@@ -37,7 +37,7 @@ FILE HANDLING:
 - Mention created files in your final answer so users know what was generated
 """  # noqa: E501
 
-REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = """Always use this exact XML format in your responses:
+REACT_BLOCK_XML_INSTRUCTIONS_SINGLE = f"""Always use this exact XML format in your responses:
 
 <output>
     <thought>
