@@ -26,6 +26,9 @@ class E2BSandbox(Sandbox):
     connection: E2B
     timeout: int = 3600
     base_path: str = "/home/user"
+    template: str | None = Field(
+        default=None, description="Template to use for sandbox creation. " "If None, the default template is used."
+    )
     sandbox_id: str | None = Field(
         default=None,
         description="Existing sandbox ID to reconnect to. If None, a new sandbox is created.",
@@ -124,6 +127,7 @@ class E2BSandbox(Sandbox):
         def create() -> E2BDesktopSandbox:
             try:
                 return E2BDesktopSandbox.create(
+                    template=self.template,
                     api_key=self.connection.api_key,
                     timeout=self.timeout,
                     domain=getattr(self.connection, "domain", None),
@@ -266,8 +270,8 @@ class E2BSandbox(Sandbox):
         """Close the E2B sandbox connection.
 
         Args:
-            kill: If True (default), kills the sandbox. If False, just disconnects
-                  but keeps the sandbox alive for reconnection using sandbox_id.
+            kill: If False (default), just disconnects
+                  but keeps the sandbox alive for reconnection using sandbox_id. If True, kills the sandbox.
         """
         if self._sandbox:
             try:
