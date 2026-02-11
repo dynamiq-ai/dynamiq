@@ -6,7 +6,7 @@ import logging
 import mimetypes
 from enum import Enum
 from functools import cached_property
-from typing import Any, ClassVar
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -36,9 +36,6 @@ class Sandbox(abc.ABC, BaseModel):
     Sandboxes provide file storage and can be extended to support
     code execution and other isolated environment capabilities.
     """
-
-    OUTPUT_DIR_NAME: ClassVar[str] = "output"
-
     connection: BaseConnection | None = Field(default=None, description="Connection to the sandbox backend.")
     max_output_files: int = Field(
         default=50, description="Maximum number of files to collect from the output directory."

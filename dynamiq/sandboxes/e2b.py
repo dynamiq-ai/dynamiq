@@ -1,5 +1,7 @@
 """E2B sandbox implementation."""
 
+from typing import ClassVar
+
 from e2b.exceptions import RateLimitException as E2BRateLimitException
 from e2b_desktop import Sandbox as E2BDesktopSandbox
 from pydantic import ConfigDict, Field, PrivateAttr
@@ -21,6 +23,8 @@ class E2BSandbox(Sandbox):
 
     Supports reconnecting to existing sandboxes by providing sandbox_id.
     """
+
+    OUTPUT_DIR_NAME: ClassVar[str] = "output"
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     connection: E2B

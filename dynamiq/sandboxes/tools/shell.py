@@ -148,7 +148,7 @@ class SandboxShellTool(Node):
             )
 
             # Handle None exit_code: treat as success unless stderr indicates error
-            is_success = (result.exit_code == 0 or result.exit_code is None) and not result.stderr
+            is_success = result.exit_code == 0 or (result.exit_code is None and not result.stderr)
             output = {
                 "content": result.stdout if result.stdout else "(no output)",
                 "stdout": result.stdout,
