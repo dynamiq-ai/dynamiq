@@ -622,7 +622,8 @@ class Agent(Node):
         if self.sandbox_backend:
             sandbox_files = self._collect_files_from_sandbox()
             if sandbox_files:
-                execution_result["files"] = sandbox_files
+                existing_files = execution_result.get("files", [])
+                execution_result["files"] = existing_files + sandbox_files
                 logger.info(
                     f"Agent {self.name} - {self.id}: returning {len(sandbox_files)} generated file(s) from sandbox"
                 )
