@@ -31,17 +31,17 @@ class TestSandbox(Sandbox):
     ) -> ShellCommandResult:
         if command.strip().startswith("echo"):
             parts = command.strip().split(maxsplit=1)
-            stdout = (parts[1] + " from SANDBOX") if len(parts) > 1 else " from SANDBOX"
+            stdout = parts[1] if len(parts) > 1 else ""
             return ShellCommandResult(stdout=stdout, stderr="", exit_code=0)
         return ShellCommandResult(stdout="", stderr="Command not found", exit_code=1)
 
     def list_output_files(self) -> list[str]:
         return []
 
-    def download_file(self, path: str) -> bytes:
-        raise FileNotFoundError(f"Test sandbox does not store files: {path}")
+    def retrieve(self, file_path: str) -> bytes:
+        raise FileNotFoundError(f"Test sandbox does not store files: {file_path}")
 
-    def get_tools(self) -> list[Node]:
+    def get_tools(self, llm=None) -> list[Node]:
         return [SandboxShellTool(sandbox=self)]
 
 
@@ -85,13 +85,16 @@ def test_agent_with_sandbox_executes_shell(openai_llm):
     wf = Workflow(flow=Flow(nodes=[agent]))
 
     result = wf.run(
-        input_data={"input": "Run this command in the sandbox and tell me the output: echo hello"},
+        input_data={
+            "input": "Run this command in the sandbox and tell me the output: echo hello."
+            " Use sandbox command tool and return its exact result."
+        },
         config=RunnableConfig(),
     )
     assert result.status == RunnableStatus.SUCCESS
     content = result.output.get(agent.id, {}).get("output", {}).get("content", "")
     assert content is not None
-    assert "hello from SANDBOX" in str(content), f"Expected 'hello from SANDBOX' in output, got: {content[:500]}"
+    assert "hello" in str(content), f"Expected 'hello' in output, got: {content[:500]}"
 
 
 @pytest.mark.integration

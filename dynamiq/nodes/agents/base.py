@@ -237,6 +237,7 @@ class Agent(Node):
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
     _skills_tool_ids: list[str] = PrivateAttr(default_factory=list)
+    _sandbox_tool_ids: list[str] = PrivateAttr(default_factory=list)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _history_offset: int = PrivateAttr(
         default=2,  # Offset to the first message (default: 2 — system and initial user messages).
@@ -307,7 +308,9 @@ class Agent(Node):
 
         if self.sandbox_backend:
             # Add sandbox tools when sandbox is enabled (not serialized; recreated from sandbox config on load)
-            self.tools.extend(self.sandbox_backend.get_tools())
+            sandbox_tools = self.sandbox_backend.get_tools(llm=self.llm)
+            self._sandbox_tool_ids = [t.id for t in sandbox_tools]
+            self.tools.extend(sandbox_tools)
 
         elif self.file_store_backend:
             # Add file tools when file store is enabled
@@ -362,11 +365,11 @@ class Agent(Node):
             "system_prompt_manager": True,  # Runtime state container, not serializable
         }
 
-    def _is_tool_excluded_from_serialization(self, tool: Node, sandbox_tool_names: set[str] | None = None) -> bool:
+    def _is_tool_excluded_from_serialization(self, tool: Node) -> bool:
         """Return True if this tool should not be serialized (recreated from config on load)."""
         if tool.id in self._mcp_server_tool_ids:
             return True
-        if sandbox_tool_names and tool.name in sandbox_tool_names:
+        if tool.id in self._sandbox_tool_ids:
             return True
         if tool.id in self._skills_tool_ids:
             return True
@@ -377,12 +380,7 @@ class Agent(Node):
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
 
-        sandbox_tool_names = {t.name for t in self.sandbox_backend.get_tools()} if self.sandbox_backend else set()
-        tools_to_serialize = [
-            t
-            for t in self.tools
-            if not self._is_tool_excluded_from_serialization(t, sandbox_tool_names=sandbox_tool_names)
-        ]
+        tools_to_serialize = [t for t in self.tools if not self._is_tool_excluded_from_serialization(t)]
         data["tools"] = [tool.to_dict(**kwargs) for tool in tools_to_serialize]
         data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_servers]
 

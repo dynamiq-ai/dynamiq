@@ -102,3 +102,32 @@ def filter(json: dict, expression_filter: str):
         raise ValueError(f"Error in path during parsing with `expression_filter` {expression_filter}: {e}")
 
     return filtered_data
+
+
+def filter_all(json: dict | list, expression_filter: str) -> list:
+    """Filter a JSON object and return all matched values as a list.
+
+    Unlike `filter`, this function always returns a list of matched values,
+    making it possible to distinguish between "no match", "single match"
+    (even if the value is a list or None), and "multiple matches" by checking len().
+
+    Args:
+        json: The input JSON object or list to be filtered.
+        expression_filter: A JSONPath expression used to filter the JSON object.
+
+    Returns:
+        A list of all matched values (empty list if no matches found).
+
+    Raises:
+        ValueError: If the filter is not a valid JSONPath expression or if there's an error in parsing.
+    """
+    if not expression_filter:
+        return [json]
+    if not is_jsonpath(expression_filter):
+        raise ValueError(f"Invalid `expression_filter` {expression_filter}: must be a jsonpath")
+
+    try:
+        matches = parse(expression_filter).find(json)
+        return [m.value for m in matches]
+    except Exception as e:
+        raise ValueError(f"Error in path during parsing with `expression_filter` {expression_filter}: {e}")
