@@ -44,7 +44,6 @@ class Sandbox(abc.ABC, BaseModel):
     )
     _clone_shared: ClassVar[bool] = True
 
-
     @property
     def output_dir(self) -> str:
         """Absolute path to the output directory inside the sandbox."""
