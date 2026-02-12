@@ -39,6 +39,8 @@ from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionM
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
+from dynamiq.skills.ingestion import ingest_skills_into_sandbox
+from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
@@ -422,8 +424,6 @@ class Agent(Node):
         source = self.skills.source
         if source is None:
             return
-        from dynamiq.skills.ingestion import ingest_skills_into_sandbox
-        from dynamiq.skills.registries.dynamiq import Dynamiq
 
         if not isinstance(source, Dynamiq) or not source.sandbox_skills_base_path:
             return

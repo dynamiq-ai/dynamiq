@@ -7,8 +7,8 @@ connections:
     api_key: ${oc.env:E2B_API_KEY}
   dynamiq-api-conn:
     type: dynamiq.connections.Dynamiq
-    url: ${oc.env:DYNAMIQ_URL,}
-    api_key: ${oc.env:DYNAMIQ_API_KEY,}
+    url: ${oc.env:DYNAMIQ_URL}
+    api_key: ${oc.env:DYNAMIQ_API_KEY}
 
 nodes:
   registry-skills-agent:
