@@ -71,3 +71,23 @@ class FileSystem(BaseSkillRegistry):
                 details={"name": skill_name, "path": str(full_path)},
             )
         return full_path
+
+    def get_skill_scripts_path(self, name: str) -> str | None:
+        """Return the absolute path to the skill's scripts directory if it exists.
+
+        Used by SkillsTool to expose scripts_path in get responses so the agent
+        can run bundled scripts (e.g. mermaid-tools, markdown-tools, xlsx).
+        """
+        try:
+            self._get_entry_by_name(name)
+        except SkillRegistryError:
+            return None
+        base = Path(self.base_path).expanduser().resolve()
+        scripts_dir = (base / name / "scripts").resolve()
+        try:
+            scripts_dir.relative_to(base)
+        except ValueError:
+            return None
+        if scripts_dir.is_dir():
+            return str(scripts_dir)
+        return None
