@@ -5,6 +5,7 @@ import pytest
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.node import Node
 from dynamiq.nodes.tools.file_tools import (
     EXTRACTED_TEXT_SUFFIX,
     FileListTool,
@@ -16,6 +17,7 @@ from dynamiq.nodes.tools.file_tools import (
     validate_file_path,
 )
 from dynamiq.runnables import RunnableResult, RunnableStatus
+from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 
 
@@ -279,3 +281,35 @@ def test_file_read_tool_limits_spreadsheet_preview(file_store, llm_model):
     assert "Spreadsheet preview" in content
     assert "Rows: 60" in content
     assert "showing up to 5 row(s)" in content
+
+
+def test_file_read_tool_with_sandbox_like_backend(llm_model):
+    """FileReadTool should work with sandbox-style storage backend."""
+
+    class FakeSandbox(Sandbox):
+        _data: dict[str, bytes] = {}
+
+        def exists(self, file_path: str) -> bool:
+            return file_path in self._data
+
+        def retrieve(self, file_path: str) -> bytes:
+            return self._data[file_path]
+
+        def get_tools(self, llm=None) -> list[Node]:
+            return []
+
+    sandbox = FakeSandbox()
+    sandbox._data["notes/readme.txt"] = b"sandbox text content"
+    sandbox._data["/home/user/scores.csv"] = b"name,score\nAlice,95"
+
+    tool = FileReadTool(file_store=sandbox, llm=llm_model, absolute_file_paths_allowed=True)
+
+    # Relative path
+    result = tool.run({"file_path": "notes/readme.txt"})
+    assert result.status == RunnableStatus.SUCCESS
+    assert result.output["content"] == "sandbox text content"
+
+    # Absolute path — allowed via absolute_file_paths_allowed=True
+    result = tool.run({"file_path": "/home/user/scores.csv"})
+    assert result.status == RunnableStatus.SUCCESS
+    assert "Alice" in result.output["content"]

@@ -1,6 +1,7 @@
 """E2B sandbox implementation."""
 
 import shlex
+from typing import Any
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
 from e2b_desktop import Sandbox as E2BDesktopSandbox
@@ -232,36 +233,48 @@ class E2BSandbox(Sandbox):
             logger.warning(f"E2BSandbox list_files failed for {target_dir}: {e}")
             return []
 
-    def download_file(self, path: str) -> bytes:
-        """Download a file from the E2B sandbox.
+    def _resolve_path(self, file_path: str) -> str:
+        """Resolve relative file paths against sandbox base path."""
+        if file_path.startswith("/"):
+            return file_path
+        return f"{self.base_path.rstrip('/')}/{file_path.lstrip('/')}"
 
-        Args:
-            path: Absolute path of the file in the sandbox.
-
-        Returns:
-            The file content as bytes.
-        """
+    def exists(self, file_path: str) -> bool:
+        """Return True when file exists in sandbox filesystem."""
         sandbox = self._ensure_sandbox()
-        try:
-            content = sandbox.files.read(path, "bytes")
-            logger.debug(f"E2BSandbox downloaded file: {path} ({len(content)} bytes)")
-            return content
-        except Exception as e:
-            logger.error(f"E2BSandbox failed to download file {path}: {e}")
-            raise
+        resolved_path = self._resolve_path(file_path)
+        check_cmd = f"test -f {shlex.quote(resolved_path)}"
+        result = sandbox.commands.run(check_cmd)
+        return getattr(result, "exit_code", 1) == 0
 
-    def get_tools(self) -> list[Node]:
+    def retrieve(self, file_path: str) -> bytes:
+        """Read file bytes from sandbox filesystem."""
+        sandbox = self._ensure_sandbox()
+        resolved_path = self._resolve_path(file_path)
+        return sandbox.files.read(resolved_path, "bytes")
+
+    def get_tools(self, llm: Any = None) -> list[Node]:
         """Return tools this sandbox provides for agent use.
 
         Creates tools based on tools config and TOOL_REGISTRY.
         Each tool is enabled by default unless explicitly disabled.
 
+        Args:
+            llm: Optional LLM instance passed to tools that require one (e.g. FileReadTool).
+
         Returns:
             List of tool instances (Node objects).
         """
+        from dynamiq.nodes.tools.file_tools import FileReadTool
         from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
-        return [SandboxShellTool(sandbox=self)]
+        if llm is not None:
+            return [
+                SandboxShellTool(sandbox=self),
+                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
+            ]
+        else:
+            return [SandboxShellTool(sandbox=self)]
 
     def close(self, kill: bool = False) -> None:
         """Close the E2B sandbox connection.

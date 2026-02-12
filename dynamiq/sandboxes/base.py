@@ -36,6 +36,7 @@ class Sandbox(abc.ABC, BaseModel):
     Sandboxes provide file storage and can be extended to support
     code execution and other isolated environment capabilities.
     """
+
     connection: BaseConnection | None = Field(default=None, description="Connection to the sandbox backend.")
     base_path: str = Field(default="/home/user", description="Base path in the sandbox filesystem.")
     max_output_files: int = Field(
@@ -108,11 +109,14 @@ class Sandbox(abc.ABC, BaseModel):
         )
 
     @abc.abstractmethod
-    def get_tools(self) -> list[Node]:
+    def get_tools(self, llm: Any = None) -> list[Node]:
         """Return tools this sandbox provides for agent use.
 
         Subclasses must implement this method to return tools specific
         to their sandbox type. Tools are configured via the `tools` field.
+
+        Args:
+            llm: Optional LLM instance passed to tools that require one (e.g. FileReadTool).
 
         Returns:
             List of tool instances (Node objects).
@@ -155,23 +159,6 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
-    def download_file(self, path: str) -> bytes:
-        """Download a file from the sandbox.
-
-        Args:
-            path: Absolute path of the file in the sandbox.
-
-        Returns:
-            The file content as bytes.
-
-        Raises:
-            NotImplementedError: If the sandbox does not support file downloads.
-        """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support file downloads. "
-            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
-        )
-
     def is_output_empty(self) -> bool:
         """Check whether the sandbox output directory contains any files.
 
@@ -200,7 +187,7 @@ class Sandbox(abc.ABC, BaseModel):
         for file_path in file_paths:
             file_name = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
             try:
-                content = self.download_file(file_path)
+                content = self.retrieve(file_path)
                 content_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
 
                 file_bytesio = io.BytesIO(content)
@@ -215,6 +202,44 @@ class Sandbox(abc.ABC, BaseModel):
                 continue
 
         return result_files
+
+    def exists(self, file_path: str) -> bool:
+        """Check whether a file exists in the sandbox filesystem.
+
+        Required for FileReadTool compatibility.
+
+        Args:
+            file_path: Path to the file (relative or absolute).
+
+        Returns:
+            True if the file exists, False otherwise.
+
+        Raises:
+            NotImplementedError: If the sandbox does not support file existence checks.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support file existence checks. "
+            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
+        )
+
+    def retrieve(self, file_path: str) -> bytes:
+        """Read file content from the sandbox filesystem.
+
+        Required for FileReadTool compatibility.
+
+        Args:
+            file_path: Path to the file (relative or absolute).
+
+        Returns:
+            The file content as bytes.
+
+        Raises:
+            NotImplementedError: If the sandbox does not support file retrieval.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support file retrieval. "
+            "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
+        )
 
     def close(self) -> None:
         """Close the sandbox."""
