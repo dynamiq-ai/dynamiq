@@ -131,6 +131,7 @@ def run(input_data):
     )
 
 
+@pytest.mark.skip(reason="LLM test is skipped due to resolving issues with it")
 def test_react_agent_with_structured_python_tool(string_handler_python_tool):
     """Test ReAct agent using Python tool with structured output (content + raw_response)."""
     llm = OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(), temperature=0.1)

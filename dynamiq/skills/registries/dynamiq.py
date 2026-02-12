@@ -1,5 +1,6 @@
 """Dynamiq API skill registry."""
 
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -102,8 +103,7 @@ class Dynamiq(BaseSkillRegistry):
         """Return sandbox path to the skill's scripts directory when skills are ingested into sandbox.
 
         Used by SkillsTool so the agent knows where to run scripts inside the sandbox
-        (e.g. /home/user/skills/mermaid-tools/scripts). Only returns a path when
-        sandbox_skills_base_path is set.
+        (e.g. /home/user/skills/mermaid-tools/scripts).
         """
         if not self.sandbox_skills_base_path:
             return None
@@ -111,8 +111,15 @@ class Dynamiq(BaseSkillRegistry):
             self._get_entry_by_name(name)
         except SkillRegistryError:
             return None
-        base = self.sandbox_skills_base_path.rstrip("/")
-        return f"{base}/{name}/scripts"
+        base = Path(self.sandbox_skills_base_path).expanduser().resolve()
+        scripts_dir = (base / name / "scripts").resolve()
+        try:
+            scripts_dir.relative_to(base)
+        except ValueError:
+            return None
+        if scripts_dir.is_dir():
+            return str(scripts_dir)
+        return None
 
     def download_skill_archive(self, skill_id: str, version_id: str) -> bytes:
         """Download skill version as a zip archive from the API.
@@ -126,8 +133,16 @@ class Dynamiq(BaseSkillRegistry):
         )
         return response
 
-    def _request_bytes(self, method: str, path: str) -> bytes:
-        """Perform a request that returns raw bytes (e.g. zip download)."""
+    def _execute_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers_extra: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> Any:
+        """Build URL and client, execute HTTP request, raise on error. Returns the response object."""
         conn_params = self.connection.conn_params
         base_url = (conn_params.get("api_base") or "").rstrip("/")
         if not base_url:
@@ -135,6 +150,8 @@ class Dynamiq(BaseSkillRegistry):
 
         url = f"{base_url}/{path.lstrip('/')}"
         headers: dict[str, str] = {}
+        if headers_extra:
+            headers.update(headers_extra)
         conn_headers = conn_params.get("headers")
         if isinstance(conn_headers, dict):
             headers.update(conn_headers)
@@ -143,44 +160,6 @@ class Dynamiq(BaseSkillRegistry):
         try:
             response = client.request(
                 method,
-                url,
-                headers=headers,
-                timeout=self.timeout,
-            )
-        except Exception as exc:
-            raise SkillRegistryError(f"Failed to call Dynamiq skills API: {exc}") from exc
-
-        if response.status_code >= 400:
-            raise SkillRegistryError(
-                f"Request to Dynamiq skills API failed: {response.status_code} {response.text}",
-                details={"path": path},
-            )
-
-        return response.content
-
-    def _request(
-        self,
-        method: HTTPMethod,
-        path: str,
-        params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
-    ) -> Any:
-        conn_params = self.connection.conn_params
-        base_url = (conn_params.get("api_base") or "").rstrip("/")
-        if not base_url:
-            raise SkillRegistryError("Dynamiq API base URL is not configured.")
-
-        url = f"{base_url}/{path.lstrip('/')}"
-        headers = {"Content-Type": "application/json"}
-        conn_headers = conn_params.get("headers")
-        if isinstance(conn_headers, dict):
-            headers.update(conn_headers)
-
-        client = self.connection.connect()
-        verb = method.value if isinstance(method, HTTPMethod) else method
-        try:
-            response = client.request(
-                verb,
                 url,
                 headers=headers,
                 params=params,
@@ -195,9 +174,31 @@ class Dynamiq(BaseSkillRegistry):
                 f"Request to Dynamiq skills API failed: {response.status_code} {response.text}",
                 details={"path": path},
             )
+        return response
+
+    def _request_bytes(self, method: str, path: str) -> bytes:
+        """Perform a request that returns raw bytes (e.g. zip download)."""
+        response = self._execute_request(method, path)
+        return response.content
+
+    def _request(
+        self,
+        method: HTTPMethod,
+        path: str,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> Any:
+        verb = method.value if isinstance(method, HTTPMethod) else method
+        response = self._execute_request(
+            verb,
+            path,
+            headers_extra={"Content-Type": "application/json"},
+            params=params,
+            json=json,
+        )
 
         if response.status_code == 204 or not response.content:
-            logger.debug("Dynamiq skills API returned empty response for %s", url)
+            logger.debug("Dynamiq skills API returned empty response for %s", path)
             return ""
 
         content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
