@@ -1,6 +1,5 @@
 """Dynamiq API skill registry."""
 
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -111,15 +110,10 @@ class Dynamiq(BaseSkillRegistry):
             self._get_entry_by_name(name)
         except SkillRegistryError:
             return None
-        base = Path(self.sandbox_skills_base_path).expanduser().resolve()
-        scripts_dir = (base / name / "scripts").resolve()
-        try:
-            scripts_dir.relative_to(base)
-        except ValueError:
+        if ".." in name or "/" in name:
             return None
-        if scripts_dir.is_dir():
-            return str(scripts_dir)
-        return None
+        base = self.sandbox_skills_base_path.rstrip("/")
+        return f"{base}/{name}/scripts"
 
     def download_skill_archive(self, skill_id: str, version_id: str) -> bytes:
         """Download skill version as a zip archive from the API.
