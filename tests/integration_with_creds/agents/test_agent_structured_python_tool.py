@@ -131,6 +131,7 @@ def run(input_data):
     )
 
 
+@pytest.mark.flaky(reruns=3)
 def test_react_agent_with_structured_python_tool(string_handler_python_tool):
     """Test ReAct agent using Python tool with structured output (content + raw_response)."""
     llm = OpenAI(model="gpt-5-mini", connection=connections.OpenAI(), temperature=0.1)
