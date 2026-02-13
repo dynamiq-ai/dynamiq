@@ -4,6 +4,8 @@ from .prompts import (
     MessageRole,
     Prompt,
     VisionMessage,
+    VisionMessageFileContent,
+    VisionMessageFileData,
     VisionMessageImageContent,
     VisionMessageImageURL,
     VisionMessageTextContent,

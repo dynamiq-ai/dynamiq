@@ -617,6 +617,12 @@ class Weaviate(BaseApiKeyConnection):
             Defaults to the environment variable 'WEAVIATE_GRPC_HOST'.
         grpc_port (int): The gRPC port for the service.
             Defaults to the environment variable 'WEAVIATE_GRPC_PORT'.
+        timeout_init (int): Timeout for initialization checks in seconds.
+            Defaults to 30.
+        timeout_query (int): Timeout for query operations in seconds.
+            Defaults to 180.
+        timeout_insert (int): Timeout for insert operations in seconds.
+            Defaults to 120.
     """
 
     deployment_type: WeaviateDeploymentType = WeaviateDeploymentType.WEAVIATE_CLOUD
@@ -626,6 +632,9 @@ class Weaviate(BaseApiKeyConnection):
     http_port: int = Field(default_factory=partial(get_env_var, "WEAVIATE_HTTP_PORT", 443))
     grpc_host: str = Field(default_factory=partial(get_env_var, "WEAVIATE_GRPC_HOST"))
     grpc_port: int = Field(default_factory=partial(get_env_var, "WEAVIATE_GRPC_PORT", 50051))
+    timeout_init: int = Field(default=30, description="Timeout for initialization checks in seconds")
+    timeout_query: int = Field(default=180, description="Timeout for query operations in seconds")
+    timeout_insert: int = Field(default=120, description="Timeout for insert operations in seconds")
 
     def connect(self) -> "WeaviateClient":
         """
@@ -644,6 +653,9 @@ class Weaviate(BaseApiKeyConnection):
             weaviate_client = connect_to_weaviate_cloud(
                 cluster_url=self.url,
                 auth_credentials=Auth.api_key(self.api_key),
+                additional_config=AdditionalConfig(
+                    timeout=Timeout(init=self.timeout_init, query=self.timeout_query, insert=self.timeout_insert)
+                ),
             )
             logger.debug(f"Connected to Weaviate with url={self.url}")
             return weaviate_client
@@ -658,7 +670,9 @@ class Weaviate(BaseApiKeyConnection):
                 grpc_secure=True,
                 auth_credentials=Auth.api_key(self.api_key),
                 additional_config=AdditionalConfig(
-                    timeout=Timeout(init=30, query=60, insert=120),  # Values in seconds
+                    timeout=Timeout(
+                        init=self.timeout_init, query=self.timeout_query, insert=self.timeout_insert
+                    ),  # Values in seconds
                 ),
                 skip_init_checks=False,
             )
