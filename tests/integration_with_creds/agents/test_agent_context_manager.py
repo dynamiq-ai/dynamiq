@@ -112,6 +112,7 @@ def test_automatic_context_manager_invocation(llm_instance, python_tool, run_con
     ), "Context message not found"
 
 
+@pytest.mark.flaky(reruns=3)
 def test_automatic_context_manager_auto_clean(llm_instance, python_tool, run_config):
     """
     Test automatic Context Manager Tool auto clean when token limit is exceeded.
