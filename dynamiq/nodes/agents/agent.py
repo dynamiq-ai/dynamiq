@@ -11,6 +11,7 @@ from dynamiq.nodes.agents.components import parser, schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
+    JSONParsingError,
     MaxLoopsExceededException,
     ParsingError,
     RecoverableAgentException,
@@ -473,6 +474,14 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 action_input = parsed_data.get("action_input")
                 self.log_reasoning(thought, action, action_input, loop_num)
                 return thought, action, action_input
+            except JSONParsingError as e:
+                logger.error(f"XMLParser: Invalid JSON in action_input: {e}")
+                raise ActionParsingException(
+                    "The <action_input> value must be valid JSON. Put the whole JSON on one line; "
+                    'use \\n for newlines inside strings and \\" for quotes. '
+                    "Provide <thought> with <action> and <action_input> again.",
+                    recoverable=True,
+                )
             except ParsingError as e:
                 logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
                 raise ActionParsingException(

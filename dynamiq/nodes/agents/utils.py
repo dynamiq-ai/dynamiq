@@ -1,4 +1,5 @@
 import base64
+import html
 import io
 import json
 import re
@@ -161,7 +162,7 @@ class XMLParser:
         for tag in tags_to_process:
             content = XMLParser.extract_content_with_regex_fallback(text, tag)
             if content:
-                tag_pattern = f"<{tag}[^>]*>.*?(?=<(?!/{tag})|$)|<{tag}[^>]*>.*?</{tag}>"
+                tag_pattern = f"<{tag}[^>]*>.*?</{tag}>"
                 modified_text = re.sub(tag_pattern, f"<{tag}>CONTENT_PLACEHOLDER_{tag}</{tag}>", text, flags=re.DOTALL)
                 extracted_contents[tag] = (modified_text, content)
                 text = modified_text
@@ -339,6 +340,55 @@ class XMLParser:
         return data
 
     @staticmethod
+    def _repair_json_newlines_in_strings(text: str) -> str:
+        """
+        Replace literal newlines inside double-quoted JSON string values with
+        the escape sequence \\n so that json.loads can parse LLM output that
+        used real line breaks instead of escaped newlines.
+        """
+        result = []
+        i = 0
+        in_double_quote = False
+        escape_next = False
+        while i < len(text):
+            c = text[i]
+            if escape_next:
+                result.append(c)
+                escape_next = False
+                i += 1
+                continue
+            if c == "\\" and in_double_quote:
+                escape_next = True
+                result.append(c)
+                i += 1
+                continue
+            if c == '"' and not escape_next:
+                in_double_quote = not in_double_quote
+                result.append(c)
+                i += 1
+                continue
+            if in_double_quote and c in ("\r", "\n"):
+                result.append("\\n")
+                if c == "\r" and i + 1 < len(text) and text[i + 1] == "\n":
+                    i += 1
+                i += 1
+                continue
+            result.append(c)
+            i += 1
+        return "".join(result)
+
+    @staticmethod
+    def _unescape_html_in_json_values(obj: Any) -> Any:
+        """Recursively unescape &lt; &gt; &amp; in string values so tool inputs get real < > &."""
+        if isinstance(obj, str):
+            return html.unescape(obj)
+        if isinstance(obj, dict):
+            return {k: XMLParser._unescape_html_in_json_values(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [XMLParser._unescape_html_in_json_values(v) for v in obj]
+        return obj
+
+    @staticmethod
     def _parse_json_fields(data: dict[str, str], json_fields: Sequence[str]) -> dict[str, Any]:
         """
         Parses specified fields in the data dictionary as JSON.
@@ -356,9 +406,14 @@ class XMLParser:
         parsed_data = data.copy()
         for field in json_fields:
             if field in parsed_data:
+                json_string = re.sub(r"^```(?:json)?\s*|```$", "", parsed_data[field].strip())
                 try:
-                    json_string = re.sub(r"^```(?:json)?\s*|```$", "", parsed_data[field].strip())
-                    parsed_data[field] = json.loads(json_string)
+                    try:
+                        parsed_data[field] = json.loads(json_string)
+                    except json.JSONDecodeError:
+                        repaired = XMLParser._repair_json_newlines_in_strings(json_string)
+                        parsed_data[field] = json.loads(repaired)
+                    parsed_data[field] = XMLParser._unescape_html_in_json_values(parsed_data[field])
                 except json.JSONDecodeError as e:
                     error_message = (
                         f"Failed to parse JSON content for field '{field}'. "
