@@ -105,6 +105,95 @@ def test_select_execute(mock_fetchall_sql_response, connection, mock_cursor_with
     assert output_dump["content"] == output
 
 
+@pytest.mark.parametrize(
+    "connection",
+    [
+        connections.PostgreSQL(host="test_host", port=5432, database="db", user="user", password="password"),
+        connections.MySQL(host="test_host", database="db", user="user", password="password"),
+        connections.Snowflake(
+            user="user", password="password", database="db", account="account", warehouse="warehouse", schema="schema"
+        ),
+        connections.AWSRedshift(user="user", host="test_host", port=5439, database="db", password="password"),
+    ],
+)
+def test_select_execute_with_list_parameters(mock_fetchall_sql_response, connection, mock_cursor_with_select):
+    """Parameterized query with list-style placeholders prevents SQL injection."""
+    sql_tool = SQLExecutor(connection=connection)
+    output = mock_fetchall_sql_response
+    input_data = {"query": "SELECT * FROM test1 WHERE id = %s", "parameters": [42]}
+
+    result = sql_tool.run(input_data, None)
+
+    assert isinstance(result, RunnableResult)
+    assert result.status == RunnableStatus.SUCCESS
+    mock_cursor_with_select.execute.assert_called_once_with(input_data["query"], input_data["parameters"])
+    output_dump = result.output
+    assert output_dump["content"] == output
+
+
+@pytest.mark.parametrize(
+    "connection",
+    [
+        connections.PostgreSQL(host="test_host", port=5432, database="db", user="user", password="password"),
+        connections.MySQL(host="test_host", database="db", user="user", password="password"),
+        connections.Snowflake(
+            user="user", password="password", database="db", account="account", warehouse="warehouse", schema="schema"
+        ),
+        connections.AWSRedshift(user="user", host="test_host", port=5439, database="db", password="password"),
+    ],
+)
+def test_select_execute_with_dict_parameters(mock_fetchall_sql_response, connection, mock_cursor_with_select):
+    sql_tool = SQLExecutor(connection=connection)
+    output = mock_fetchall_sql_response
+    input_data = {"query": "SELECT * FROM test1 WHERE name = %(name)s", "parameters": {"name": "test"}}
+
+    result = sql_tool.run(input_data, None)
+
+    assert isinstance(result, RunnableResult)
+    assert result.status == RunnableStatus.SUCCESS
+    mock_cursor_with_select.execute.assert_called_once_with(input_data["query"], input_data["parameters"])
+    output_dump = result.output
+    assert output_dump["content"] == output
+
+
+@pytest.mark.parametrize(
+    "connection",
+    [
+        connections.PostgreSQL(host="test_host", port=5432, database="db", user="user", password="password"),
+        connections.MySQL(host="test_host", database="db", user="user", password="password"),
+    ],
+)
+def test_execute_uses_node_level_default_parameters(connection, mock_cursor_with_select):
+    default_params = {"status": "active"}
+    sql_tool = SQLExecutor(connection=connection, parameters=default_params)
+    input_data = {"query": "SELECT * FROM test1 WHERE status = %(status)s"}
+
+    result = sql_tool.run(input_data, None)
+
+    assert isinstance(result, RunnableResult)
+    assert result.status == RunnableStatus.SUCCESS
+    mock_cursor_with_select.execute.assert_called_once_with(input_data["query"], default_params)
+
+
+@pytest.mark.parametrize(
+    "connection",
+    [
+        connections.PostgreSQL(host="test_host", port=5432, database="db", user="user", password="password"),
+        connections.MySQL(host="test_host", database="db", user="user", password="password"),
+    ],
+)
+def test_input_parameters_override_node_defaults(connection, mock_cursor_with_select):
+    sql_tool = SQLExecutor(connection=connection, parameters={"status": "old_default"})
+    input_params = {"status": "active"}
+    input_data = {"query": "SELECT * FROM test1 WHERE status = %(status)s", "parameters": input_params}
+
+    result = sql_tool.run(input_data, None)
+
+    assert isinstance(result, RunnableResult)
+    assert result.status == RunnableStatus.SUCCESS
+    mock_cursor_with_select.execute.assert_called_once_with(input_data["query"], input_params)
+
+
 @pytest.fixture
 def mock_databricks_cursor_with_select(mocker, mock_fetchall_sql_response, mock_fetchall_databricks_sql_response):
     mock_databricks_cursor = mocker.Mock()
