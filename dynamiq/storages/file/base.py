@@ -5,7 +5,7 @@ from datetime import datetime
 from functools import cached_property
 from io import BytesIO
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -55,7 +55,13 @@ class FileStore(abc.ABC, BaseModel):
 
     This interface provides a unified way to interact with different
     file storage backends (in-memory, file system, cloud storage, etc.).
+
+    The ``_clone_shared`` flag tells the Node.clone() machinery to
+    share this instance by reference instead of deep-copying it.
+    This preserves stored files across cloned tool invocations.
     """
+
+    _clone_shared: ClassVar[bool] = True
 
     @computed_field
     @cached_property

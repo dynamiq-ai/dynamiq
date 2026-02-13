@@ -3,8 +3,10 @@ import threading
 import time
 from queue import Queue
 from threading import Event
+from typing import ClassVar
 
 import pytest
+from pydantic import BaseModel, Field
 
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.nodes.llms.openai import OpenAI
@@ -831,3 +833,83 @@ def test_streaming_timeout_respects_poll_interval_accumulation():
     assert (
         elapsed_time < streaming_timeout + TIMING_TOLERANCE + SHORT_POLL_INTERVAL
     ), f"Timed out in {elapsed_time:.2f}s, expected around {streaming_timeout}s."
+
+
+class SharedResource(BaseModel):
+    """A resource marked as clone-shared; Node.clone() should reuse by reference."""
+
+    _clone_shared: ClassVar[bool] = True
+    name: str = "shared"
+
+
+class RegularResource(BaseModel):
+    """A normal BaseModel without _clone_shared; Node.clone() should deep-copy it."""
+
+    name: str = "regular"
+
+
+class NodeWithSharedField(Node):
+    """Minimal concrete Node that holds both shared and regular resources."""
+
+    group: NodeGroup = NodeGroup.UTILS
+    name: str = "NodeWithSharedField"
+    shared: SharedResource = Field(default_factory=SharedResource)
+    regular: RegularResource = Field(default_factory=RegularResource)
+
+    def execute(self, input_data: dict, config: RunnableConfig = None, **kwargs) -> dict:
+        return {"ok": True}
+
+
+class NodeWithNestedShared(Node):
+    """Node where the shared resource lives inside a list and a dict."""
+
+    group: NodeGroup = NodeGroup.UTILS
+    name: str = "NodeWithNestedShared"
+    shared_list: list[SharedResource] = Field(default_factory=lambda: [SharedResource(name="in-list")])
+    shared_dict: dict[str, SharedResource] = Field(default_factory=lambda: {"key": SharedResource(name="in-dict")})
+
+    def execute(self, input_data: dict, config: RunnableConfig = None, **kwargs) -> dict:
+        return {"ok": True}
+
+
+def test_clone_regular_object_is_different_reference():
+    """Regular BaseModel fields (no _clone_shared) must be deep-copied."""
+    node = NodeWithSharedField()
+    cloned = node.clone()
+
+    assert (
+        cloned.regular is not node.regular
+    ), "RegularResource without _clone_shared should have been deep-copied but was shared."
+    assert cloned.regular.name == node.regular.name
+
+
+def test_clone_shared_in_list_is_same_reference():
+    """_clone_shared objects nested inside a list must stay shared."""
+    node = NodeWithNestedShared()
+    cloned = node.clone()
+
+    assert (
+        cloned.shared_list[0] is node.shared_list[0]
+    ), "SharedResource inside a list was deep-copied instead of shared by reference."
+
+
+def test_clone_shared_in_dict_is_same_reference():
+    """_clone_shared objects nested inside a dict must stay shared."""
+    node = NodeWithNestedShared()
+    cloned = node.clone()
+
+    assert (
+        cloned.shared_dict["key"] is node.shared_dict["key"]
+    ), "SharedResource inside a dict was deep-copied instead of shared by reference."
+
+
+def test_clone_shared_survives_multiple_clones():
+    """Cloning several times should always yield the same shared reference."""
+    node = NodeWithSharedField()
+    clone1 = node.clone()
+    clone2 = node.clone()
+    clone3 = clone1.clone()
+
+    assert clone1.shared is node.shared
+    assert clone2.shared is node.shared
+    assert clone3.shared is node.shared, "Shared reference was lost when cloning a clone."

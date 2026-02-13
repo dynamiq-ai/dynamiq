@@ -581,6 +581,8 @@ class Node(BaseModel, Runnable, DryRunMixin, ABC):
             # Do not attempt to copy modules/functions/classes or other callables
             if isinstance(value, (ModuleType, FunctionType)) or isinstance(value, type) or callable(value):
                 return value
+            if getattr(value, "_clone_shared", False):
+                return value
             if isinstance(value, Node):
                 return value.clone()
             elif isinstance(value, BaseModel):
