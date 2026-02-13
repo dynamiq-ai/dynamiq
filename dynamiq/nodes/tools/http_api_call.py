@@ -109,6 +109,7 @@ class HttpApiCallInputSchema(BaseModel):
     payload_type: RequestPayloadType = Field(default=None, description="Parameter to specify the type of payload data.")
     headers: dict = Field(default={}, description="Parameter to provide headers to the request.")
     params: dict = Field(default={}, description="Parameter to provide GET parameters in URL.")
+    method: HTTPMethod | None = Field(default=None, description="Parameter to specify HTTP method.")
     files: dict[str, io.BytesIO] = Field(
         default={},
         description="Parameter to provide files to the request. Maps parameter names to file paths for file uploads. "
@@ -203,7 +204,7 @@ class HttpApiCall(ConnectionNode):
             raise ValueError("No url provided.")
         headers = input_data.headers
         params = input_data.params
-        method = self.method or self.connection.method
+        method = input_data.method or self.method or self.connection.method
 
         try:
             response = self.client.request(
