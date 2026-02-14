@@ -87,6 +87,7 @@ CRITICAL XML FORMAT RULES:
 - Use double quotes for JSON strings
 - Escape special characters in JSON (\\n for newlines, \\" for quotes)
 - Properly close all XML tags
+- In <action_input> you may use normal symbols in JSON (e.g. Python "a < 1", shell "cmd1 && cmd2"); the parser accepts both plain and XML-escaped (&lt; &amp; etc.)
 - For all tags other than <answer>, text content should ideally be XML-escaped
 - Special characters like & should be escaped as &amp; in <thought> and other tags, but can be used directly in <answer>
 - Do not use markdown formatting (like ```) inside XML tags *unless* it's within the <answer> tag.
@@ -101,6 +102,7 @@ JSON FORMATTING REQUIREMENTS:
 - Use double quotes for all strings
 - Escape newlines as \\n, quotes as \\"
 - NO multi-line JSON formatting
+- For tools that accept code (e.g. python), the code must be one JSON string with \\n for line breaks, not literal newlines
 
 FILE HANDLING:
 - Tools may generate or process files (images, CSVs, PDFs, reports, etc.)

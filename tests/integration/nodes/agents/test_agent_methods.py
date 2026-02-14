@@ -172,6 +172,31 @@ def test_xmlparser_parse_valid_with_json():
     assert result == {"thought": "OK", "action": "do", "action_input": {"p": 1}}
 
 
+def test_xmlparser_parse_json_with_literal_newlines_repaired():
+    """Literal newlines inside JSON string values are repaired so parsing succeeds."""
+    text = '<output><thought>Run code</thought><action>code-executor</action><action_input>{"python": "import pandas as pd\nprint(1)"}</action_input></output>'  # noqa E501
+    result = XMLParser.parse(text, required_tags=["thought", "action", "action_input"], json_fields=["action_input"])
+    assert result["action_input"] == {"python": "import pandas as pd\nprint(1)"}
+
+
+def test_xmlparser_parse_action_input_with_less_than_and_ampersand():
+    """Content with < (e.g. Python comparison) or & (e.g. shell &&) inside <action_input> must not break the parser."""
+    text = '<output><thought>Compute loss</thought><action>code-executor</action><action_input>{"python": "loss_count = (moic_col < 1.0).sum()"}</action_input></output>'  # noqa E501
+    result = XMLParser.parse(text, required_tags=["thought", "action", "action_input"], json_fields=["action_input"])
+    assert result["action_input"] == {"python": "loss_count = (moic_col < 1.0).sum()"}
+    # Shell with &&
+    text2 = '<output><thought>List dirs</thought><action>code-executor</action><action_input>{"shell_command": "ls -la /home/user/input && ls -la /home/user/output"}</action_input></output>'  # noqa E501
+    result2 = XMLParser.parse(text2, required_tags=["thought", "action", "action_input"], json_fields=["action_input"])
+    assert result2["action_input"] == {"shell_command": "ls -la /home/user/input && ls -la /home/user/output"}
+
+
+def test_xmlparser_parse_action_input_escaped_entities_unescaped():
+    """When model sends &lt; &gt; &amp; in JSON strings, parser unescapes so tool receives real < > &."""
+    text = '<output><thought>Run</thought><action>code-executor</action><action_input>{"python": "x = (a &lt; 1).sum()"}</action_input></output>'  # noqa E501
+    result = XMLParser.parse(text, required_tags=["thought", "action", "action_input"], json_fields=["action_input"])
+    assert result["action_input"] == {"python": "x = (a < 1).sum()"}
+
+
 def test_xmlparser_parse_missing_required_tag():
     text = "<output><thought>OK</thought></output>"
     with pytest.raises(TagNotFoundError, match="Required tag <action> not found"):
