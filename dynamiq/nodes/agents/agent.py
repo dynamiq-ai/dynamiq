@@ -507,7 +507,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             ),
             static=True,
         )
-
+        with open("system_message.txt", "w") as f:
+            f.write(system_message.content)
         if history_messages:
             self._prompt.messages = [system_message, *history_messages, input_message]
         else:
@@ -1185,7 +1186,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             has_tools=has_tools,
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,
-            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
+            todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
+            or bool(self.sandbox_backend),
             sandbox_output_dir=self.sandbox_backend.output_dir if self.sandbox_backend else None,
         )
 

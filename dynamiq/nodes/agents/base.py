@@ -1216,7 +1216,8 @@ class Agent(Node):
                     has_tools=True,
                     delegation_allowed=self.delegation_allowed,
                     context_compaction_enabled=self.summarization_config.enabled,
-                    todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
+                    todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
+                    or bool(self.sandbox_backend),
                 )
 
     def _inject_attached_files_into_message(
