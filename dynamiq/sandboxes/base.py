@@ -199,9 +199,9 @@ class Sandbox(abc.ABC, BaseModel):
             FileNotFoundError: If explicit ``file_paths`` were requested and any
                 of them could not be retrieved.
         """
-        explicit_request = file_paths is not None
+        file_paths_requested = bool(file_paths)
 
-        if file_paths:
+        if file_paths_requested:
             resolved: list[str] = []
             for file_path in file_paths:
                 if not file_path.startswith("/"):
@@ -230,7 +230,7 @@ class Sandbox(abc.ABC, BaseModel):
 
                 result_files.append(file_bytesio)
             except Exception as e:
-                if explicit_request:
+                if file_paths_requested:
                     raise FileNotFoundError(f"Failed to download requested file '{file_path}': {e}") from e
                 logging.getLogger(__name__).warning(f"Failed to download file '{file_path}': {e}")
                 continue
