@@ -20,24 +20,29 @@ Key Capabilities:
 - Automatic result formatting and error handling
 
 Usage Strategy:
+- Use parameterized queries with placeholders instead of string concatenation
 - Use specific columns instead of SELECT * for performance
 - Include LIMIT clauses for large datasets
 - Leverage database-specific features for optimization
 - Handle transactions appropriately for data modifications
 
 Parameter Guide:
-- query: SQL statement to execute (required)
+- query: SQL statement with placeholders to execute (required)
+- parameters: dict or list of values to bind to query placeholders (recommended for security)
 - Database connection configured at tool initialization
-- Supports parameterized queries for security
 
 Examples:
-- {"query": "SELECT name, email FROM users WHERE status = 'active' LIMIT 10"}
+- {"query": "SELECT name, email FROM users WHERE status = %s LIMIT 10", "parameters": ["active"]}
 - {"query": "SELECT department, COUNT(*) FROM employees GROUP BY department"}
-- {"query": "INSERT INTO products (name, price) VALUES ('Widget', 29.99)"}"""
+- {"query": "INSERT INTO products (name, price) VALUES (%s, %s)", "parameters": ["Widget", 29.99]}"""
 
 
 class SQLInputSchema(BaseModel):
     query: str | None = Field(None, description="Parameter to provide a query that needs to be executed.")
+    parameters: dict[str, Any] | list[Any] | None = Field(
+        None,
+        description="Parameters to bind to query placeholders for safe, parameterized execution.",
+    )
 
 
 class SQLExecutor(ConnectionNode):
@@ -60,6 +65,7 @@ class SQLExecutor(ConnectionNode):
     description: str = DESCRIPTION_SQL
     connection: PostgreSQL | MySQL | Snowflake | AWSRedshift | DatabricksSQL
     query: str | None = None
+    parameters: dict[str, Any] | list[Any] | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -91,6 +97,7 @@ class SQLExecutor(ConnectionNode):
         self.run_on_node_execute_run(config.callbacks, **kwargs)
 
         query = input_data.query or self.query
+        params = input_data.parameters if input_data.parameters is not None else self.parameters
         try:
             if not query:
                 raise ValueError("Query cannot be empty")
@@ -101,7 +108,10 @@ class SQLExecutor(ConnectionNode):
                     else {}
                 )
             )
-            cursor.execute(query)
+            if params is not None:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
             output = cursor.fetchall() if cursor.description is not None else []
             if isinstance(self.connection, DatabricksSQL):
                 output = [row.asDict(True) for row in output]
