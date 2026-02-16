@@ -39,9 +39,9 @@ from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionM
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
-from dynamiq.skills.ingestion import ingest_skills_into_sandbox
 from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
+from dynamiq.skills.utils import ingest_skills_into_sandbox
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger

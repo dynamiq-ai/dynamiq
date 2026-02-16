@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dynamiq.skills.ingestion import _upload_zip_to_sandbox, ingest_skills_into_sandbox
 from dynamiq.skills.registries.dynamiq import Dynamiq, DynamiqSkillEntry
 from dynamiq.skills.types import SkillRegistryError
+from dynamiq.skills.utils import _upload_zip_to_sandbox, ingest_skills_into_sandbox
 
 
 def _make_zip(files: dict[str, bytes]) -> bytes:
@@ -34,7 +34,9 @@ class TestIngestSkillsIntoSandbox:
                 DynamiqSkillEntry(id="id1", version_id="v1", name="my-skill", description=None),
             ],
         )
-        with patch("dynamiq.skills.ingestion.Dynamiq.download_skill_archive", return_value=zip_bytes) as mock_download:
+        with patch(
+            "dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes
+        ) as mock_download:
             result = ingest_skills_into_sandbox(
                 sandbox,
                 registry,
@@ -58,7 +60,7 @@ class TestIngestSkillsIntoSandbox:
                 DynamiqSkillEntry(id="id1", version_id="v1", name="default-skill", description=None),
             ],
         )
-        with patch("dynamiq.skills.ingestion.Dynamiq.download_skill_archive", return_value=zip_bytes):
+        with patch("dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes):
             result = ingest_skills_into_sandbox(sandbox, registry)
 
         assert result == ["default-skill"]
@@ -77,7 +79,9 @@ class TestIngestSkillsIntoSandbox:
                 DynamiqSkillEntry(id="i2", version_id="v2", name="skill-b", description=None),
             ],
         )
-        with patch("dynamiq.skills.ingestion.Dynamiq.download_skill_archive", return_value=zip_bytes) as mock_download:
+        with patch(
+            "dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes
+        ) as mock_download:
             result = ingest_skills_into_sandbox(sandbox, registry)
 
         assert result == ["skill-a", "skill-b"]
@@ -96,7 +100,9 @@ class TestIngestSkillsIntoSandbox:
                 DynamiqSkillEntry(id="i3", version_id="v3", name="three", description=None),
             ],
         )
-        with patch("dynamiq.skills.ingestion.Dynamiq.download_skill_archive", return_value=zip_bytes) as mock_download:
+        with patch(
+            "dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes
+        ) as mock_download:
             result = ingest_skills_into_sandbox(sandbox, registry, skill_names=["one", "three"])
 
         assert result == ["one", "three"]
@@ -115,7 +121,7 @@ class TestIngestSkillsIntoSandbox:
             ],
         )
         with patch(
-            "dynamiq.skills.ingestion.Dynamiq.download_skill_archive",
+            "dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive",
             side_effect=ConnectionError("network error"),
         ):
             with pytest.raises(SkillRegistryError, match="Failed to download skill 'fail-skill'"):
@@ -133,7 +139,7 @@ class TestIngestSkillsIntoSandbox:
                 DynamiqSkillEntry(id="i1", version_id="v1", name="upload-fail", description=None),
             ],
         )
-        with patch("dynamiq.skills.ingestion.Dynamiq.download_skill_archive", return_value=zip_bytes):
+        with patch("dynamiq.skills.registries.dynamiq.Dynamiq.download_skill_archive", return_value=zip_bytes):
             with pytest.raises(SkillRegistryError, match="Failed to upload skill 'upload-fail' to sandbox"):
                 ingest_skills_into_sandbox(sandbox, registry)
 
