@@ -6,7 +6,7 @@ import logging
 import mimetypes
 from enum import Enum
 from functools import cached_property
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -42,6 +42,7 @@ class Sandbox(abc.ABC, BaseModel):
     max_output_files: int = Field(
         default=50, description="Maximum number of files to collect from the output directory."
     )
+    _clone_shared: ClassVar[bool] = True
 
     @property
     def output_dir(self) -> str:

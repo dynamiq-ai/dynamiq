@@ -1,6 +1,7 @@
 """E2B sandbox implementation."""
 
 import shlex
+import threading
 from typing import Any
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
@@ -41,6 +42,7 @@ class E2BSandbox(Sandbox):
         description="Retry and backoff config for sandbox creation and reconnection (rate-limit and transient errors).",
     )
     _sandbox: E2BDesktopSandbox | None = PrivateAttr(default=None)
+    _sandbox_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
     def __init__(self, **kwargs):
         """Initialize the E2B sandbox storage."""
@@ -52,25 +54,33 @@ class E2BSandbox(Sandbox):
         return self.sandbox_id
 
     def _ensure_sandbox(self) -> E2BDesktopSandbox:
-        """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors."""
+        """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors.
+
+        Uses double-checked locking so concurrent threads never create
+        duplicate sandboxes.
+        """
         if self._sandbox is not None:
             return self._sandbox
 
-        if self.sandbox_id:
-            try:
-                self._sandbox = self._reconnect_with_retry()
-                logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
-                self._ensure_output_dir()
+        with self._sandbox_lock:
+            if self._sandbox is not None:
                 return self._sandbox
-            except Exception as e:
-                raise SandboxConnectionError(self.sandbox_id, cause=e) from e
 
-        # Create new sandbox (no sandbox_id)
-        self._sandbox = self._create_with_retry()
-        self.sandbox_id = self._sandbox.sandbox_id
-        logger.debug(f"E2B sandbox created: {self.sandbox_id}")
-        self._ensure_output_dir()
-        return self._sandbox
+            if self.sandbox_id:
+                try:
+                    self._sandbox = self._reconnect_with_retry()
+                    logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
+                    self._ensure_output_dir()
+                    return self._sandbox
+                except Exception as e:
+                    raise SandboxConnectionError(self.sandbox_id, cause=e) from e
+
+            # Create new sandbox (no sandbox_id)
+            self._sandbox = self._create_with_retry()
+            self.sandbox_id = self._sandbox.sandbox_id
+            logger.debug(f"E2B sandbox created: {self.sandbox_id}")
+            self._ensure_output_dir()
+            return self._sandbox
 
     def _ensure_output_dir(self) -> None:
         """Create the output directory inside the sandbox if it does not exist."""
