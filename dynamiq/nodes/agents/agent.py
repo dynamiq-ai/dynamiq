@@ -507,8 +507,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             ),
             static=True,
         )
-        with open("system_message.txt", "w") as f:
-            f.write(system_message.content)
+       
         if history_messages:
             self._prompt.messages = [system_message, *history_messages, input_message]
         else:
