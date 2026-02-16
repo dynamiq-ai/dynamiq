@@ -194,7 +194,12 @@ class Sandbox(abc.ABC, BaseModel):
 
         Returns:
             List of BytesIO objects with name, description, and content_type attributes.
+
+        Raises:
+            FileNotFoundError: If explicit ``file_paths`` were requested and any
+                of them could not be retrieved.
         """
+        explicit_request = file_paths is not None
 
         if file_paths:
             resolved: list[str] = []
@@ -225,6 +230,8 @@ class Sandbox(abc.ABC, BaseModel):
 
                 result_files.append(file_bytesio)
             except Exception as e:
+                if explicit_request:
+                    raise FileNotFoundError(f"Failed to download requested file '{file_path}': {e}") from e
                 logging.getLogger(__name__).warning(f"Failed to download file '{file_path}': {e}")
                 continue
 
