@@ -213,7 +213,7 @@ class E2BSandbox(Sandbox):
             logger.error(f"Failed to upload file {file_name}: {e}")
             raise
 
-    def list_files(self, target_dir=None) -> list[str]:
+    def list_files(self, target_dir: str | None = None) -> list[str]:
         """List files in the E2B sandbox directory.
 
         Searches for files in the given directory (defaults to output directory),
