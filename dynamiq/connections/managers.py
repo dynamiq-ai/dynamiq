@@ -1,6 +1,7 @@
 import enum
 import hashlib
 import importlib
+import threading
 from contextlib import contextmanager
 from typing import Any
 
@@ -45,6 +46,8 @@ class ConnectionManager:
         """
         self.serializer = serializer or JsonPickleSerializer()
         self.connection_clients: dict[str, Any] = {}
+        self._connection_locks_guard = threading.Lock()
+        self._connection_locks: dict[str, threading.Lock] = {}
 
     @staticmethod
     def get_connection_by_type(conn_type: str) -> type[BaseConnection]:
@@ -68,6 +71,20 @@ class ConnectionManager:
         except (ModuleNotFoundError, ImportError):
             raise ValueError(f"Connection type {conn_type} not found")
 
+    def _get_conn_lock(self, conn_id: str) -> threading.Lock:
+        """Get or create a per-connection lock for the given conn_id."""
+        with self._connection_locks_guard:
+            if conn_id not in self._connection_locks:
+                self._connection_locks[conn_id] = threading.Lock()
+            return self._connection_locks[conn_id]
+
+    def _is_client_alive(self, conn_client: Any) -> bool:
+        """Check if an existing connection client is still usable."""
+        conn_client_closed = getattr(conn_client, "closed", None)
+        if conn_client_closed is None:
+            return True
+        return not conn_client_closed
+
     def get_connection_client(
         self,
         connection: BaseConnection,
@@ -75,6 +92,9 @@ class ConnectionManager:
     ) -> Any | None:
         """
         Retrieves or initializes a connection client for the given connection.
+
+        Thread-safe: uses per-connection locks so different connections can be
+        created in parallel, while the same connection is never created twice concurrently.
 
         Args:
             connection: The connection object.
@@ -91,29 +111,33 @@ class ConnectionManager:
             f"with '{init_type.value.lower()}' initialization"
         )
         conn_id = self.get_connection_id(connection, init_type)
+
         if conn_client := self.connection_clients.get(conn_id):
-            if (conn_client_closed := getattr(conn_client, "closed", None)) is None:
+            if self._is_client_alive(conn_client):
                 return conn_client
 
-            if not conn_client_closed:
-                return conn_client
+        conn_lock = self._get_conn_lock(conn_id)
+        with conn_lock:
+            logger.info(f"Acquired lock for '{conn_id}' connection for initialization")
+            # Double-check after acquiring lock (another thread may have created it)
+            if conn_client := self.connection_clients.get(conn_id):
+                if self._is_client_alive(conn_client):
+                    return conn_client
 
-        logger.debug(
-            f"Init connection client for '{connection.id}-{connection.type}' "
-            f"with '{init_type.value.lower()}' initialization"
-        )
-        conn_method_name = CONNECTION_METHOD_BY_INIT_TYPE[init_type]
-        if not (
-            conn_method := getattr(connection, conn_method_name, None)
-        ) or not callable(conn_method):
-            raise ConnectionManagerException(
-                f"Connection '{connection.id}-{connection.type}' not support '{init_type.value}' initialization"
+            logger.debug(
+                f"Init connection client for '{connection.id}-{connection.type}' "
+                f"with '{init_type.value.lower()}' initialization"
             )
+            conn_method_name = CONNECTION_METHOD_BY_INIT_TYPE[init_type]
+            if not (conn_method := getattr(connection, conn_method_name, None)) or not callable(conn_method):
+                raise ConnectionManagerException(
+                    f"Connection '{connection.id}-{connection.type}' not support '{init_type.value}' initialization"
+                )
 
-        conn_client = conn_method()
-        self.connection_clients[conn_id] = conn_client
+            conn_client = conn_method()
+            self.connection_clients[conn_id] = conn_client
 
-        return conn_client
+            return conn_client
 
     def get_connection_id(
         self,
