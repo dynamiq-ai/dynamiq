@@ -1142,10 +1142,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         self.state.update_loop(loop_num)
         todo_backend = None
-        if self.file_store.enabled and self.file_store.todo_enabled:
-            todo_backend = self.file_store.backend
-        elif self.sandbox_backend:
+        if self.sandbox_backend:
             todo_backend = self.sandbox_backend
+        elif self.file_store.enabled and self.file_store.todo_enabled:
+            todo_backend = self.file_store.backend
 
         if todo_backend:
             try:
@@ -1155,7 +1155,6 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     content = todo_backend.retrieve(TODOS_FILE_PATH)
                     data = json.loads(content.decode("utf-8"))
                     self.state.update_todos(data.get("todos", []))
-                    logger.info(f"TodoWriteTool: Todo state: {data.get("todos", [])}")
             except Exception as e:
                 logger.error(f"Failed to get todo state: {e}")
 
