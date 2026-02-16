@@ -23,6 +23,7 @@ class MessageRole(str, enum.Enum):
 class VisionMessageType(str, enum.Enum):
     TEXT = "text"
     IMAGE_URL = "image_url"
+    FILE = "file"
 
 
 class VisionDetail(str, enum.Enum):
@@ -118,6 +119,30 @@ class VisionMessageImageContent(BaseModel):
     image_url: VisionMessageImageURL
 
 
+class VisionMessageFileData(BaseModel):
+    """
+    Represents a file data in a vision conversation.
+
+    Attributes:
+        file_data (str): The base64 formatted data of the file.
+    """
+
+    file_data: str
+
+
+class VisionMessageFileContent(BaseModel):
+    """
+    Represents a file message in a vision conversation.
+
+    Attributes:
+        type (VisionMessageType): The type of the message, default is "image_url".
+        file (VisionMessageFileData): The file data class.
+    """
+
+    type: VisionMessageType = VisionMessageType.FILE
+    file: VisionMessageFileData
+
+
 class VisionMessage(BaseModel):
     """
     Represents a vision message in a conversation.
@@ -128,7 +153,7 @@ class VisionMessage(BaseModel):
         static (bool): Determines whether it is possible to pass parameters via this message.
     """
 
-    content: list[VisionMessageTextContent | VisionMessageImageContent]
+    content: list[VisionMessageTextContent | VisionMessageImageContent | VisionMessageFileContent]
     role: MessageRole = MessageRole.USER
     static: bool = Field(default=False, exclude=True)
 
@@ -214,6 +239,15 @@ class VisionMessage(BaseModel):
                         image_url=VisionMessageImageURL(
                             url=self._Template(content.image_url.url).render(**kwargs),
                             detail=content.image_url.detail,
+                        )
+                    )
+                )
+            elif isinstance(content, VisionMessageFileContent):
+                self.parse_image_url_parameters(content.file.file_data, kwargs)
+                out_msg_content.append(
+                    VisionMessageFileContent(
+                        file=VisionMessageFileData(
+                            file_data=self._Template(content.file.file_data).render(**kwargs),
                         )
                     )
                 )
@@ -336,6 +370,8 @@ class Prompt(BasePrompt):
                             parameters |= get_parameters_for_template(content.text, env=env)
                     elif isinstance(content, VisionMessageImageContent):
                         parameters |= get_parameters_for_template(content.image_url.url, env=env)
+                    elif isinstance(content, VisionMessageFileContent):
+                        parameters |= get_parameters_for_template(content.file.file_data, env=env)
                     else:
                         raise ValueError(f"Invalid content type: {content.type}")
             else:
