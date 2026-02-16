@@ -123,7 +123,7 @@ peft = "^0.13.0"
 pyarrow = "~18.0.0"
 
 [tool.bandit]
-exclude_dirs = ["tests", ".skills"]
+exclude_dirs = ["tests"]
 
 [tool.isort]
 line_length = 120

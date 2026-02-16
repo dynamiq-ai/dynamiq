@@ -1,4 +1,4 @@
-exclude: "^docs/|^env/|^\\.skills/"
+exclude: "^docs/|env/"
 default_stages: [commit]
 default_install_hook_types: [pre-commit, commit-msg]
 
