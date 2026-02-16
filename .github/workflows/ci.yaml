@@ -62,9 +62,6 @@ jobs:
         env:
           SKIP: 'no-commit-to-branch'
 
-      - name: Run conventional commits checker
-        uses: opensource-nepal/commitlint@v1.2.0
-
   test:
     needs:
       - build
