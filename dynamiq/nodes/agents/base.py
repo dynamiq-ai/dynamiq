@@ -15,7 +15,6 @@ from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
-    FileMappedInput,
     ToolCacheEntry,
     convert_bytesio_to_file_info,
     process_tool_output_for_agent,
@@ -611,10 +610,11 @@ class Agent(Node):
             }
             if self.sandbox_backend:
                 self._upload_files_to_sandbox(normalized_files)
-            elif not self.file_store_backend:
-                self._setup_in_memory_file_store_and_tools()
-            if self.file_store_backend:
-                self._upload_files_to_file_store(normalized_files)
+            else:
+                if not self.file_store_backend:
+                    self._setup_in_memory_file_store_and_tools()
+                if self.file_store_backend:
+                    self._upload_files_to_file_store(normalized_files)
             input_message = self._inject_attached_files_into_message(input_message, normalized_files)
 
         if input_data.tool_params:
@@ -901,6 +901,78 @@ class Agent(Node):
 
         return tool_copy, local_config
 
+    @staticmethod
+    def _extract_file_paths_from_input(tool: Node, merged_input: dict[str, Any]) -> list[str] | None:
+        """Extract file path references from map_from_storage fields in tool input.
+
+        Scans the tool's input schema for fields tagged with ``map_from_storage``
+        and collects any string values the LLM provided for those fields.
+
+        Returns:
+            List of file path strings, or None if no paths were found.
+        """
+        paths: list[str] = []
+        for field_name, field in tool.input_schema.model_fields.items():
+            if not (field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False)):
+                continue
+            value = merged_input.get(field_name)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                paths.append(value)
+            elif isinstance(value, (list, tuple)):
+                paths.extend(v for v in value if isinstance(v, str))
+            elif isinstance(value, dict):
+                paths.extend(v for v in value.values() if isinstance(v, str))
+        return paths or None
+
+    def _inject_files_into_tool(self, tool: Node, merged_input: dict[str, Any]) -> None:
+        """Inject files from file store or sandbox into tool input when applicable.
+
+        Sandbox files are only collected when the LLM explicitly references paths
+        in ``map_from_storage`` fields.  Otherwise the file store is used, which
+        means ``Python`` and ``PythonCodeExecutor`` tools always receive files
+        from the file store (never from the sandbox).
+        """
+        if not tool.is_files_allowed:
+            return
+
+        file_paths = self._extract_file_paths_from_input(tool, merged_input)
+
+        if self.sandbox_backend and file_paths:
+            files = self.sandbox_backend.collect_files(file_paths=file_paths)
+            files_map = {path: file for path, file in zip(file_paths, files)}
+        elif self.file_store_backend:
+            files = self.file_store_backend.list_files_bytes()
+            files_map = {getattr(f, "name", f"file_{id(f)}"): f for f in files}
+        else:
+            return
+
+        if not files:
+            return
+
+        for field_name, field in tool.input_schema.model_fields.items():
+            if not (field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False)):
+                continue
+            value = merged_input.get(field_name)
+            if value is None:
+                merged_input[field_name] = files
+            elif isinstance(value, dict):
+                merged_input[field_name] = {
+                    k: files_map.get(v, v) if isinstance(v, str) else v for k, v in value.items()
+                }
+            elif isinstance(value, (list, tuple)):
+                merged_input[field_name] = [files_map.get(v, v) if isinstance(v, str) else v for v in value]
+            elif isinstance(value, str):
+                merged_input[field_name] = files_map.get(value, value)
+
+        if isinstance(tool, Python):
+            merged_input["files"] = files
+
+        if isinstance(tool, PythonCodeExecutor) and not tool.file_store and self.file_store_backend:
+            tool.file_store = self.file_store_backend
+            logger.debug(f"Agent {self.name} - {self.id}: injected file_store into PythonCodeExecutor tool {tool.name}")
+
     def _run_tool(
         self,
         tool: Node,
@@ -940,23 +1012,7 @@ class Agent(Node):
             ToolParams.model_validate(raw_tool_params) if isinstance(raw_tool_params, dict) else raw_tool_params
         )
 
-        if self.file_store_backend and tool.is_files_allowed:
-            for field_name, field in tool.input_schema.model_fields.items():
-                if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
-                    if field_name in merged_input:
-                        merged_input[field_name] = FileMappedInput(
-                            input=merged_input[field_name], files=self.file_store_backend.list_files_bytes()
-                        )
-                    else:
-                        merged_input[field_name] = self.file_store_backend.list_files_bytes()
-            if isinstance(tool, Python):
-                merged_input["files"] = self.file_store_backend.list_files_bytes()
-
-            if isinstance(tool, PythonCodeExecutor) and not tool.file_store:
-                tool.file_store = self.file_store_backend
-                logger.debug(
-                    f"Agent {self.name} - {self.id}: injected file_store into PythonCodeExecutor tool {tool.name}"
-                )
+        self._inject_files_into_tool(tool, merged_input)
 
         if tool_params:
             debug_info = []
@@ -1068,7 +1124,7 @@ class Agent(Node):
         return tool_result_content_processed, output_files
 
     def _ensure_named_files(self, files: list[io.BytesIO | bytes]) -> list[io.BytesIO | bytes]:
-        """Ensure all uploaded files have name and description attributes."""
+        """Ensure all uploaded files have name and description attributes and store them in storage backend."""
         named = []
         for i, f in enumerate(files):
             if isinstance(f, bytes):
@@ -1088,52 +1144,75 @@ class Agent(Node):
 
     def _handle_tool_generated_files(self, tool: Node, tool_result: RunnableResult) -> None:
         """
-        Handle files generated by tools and store them in the file store.
+        Handle files generated by tools and store them in the file store and/or sandbox.
 
         Args:
             tool: The tool that generated the files
             tool_result: The result from the tool execution
         """
-        if not self.file_store_backend:
+        if not self.file_store_backend and not self.sandbox_backend:
             return
 
-        if isinstance(tool_result.output, dict) and "files" in tool_result.output:
-            tool_files = tool_result.output.get("files", [])
-            if tool_files:
-                stored_files = []
-                for file in tool_files:
-                    if isinstance(file, io.BytesIO):
-                        file_name = getattr(file, "name", f"file_{id(file)}.bin")
-                        file_description = getattr(file, "description", "Tool-generated file")
-                        content_type = getattr(file, "content_type", "application/octet-stream")
+        if not (isinstance(tool_result.output, dict) and "files" in tool_result.output):
+            return
 
-                        content = file.read()
-                        file.seek(0)
+        tool_files = tool_result.output.get("files", [])
+        if not tool_files:
+            return
 
-                        self.file_store_backend.store(
-                            file_path=file_name,
-                            content=content,
-                            content_type=content_type,
-                            metadata={"description": file_description, "source": "tool_generated"},
-                            overwrite=True,
-                        )
+        stored_files = []
+        for file in tool_files:
+            if isinstance(file, io.BytesIO):
+                file_name = getattr(file, "name", f"file_{id(file)}.bin")
+                file_description = getattr(file, "description", "Tool-generated file")
+                content_type = getattr(file, "content_type", "application/octet-stream")
+
+                content = file.read()
+                file.seek(0)
+
+                if self.sandbox_backend:
+                    try:
+                        dest = f"{self.sandbox_backend.base_path}/{file_name}"
+                        self.sandbox_backend.upload_file(file_name, content, destination_path=dest)
                         stored_files.append(file_name)
-                    elif isinstance(file, bytes):
-                        file_name = f"file_{id(file)}.bin"
-                        file_description = f"Tool-{tool.name}-generated file"
-                        content_type = "application/octet-stream"
-                        self.file_store_backend.store(
-                            file_path=file_name,
-                            content=file,
-                            content_type=content_type,
-                            metadata={"description": file_description, "source": "tool_generated"},
-                            overwrite=True,
-                        )
-                        stored_files.append(file_name)
-                    else:
-                        logger.warning(f"Unsupported file type from tool '{tool.name}': {type(file)}")
+                    except Exception as e:
+                        logger.warning(f"Failed to upload tool file '{file_name}' to sandbox: {e}")
+                elif self.file_store_backend:
+                    self.file_store_backend.store(
+                        file_path=file_name,
+                        content=content,
+                        content_type=content_type,
+                        metadata={"description": file_description, "source": "tool_generated"},
+                        overwrite=True,
+                    )
+                    stored_files.append(file_name)
 
-                logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
+            elif isinstance(file, bytes):
+                file_name = f"file_{id(file)}.bin"
+                file_description = f"Tool-{tool.name}-generated file"
+                content_type = "application/octet-stream"
+
+                if self.sandbox_backend:
+                    try:
+                        dest = f"{self.sandbox_backend.base_path}/{file_name}"
+                        self.sandbox_backend.upload_file(file_name, file, destination_path=dest)
+                        stored_files.append(file_name)
+                    except Exception as e:
+                        logger.warning(f"Failed to upload tool file '{file_name}' to sandbox: {e}")
+                elif self.file_store_backend:
+                    self.file_store_backend.store(
+                        file_path=file_name,
+                        content=file,
+                        content_type=content_type,
+                        metadata={"description": file_description, "source": "tool_generated"},
+                        overwrite=True,
+                    )
+                    stored_files.append(file_name)
+            else:
+                logger.warning(f"Unsupported file type from tool '{tool.name}': {type(file)}")
+
+        if stored_files:
+            logger.info(f"Tool '{tool.name}' generated {len(stored_files)} file(s): {stored_files}")
 
     INTERNAL_CACHE_SUFFIXES: ClassVar[tuple[str, ...]] = (EXTRACTED_TEXT_SUFFIX,)
 

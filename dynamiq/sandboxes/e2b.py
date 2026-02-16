@@ -56,13 +56,14 @@ class E2BSandbox(Sandbox):
     def _ensure_sandbox(self) -> E2BDesktopSandbox:
         """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors.
 
-        Uses double-checked locking so concurrent threads never create
-        duplicate sandboxes.
+        Uses double-checked locking so concurrent threads (e.g. parallel tool
+        calls via ThreadPoolExecutor) never create duplicate sandboxes.
         """
         if self._sandbox is not None:
             return self._sandbox
 
         with self._sandbox_lock:
+            # Double-check after acquiring the lock
             if self._sandbox is not None:
                 return self._sandbox
 
@@ -70,7 +71,7 @@ class E2BSandbox(Sandbox):
                 try:
                     self._sandbox = self._reconnect_with_retry()
                     logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
-                    self._ensure_output_dir()
+                    self._ensure_directories()
                     return self._sandbox
                 except Exception as e:
                     raise SandboxConnectionError(self.sandbox_id, cause=e) from e
@@ -79,18 +80,18 @@ class E2BSandbox(Sandbox):
             self._sandbox = self._create_with_retry()
             self.sandbox_id = self._sandbox.sandbox_id
             logger.debug(f"E2B sandbox created: {self.sandbox_id}")
-            self._ensure_output_dir()
+            self._ensure_directories()
             return self._sandbox
 
-    def _ensure_output_dir(self) -> None:
-        """Create the output directory inside the sandbox if it does not exist."""
+    def _ensure_directories(self) -> None:
+        """Create the base and output directories inside the sandbox if they do not exist."""
         if self._sandbox is None:
             return
         try:
-            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.output_dir)}")
-            logger.debug(f"E2BSandbox ensured output dir exists: {self.output_dir}")
+            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.base_path)} {shlex.quote(self.output_dir)}")
+            logger.debug(f"E2BSandbox ensured directories exist: {self.base_path}, {self.output_dir}")
         except Exception as e:
-            logger.warning(f"E2BSandbox failed to create output dir {self.output_dir}: {e}")
+            logger.warning(f"E2BSandbox failed to create directories: {e}")
 
     def _reconnect_with_retry(self) -> E2BDesktopSandbox:
         """Reconnect to existing sandbox with exponential backoff on rate-limit."""
@@ -214,17 +215,18 @@ class E2BSandbox(Sandbox):
             logger.error(f"Failed to upload file {file_name}: {e}")
             raise
 
-    def list_output_files(self) -> list[str]:
-        """List files in the E2B sandbox output directory.
+    def list_files(self, target_dir: str | None = None) -> list[str]:
+        """List files in the E2B sandbox directory.
 
-        Searches for files in the output directory (``{base_path}/output``),
+        Searches for files in the given directory (defaults to output directory),
         returning at most ``max_output_files`` file paths.
 
         Returns:
-            List of absolute file paths found in the output directory.
+            List of absolute file paths found in the directory.
         """
         sandbox = self._ensure_sandbox()
-        target_dir = self.output_dir
+        if target_dir is None:
+            target_dir = self.base_path
 
         try:
             # Check if the directory exists
