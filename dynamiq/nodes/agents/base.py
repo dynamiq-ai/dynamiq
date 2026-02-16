@@ -913,15 +913,15 @@ class Agent(Node):
 
         if self.sandbox_backend and file_paths:
             files = self.sandbox_backend.collect_files(file_paths=file_paths)
+            files_map = {path: file for path, file in zip(file_paths, files)}
         elif self.file_store_backend:
             files = self.file_store_backend.list_files_bytes()
+            files_map = {getattr(f, "name", f"file_{id(f)}"): f for f in files}
         else:
             return
 
         if not files:
             return
-
-        files_map = {getattr(f, "name", ""): f for f in files}
 
         for field_name, field in tool.input_schema.model_fields.items():
             if not (field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False)):
