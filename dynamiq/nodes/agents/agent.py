@@ -1020,6 +1020,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
             or bool(self.sandbox_backend),
             sandbox_output_dir=self.sandbox_backend.output_dir if self.sandbox_backend else None,
+            sandbox_base_path=self.sandbox_backend.base_path if self.sandbox_backend else None,
         )
 
         # Only auto-wrap the entire role in a raw block if the user did not

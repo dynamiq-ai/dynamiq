@@ -50,7 +50,7 @@ class MockSandbox(Sandbox):
             shared.append(rec)
         return ShellCommandResult(stdout="hello from sandbox", stderr="", exit_code=0)
 
-    def list_output_files(self) -> list[str]:
+    def list_files(self, target_dir=None) -> list[str]:
         return list(self.mock_files.keys())
 
     def retrieve(self, file_path: str) -> bytes:

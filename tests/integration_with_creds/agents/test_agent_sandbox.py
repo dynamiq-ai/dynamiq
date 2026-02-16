@@ -35,7 +35,7 @@ class TestSandbox(Sandbox):
             return ShellCommandResult(stdout=stdout, stderr="", exit_code=0)
         return ShellCommandResult(stdout="", stderr="Command not found", exit_code=1)
 
-    def list_output_files(self) -> list[str]:
+    def list_files(self, target_dir=None) -> list[str]:
         return []
 
     def retrieve(self, file_path: str) -> bytes:
