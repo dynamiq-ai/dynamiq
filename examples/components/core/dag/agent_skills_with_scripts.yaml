@@ -1,0 +1,55 @@
+connections:
+  anthropic-conn:
+    type: dynamiq.connections.Anthropic
+    api_key: ${oc.env:ANTHROPIC_API_KEY}
+  e2b-conn:
+    type: dynamiq.connections.E2B
+    api_key: ${oc.env:E2B_API_KEY}
+
+nodes:
+  skills-agent:
+    type: dynamiq.nodes.agents.Agent
+    llm:
+      id: skills-agent-llm
+      type: dynamiq.nodes.llms.Anthropic
+      connection: anthropic-conn
+      model: claude-sonnet-4-20250514
+    tools: []
+    role: |
+      You have access to skills (SkillsTool) and a sandbox to run commands. Use SkillsTool
+      action="list" then action="get" with skill_name="..." to load a skill. When get returns
+      "scripts_path", that skill has scripts you can run in the sandbox. Use the sandbox tool
+      to execute shell commands or Python.
+      Uploaded files are placed under /home/user/input (reusing the same paths as their names, e.g. input/sample.md -> /home/user/input/sample.md). Write output files to /home/user/output; files there are automatically collected and returned after the run (download from sandbox). Apply skill instructions and run any requested scripts; report script stdout/stderr and created files.
+    sandbox:
+      enabled: true
+      backend:
+        type: dynamiq.sandboxes.E2BSandbox
+        connection: e2b-conn
+    skills:
+      enabled: true
+      source:
+        type: dynamiq.skills.registries.FileSystem
+        base_path: ".skills"
+        skills:
+          - name: humanizer
+            description: Make AI-generated text sound more natural and human-written.
+          - name: mermaid-tools
+            description: Extract Mermaid diagrams from markdown and generate PNG images. Use when working with Mermaid diagrams.
+          - name: markdown-tools
+            description: Convert PDF/DOCX/PPTX to markdown with multi-tool orchestration. Use for document-to-markdown conversion.
+          - name: xlsx
+            description: Create, edit, and analyze Excel/spreadsheet files. Use when the deliverable is a spreadsheet.
+    max_loops: 15
+    inference_mode: XML
+
+flows:
+  skills-agent-flow:
+    name: Skills with Scripts (FileSystem)
+    nodes:
+      - skills-agent
+
+workflows:
+  skills-with-scripts-workflow:
+    flow: skills-agent-flow
+    version: 1

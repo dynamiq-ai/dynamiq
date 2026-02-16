@@ -64,5 +64,6 @@ class SkillsConfig(BaseModel):
         data = self.model_dump()
         if self.source is not None and getattr(self.source, "connection", None) is not None:
             if "source" in data:
-                data["source"]["connection"] = self.source.connection.to_dict(**kwargs)
+                for_tracing = kwargs.get("for_tracing", False)
+                data["source"]["connection"] = self.source.connection.to_dict(for_tracing=for_tracing)
         return data
