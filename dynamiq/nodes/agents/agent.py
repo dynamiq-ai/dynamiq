@@ -16,6 +16,7 @@ from dynamiq.nodes.agents.exceptions import (
     MaxLoopsExceededException,
     RecoverableAgentException,
 )
+from dynamiq.nodes.agents.exceptions import ActionParsingException, MaxLoopsExceededException, RecoverableAgentException
 from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
 from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry
 from dynamiq.nodes.node import Node, NodeDependency

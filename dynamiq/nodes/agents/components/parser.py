@@ -10,7 +10,6 @@ def parse_default_thought(output: str) -> str:
     raise DeprecationError(
         "parse_default_thought is deprecated. Agents use function calling only; "
         "do not rely on text/XML parsing."
-    )
 
 
 def parse_default_action(output: str) -> tuple[str | None, str | None, dict | list | None]:
