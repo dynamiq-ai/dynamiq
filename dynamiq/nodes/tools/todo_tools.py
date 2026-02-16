@@ -12,6 +12,7 @@ from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.node import ensure_config
 from dynamiq.runnables import RunnableConfig
+from dynamiq.sandboxes.base import Sandbox
 from dynamiq.storages.file.base import FileStore
 from dynamiq.utils.logger import logger
 
@@ -84,7 +85,7 @@ RULES:
 """
 
     error_handling: ErrorHandling = Field(default_factory=lambda: ErrorHandling(timeout_seconds=30))
-    file_store: FileStore = Field(..., description="File storage for todos")
+    file_store: FileStore | Sandbox = Field(..., description="File storage for todos")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[TodoWriteInputSchema]] = TodoWriteInputSchema
@@ -119,14 +120,20 @@ RULES:
         return []
 
     def _save_todos(self, todos: list[dict]) -> None:
-        """Save todos to file store."""
+        """Save todos to file store or sandbox."""
         content = json.dumps({"todos": todos}, indent=2)
-        self.file_store.store(
-            file_path=TODOS_FILE_PATH,
-            content=content,
-            content_type="application/json",
-            overwrite=True,
-        )
+        if isinstance(self.file_store, Sandbox):
+            self.file_store.upload_file(
+                TODOS_FILE_PATH,
+                content.encode("utf-8"),
+            )
+        else:
+            self.file_store.store(
+                file_path=TODOS_FILE_PATH,
+                content=content,
+                content_type="application/json",
+                overwrite=True,
+            )
 
     def execute(
         self, input_data: TodoWriteInputSchema, config: RunnableConfig | None = None, **kwargs

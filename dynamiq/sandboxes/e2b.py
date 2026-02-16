@@ -191,6 +191,8 @@ class E2BSandbox(Sandbox):
     def upload_file(self, file_name: str, content: bytes, destination_path: str | None = None) -> str:
         """Upload a file to the E2B sandbox.
 
+        Note: Parent directories are created automatically by E2B's ``files.write()``.
+
         Args:
             file_name: Name of the file.
             content: File content as bytes.
@@ -276,12 +278,14 @@ class E2BSandbox(Sandbox):
             List of tool instances (Node objects).
         """
         from dynamiq.nodes.tools.file_tools import FileReadTool
+        from dynamiq.nodes.tools.todo_tools import TodoWriteTool
         from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
         if llm is not None:
             return [
                 SandboxShellTool(sandbox=self),
                 FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
+                TodoWriteTool(file_store=self),
             ]
         else:
             return [SandboxShellTool(sandbox=self)]
