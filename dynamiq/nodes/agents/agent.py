@@ -507,7 +507,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
             ),
             static=True,
         )
-       
+
         if history_messages:
             self._prompt.messages = [system_message, *history_messages, input_message]
         else:
