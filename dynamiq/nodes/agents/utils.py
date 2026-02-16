@@ -171,42 +171,52 @@ class XMLParser:
 
     @staticmethod
     def _escape_unbalanced_reserved_tags(text: str, tags: Sequence[str]) -> str:
-        """Escape reserved tag tokens that appear in prose instead of well-formed XML."""
+        """Escape reserved-tag tokens that appear in prose instead of well-formed XML."""
 
         if not text:
             return text
 
-        for tag in tags:
-            open_tag = f"<{tag}>"
-            close_tag = f"</{tag}>"
+        reserved = set(tags)
+        token_pattern = re.compile(r"</?([A-Za-z_][\w\-]*)\b[^>]*>")
+        stack: list[tuple[str, int, int]] = []
+        spans_to_escape: list[tuple[int, int]] = []
 
-            # Replace stray closing tags without matching opening tags
-            search_start = 0
-            while True:
-                close_index = text.find(close_tag, search_start)
-                if close_index == -1:
-                    break
+        for match in token_pattern.finditer(text):
+            tag = match.group(1)
+            if tag not in reserved:
+                continue
 
-                opening_index = text.rfind(open_tag, 0, close_index)
-                if opening_index == -1:
-                    text = text[:close_index] + f"&lt;/{tag}&gt;" + text[close_index + len(close_tag) :]
-                    search_start = close_index + len(f"&lt;/{tag}&gt;")
-                else:
-                    search_start = close_index + len(close_tag)
+            token = match.group(0)
+            is_closing = token.startswith("</")
 
-            # Replace stray opening tags without matching closing tags
-            search_start = 0
-            while True:
-                open_index = text.find(open_tag, search_start)
-                if open_index == -1:
-                    break
+            if not is_closing:
+                stack.append((tag, match.start(), match.end()))
+                continue
 
-                closing_index = text.find(close_tag, open_index + len(open_tag))
-                if closing_index == -1:
-                    text = text[:open_index] + f"&lt;{tag}&gt;" + text[open_index + len(open_tag) :]
-                    search_start = open_index + len(f"&lt;{tag}&gt;")
-                else:
-                    search_start = open_index + len(open_tag)
+            if stack and stack[-1][0] == tag:
+                stack.pop()
+                continue
+
+            found_matching_open = any(open_tag == tag for open_tag, _, _ in stack)
+            if found_matching_open:
+                while stack and stack[-1][0] != tag:
+                    _, open_start, open_end = stack.pop()
+                    spans_to_escape.append((open_start, open_end))
+                if stack and stack[-1][0] == tag:
+                    stack.pop()
+            else:
+                spans_to_escape.append((match.start(), match.end()))
+
+        for _, open_start, open_end in stack:
+            spans_to_escape.append((open_start, open_end))
+
+        if not spans_to_escape:
+            return text
+
+        for start, end in sorted(spans_to_escape, reverse=True):
+            token = text[start:end]
+            escaped = token.replace("<", "&lt;").replace(">", "&gt;")
+            text = text[:start] + escaped + text[end:]
 
         return text
 

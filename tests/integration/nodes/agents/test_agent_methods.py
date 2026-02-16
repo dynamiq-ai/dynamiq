@@ -20,6 +20,7 @@ from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.runnables import RunnableConfig
 from dynamiq.storages.file.base import FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 
@@ -195,6 +196,47 @@ def test_xmlparser_parse_action_input_escaped_entities_unescaped():
     text = '<output><thought>Run</thought><action>code-executor</action><action_input>{"python": "x = (a &lt; 1).sum()"}</action_input></output>'  # noqa E501
     result = XMLParser.parse(text, required_tags=["thought", "action", "action_input"], json_fields=["action_input"])
     assert result["action_input"] == {"python": "x = (a < 1).sum()"}
+
+
+def test_xmlparser_parse_json_with_literal_crlf_newlines_repaired():
+    """CRLF line breaks inside JSON string values are repaired and parsed."""
+    text = '<output><thought>Run code</thought><action>code-executor</action><action_input>{"python": "line1\r\nline2"}</action_input></output>'  # noqa E501
+    result = XMLParser.parse(text, required_tags=["thought", "action", "action_input"], json_fields=["action_input"])
+    assert result["action_input"] == {"python": "line1\nline2"}
+
+
+def test_xmlparser_parse_action_input_entities_unescaped_recursively():
+    """HTML entities are unescaped recursively inside nested JSON dict/list values."""
+    text = (
+        "<output><thought>Run</thought><action>code-executor</action><action_input>"
+        '{"commands": ["echo start &amp;&amp; echo done"], "meta": {"expr": "(x &gt; 1) &amp;&amp; (y &lt; 3)"}}'
+        "</action_input></output>"
+    )
+    result = XMLParser.parse(text, required_tags=["thought", "action", "action_input"], json_fields=["action_input"])
+    assert result["action_input"] == {
+        "commands": ["echo start && echo done"],
+        "meta": {"expr": "(x > 1) && (y < 3)"},
+    }
+
+
+def test_xmlparser_parse_json_invalid_after_repair_raises():
+    """Invalid JSON syntax should still raise JSONParsingError after newline/entity repair attempts."""
+    text = "<output><thought>Run</thought><action_input>{'python': 'print(1)'}</action_input></output>"
+    with pytest.raises(JSONParsingError, match="Failed to parse JSON content for field 'action_input'"):
+        XMLParser.parse(text, required_tags=["thought", "action_input"], json_fields=["action_input"])
+
+
+def test_agent_xml_mode_invalid_action_input_json_is_recoverable(xml_react_agent):
+    """Malformed action_input JSON should surface as recoverable ActionParsingException in XML mode."""
+    llm_generated_output = (
+        "<output><thought>Run code</thought><action>code-executor</action>"
+        '<action_input>{"python": "print(1)"</action_input></output>'
+    )
+
+    with pytest.raises(ActionParsingException, match="must be valid JSON") as excinfo:
+        xml_react_agent._handle_xml_mode(llm_generated_output=llm_generated_output, loop_num=1, config=RunnableConfig())
+
+    assert excinfo.value.recoverable is True
 
 
 def test_xmlparser_parse_missing_required_tag():
