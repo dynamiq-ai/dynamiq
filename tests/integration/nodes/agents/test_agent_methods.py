@@ -18,8 +18,10 @@ from dynamiq.nodes.agents.exceptions import (
 )
 from dynamiq.nodes.agents.utils import XMLParser
 from dynamiq.nodes.llms import OpenAI
+from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.nodes.types import InferenceMode
+from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.storages.file.base import FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 
@@ -553,3 +555,104 @@ def test_agent_state_updates_with_todos(openai_node):
     assert state.current_loop == 0
     assert state.max_loops == 10
     assert state.todos == []
+
+
+class TestParallelToolCloning:
+    """Test parallel tool cloning."""
+
+    @pytest.fixture
+    def calculator_tool(self):
+        return Python(
+            name="Calculator",
+            description="A simple calculator tool for performing arithmetic operations",
+            code="",
+        )
+
+    @pytest.fixture
+    def formatter_tool(self):
+        return Python(
+            name="Formatter",
+            description="A text formatting tool",
+            code="",
+        )
+
+    @pytest.fixture
+    def parallel_agent(self, openai_node, mock_llm_executor, calculator_tool, formatter_tool):
+        """Agent with parallel_tool_calls_enabled=True and two tools."""
+        return Agent(
+            name="Parallel Clone Agent",
+            llm=openai_node,
+            tools=[calculator_tool, formatter_tool],
+            inference_mode=InferenceMode.XML,
+            parallel_tool_calls_enabled=True,
+        )
+
+    # -- Low-level: _run_tool -------------------------------------------------
+
+    def test_run_tool_does_not_clone_for_sequential_execution(self, parallel_agent, calculator_tool, mocker):
+        """_run_tool must NOT clone when is_parallel is False (the default),
+        even when the agent has parallel_tool_calls_enabled=True."""
+        config = RunnableConfig()
+        clone_spy = mocker.patch.object(
+            parallel_agent,
+            "_clone_tool_for_execution",
+            return_value=(calculator_tool, config),
+        )
+        mock_result = RunnableResult(status=RunnableStatus.SUCCESS, output={"content": "42"})
+        mocker.patch.object(Python, "run", return_value=mock_result)
+
+        parallel_agent._run_tool(calculator_tool, {"expression": "1+1"}, config, is_parallel=False)
+
+        assert clone_spy.call_count == 0, "_clone_tool_for_execution must not be called for sequential execution"
+
+    def test_run_tool_clones_for_parallel_execution(self, parallel_agent, calculator_tool, mocker):
+        """_run_tool must clone the tool when is_parallel=True."""
+        config = RunnableConfig()
+        clone_spy = mocker.patch.object(
+            parallel_agent,
+            "_clone_tool_for_execution",
+            return_value=(calculator_tool, config),
+        )
+        mock_result = RunnableResult(status=RunnableStatus.SUCCESS, output={"content": "42"})
+        mocker.patch.object(Python, "run", return_value=mock_result)
+
+        parallel_agent._run_tool(calculator_tool, {"expression": "1+1"}, config, is_parallel=True)
+
+        assert clone_spy.call_count == 1, "_clone_tool_for_execution must be called for parallel execution"
+
+    def test_execute_tools_single_tool_does_not_pass_is_parallel(self, parallel_agent, mocker):
+        """When _execute_tools dispatches a single tool it must NOT set
+        is_parallel=True on the inner _execute_single_tool call."""
+        mock_single = mocker.patch.object(
+            parallel_agent,
+            "_execute_single_tool",
+            return_value=("result", [], False, True, {"node": "dep"}),
+        )
+
+        tools_data = [{"name": "Calculator", "input": {"expression": "1+1"}}]
+        parallel_agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
+
+        mock_single.assert_called_once()
+        call_kw = mock_single.call_args.kwargs
+        assert call_kw.get("is_parallel", False) is False, "Single-tool dispatch must not set is_parallel=True"
+
+    def test_execute_tools_multiple_tools_passes_is_parallel(self, parallel_agent, mocker):
+        """When _execute_tools dispatches multiple tools concurrently it must
+        set is_parallel=True on every _execute_single_tool call."""
+        mock_single = mocker.patch.object(
+            parallel_agent,
+            "_execute_single_tool",
+            return_value=("result", [], False, True, {"node": "dep"}),
+        )
+
+        tools_data = [
+            {"name": "Calculator", "input": {"expression": "1+1"}},
+            {"name": "Formatter", "input": {"text": "hello"}},
+        ]
+        parallel_agent._execute_tools(tools_data, "thinking", 1, RunnableConfig())
+
+        assert mock_single.call_count == 2
+        for call in mock_single.call_args_list:
+            assert (
+                call.kwargs.get("is_parallel") is True
+            ), "Concurrent dispatch must set is_parallel=True for every tool"
