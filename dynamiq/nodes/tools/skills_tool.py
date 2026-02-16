@@ -43,10 +43,12 @@ class SkillsTool(Node):
     group: Literal[NodeGroup.TOOLS] = NodeGroup.TOOLS
     name: str = "SkillsTool"
     description: str = (
-        "Manages skills (instructions only). Use this tool to:\n"
+        "Manages skills (instructions and optional scripts). Use this tool to:\n"
         "- List available skills: action='list'\n"
         "- Get skill content: action='get', skill_name='...'. "
         "For large skills use section='Section title' or line_start/line_end to read only a part.\n\n"
+        "When get returns a 'scripts_path', the skill has bundled scripts: run commands from that "
+        "directory (e.g. cd <scripts_path> then run scripts) or pass it to your execution environment.\n\n"
         "After get, apply the skill's instructions yourself in your reasoning and provide the result "
         "in your final answer. Do not call the tool again with user content to transform; "
         "the tool only provides instructions; you produce the output."
@@ -117,6 +119,9 @@ class SkillsTool(Node):
                 out["section_used"] = section_used
             if instructions.metadata:
                 out["metadata"] = instructions.metadata
+            path = self.skill_registry.get_skill_scripts_path(skill_name)
+            if path:
+                out["scripts_path"] = path
             return out
 
         if section is not None or line_start is not None or line_end is not None:
