@@ -146,11 +146,25 @@ class Sandbox(abc.ABC, BaseModel):
     def list_output_files(self) -> list[str]:
         """List files in the sandbox output directory.
 
+        Args:
+            target_dir: Directory to list. Defaults to the output directory.
+
+        Returns:
+            List of absolute file paths found in the output directory.
+        """
+        return self.list_files(target_dir=self.output_dir)
+
+    def list_files(self, target_dir: str | None = None) -> list[str]:
+        """List files in the sandbox directory.
+
+        Args:
+            target_dir: Directory to list. Defaults to the output directory.
+
         Implementations should respect ``max_output_files`` when scanning
         for files.
 
         Returns:
-            List of absolute file paths found in the output directory.
+            List of absolute file paths found in the directory.
 
         Raises:
             NotImplementedError: If the sandbox does not support file listing.
@@ -171,15 +185,32 @@ class Sandbox(abc.ABC, BaseModel):
         except NotImplementedError:
             return True
 
-    def collect_output_files(self) -> list[io.BytesIO]:
-        """Collect output files from the sandbox output directory as BytesIO objects.
+    def collect_files(self, target_dir: str | None = None, file_paths: list[str] | None = None) -> list[io.BytesIO]:
+        """Collect files from the sandbox directory as BytesIO objects.
 
-        Only files placed in the dedicated output directory are collected.
+        Args:
+            target_dir: Directory to collect files from. Defaults to the base path.
+            file_paths: List of file paths to collect. If None, all files in the target directory are collected.
 
         Returns:
             List of BytesIO objects with name, description, and content_type attributes.
+
+        Raises:
+            FileNotFoundError: If explicit ``file_paths`` were requested and any
+                of them could not be retrieved.
         """
-        file_paths = self.list_output_files()
+        file_paths_requested = bool(file_paths)
+
+        if file_paths_requested:
+            resolved: list[str] = []
+            for file_path in file_paths:
+                if not file_path.startswith("/"):
+                    file_path = f"{self.base_path.rstrip('/')}/{file_path.lstrip('/')}"
+                resolved.append(file_path)
+            file_paths = resolved
+
+        if not file_paths:
+            file_paths = self.list_files(target_dir=target_dir)
 
         if not file_paths:
             return []
@@ -199,10 +230,22 @@ class Sandbox(abc.ABC, BaseModel):
 
                 result_files.append(file_bytesio)
             except Exception as e:
+                if file_paths_requested:
+                    raise FileNotFoundError(f"Failed to download requested file '{file_path}': {e}") from e
                 logging.getLogger(__name__).warning(f"Failed to download file '{file_path}': {e}")
                 continue
 
         return result_files
+
+    def collect_output_files(self) -> list[io.BytesIO]:
+        """Collect output files from the sandbox output directory as BytesIO objects.
+
+        Only files placed in the dedicated output directory are collected.
+
+        Returns:
+            List of BytesIO objects with name, description, and content_type attributes.
+        """
+        return self.collect_files(target_dir=self.output_dir)
 
     def exists(self, file_path: str) -> bool:
         """Check whether a file exists in the sandbox filesystem.
