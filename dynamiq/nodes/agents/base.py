@@ -881,13 +881,17 @@ class Agent(Node):
         and maps files into ``merged_input`` for tools that declare ``map_from_storage``
         fields, Python tools, or PythonCodeExecutor.
         """
-        files = None
+        if not tool.is_files_allowed:
+            return
+
         if self.sandbox_backend:
             files = self.sandbox_backend.collect_files()
         elif self.file_store_backend:
             files = self.file_store_backend.list_files_bytes()
+        else:
+            return
 
-        if not files or not tool.is_files_allowed:
+        if not files:
             return
 
         for field_name, field in tool.input_schema.model_fields.items():
@@ -1104,6 +1108,7 @@ class Agent(Node):
                     try:
                         dest = f"{self.sandbox_backend.base_path}/{file_name}"
                         self.sandbox_backend.upload_file(file_name, content, destination_path=dest)
+                        stored_files.append(file_name)
                     except Exception as e:
                         logger.warning(f"Failed to upload tool file '{file_name}' to sandbox: {e}")
                 elif self.file_store_backend:
@@ -1114,8 +1119,8 @@ class Agent(Node):
                         metadata={"description": file_description, "source": "tool_generated"},
                         overwrite=True,
                     )
+                    stored_files.append(file_name)
 
-                stored_files.append(file_name)
             elif isinstance(file, bytes):
                 file_name = f"file_{id(file)}.bin"
                 file_description = f"Tool-{tool.name}-generated file"
@@ -1125,6 +1130,7 @@ class Agent(Node):
                     try:
                         dest = f"{self.sandbox_backend.base_path}/{file_name}"
                         self.sandbox_backend.upload_file(file_name, file, destination_path=dest)
+                        stored_files.append(file_name)
                     except Exception as e:
                         logger.warning(f"Failed to upload tool file '{file_name}' to sandbox: {e}")
                 elif self.file_store_backend:
@@ -1135,8 +1141,7 @@ class Agent(Node):
                         metadata={"description": file_description, "source": "tool_generated"},
                         overwrite=True,
                     )
-
-                stored_files.append(file_name)
+                    stored_files.append(file_name)
             else:
                 logger.warning(f"Unsupported file type from tool '{tool.name}': {type(file)}")
 
