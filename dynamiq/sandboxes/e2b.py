@@ -284,8 +284,8 @@ class E2BSandbox(Sandbox):
         if llm is not None:
             return [
                 SandboxShellTool(sandbox=self),
-                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
-                TodoWriteTool(name="sandbox_todo_write", file_store=self),
+                FileReadTool(file_store=self, llm=llm, absolute_file_paths_allowed=True),
+                TodoWriteTool(file_store=self),
             ]
         else:
             return [SandboxShellTool(sandbox=self)]
