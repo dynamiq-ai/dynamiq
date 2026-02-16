@@ -901,22 +901,17 @@ class Agent(Node):
     def _inject_files_into_tool(self, tool: Node, merged_input: dict[str, Any]) -> None:
         """Inject files from file store or sandbox into tool input when applicable.
 
-        Resolves the active file source (file store preferred, sandbox as fallback)
-        and maps files into ``merged_input`` for tools that declare ``map_from_storage``
-        fields, Python tools, or PythonCodeExecutor.
-
-        When the LLM provides file path references in ``map_from_storage`` fields,
-        only those specific files are downloaded from the sandbox instead of all files.
+        Sandbox files are only collected when the LLM explicitly references paths
+        in ``map_from_storage`` fields.  Otherwise the file store is used, which
+        means ``Python`` and ``PythonCodeExecutor`` tools always receive files
+        from the file store (never from the sandbox).
         """
         if not tool.is_files_allowed:
             return
 
         file_paths = self._extract_file_paths_from_input(tool, merged_input)
 
-        if not file_paths:
-            return
-
-        if self.sandbox_backend:
+        if self.sandbox_backend and file_paths:
             files = self.sandbox_backend.collect_files(file_paths=file_paths)
         elif self.file_store_backend:
             files = self.file_store_backend.list_files_bytes()
