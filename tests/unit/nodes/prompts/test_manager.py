@@ -5,7 +5,6 @@ from dynamiq.nodes.agents import Agent
 from dynamiq.nodes.agents.orchestrators.adaptive_manager import AdaptiveAgentManager
 from dynamiq.nodes.agents.orchestrators.graph_manager import GraphAgentManager
 from dynamiq.nodes.agents.orchestrators.linear_manager import LinearAgentManager
-from dynamiq.nodes.agents.prompts import get_prompt_constant
 from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.orchestrators.adaptive import (
     PROMPT_TEMPLATE_ADAPTIVE_FINAL,
@@ -24,13 +23,7 @@ from dynamiq.nodes.agents.prompts.orchestrators.linear import (
     PROMPT_TEMPLATE_LINEAR_FINAL,
     PROMPT_TEMPLATE_LINEAR_PLAN,
 )
-from dynamiq.nodes.agents.prompts.overrides.gpt import (
-    REACT_BLOCK_INSTRUCTIONS_SINGLE as GPT_REACT_BLOCK_INSTRUCTIONS_SINGLE,
-)
-from dynamiq.nodes.agents.prompts.overrides.gpt import (
-    REACT_BLOCK_XML_INSTRUCTIONS_SINGLE as GPT_REACT_BLOCK_XML_INSTRUCTIONS_SINGLE,
-)
-from dynamiq.nodes.agents.prompts.secondary_instructions import DELEGATION_INSTRUCTIONS, DELEGATION_INSTRUCTIONS_XML
+from dynamiq.nodes.agents.prompts.secondary_instructions import DELEGATION_INSTRUCTIONS
 from dynamiq.nodes.llms import OpenAI
 from dynamiq.nodes.tools.python import Python
 from dynamiq.nodes.types import InferenceMode
@@ -59,17 +52,8 @@ def test_variables_refreshed_on_reset():
     assert "block1" not in manager._prompt_variables
 
 
-@pytest.mark.parametrize(
-    "inference_mode,expected_delegation_text",
-    [
-        (InferenceMode.DEFAULT, DELEGATION_INSTRUCTIONS),
-        (InferenceMode.XML, DELEGATION_INSTRUCTIONS_XML),
-        (InferenceMode.FUNCTION_CALLING, DELEGATION_INSTRUCTIONS),
-        (InferenceMode.STRUCTURED_OUTPUT, DELEGATION_INSTRUCTIONS),
-    ],
-)
-def test_agent_initialization_with_model_specific_prompts(test_llm, inference_mode, expected_delegation_text):
-    """Test that Agent properly initializes with GPT model-specific prompts for all inference modes."""
+def test_agent_initialization_with_model_specific_prompts(test_llm):
+    """Test that Agent properly initializes with GPT model-specific prompts (function calling only)."""
     python_tool = Python(code="def run(input_data): return input_data")
     agent = Agent(
         name="TestAgent",
@@ -77,7 +61,7 @@ def test_agent_initialization_with_model_specific_prompts(test_llm, inference_mo
         llm=test_llm,
         role="You are a helpful assistant with special capabilities.",
         tools=[python_tool],
-        inference_mode=inference_mode,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         verbose=False,
         delegation_allowed=True,
     )
@@ -97,22 +81,8 @@ def test_agent_initialization_with_model_specific_prompts(test_llm, inference_mo
     prompt = agent.system_prompt_manager.generate_prompt()
     assert prompt is not None
 
-    # Verify delegation instructions are in the prompt for all modes
-    if expected_delegation_text:
-        assert expected_delegation_text in prompt, (
-            f"Expected delegation instructions not found in {inference_mode} mode for GPT model. "
-            f"Looking for: {expected_delegation_text[:100]}..."
-        )
-
-    # Verify GPT-specific override is being used for applicable inference modes
-    if inference_mode == InferenceMode.XML:
-        assert GPT_REACT_BLOCK_XML_INSTRUCTIONS_SINGLE == get_prompt_constant(
-            "gpt-5.1", "REACT_BLOCK_XML_INSTRUCTIONS_SINGLE", None
-        )
-    if inference_mode == InferenceMode.DEFAULT:
-        assert GPT_REACT_BLOCK_INSTRUCTIONS_SINGLE == get_prompt_constant(
-            "gpt-5.1", "REACT_BLOCK_INSTRUCTIONS_SINGLE", None
-        )
+    # Verify delegation instructions are in the prompt
+    assert DELEGATION_INSTRUCTIONS in prompt
 
 
 def test_linear_manager_prompt_blocks_setup(test_llm):

@@ -431,7 +431,7 @@ class Agent(Node):
         return self.skills.enabled and self.skills.source is not None
 
     def _init_skills(self) -> None:
-        """Add SkillsTool to self.tools so it is included in function-calling and structured-output schemas."""
+        """Add SkillsTool to self.tools so it is included in function-calling schemas."""
 
         source = self.skills.source
         if source is None:

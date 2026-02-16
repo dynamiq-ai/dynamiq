@@ -89,7 +89,7 @@ def run_agent(request: str, send_handler: AsyncStreamingIteratorCallbackHandler)
         llm=llm,
         tools=[tool_search],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         streaming=StreamingConfig(enabled=True, mode=StreamingMode.ALL),
     )
 

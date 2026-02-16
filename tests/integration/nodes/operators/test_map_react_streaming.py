@@ -88,7 +88,7 @@ def run(input_data):
     agent = Agent(
         name="React Agent",
         llm=OpenAI(model="gpt-4o-mini", connection=connections.OpenAI(api_key="test-api-key")),
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         parallel_tool_calls_enabled=True,
         tools=[python_tool, exa_tool, firecrawl_tool],
         streaming=StreamingConfig(enabled=True, event="map_react_stream", mode=StreamingMode.ALL),

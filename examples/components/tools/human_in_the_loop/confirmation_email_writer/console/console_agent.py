@@ -50,7 +50,7 @@ def run_agent(query) -> dict:
             "You can request clarifications or send messages using human-feedback tool with "
             "action='ask' or action='info'."
         ),
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         llm=llm,
         tools=[email_sender_tool, human_feedback_tool],
     )

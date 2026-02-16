@@ -39,7 +39,7 @@ def create_agent():
         tools=[tool],
         role=AGENT_ROLE,
         max_loops=10,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
     return agent

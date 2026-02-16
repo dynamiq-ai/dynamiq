@@ -52,7 +52,7 @@ def test_agent_todo_state_updates(openai_llm, run_config):
         id="todo_agent",
         llm=openai_llm,
         role="A helpful assistant that creates todo lists for tasks.",
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         file_store=file_store_config,
         tools=[],
         max_loops=5,

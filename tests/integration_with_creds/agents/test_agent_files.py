@@ -197,7 +197,7 @@ def test_agent_filestore_multiple_files(
         id=f"multi_file_agent_{llm_fixture}",
         llm=llm,
         role=agent_role,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         file_store=file_store_config,
         tools=[],
         verbose=True,

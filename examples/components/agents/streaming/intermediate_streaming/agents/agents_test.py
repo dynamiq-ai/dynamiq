@@ -21,10 +21,7 @@ LLM_CONFIGS = [
 ]
 
 INFERENCE_MODES = [
-    InferenceMode.DEFAULT,
     InferenceMode.FUNCTION_CALLING,
-    InferenceMode.STRUCTURED_OUTPUT,
-    InferenceMode.XML,
 ]
 
 STREAMING_MODES = [

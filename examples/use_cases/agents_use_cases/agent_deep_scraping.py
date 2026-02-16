@@ -37,7 +37,7 @@ if __name__ == "__main__":
         tools=[tool_scrape, tool_code],
         role=AGENT_ROLE,
         max_loops=30,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         file_store=FileStoreConfig(enabled=True, backend=storage, agent_file_write_enabled=True),
         summarization_config=SummarizationConfig(enabled=True, max_token_context_length=100000),
     )

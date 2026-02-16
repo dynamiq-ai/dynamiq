@@ -63,7 +63,7 @@ def make_child_agent(llm):
         llm=llm,
         tools=[cat_api, dog_api],
         max_loops=3,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
 
@@ -75,7 +75,7 @@ def make_parent_agent(llm, child_agent):
         llm=llm,
         tools=[child_agent],
         max_loops=3,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
 

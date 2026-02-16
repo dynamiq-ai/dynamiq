@@ -70,7 +70,7 @@ def setup_agent() -> Agent:
         streaming=streaming_config,
         max_loops=30,
         memory=memory,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         behaviour_on_max_loops=Behavior.RETURN,
     )
 

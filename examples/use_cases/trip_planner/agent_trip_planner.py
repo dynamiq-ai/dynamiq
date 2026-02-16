@@ -32,7 +32,7 @@ def _city_selection_agent(llm, search_tool: ScaleSerpTool) -> Agent:
         role=role,
         llm=llm,
         tools=[search_tool],
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=8,
         behaviour_on_max_loops=Behavior.RETURN,
     )
@@ -51,7 +51,7 @@ def _city_guide_agent(llm, search_tool: ScaleSerpTool) -> Agent:
         role=role,
         llm=llm,
         tools=[search_tool],
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=8,
         behaviour_on_max_loops=Behavior.RETURN,
     )
@@ -69,7 +69,7 @@ def _itinerary_agent(llm) -> Agent:
         description="Transforms research into a polished multi-day travel plan.",
         role=role,
         llm=llm,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=6,
         behaviour_on_max_loops=Behavior.RETURN,
     )
@@ -89,7 +89,7 @@ def _manager_agent(llm, subagents: Iterable[Agent]) -> Agent:
         role=role,
         llm=llm,
         tools=list(subagents),
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         parallel_tool_calls_enabled=True,
         max_loops=12,
         behaviour_on_max_loops=Behavior.RETURN,

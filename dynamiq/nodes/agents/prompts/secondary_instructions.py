@@ -7,12 +7,6 @@ DELEGATION_INSTRUCTIONS = (
     "Do not set delegate_final: true inside metadata of the input, it has to be a separate field."
 )
 
-DELEGATION_INSTRUCTIONS_XML = (
-    '- To return an agent tool\'s response as the final output, include "delegate_final": true inside that '
-    "tool's <input> or <action_input>. Use this only for a single agent tool call and do not provide an "
-    "<answer> yourself; the system will return the agent's result directly."
-)
-
 CONTEXT_MANAGER_INSTRUCTIONS = """CONTEXT MANAGEMENT:
 - Use the context-manager tool proactively when conversation is getting long
 - Save critical info (IDs, filenames) in "notes" field BEFORE calling - previous messages will be summarized"""

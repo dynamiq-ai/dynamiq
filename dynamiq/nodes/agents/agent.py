@@ -2,22 +2,20 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Mapping
 
-from litellm import get_supported_openai_params, supports_function_calling
+from litellm import supports_function_calling
 from pydantic import BaseModel, Field, model_validator
 
 from dynamiq.callbacks import AgentStreamingParserCallback, StreamingQueueCallbackHandler
 from dynamiq.nodes.agents.base import Agent as BaseAgent
-from dynamiq.nodes.agents.components import parser, schema_generator
+from dynamiq.nodes.agents.components import schema_generator
 from dynamiq.nodes.agents.components.history_manager import HistoryManagerMixin
 from dynamiq.nodes.agents.exceptions import (
     ActionParsingException,
     MaxLoopsExceededException,
-    ParsingError,
     RecoverableAgentException,
-    TagNotFoundError,
 )
 from dynamiq.nodes.agents.prompts.react.instructions import PROMPT_AUTO_CLEAN_CONTEXT
-from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry, XMLParser
+from dynamiq.nodes.agents.utils import SummarizationConfig, ToolCacheEntry
 from dynamiq.nodes.node import Node, NodeDependency
 from dynamiq.nodes.tools.context_manager import ContextManagerTool
 from dynamiq.nodes.tools.parallel_tool_calls import PARALLEL_TOOL_NAME, ParallelToolCallsInputSchema
@@ -89,7 +87,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     name: str = "Agent"
     max_loops: int = Field(default=15, ge=2)
-    inference_mode: InferenceMode = Field(default=InferenceMode.DEFAULT)
+    inference_mode: InferenceMode = Field(default=InferenceMode.FUNCTION_CALLING)
     behaviour_on_max_loops: Behavior = Field(
         default=Behavior.RAISE,
         description="Define behavior when max loops are exceeded. Options are 'raise' or 'return'.",
@@ -192,17 +190,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     @model_validator(mode="after")
     def validate_inference_mode(self):
-        """Validate whether specified model can be inferenced in provided mode."""
-        match self.inference_mode:
-            case InferenceMode.FUNCTION_CALLING:
-                if not supports_function_calling(model=self.llm.model):
-                    raise ValueError(f"Model {self.llm.model} does not support function calling")
-
-            case InferenceMode.STRUCTURED_OUTPUT:
-                params = get_supported_openai_params(model=self.llm.model)
-                if "response_format" not in params:
-                    raise ValueError(f"Model {self.llm.model} does not support structured output")
-
+        """Validate that the model supports function calling (required for agents)."""
+        if not supports_function_calling(model=self.llm.model):
+            raise ValueError(f"Model {self.llm.model} does not support function calling")
         return self
 
     @model_validator(mode="after")
@@ -299,60 +289,73 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
     def _append_assistant_message(self, llm_result: Any, llm_generated_output: str) -> None:
         """
-        Appends the assistant's message to conversation history based on inference mode.
-
-        Args:
-            llm_result: The full LLM result object (needed for function calling mode).
-            llm_generated_output: The generated text output from the LLM.
+        Appends the assistant's message to conversation history (function call or raw content).
         """
-        if self.inference_mode == InferenceMode.FUNCTION_CALLING:
-            # For function calling, construct a message that includes the tool call
-            if "tool_calls" in dict[Any, Any](llm_result.output):
-                try:
-                    tool_call = list(llm_result.output["tool_calls"].values())[0]
-                    function_name = tool_call["function"]["name"]
-                    function_args = json.dumps(tool_call["function"]["arguments"])
-                    message_content = f"Function call: {function_name}({function_args})"
-                    self._prompt.messages.append(
-                        Message(role=MessageRole.ASSISTANT, content=message_content, static=True)
+        if "tool_calls" in dict[Any, Any](llm_result.output):
+            try:
+                tool_call = list(llm_result.output["tool_calls"].values())[0]
+                function_name = tool_call["function"]["name"]
+                function_args = json.dumps(tool_call["function"]["arguments"])
+                message_content = f"Function call: {function_name}({function_args})"
+                self._prompt.messages.append(
+                    Message(role=MessageRole.ASSISTANT, content=message_content, static=True)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to extract tool call from LLM result: {e}. Using raw output instead.")
+                self._prompt.messages.append(
+                    Message(
+                        role=MessageRole.ASSISTANT,
+                        content=llm_generated_output or "Cannot extract tool call from LLM result.",
+                        static=True,
                     )
-                except Exception as e:
-                    logger.warning(f"Failed to extract tool call from LLM result: {e}. Using raw output instead.")
-                    self._prompt.messages.append(
-                        Message(
-                            role=MessageRole.ASSISTANT,
-                            content=llm_generated_output or "Cannot extract tool call from LLM result.",
-                            static=True,
-                        )
-                    )
+                )
         elif llm_generated_output:
-            # For other modes, use the generated text output
             self._prompt.messages.append(Message(role=MessageRole.ASSISTANT, content=llm_generated_output, static=True))
 
-    def _handle_default_mode(
-        self, llm_generated_output: str, loop_num: int
-    ) -> tuple[str | None, str | None, dict | list | None]:
-        """Handle DEFAULT inference mode parsing."""
-        if not llm_generated_output or not llm_generated_output.strip():
-            self._append_recovery_instruction(
-                error_label="EmptyResponse",
-                error_detail="The model returned an empty reply while using the Thought/Action format.",
-                llm_generated_output=llm_generated_output,
-                extra_guidance=(
-                    "Re-evaluate the latest observation and respond with 'Thought:' followed by either "
-                    "an 'Action:' plus JSON 'Action Input:' or a final 'Answer:' section."
-                ),
-            )
-            return None, None, None
-
-        if "Answer:" in llm_generated_output:
-            thought, final_answer = parser.extract_default_final_answer(llm_generated_output)
-            self.log_final_output(thought, final_answer, loop_num)
-            return thought, "final_answer", final_answer
-
-        thought, action, action_input = parser.parse_default_action(llm_generated_output)
-        self.log_reasoning(thought, action, action_input, loop_num)
-        return thought, action, action_input
+    def _parse_action_input_json(self, raw: str) -> dict | list:
+        """Parse action_input string as JSON, tolerating trailing content (e.g. extra newlines/text from LLM)."""
+        raw = (raw or "").strip()
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            if "Extra data" not in str(e) and "line 2" not in str(e).lower():
+                raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+            start = raw.find("{")
+            if start == -1:
+                start = raw.find("[")
+            if start == -1:
+                raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+            open_b, close_b = ("{", "}") if raw[start] == "{" else ("[", "]")
+            depth = 0
+            in_string = False
+            escape = False
+            quote = None
+            for i in range(start, len(raw)):
+                c = raw[i]
+                if in_string:
+                    if escape:
+                        escape = False
+                        continue
+                    if c == "\\":
+                        escape = True
+                        continue
+                    if c == quote:
+                        in_string = False
+                    continue
+                if c in ('"', "'"):
+                    in_string = True
+                    quote = c
+                    continue
+                if c == open_b:
+                    depth += 1
+                elif c == close_b:
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(raw[start : i + 1])
+                        except json.JSONDecodeError:
+                            break
+            raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
 
     def _handle_function_calling_mode(
         self, llm_result: Any, loop_num: int
@@ -382,111 +385,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
         action_input = llm_generated_output_json["action_input"]
 
         if isinstance(action_input, str):
-            try:
-                action_input = json.loads(action_input)
-            except json.JSONDecodeError as e:
-                raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
+            action_input = self._parse_action_input_json(action_input)
 
         self.log_reasoning(thought, action, action_input, loop_num)
         return thought, action, action_input
-
-    def _handle_structured_output_mode(
-        self, llm_generated_output: str | dict, loop_num: int
-    ) -> tuple[str | None, str | None, dict | list | None] | tuple[str, str, str]:
-        """Handle STRUCTURED_OUTPUT inference mode parsing.
-
-        Returns:
-            tuple: (thought, action, action_input) for normal actions
-                   (thought, "final_answer", final_answer) for final answers
-        """
-        if self.verbose:
-            logger.info(f"Agent {self.name} - {self.id}: using structured output inference mode")
-
-        try:
-            if isinstance(llm_generated_output, str):
-                llm_generated_output_json = json.loads(llm_generated_output)
-            else:
-                llm_generated_output_json = llm_generated_output
-        except json.JSONDecodeError as e:
-            raise ActionParsingException(f"Error parsing action. {e}", recoverable=True)
-
-        if "action" not in llm_generated_output_json or "thought" not in llm_generated_output_json:
-            raise ActionParsingException("No action or thought provided.", recoverable=True)
-
-        thought = llm_generated_output_json["thought"]
-        action = llm_generated_output_json["action"]
-        action_input = llm_generated_output_json["action_input"]
-
-        if action == "finish":
-            self.log_final_output(thought, action_input, loop_num)
-            return thought, "final_answer", action_input
-
-        try:
-            if isinstance(action_input, str):
-                action_input = json.loads(action_input)
-        except json.JSONDecodeError as e:
-            raise ActionParsingException(f"Error parsing action_input string. {e}", recoverable=True)
-
-        self.log_reasoning(thought, action, action_input, loop_num)
-        return thought, action, action_input
-
-    def _handle_xml_mode(
-        self, llm_generated_output: str, loop_num: int, config: RunnableConfig, **kwargs
-    ) -> tuple[str | None, str | None, dict | list | None]:
-        """Handle XML inference mode parsing."""
-        if self.verbose:
-            logger.info(f"Agent {self.name} - {self.id}: using XML inference mode")
-
-        if not llm_generated_output or not llm_generated_output.strip():
-            self._append_recovery_instruction(
-                error_label="EmptyResponse",
-                error_detail="The model returned an empty reply while XML format was required.",
-                llm_generated_output=llm_generated_output,
-                extra_guidance=(
-                    "Respond with <thought>...</thought> and "
-                    "either <action>/<action_input> or <answer> tags, "
-                    "making sure to address the latest observation."
-                ),
-            )
-            return None, None, None
-
-        try:
-            parsed_data = XMLParser.parse(
-                llm_generated_output, required_tags=["thought", "answer"], optional_tags=["output"]
-            )
-            thought = parsed_data.get("thought")
-            final_answer = parsed_data.get("answer")
-            self.log_final_output(thought, final_answer, loop_num)
-            return thought, "final_answer", final_answer
-
-        except TagNotFoundError:
-            logger.debug("XMLParser: Not a final answer structure, trying action structure.")
-            try:
-                parsed_data = XMLParser.parse(
-                    llm_generated_output,
-                    required_tags=["thought", "action", "action_input"],
-                    optional_tags=["output"],
-                    json_fields=["action_input"],
-                )
-                thought = parsed_data.get("thought")
-                action = parsed_data.get("action")
-                action_input = parsed_data.get("action_input")
-                self.log_reasoning(thought, action, action_input, loop_num)
-                return thought, action, action_input
-            except ParsingError as e:
-                logger.error(f"XMLParser: Empty or invalid XML response for action parsing: {e}")
-                raise ActionParsingException(
-                    "The previous response was empty or invalid. "
-                    "Provide <thought> with either <action>/<action_input> or <answer>.",
-                    recoverable=True,
-                )
-
-        except ParsingError as e:
-            logger.error(f"XMLParser: Empty or invalid XML response: {e}")
-            raise ActionParsingException(
-                "The previous response was empty or invalid. " "Please provide the required XML tags.",
-                recoverable=True,
-            )
 
     def _setup_prompt_and_stop_sequences(
         self,
@@ -501,10 +403,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         """
         system_message = Message(
             role=MessageRole.SYSTEM,
-            content=self.generate_prompt(
-                tools_name=self.tool_names,
-                input_formats=schema_generator.generate_input_formats(self.tools, self.sanitize_tool_name),
-            ),
+            content=self.generate_prompt(tools_name=self.tool_names),
             static=True,
         )
 
@@ -515,20 +414,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
 
         self._history_offset = len(self._prompt.messages)
 
-        # Configure stop sequences based on inference mode
-        stop_sequences = []
-        if self.inference_mode == InferenceMode.DEFAULT:
-            stop_sequences.extend(["Observation: ", "\nObservation:"])
-        elif self.inference_mode == InferenceMode.XML:
-            stop_sequences.extend(
-                [
-                    "\nObservation:",
-                    "Observation:",
-                    "</output>\n<",
-                    "</output><",
-                ]
-            )
-        self.llm.stop = stop_sequences
+        self.llm.stop = []
 
     def _setup_streaming_callback(
         self, config: RunnableConfig, loop_num: int, **kwargs
@@ -968,16 +854,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 # This ensures the LLM can see its own output during error recovery
                 self._append_assistant_message(llm_result, llm_generated_output)
 
-                # Parse LLM output based on inference mode
-                match self.inference_mode:
-                    case InferenceMode.DEFAULT:
-                        result = self._handle_default_mode(llm_generated_output, loop_num)
-                    case InferenceMode.FUNCTION_CALLING:
-                        result = self._handle_function_calling_mode(llm_result, loop_num)
-                    case InferenceMode.STRUCTURED_OUTPUT:
-                        result = self._handle_structured_output_mode(llm_generated_output, loop_num)
-                    case InferenceMode.XML:
-                        result = self._handle_xml_mode(llm_generated_output, loop_num, config, **kwargs)
+                result = self._handle_function_calling_mode(llm_result, loop_num)
 
                 # Handle final answer
                 if result[1] == "final_answer":
@@ -998,24 +875,11 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     return final_answer
 
             except ActionParsingException as e:
-                extra_guidance = None
-                if self.inference_mode == InferenceMode.XML:
-                    extra_guidance = (
-                        "Ensure the reply contains <thought> along "
-                        "with either <action>/<action_input> or a final "
-                        "<answer> tag."
-                    )
-                elif self.inference_mode == InferenceMode.DEFAULT:
-                    extra_guidance = (
-                        "Provide 'Thought:' and either 'Action:' "
-                        "with a JSON 'Action Input:' or a final 'Answer:' section."
-                    )
-
                 self._append_recovery_instruction(
                     error_label=type(e).__name__,
                     error_detail=str(e),
                     llm_generated_output=llm_generated_output,
-                    extra_guidance=extra_guidance,
+                    extra_guidance="Call the correct function with valid arguments.",
                 )
                 continue
 
@@ -1091,20 +955,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
         self, input_message: Message | VisionMessage, config: RunnableConfig | None = None, **kwargs
     ) -> str:
         """
-        Handle the case where max loops are exceeded by crafting a thoughtful response.
-        Uses XMLParser to extract the final answer from the LLM's last attempt.
-
-        Args:
-            input_message (Message | VisionMessage): Initial user message.
-            config (RunnableConfig | None): Configuration for the agent run.
-            **kwargs: Additional parameters for running the agent.
-
-        Returns:
-            str: Final answer provided by the agent.
+        Handle the case where max loops are exceeded by asking the LLM for a final summary.
+        Returns the raw LLM content as the final answer (no parsing).
         """
-        # Use model-specific max loops prompt from prompt manager
         max_loops_prompt = self.system_prompt_manager.max_loops_prompt
-
         system_message = Message(content=max_loops_prompt, role=MessageRole.SYSTEM, static=True)
         conversation_history = Message(
             content=self.aggregate_history(self._prompt.messages), role=MessageRole.USER, static=True
@@ -1112,26 +966,9 @@ class Agent(HistoryManagerMixin, BaseAgent):
         llm_final_attempt_result = self._run_llm(
             [system_message, input_message, conversation_history], config=config, **kwargs
         )
-        llm_final_attempt = llm_final_attempt_result.output["content"]
+        content = llm_final_attempt_result.output.get("content", "") or ""
         self._run_depends = [NodeDependency(node=self.llm).to_dict()]
-
-        try:
-            final_answer = XMLParser.extract_first_tag_lxml(llm_final_attempt, ["answer"])
-            if final_answer is None:
-                logger.warning("Max loops handler: lxml failed to extract <answer>, falling back to regex.")
-                final_answer = XMLParser.extract_first_tag_regex(llm_final_attempt, ["answer"])
-
-            if final_answer is None:
-                logger.error(
-                    "Max loops handler: Failed to extract <answer> tag even with fallbacks. Returning raw output."
-                )
-                final_answer = llm_final_attempt
-
-        except Exception as e:
-            logger.error(f"Max loops handler: Error during final answer extraction: {e}. Returning raw output.")
-            final_answer = llm_final_attempt
-
-        return f"{final_answer}"
+        return content.strip() or "No final answer could be generated."
 
     def _refresh_agent_state(self, loop_num: int) -> None:
         """
@@ -1160,15 +997,10 @@ class Agent(HistoryManagerMixin, BaseAgent):
         super()._init_prompt_blocks()
         # Delegation guidance is rendered via prompt variables managed by AgentPromptManager
 
-        # Handle function calling schema generation first
-        if self.inference_mode == InferenceMode.FUNCTION_CALLING:
-            self._tools = schema_generator.generate_function_calling_schemas(
-                self.tools, self.delegation_allowed, self.sanitize_tool_name, self.llm
-            )
-        elif self.inference_mode == InferenceMode.STRUCTURED_OUTPUT:
-            self._response_format = schema_generator.generate_structured_output_schemas(
-                self.tools, self.sanitize_tool_name, self.delegation_allowed
-            )
+        self._tools = schema_generator.generate_function_calling_schemas(
+            self.tools, self.delegation_allowed, self.sanitize_tool_name, self.llm
+        )
+        self._response_format = None
 
         # Setup ReAct-specific prompts via prompt manager.
         has_tools = bool(self.tools) or (self.skills.enabled and self.skills.source is not None)

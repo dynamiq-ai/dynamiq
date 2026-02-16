@@ -59,7 +59,7 @@ def setup_multi_tool_streaming_agent() -> Agent:
         llm=llm,
         tools=[tool_search, tool_code],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         parallel_tool_calls_enabled=True,
         streaming=StreamingConfig(
             enabled=True,

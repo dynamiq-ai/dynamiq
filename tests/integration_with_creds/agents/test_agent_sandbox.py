@@ -77,7 +77,7 @@ def test_agent_with_sandbox_executes_shell(openai_llm):
         name="Sandbox Agent",
         llm=openai_llm,
         sandbox=SandboxConfig(enabled=True, backend=sandbox),
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=5,
         role="You are helpful assistant that can run commands in the sandbox.",
     )
@@ -111,7 +111,7 @@ def test_agent_with_e2b_sandbox_executes_shell(openai_llm, e2b_connection):
             name="E2B Sandbox Agent",
             llm=openai_llm,
             sandbox=SandboxConfig(enabled=True, backend=sandbox),
-            inference_mode=InferenceMode.XML,
+            inference_mode=InferenceMode.FUNCTION_CALLING,
             max_loops=5,
             role="You are a helpful assistant that can run commands in the sandbox.",
         )

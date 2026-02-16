@@ -60,7 +60,7 @@ def setup_agent() -> Agent:
         name="React Agent",
         llm=llm,
         tools=[tool_writer, preprocess_tool, tavily_tool, scraping_tool],
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         parallel_tool_calls_enabled=True,
         role=AGENT_ROLE,
         max_loops=50,

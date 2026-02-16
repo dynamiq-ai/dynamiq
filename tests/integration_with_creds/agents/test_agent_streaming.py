@@ -58,7 +58,7 @@ def react_agent_with_all_streaming(openai_llm, agent_role, streaming_event):
         id="all_streaming_test_agent",
         llm=openai_llm,
         role=agent_role,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         tools=[],
         verbose=True,
         streaming=StreamingConfig(
@@ -77,7 +77,7 @@ def react_agent_with_final_streaming(openai_llm, agent_role, streaming_event):
         id="final_streaming_test_agent",
         llm=openai_llm,
         role=agent_role,
-        inference_mode=InferenceMode.DEFAULT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         tools=[],
         verbose=True,
         streaming=StreamingConfig(

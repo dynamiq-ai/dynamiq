@@ -41,10 +41,10 @@ that highlights key insights, caveats, and any generated files.
 """
 
 PROMPT = """
-Get a summary of debits and credits for all transactions over all time, grouped by month.
+Analyze dataset
 """
 
-FILE_PATH = "./examples/use_cases/agents_use_cases/data/transactions.xlsx"
+FILE_PATH = "/Users/oleksiibabych/Projects/Product_D/dynamiq/examples/use_cases/agents_use_cases/data/house_prices.csv"
 
 FILE_DESCRIPTION = f"""
 - The file is `{FILE_PATH}`.
@@ -83,7 +83,7 @@ def create_agent():
     """
     llm = AnthropicLLM(
         name="claude",
-        model="claude-sonnet-4-20250514",
+        model="claude-haiku-4-5-20251001",
         temperature=1,
         max_tokens=32000,
         thinking_enabled=True,
@@ -100,8 +100,8 @@ def create_agent():
         llm=llm,
         tools=[tool],
         role=AGENT_ROLE,
-        max_loops=10,
-        inference_mode=InferenceMode.XML,
+        max_loops=15,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         file_store=file_store_config,
     )
 
@@ -149,8 +149,10 @@ def run_workflow(
     )
 
     agent_id = workflow.flow.nodes[0].id
-    agent_output = result.output.get(agent_id, {}).get("output", {})
-    LOGGER.info("Agent coder output preview: %s", agent_output.get("content", "")[:200])
+    out = (result.output or {}).get(agent_id)
+    agent_output = out.get("output") if isinstance(out, dict) else {}
+    agent_output = agent_output or {}
+    LOGGER.info("Agent coder output preview: %s", (agent_output.get("content") or "")[:200])
 
     trace_runs = _resolve_trace_runs(callbacks)
     if trace_runs:

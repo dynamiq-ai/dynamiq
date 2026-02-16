@@ -16,7 +16,7 @@ def run_files_with_images_workflow():
     agent = Agent(
         name="FilesImageAgent",
         id="files_image_agent",
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         llm=llm,
     )
 

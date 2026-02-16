@@ -17,7 +17,7 @@ if __name__ == "__main__":
         id="thinking_agent",
         llm=llm,
         tools=[thinking_tool, tool_search],
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
     result = agent.run(

@@ -30,13 +30,11 @@ class NodeGroup(str, Enum):
 
 class InferenceMode(str, Enum):
     """
-    Enumeration of inference types.
+    Inference type for agents. Only function calling is supported:
+    the LLM uses native tool_calls; tool schema is the single source of truth.
     """
 
-    DEFAULT = "DEFAULT"
-    XML = "XML"
     FUNCTION_CALLING = "FUNCTION_CALLING"
-    STRUCTURED_OUTPUT = "STRUCTURED_OUTPUT"
 
 
 class ActionType(str, Enum):

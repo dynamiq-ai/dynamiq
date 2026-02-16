@@ -39,7 +39,7 @@ GOOGLE_MODELS = [
     "gemini-2.5-pro",
 ]
 
-INFERENCE_MODES = [InferenceMode.DEFAULT, InferenceMode.XML]
+INFERENCE_MODES = [InferenceMode.FUNCTION_CALLING]
 
 
 def create_openai_llm(model):
@@ -299,7 +299,7 @@ def test_anthropic_llm_structured_output_strict(model):
         input_data={},
         prompt=prompt,
         response_format=schema_,
-        inference_mode=InferenceMode.STRUCTURED_OUTPUT,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
     )
 
     assert result.status == RunnableStatus.SUCCESS

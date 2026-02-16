@@ -69,7 +69,7 @@ def _create_agent() -> Agent:
         llm=llm,
         tools=[code_tool],
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=8,
         file_store=file_store_config,
     )

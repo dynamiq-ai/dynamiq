@@ -152,7 +152,7 @@ def test_agent_sandbox_creates_and_returns_file(openai_llm, image_bytes, e2b_con
             id="sandbox_file_agent",
             llm=openai_llm,
             role=("You are a helpful assistant that can execute commands in the sandbox. "),
-            inference_mode=InferenceMode.XML,
+            inference_mode=InferenceMode.FUNCTION_CALLING,
             sandbox=sandbox_config,
             max_loops=10,
             verbose=True,
@@ -201,7 +201,7 @@ def test_agent_sandbox_with_input_files_returns_output(openai_llm, e2b_connectio
                 "For Python tasks, write a .py script file first, then run it with 'python script.py'. "
                 "Never use Python one-liners with semicolons for multi-step logic."
             ),
-            inference_mode=InferenceMode.XML,
+            inference_mode=InferenceMode.FUNCTION_CALLING,
             sandbox=sandbox_config,
             max_loops=10,
             verbose=True,

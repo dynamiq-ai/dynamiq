@@ -81,7 +81,7 @@ def setup_agent(e2b_api_key: str = None) -> tuple[Agent, E2BSandbox]:
         llm=llm,
         sandbox=sandbox_config,
         role=AGENT_ROLE,
-        inference_mode=InferenceMode.XML,
+        inference_mode=InferenceMode.FUNCTION_CALLING,
         max_loops=10,
     )
 
