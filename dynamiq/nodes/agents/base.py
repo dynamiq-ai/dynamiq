@@ -39,7 +39,9 @@ from dynamiq.prompts import Message, MessageRole, Prompt, VisionMessage, VisionM
 from dynamiq.runnables import RunnableConfig, RunnableResult, RunnableStatus
 from dynamiq.sandboxes.base import Sandbox, SandboxConfig
 from dynamiq.skills.config import SkillsConfig
+from dynamiq.skills.registries.dynamiq import Dynamiq
 from dynamiq.skills.types import SkillMetadata
+from dynamiq.skills.utils import ingest_skills_into_sandbox
 from dynamiq.storages.file.base import FileStore, FileStoreConfig
 from dynamiq.storages.file.in_memory import InMemoryFileStore
 from dynamiq.utils.logger import logger
@@ -412,6 +414,30 @@ class Agent(Node):
             if tool.is_postponed_component_init:
                 tool.init_components(connection_manager)
             tool.is_optimized_for_agents = True
+
+        self._ensure_skills_ingested_for_sandbox()
+
+    def _ensure_skills_ingested_for_sandbox(self) -> None:
+        """When skills source is Dynamiq with sandbox_skills_base_path and sandbox is enabled, ingest skills at init."""
+        if not self.sandbox_backend or not self._skills_should_init():
+            return
+        source = self.skills.source
+        if source is None:
+            return
+
+        if not isinstance(source, Dynamiq) or not source.sandbox_skills_base_path:
+            return
+        try:
+            if hasattr(self.sandbox_backend, "_ensure_sandbox"):
+                self.sandbox_backend._ensure_sandbox()
+            ingest_skills_into_sandbox(
+                self.sandbox_backend,
+                source,
+                sandbox_skills_base_path=source.sandbox_skills_base_path,
+            )
+            logger.info("Agent %s: skills ingested into sandbox at init", self.name)
+        except Exception as e:
+            logger.warning("Agent %s: skills ingestion into sandbox failed: %s", self.name, e)
 
     def sanitize_tool_name(self, s: str):
         """Sanitize tool name to follow [^a-zA-Z0-9_-]."""

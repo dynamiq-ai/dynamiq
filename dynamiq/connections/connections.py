@@ -70,8 +70,7 @@ class BaseConnection(BaseModel, ABC):
         """
         if for_tracing:
             return {"id": self.id, "type": self.type}
-        else:
-            return self.model_dump(**kwargs)
+        return self.model_dump(**kwargs)
 
     @abstractmethod
     def connect(self):
