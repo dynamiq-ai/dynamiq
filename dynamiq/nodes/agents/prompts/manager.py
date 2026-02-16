@@ -215,6 +215,7 @@ class AgentPromptManager:
         context_compaction_enabled: bool = False,
         todo_management_enabled: bool = False,
         sandbox_output_dir: str | None = None,
+        sandbox_base_path: str | None = None,
     ) -> None:
         """
         Setup prompts for ReAct-style Agent.
@@ -231,6 +232,7 @@ class AgentPromptManager:
             context_compaction_enabled=context_compaction_enabled,
             todo_management_enabled=todo_management_enabled,
             sandbox_output_dir=sandbox_output_dir,
+            sandbox_base_path=sandbox_base_path,
         )
 
         # Update prompt blocks
@@ -259,6 +261,7 @@ def get_model_specific_prompts(
     context_compaction_enabled: bool = False,
     todo_management_enabled: bool = False,
     sandbox_output_dir: str | None = None,
+    sandbox_base_path: str | None = None,
 ) -> tuple[dict[str, str], str]:
     """
     Get model-specific prompts based on the model name and agent configuration.
@@ -350,7 +353,12 @@ def get_model_specific_prompts(
     if todo_management_enabled:
         secondary_parts.append(TODO_TOOLS_INSTRUCTIONS)
     if sandbox_output_dir:
-        secondary_parts.append(SANDBOX_INSTRUCTIONS_TEMPLATE.format(output_dir=sandbox_output_dir))
+        secondary_parts.append(
+            SANDBOX_INSTRUCTIONS_TEMPLATE.format(
+                output_dir=sandbox_output_dir,
+                base_path=sandbox_base_path or sandbox_output_dir,
+            )
+        )
 
     if secondary_parts:
         prompt_blocks["secondary_instructions"] = "\n\n".join(secondary_parts)

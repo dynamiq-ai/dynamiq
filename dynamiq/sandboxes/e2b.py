@@ -1,7 +1,6 @@
 """E2B sandbox implementation."""
 
 import shlex
-import threading
 from typing import Any
 
 from e2b.exceptions import RateLimitException as E2BRateLimitException
@@ -42,7 +41,6 @@ class E2BSandbox(Sandbox):
         description="Retry and backoff config for sandbox creation and reconnection (rate-limit and transient errors).",
     )
     _sandbox: E2BDesktopSandbox | None = PrivateAttr(default=None)
-    _sandbox_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
     def __init__(self, **kwargs):
         """Initialize the E2B sandbox storage."""
@@ -54,43 +52,35 @@ class E2BSandbox(Sandbox):
         return self.sandbox_id
 
     def _ensure_sandbox(self) -> E2BDesktopSandbox:
-        """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors.
-
-        Uses double-checked locking so concurrent threads never create
-        duplicate sandboxes.
-        """
+        """Lazily initialize or reconnect to E2B sandbox, with retries on rate-limit and transient errors."""
         if self._sandbox is not None:
             return self._sandbox
 
-        with self._sandbox_lock:
-            if self._sandbox is not None:
+        if self.sandbox_id:
+            try:
+                self._sandbox = self._reconnect_with_retry()
+                logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
+                self._ensure_directories()
                 return self._sandbox
+            except Exception as e:
+                raise SandboxConnectionError(self.sandbox_id, cause=e) from e
 
-            if self.sandbox_id:
-                try:
-                    self._sandbox = self._reconnect_with_retry()
-                    logger.debug(f"E2B sandbox reconnected: {self.sandbox_id}")
-                    self._ensure_output_dir()
-                    return self._sandbox
-                except Exception as e:
-                    raise SandboxConnectionError(self.sandbox_id, cause=e) from e
+        # Create new sandbox (no sandbox_id)
+        self._sandbox = self._create_with_retry()
+        self.sandbox_id = self._sandbox.sandbox_id
+        logger.debug(f"E2B sandbox created: {self.sandbox_id}")
+        self._ensure_directories()
+        return self._sandbox
 
-            # Create new sandbox (no sandbox_id)
-            self._sandbox = self._create_with_retry()
-            self.sandbox_id = self._sandbox.sandbox_id
-            logger.debug(f"E2B sandbox created: {self.sandbox_id}")
-            self._ensure_output_dir()
-            return self._sandbox
-
-    def _ensure_output_dir(self) -> None:
-        """Create the output directory inside the sandbox if it does not exist."""
+    def _ensure_directories(self) -> None:
+        """Create the base and output directories inside the sandbox if they do not exist."""
         if self._sandbox is None:
             return
         try:
-            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.output_dir)}")
-            logger.debug(f"E2BSandbox ensured output dir exists: {self.output_dir}")
+            self._sandbox.commands.run(f"mkdir -p {shlex.quote(self.base_path)} {shlex.quote(self.output_dir)}")
+            logger.debug(f"E2BSandbox ensured directories exist: {self.base_path}, {self.output_dir}")
         except Exception as e:
-            logger.warning(f"E2BSandbox failed to create output dir {self.output_dir}: {e}")
+            logger.warning(f"E2BSandbox failed to create directories: {e}")
 
     def _reconnect_with_retry(self) -> E2BDesktopSandbox:
         """Reconnect to existing sandbox with exponential backoff on rate-limit."""
@@ -212,17 +202,18 @@ class E2BSandbox(Sandbox):
             logger.error(f"Failed to upload file {file_name}: {e}")
             raise
 
-    def list_output_files(self) -> list[str]:
-        """List files in the E2B sandbox output directory.
+    def list_files(self, target_dir=None) -> list[str]:
+        """List files in the E2B sandbox directory.
 
-        Searches for files in the output directory (``{base_path}/output``),
+        Searches for files in the given directory (defaults to output directory),
         returning at most ``max_output_files`` file paths.
 
         Returns:
-            List of absolute file paths found in the output directory.
+            List of absolute file paths found in the directory.
         """
         sandbox = self._ensure_sandbox()
-        target_dir = self.output_dir
+        if target_dir is None:
+            target_dir = self.base_path
 
         try:
             # Check if the directory exists
@@ -281,7 +272,7 @@ class E2BSandbox(Sandbox):
         if llm is not None:
             return [
                 SandboxShellTool(sandbox=self),
-                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
+                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, allow_absolute_paths=True),
             ]
         else:
             return [SandboxShellTool(sandbox=self)]

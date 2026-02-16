@@ -38,7 +38,7 @@ class Sandbox(abc.ABC, BaseModel):
     """
 
     connection: BaseConnection | None = Field(default=None, description="Connection to the sandbox backend.")
-    base_path: str = Field(default="/home/user", description="Base path in the sandbox filesystem.")
+    base_path: str = Field(default="/home/user/workspace", description="Base path in the sandbox filesystem.")
     max_output_files: int = Field(
         default=50, description="Maximum number of files to collect from the output directory."
     )
@@ -146,11 +146,25 @@ class Sandbox(abc.ABC, BaseModel):
     def list_output_files(self) -> list[str]:
         """List files in the sandbox output directory.
 
+        Args:
+            target_dir: Directory to list. Defaults to the output directory.
+
+        Returns:
+            List of absolute file paths found in the output directory.
+        """
+        return self.list_files(target_dir=self.output_dir)
+
+    def list_files(self, target_dir: str | None = None) -> list[str]:
+        """List files in the sandbox directory.
+
+        Args:
+            target_dir: Directory to list. Defaults to the output directory.
+
         Implementations should respect ``max_output_files`` when scanning
         for files.
 
         Returns:
-            List of absolute file paths found in the output directory.
+            List of absolute file paths found in the directory.
 
         Raises:
             NotImplementedError: If the sandbox does not support file listing.
@@ -171,15 +185,16 @@ class Sandbox(abc.ABC, BaseModel):
         except NotImplementedError:
             return True
 
-    def collect_output_files(self) -> list[io.BytesIO]:
-        """Collect output files from the sandbox output directory as BytesIO objects.
+    def collect_files(self, target_dir: str | None = None) -> list[io.BytesIO]:
+        """Collect files from the sandbox directory as BytesIO objects.
 
-        Only files placed in the dedicated output directory are collected.
+        Args:
+            target_dir: Directory to collect files from. Defaults to the base path.
 
         Returns:
             List of BytesIO objects with name, description, and content_type attributes.
         """
-        file_paths = self.list_output_files()
+        file_paths = self.list_files(target_dir=target_dir)
 
         if not file_paths:
             return []
@@ -203,6 +218,20 @@ class Sandbox(abc.ABC, BaseModel):
                 continue
 
         return result_files
+
+    def collect_output_files(self) -> list[io.BytesIO]:
+        """Collect output files from the sandbox output directory as BytesIO objects.
+
+        Only files placed in the dedicated output directory are collected.
+
+        Returns:
+            List of BytesIO objects with name, description, and content_type attributes.
+        """
+        file_paths = self.list_output_files()
+
+        if not file_paths:
+            return []
+        return self.collect_files(target_dir=self.output_dir)
 
     def exists(self, file_path: str) -> bool:
         """Check whether a file exists in the sandbox filesystem.
