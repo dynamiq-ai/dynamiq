@@ -288,7 +288,7 @@ class WorkflowYAMLLoader:
             try:
                 connection = conn_cls(**conn_init_data)
             except Exception as e:
-                raise WorkflowYAMLLoaderException(f"Connection '{conn_id}' data is invalid. Error: {e}")
+                raise WorkflowYAMLLoaderException(f"Connection '{conn_id}' data is invalid. Error: {str(e) or repr(e)}")
 
             connections[conn_id] = connection
 
@@ -329,7 +329,9 @@ class WorkflowYAMLLoader:
         try:
             connection = conn_cls(**conn_init_data)
         except Exception as e:
-            raise WorkflowYAMLLoaderException(f"Inline connection for node '{node_id}' data is invalid. Error: {e}")
+            raise WorkflowYAMLLoaderException(
+                f"Inline connection for node '{node_id}' data is invalid. Error: {str(e) or repr(e)}"
+            )
 
         return connection
 
@@ -350,7 +352,9 @@ class WorkflowYAMLLoader:
         try:
             return Prompt(**prompt_init_data)
         except Exception as e:
-            raise WorkflowYAMLLoaderException(f"Prompt '{prompt_init_data.get('id')}' data is invalid. Error: {e}")
+            raise WorkflowYAMLLoaderException(
+                f"Prompt '{prompt_init_data.get('id')}' data is invalid. Error: {str(e) or repr(e)}"
+            )
 
     @classmethod
     def get_prompts(cls, data: dict[str, dict]) -> dict[str, Prompt]:
@@ -555,7 +559,8 @@ class WorkflowYAMLLoader:
                 dependency = NodeDependency(**dependency_init_data)
             except Exception as e:
                 raise WorkflowYAMLLoaderException(
-                    f"Dependency '{dependency_data.get('node')}' data for node '{node_id}' " f"is invalid. Error: {e}"
+                    f"Dependency '{dependency_data.get('node')}' data for node '{node_id}' "
+                    f"is invalid. Error: {str(e) or repr(e)}"
                 )
 
             if dependency.option:
@@ -748,7 +753,7 @@ class WorkflowYAMLLoader:
                 except WorkflowYAMLLoaderException:
                     raise
                 except Exception as e:
-                    raise WorkflowYAMLLoaderException(f"Node '{node_id}' processing failed. Error: {e}")
+                    raise WorkflowYAMLLoaderException(f"Node '{node_id}' processing failed. Error: {str(e) or repr(e)}")
 
         return new_nodes
 
@@ -842,7 +847,8 @@ class WorkflowYAMLLoader:
                 node.is_postponed_component_init = False
 
         except Exception as e:
-            raise WorkflowYAMLLoaderException(f"Node '{node_id}' data is invalid. Error: {e}")
+            logger.exception(f"Node '{node_id}' data is invalid")
+            raise WorkflowYAMLLoaderException(f"Node '{node_id}' data is invalid. Error: {str(e) or repr(e)}")
 
         return node_id, node
 
@@ -1015,7 +1021,7 @@ class WorkflowYAMLLoader:
             try:
                 flow = Flow(**flow_init_data)
             except Exception as e:
-                raise WorkflowYAMLLoaderException(f"Flow '{flow_id}' data is invalid. Error: {e}")
+                raise WorkflowYAMLLoaderException(f"Flow '{flow_id}' data is invalid. Error: {str(e) or repr(e)}")
 
             new_flows[flow_id] = flow
         return new_flows
@@ -1089,7 +1095,7 @@ class WorkflowYAMLLoader:
             try:
                 wf = Workflow(id=wf_id, flow=flow, version=version)
             except Exception as e:
-                raise WorkflowYAMLLoaderException(f"Workflow '{wf_id}' data is invalid. Error: {e}")
+                raise WorkflowYAMLLoaderException(f"Workflow '{wf_id}' data is invalid. Error: {str(e) or repr(e)}")
 
             workflows[wf_id] = wf
         return workflows
