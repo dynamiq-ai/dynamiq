@@ -119,11 +119,9 @@ class SkillsTool(Node):
                 out["section_used"] = section_used
             if instructions.metadata:
                 out["metadata"] = instructions.metadata
-            scripts_path = getattr(self.skill_registry, "get_skill_scripts_path", None)
-            if callable(scripts_path):
-                path = scripts_path(skill_name)
-                if path:
-                    out["scripts_path"] = path
+            path = self.skill_registry.get_skill_scripts_path(skill_name)
+            if path:
+                out["scripts_path"] = path
             return out
 
         if section is not None or line_start is not None or line_end is not None:

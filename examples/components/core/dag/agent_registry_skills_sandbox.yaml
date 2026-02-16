@@ -42,7 +42,7 @@ nodes:
             version_id: "e0a3a68c-b3b6-4834-87f9-b8be7c8b8602"
             name: mermaid-tools
             description: Extract Mermaid diagrams from markdown and generate PNG images.
-    max_loops: 15
+    max_loops: 45
     inference_mode: XML
 
 flows:
