@@ -48,10 +48,11 @@ class SandboxShellTool(Node):
         "- command (str, required): The shell command to execute.\n"
         "- timeout (int, default 60): Max seconds to wait for completion.\n"
         "- run_in_background_enabled (bool, default false): Run without waiting for output.\n\n"
+        "Paths: Input files are under /home/user/input. Write outputs to /home/user/output; "
+        "files there are automatically collected and returned after the run.\n\n"
         "Examples:\n"
-        '- {"command": "ls -la"}\n'
-        '- {"command": "echo Hello World"}\n'
-        '- {"command": "pip install pandas", "timeout": 120}\n'
+        '- {"command": "ls -la /home/user/input"}\n'
+        '- {"command": "python3 /home/user/input/script.py /home/user/input/data.txt /home/user/output"}\n'
         '- {"command": "cp result.csv /home/user/output/"}\n'
         '- {"command": "cat <<\'EOF\' > script.py && python3 script.py\\nimport csv\\n'
         "with open('data.csv') as f:\\n"

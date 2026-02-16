@@ -31,3 +31,11 @@ class BaseSkillRegistry(ABC, BaseModel):
     @abstractmethod
     def get_skill_instructions(self, name: str) -> SkillInstructions:
         raise NotImplementedError
+
+    def get_skill_scripts_path(self, name: str) -> str | None:
+        """Return absolute scripts path for a skill when available.
+
+        Registries that can expose runnable scripts should override this.
+        Default behavior returns None.
+        """
+        return None
