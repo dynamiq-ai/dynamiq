@@ -916,6 +916,7 @@ class Agent(Node):
         update_run_depends: bool = True,
         collect_dependency: bool = False,
         delegate_final: bool = False,
+        is_parallel: bool = False,
         **kwargs,
     ) -> Any:
         """Runs a specific tool with the given input."""
@@ -1019,7 +1020,7 @@ class Agent(Node):
 
         tool_to_run = tool
         tool_config = ensure_config(config)
-        if getattr(self, "parallel_tool_calls_enabled", False):
+        if is_parallel:
             tool_to_run, tool_config = self._clone_tool_for_execution(tool, tool_config)
 
         tool_result = tool_to_run.run(
