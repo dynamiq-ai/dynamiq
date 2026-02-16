@@ -565,11 +565,7 @@ class TestParallelToolCloning:
         return Python(
             name="Calculator",
             description="A simple calculator tool for performing arithmetic operations",
-            code="""
-def run(input_data):
-    result = eval(input_data.get('expression', '0'))
-    return {"result": result}
-""",
+            code="",
         )
 
     @pytest.fixture
@@ -577,10 +573,7 @@ def run(input_data):
         return Python(
             name="Formatter",
             description="A text formatting tool",
-            code="""
-def run(input_data):
-    return {"result": input_data.get('text', '').upper()}
-""",
+            code="",
         )
 
     @pytest.fixture
