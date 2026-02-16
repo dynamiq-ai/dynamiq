@@ -1,4 +1,5 @@
 import base64
+import html
 import io
 import json
 import re
@@ -161,7 +162,7 @@ class XMLParser:
         for tag in tags_to_process:
             content = XMLParser.extract_content_with_regex_fallback(text, tag)
             if content:
-                tag_pattern = f"<{tag}[^>]*>.*?(?=<(?!/{tag})|$)|<{tag}[^>]*>.*?</{tag}>"
+                tag_pattern = f"<{tag}[^>]*>.*?</{tag}>"
                 modified_text = re.sub(tag_pattern, f"<{tag}>CONTENT_PLACEHOLDER_{tag}</{tag}>", text, flags=re.DOTALL)
                 extracted_contents[tag] = (modified_text, content)
                 text = modified_text
@@ -170,42 +171,52 @@ class XMLParser:
 
     @staticmethod
     def _escape_unbalanced_reserved_tags(text: str, tags: Sequence[str]) -> str:
-        """Escape reserved tag tokens that appear in prose instead of well-formed XML."""
+        """Escape reserved-tag tokens that appear in prose instead of well-formed XML."""
 
         if not text:
             return text
 
-        for tag in tags:
-            open_tag = f"<{tag}>"
-            close_tag = f"</{tag}>"
+        reserved = set(tags)
+        token_pattern = re.compile(r"</?([A-Za-z_][\w\-]*)\b[^>]*>")
+        stack: list[tuple[str, int, int]] = []
+        spans_to_escape: list[tuple[int, int]] = []
 
-            # Replace stray closing tags without matching opening tags
-            search_start = 0
-            while True:
-                close_index = text.find(close_tag, search_start)
-                if close_index == -1:
-                    break
+        for match in token_pattern.finditer(text):
+            tag = match.group(1)
+            if tag not in reserved:
+                continue
 
-                opening_index = text.rfind(open_tag, 0, close_index)
-                if opening_index == -1:
-                    text = text[:close_index] + f"&lt;/{tag}&gt;" + text[close_index + len(close_tag) :]
-                    search_start = close_index + len(f"&lt;/{tag}&gt;")
-                else:
-                    search_start = close_index + len(close_tag)
+            token = match.group(0)
+            is_closing = token.startswith("</")
 
-            # Replace stray opening tags without matching closing tags
-            search_start = 0
-            while True:
-                open_index = text.find(open_tag, search_start)
-                if open_index == -1:
-                    break
+            if not is_closing:
+                stack.append((tag, match.start(), match.end()))
+                continue
 
-                closing_index = text.find(close_tag, open_index + len(open_tag))
-                if closing_index == -1:
-                    text = text[:open_index] + f"&lt;{tag}&gt;" + text[open_index + len(open_tag) :]
-                    search_start = open_index + len(f"&lt;{tag}&gt;")
-                else:
-                    search_start = open_index + len(open_tag)
+            if stack and stack[-1][0] == tag:
+                stack.pop()
+                continue
+
+            found_matching_open = any(open_tag == tag for open_tag, _, _ in stack)
+            if found_matching_open:
+                while stack and stack[-1][0] != tag:
+                    _, open_start, open_end = stack.pop()
+                    spans_to_escape.append((open_start, open_end))
+                if stack and stack[-1][0] == tag:
+                    stack.pop()
+            else:
+                spans_to_escape.append((match.start(), match.end()))
+
+        for _, open_start, open_end in stack:
+            spans_to_escape.append((open_start, open_end))
+
+        if not spans_to_escape:
+            return text
+
+        for start, end in sorted(spans_to_escape, reverse=True):
+            token = text[start:end]
+            escaped = token.replace("<", "&lt;").replace(">", "&gt;")
+            text = text[:start] + escaped + text[end:]
 
         return text
 
@@ -339,6 +350,55 @@ class XMLParser:
         return data
 
     @staticmethod
+    def _repair_json_newlines_in_strings(text: str) -> str:
+        """
+        Replace literal newlines inside double-quoted JSON string values with
+        the escape sequence \\n so that json.loads can parse LLM output that
+        used real line breaks instead of escaped newlines.
+        """
+        result = []
+        i = 0
+        in_double_quote = False
+        escape_next = False
+        while i < len(text):
+            c = text[i]
+            if escape_next:
+                result.append(c)
+                escape_next = False
+                i += 1
+                continue
+            if c == "\\" and in_double_quote:
+                escape_next = True
+                result.append(c)
+                i += 1
+                continue
+            if c == '"' and not escape_next:
+                in_double_quote = not in_double_quote
+                result.append(c)
+                i += 1
+                continue
+            if in_double_quote and c in ("\r", "\n"):
+                result.append("\\n")
+                if c == "\r" and i + 1 < len(text) and text[i + 1] == "\n":
+                    i += 1
+                i += 1
+                continue
+            result.append(c)
+            i += 1
+        return "".join(result)
+
+    @staticmethod
+    def _unescape_html_in_json_values(obj: Any) -> Any:
+        """Recursively unescape &lt; &gt; &amp; in string values so tool inputs get real < > &."""
+        if isinstance(obj, str):
+            return html.unescape(obj)
+        if isinstance(obj, dict):
+            return {k: XMLParser._unescape_html_in_json_values(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [XMLParser._unescape_html_in_json_values(v) for v in obj]
+        return obj
+
+    @staticmethod
     def _parse_json_fields(data: dict[str, str], json_fields: Sequence[str]) -> dict[str, Any]:
         """
         Parses specified fields in the data dictionary as JSON.
@@ -356,9 +416,14 @@ class XMLParser:
         parsed_data = data.copy()
         for field in json_fields:
             if field in parsed_data:
+                json_string = re.sub(r"^```(?:json)?\s*|```$", "", parsed_data[field].strip())
                 try:
-                    json_string = re.sub(r"^```(?:json)?\s*|```$", "", parsed_data[field].strip())
-                    parsed_data[field] = json.loads(json_string)
+                    try:
+                        parsed_data[field] = json.loads(json_string)
+                    except json.JSONDecodeError:
+                        repaired = XMLParser._repair_json_newlines_in_strings(json_string)
+                        parsed_data[field] = json.loads(repaired)
+                    parsed_data[field] = XMLParser._unescape_html_in_json_values(parsed_data[field])
                 except json.JSONDecodeError as e:
                     error_message = (
                         f"Failed to parse JSON content for field '{field}'. "
