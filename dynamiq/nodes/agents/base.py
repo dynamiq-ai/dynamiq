@@ -307,6 +307,8 @@ class Agent(Node):
                 expanded_tools.append(tool)
 
         self.tools = expanded_tools
+        if self.file_store_backend and self.sandbox_backend:
+            raise ValueError("file_store and sandbox cannot both be enabled for an Agent at the same time")
 
         if self.sandbox_backend:
             # Add sandbox tools when sandbox is enabled (not serialized; recreated from sandbox config on load)
@@ -1242,7 +1244,8 @@ class Agent(Node):
                     has_tools=True,
                     delegation_allowed=self.delegation_allowed,
                     context_compaction_enabled=self.summarization_config.enabled,
-                    todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
+                    todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
+                    or bool(self.sandbox_backend),
                 )
 
     def _inject_attached_files_into_message(
