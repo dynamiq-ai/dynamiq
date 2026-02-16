@@ -38,7 +38,7 @@ class Sandbox(abc.ABC, BaseModel):
     """
 
     connection: BaseConnection | None = Field(default=None, description="Connection to the sandbox backend.")
-    base_path: str = Field(default="/home/user/workspace", description="Base path in the sandbox filesystem.")
+    base_path: str = Field(default="/home/user", description="Base path in the sandbox filesystem.")
     max_output_files: int = Field(
         default=50, description="Maximum number of files to collect from the output directory."
     )
@@ -185,16 +185,27 @@ class Sandbox(abc.ABC, BaseModel):
         except NotImplementedError:
             return True
 
-    def collect_files(self, target_dir: str | None = None) -> list[io.BytesIO]:
+    def collect_files(self, target_dir: str | None = None, file_paths: list[str] | None = None) -> list[io.BytesIO]:
         """Collect files from the sandbox directory as BytesIO objects.
 
         Args:
             target_dir: Directory to collect files from. Defaults to the base path.
+            file_paths: List of file paths to collect. If None, all files in the target directory are collected.
 
         Returns:
             List of BytesIO objects with name, description, and content_type attributes.
         """
-        file_paths = self.list_files(target_dir=target_dir)
+
+        if file_paths:
+            resolved: list[str] = []
+            for file_path in file_paths:
+                if not file_path.startswith("/"):
+                    file_path = f"{self.base_path.rstrip('/')}/{file_path.lstrip('/')}"
+                resolved.append(file_path)
+            file_paths = resolved
+
+        if not file_paths:
+            file_paths = self.list_files(target_dir=target_dir)
 
         if not file_paths:
             return []

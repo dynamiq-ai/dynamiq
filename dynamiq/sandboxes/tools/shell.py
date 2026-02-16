@@ -52,7 +52,7 @@ class SandboxShellTool(Node):
         '- {"command": "ls -la"}\n'
         '- {"command": "echo Hello World"}\n'
         '- {"command": "pip install pandas", "timeout": 120}\n'
-        '- {"command": "cp result.csv /home/user/workspace/output/"}\n'
+        '- {"command": "cp result.csv /home/user/output/"}\n'
         '- {"command": "cat <<\'EOF\' > script.py && python3 script.py\\nimport csv\\n'
         "with open('data.csv') as f:\\n"
         "    reader = csv.reader(f)\\n"

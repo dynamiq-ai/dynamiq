@@ -15,7 +15,6 @@ from dynamiq.nodes.agents.prompts.manager import AgentPromptManager
 from dynamiq.nodes.agents.prompts.templates import AGENT_PROMPT_TEMPLATE
 from dynamiq.nodes.agents.utils import (
     TOOL_MAX_TOKENS,
-    FileMappedInput,
     ToolCacheEntry,
     convert_bytesio_to_file_info,
     process_tool_output_for_agent,
@@ -874,18 +873,51 @@ class Agent(Node):
 
         return tool_copy, local_config
 
+    @staticmethod
+    def _extract_file_paths_from_input(tool: Node, merged_input: dict[str, Any]) -> list[str] | None:
+        """Extract file path references from map_from_storage fields in tool input.
+
+        Scans the tool's input schema for fields tagged with ``map_from_storage``
+        and collects any string values the LLM provided for those fields.
+
+        Returns:
+            List of file path strings, or None if no paths were found.
+        """
+        paths: list[str] = []
+        for field_name, field in tool.input_schema.model_fields.items():
+            if not (field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False)):
+                continue
+            value = merged_input.get(field_name)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                paths.append(value)
+            elif isinstance(value, (list, tuple)):
+                paths.extend(v for v in value if isinstance(v, str))
+            elif isinstance(value, dict):
+                paths.extend(v for v in value.values() if isinstance(v, str))
+        return paths or None
+
     def _inject_files_into_tool(self, tool: Node, merged_input: dict[str, Any]) -> None:
         """Inject files from file store or sandbox into tool input when applicable.
 
         Resolves the active file source (file store preferred, sandbox as fallback)
         and maps files into ``merged_input`` for tools that declare ``map_from_storage``
         fields, Python tools, or PythonCodeExecutor.
+
+        When the LLM provides file path references in ``map_from_storage`` fields,
+        only those specific files are downloaded from the sandbox instead of all files.
         """
         if not tool.is_files_allowed:
             return
 
+        file_paths = self._extract_file_paths_from_input(tool, merged_input)
+
+        if not file_paths:
+            return
+
         if self.sandbox_backend:
-            files = self.sandbox_backend.collect_files()
+            files = self.sandbox_backend.collect_files(file_paths=file_paths)
         elif self.file_store_backend:
             files = self.file_store_backend.list_files_bytes()
         else:
@@ -894,12 +926,22 @@ class Agent(Node):
         if not files:
             return
 
+        files_map = {getattr(f, "name", ""): f for f in files}
+
         for field_name, field in tool.input_schema.model_fields.items():
-            if field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False):
-                if field_name in merged_input:
-                    merged_input[field_name] = FileMappedInput(input=merged_input[field_name], files=files)
-                else:
-                    merged_input[field_name] = files
+            if not (field.json_schema_extra and field.json_schema_extra.get("map_from_storage", False)):
+                continue
+            value = merged_input.get(field_name)
+            if value is None:
+                merged_input[field_name] = files
+            elif isinstance(value, dict):
+                merged_input[field_name] = {
+                    k: files_map.get(v, v) if isinstance(v, str) else v for k, v in value.items()
+                }
+            elif isinstance(value, (list, tuple)):
+                merged_input[field_name] = [files_map.get(v, v) if isinstance(v, str) else v for v in value]
+            elif isinstance(value, str):
+                merged_input[field_name] = files_map.get(value, value)
 
         if isinstance(tool, Python):
             merged_input["files"] = files
