@@ -305,7 +305,7 @@ class Agent(Node):
                 expanded_tools.append(tool)
 
         self.tools = expanded_tools
-        if self.file_store.enabled and self.sandbox_backend:
+        if self.file_store_backend and self.sandbox_backend:
             raise ValueError("file_store and sandbox cannot both be enabled for an Agent at the same time")
 
         if self.sandbox_backend:

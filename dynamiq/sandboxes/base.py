@@ -124,6 +124,7 @@ class Sandbox(abc.ABC, BaseModel):
         """
         ...
 
+    @abc.abstractmethod
     def upload_file(self, file_name: str, content: bytes, destination_path: str | None = None) -> str:
         """Upload a file to the sandbox.
 
@@ -204,6 +205,7 @@ class Sandbox(abc.ABC, BaseModel):
 
         return result_files
 
+    @abc.abstractmethod
     def exists(self, file_path: str) -> bool:
         """Check whether a file exists in the sandbox filesystem.
 
@@ -223,6 +225,7 @@ class Sandbox(abc.ABC, BaseModel):
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
         )
 
+    @abc.abstractmethod
     def retrieve(self, file_path: str) -> bytes:
         """Read file content from the sandbox filesystem.
 
