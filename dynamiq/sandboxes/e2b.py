@@ -12,7 +12,6 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from dynamiq.connections import E2B
 from dynamiq.nodes import Node
 from dynamiq.nodes.tools.e2b_sandbox import SandboxCreationErrorHandling
-from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
 from dynamiq.sandboxes.exceptions import SandboxConnectionError
 from dynamiq.utils.logger import logger
@@ -279,12 +278,13 @@ class E2BSandbox(Sandbox):
             List of tool instances (Node objects).
         """
         from dynamiq.nodes.tools.file_tools import FileReadTool
+        from dynamiq.nodes.tools.todo_tools import TodoWriteTool
         from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
         if llm is not None:
             return [
                 SandboxShellTool(sandbox=self),
-                FileReadTool(file_store=self, llm=llm, absolute_file_paths_allowed=True),
+                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
                 TodoWriteTool(file_store=self),
             ]
         else:
