@@ -227,10 +227,6 @@ class Sandbox(abc.ABC, BaseModel):
         Returns:
             List of BytesIO objects with name, description, and content_type attributes.
         """
-        file_paths = self.list_output_files()
-
-        if not file_paths:
-            return []
         return self.collect_files(target_dir=self.output_dir)
 
     def exists(self, file_path: str) -> bool:

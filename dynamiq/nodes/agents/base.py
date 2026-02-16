@@ -881,6 +881,7 @@ class Agent(Node):
         and maps files into ``merged_input`` for tools that declare ``map_from_storage``
         fields, Python tools, or PythonCodeExecutor.
         """
+        files = None
         if self.sandbox_backend:
             files = self.sandbox_backend.collect_files()
         elif self.file_store_backend:

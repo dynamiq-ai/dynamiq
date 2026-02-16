@@ -33,6 +33,7 @@ Output Files:
 - Ensure that this folder contains only the files you want to return to the user.
 - Use {base_path}/ for scripts, intermediate data, and working files.
   Uploaded files are also placed here. Other tools can only access files under {base_path}/.
+- Files returned from other tools are placed in {base_path}/ and can be accessed by other tools.
 
 Rules:
 1. Use 'python3' instead of 'python'.
