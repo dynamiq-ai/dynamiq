@@ -192,6 +192,8 @@ class E2BSandbox(Sandbox):
     def upload_file(self, file_name: str, content: bytes, destination_path: str | None = None) -> str:
         """Upload a file to the E2B sandbox.
 
+        Note: Parent directories are created automatically by E2B's ``files.write()``.
+
         Args:
             file_name: Name of the file.
             content: File content as bytes.
