@@ -64,6 +64,6 @@ class SkillsConfig(BaseModel):
         data = self.model_dump()
         if self.source is not None and getattr(self.source, "connection", None) is not None:
             if "source" in data:
-                conn_kwargs = {k: v for k, v in kwargs.items() if k not in ("include_secure_params", "for_tracing")}
-                data["source"]["connection"] = self.source.connection.to_dict(**conn_kwargs)
+                for_tracing = kwargs.get("for_tracing", False)
+                data["source"]["connection"] = self.source.connection.to_dict(for_tracing=for_tracing)
         return data
