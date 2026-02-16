@@ -462,6 +462,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
         config: RunnableConfig,
         update_run_depends: bool = True,
         collect_dependency: bool = False,
+        is_parallel: bool = False,
         **kwargs,
     ) -> tuple[Any, list, bool, bool, dict | None]:
         """Execute a single tool with caching support.
@@ -469,6 +470,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
         Args:
             update_run_depends: Whether to update self._run_depends. Set to False for parallel execution.
             collect_dependency: Whether to collect and return the dependency dict.
+            is_parallel: Whether this tool is being executed in parallel with other tools.
+                When True, the tool will be cloned for thread-safe execution.
 
         Returns:
             tuple: (tool_result, tool_files, is_delegated, success, dependency)
@@ -527,6 +530,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     delegate_final=delegate_final,
                     update_run_depends=update_run_depends,
                     collect_dependency=collect_dependency,
+                    is_parallel=is_parallel,
                     **tool_kwargs,
                 )
                 if collect_dependency:
@@ -1110,6 +1114,7 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 config,
                 update_run_depends=False,
                 collect_dependency=True,
+                is_parallel=True,
                 **kwargs,
             )
             return {
