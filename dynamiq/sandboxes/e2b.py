@@ -12,6 +12,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from dynamiq.connections import E2B
 from dynamiq.nodes import Node
 from dynamiq.nodes.tools.e2b_sandbox import SandboxCreationErrorHandling
+from dynamiq.nodes.tools.todo_tools import TodoWriteTool
 from dynamiq.sandboxes.base import Sandbox, ShellCommandResult
 from dynamiq.sandboxes.exceptions import SandboxConnectionError
 from dynamiq.utils.logger import logger
@@ -282,6 +283,7 @@ class E2BSandbox(Sandbox):
             return [
                 SandboxShellTool(sandbox=self),
                 FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
+                TodoWriteTool(name="sandbox_todo_write", file_store=self),
             ]
         else:
             return [SandboxShellTool(sandbox=self)]
