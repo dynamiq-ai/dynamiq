@@ -1154,15 +1154,18 @@ class Agent(HistoryManagerMixin, BaseAgent):
             loop_num: Current loop iteration number.
         """
         self.state.update_loop(loop_num)
+        todo_backend = None
+        if self.sandbox_backend:
+            todo_backend = self.sandbox_backend
+        elif self.file_store.enabled and self.file_store.todo_enabled:
+            todo_backend = self.file_store.backend
 
-        # Update todos
-        if self.file_store.enabled and self.file_store.todo_enabled:
+        if todo_backend:
             try:
                 from dynamiq.nodes.tools.todo_tools import TODOS_FILE_PATH
 
-                file_store = self.file_store.backend
-                if file_store.exists(TODOS_FILE_PATH):
-                    content = file_store.retrieve(TODOS_FILE_PATH)
+                if todo_backend.exists(TODOS_FILE_PATH):
+                    content = todo_backend.retrieve(TODOS_FILE_PATH)
                     data = json.loads(content.decode("utf-8"))
                     self.state.update_todos(data.get("todos", []))
             except Exception as e:
@@ -1191,7 +1194,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
             has_tools=has_tools,
             delegation_allowed=self.delegation_allowed,
             context_compaction_enabled=self.summarization_config.enabled,
-            todo_management_enabled=self.file_store.enabled and self.file_store.todo_enabled,
+            todo_management_enabled=(self.file_store.enabled and self.file_store.todo_enabled)
+            or bool(self.sandbox_backend),
             sandbox_output_dir=self.sandbox_backend.output_dir if self.sandbox_backend else None,
         )
 
