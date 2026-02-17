@@ -783,11 +783,11 @@ class Flow(BaseFlow):
         )
 
         if config is None:
-            from dynamiq.runnables import RunnableConfig
-
-            config = RunnableConfig(checkpoint_context=checkpoint_context)
+            config = RunnableConfig(checkpoint=CheckpointConfig(context=checkpoint_context))
+        elif config.checkpoint:
+            config.checkpoint.context = checkpoint_context
         else:
-            config.checkpoint_context = checkpoint_context
+            config.checkpoint = CheckpointConfig(context=checkpoint_context)
 
         return config
 
