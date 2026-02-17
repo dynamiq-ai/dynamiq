@@ -185,10 +185,16 @@ class AgentInputSchema(BaseModel):
         return self
 
 
+# Default prompt prefix length: [system_message, user_message].
+# At runtime, _history_offset is recalculated to len(prompt.messages) before the ReAct loop,
+# which may be larger when memory history messages are injected.
+DEFAULT_HISTORY_OFFSET = 2
+
+
 class AgentCheckpointState(BaseCheckpointState):
     """Checkpoint state for Agent nodes."""
 
-    history_offset: int = Field(default=2, description="Offset for agent conversation history")
+    history_offset: int = Field(default=DEFAULT_HISTORY_OFFSET, description="Offset for agent conversation history")
     llm_state: dict = Field(default_factory=dict, description="LLM component checkpoint state")
     tool_states: dict[str, dict] = Field(
         default_factory=dict, description="Tool component checkpoint states keyed by tool ID"
@@ -248,9 +254,7 @@ class Agent(Node):
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
     _excluded_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
-    _history_offset: int = PrivateAttr(
-        default=2,  # Offset to the first message (default: 2 — system and initial user messages).
-    )
+    _history_offset: int = PrivateAttr(default=DEFAULT_HISTORY_OFFSET)
     system_prompt_manager: AgentPromptManager = Field(default_factory=AgentPromptManager)
     _current_call_context: dict[str, Any] | None = PrivateAttr(default=None)
 
@@ -375,7 +379,7 @@ class Agent(Node):
         """Restore agent state from checkpoint, including LLM and tool component states."""
         super().from_checkpoint_state(state)
         if isinstance(state, dict):
-            self._history_offset = state.get("history_offset", 2)
+            self._history_offset = state.get("history_offset", DEFAULT_HISTORY_OFFSET)
             if llm_state := state.get("llm_state"):
                 self.llm.from_checkpoint_state(llm_state)
             if tool_states := state.get("tool_states"):
