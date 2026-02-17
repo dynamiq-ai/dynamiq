@@ -9,10 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from dynamiq.checkpoints.checkpoint import CheckpointStatus, FlowCheckpoint
 from dynamiq.utils import generate_uuid
 
-# Maximum number of checkpoints to fetch during cleanup operations
 CLEANUP_FETCH_LIMIT = 1000
-
-# Default limit for list operations (None means no limit)
 DEFAULT_LIST_LIMIT = 10
 
 
