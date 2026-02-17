@@ -1,5 +1,3 @@
-"""In-memory checkpoint storage backend."""
-
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
