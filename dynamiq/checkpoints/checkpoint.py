@@ -276,3 +276,5 @@ class CheckpointConfig(BaseModel):
     )
     max_retention_hours: int | None = Field(default=None, description="Delete checkpoints older than this many hours")
     exclude_node_ids: list[str] = Field(default_factory=list, description="Node IDs to skip checkpointing")
+
+    context: CheckpointContext | None = Field(default=None, description="Runtime checkpoint context (set by Flow)")

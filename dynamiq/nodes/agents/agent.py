@@ -1028,8 +1028,8 @@ class Agent(HistoryManagerMixin, BaseAgent):
                     action, action_input, thought, loop_num, config, **kwargs
                 )
 
-                if config and config.checkpoint_context:
-                    config.checkpoint_context.save_mid_run(self.id)
+                if config and config.checkpoint and config.checkpoint.context:
+                    config.checkpoint.context.save_mid_run(self.id)
 
                 if final_answer is not None:
                     return final_answer

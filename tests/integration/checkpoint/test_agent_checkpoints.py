@@ -340,15 +340,16 @@ class TestHITLApprovalCheckpoint:
 
         def tracking_setup(config):
             result = original_setup(config)
-            if result and result.checkpoint_context:
-                original_pending = result.checkpoint_context._on_pending_input
+            ctx = result.checkpoint.context if result and result.checkpoint else None
+            if ctx:
+                original_pending = ctx._on_pending_input
 
                 def tracking_pending(node_id, prompt, metadata):
                     pending_notifications.append({"node_id": node_id, "prompt": prompt, "metadata": metadata})
                     if original_pending:
                         original_pending(node_id, prompt, metadata)
 
-                result.checkpoint_context._on_pending_input = tracking_pending
+                ctx._on_pending_input = tracking_pending
             return result
 
         mocker.patch.object(flow, "_setup_checkpoint_context", side_effect=tracking_setup)

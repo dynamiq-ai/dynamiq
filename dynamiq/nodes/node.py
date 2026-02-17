@@ -791,9 +791,9 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointMixin, ABC):
 
         message = Template(approval_config.msg_template).render(self.to_dict(), input_data=input_data)
 
-        # Notify checkpoint context that we're waiting for human input (HITL)
-        if config and config.checkpoint_context:
-            config.checkpoint_context.mark_pending_input(
+        checkpoint_ctx = config.checkpoint.context if config and config.checkpoint else None
+        if checkpoint_ctx:
+            checkpoint_ctx.mark_pending_input(
                 node_id=self.id,
                 prompt=message,
                 metadata={"event": approval_config.event, "node_name": self.name},
@@ -809,12 +809,10 @@ class Node(BaseModel, Runnable, DryRunMixin, CheckpointMixin, ABC):
             case _:
                 raise ValueError(f"Error: Incorrect feedback method is chosen {approval_config.feedback_method}.")
 
-        # Store response in case of crash before node completes (for checkpoint)
         self._pending_approval_response = approval_result
 
-        # Notify checkpoint context that input has been received
-        if config and config.checkpoint_context:
-            config.checkpoint_context.mark_input_received(self.id)
+        if checkpoint_ctx:
+            checkpoint_ctx.mark_input_received(self.id)
 
         update_params = {
             feature_name: approval_result.data[feature_name]
