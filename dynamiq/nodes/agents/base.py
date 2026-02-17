@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_serializer, model_validator
 
+from dynamiq.checkpoints.checkpoint import BaseCheckpointState, CheckpointMixin
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.memory import Memory, MemoryRetrievalStrategy
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
@@ -184,6 +185,16 @@ class AgentInputSchema(BaseModel):
         return self
 
 
+class AgentCheckpointState(BaseCheckpointState):
+    """Checkpoint state for Agent nodes."""
+
+    history_offset: int = Field(default=2, description="Offset for agent conversation history")
+    llm_state: dict = Field(default_factory=dict, description="LLM component checkpoint state")
+    tool_states: dict[str, dict] = Field(
+        default_factory=dict, description="Tool component checkpoint states keyed by tool ID"
+    )
+
+
 class Agent(Node):
     """Base class for an AI Agent that interacts with a Language Model and tools."""
 
@@ -341,6 +352,47 @@ class Agent(Node):
             self.input_message.role = MessageRole.USER
 
         return self
+
+    def to_checkpoint_state(self) -> AgentCheckpointState:
+        """Extract agent state for checkpointing, including LLM and tool component states."""
+        llm_checkpoint = self.llm.to_checkpoint_state()
+
+        tool_states = {}
+        for tool in self.tools:
+            if isinstance(tool, CheckpointMixin):
+                tool_checkpoint = tool.to_checkpoint_state()
+                tool_state = tool_checkpoint.model_dump() if hasattr(tool_checkpoint, "model_dump") else tool_checkpoint
+                if tool_state:
+                    tool_states[tool.id] = tool_state
+
+        return AgentCheckpointState(
+            history_offset=self._history_offset,
+            llm_state=llm_checkpoint.model_dump() if hasattr(llm_checkpoint, "model_dump") else llm_checkpoint,
+            tool_states=tool_states,
+        )
+
+    def from_checkpoint_state(self, state: AgentCheckpointState | dict[str, Any]) -> None:
+        """Restore agent state from checkpoint, including LLM and tool component states."""
+        super().from_checkpoint_state(state)
+        if isinstance(state, dict):
+            self._history_offset = state.get("history_offset", 2)
+            if llm_state := state.get("llm_state"):
+                self.llm.from_checkpoint_state(llm_state)
+            if tool_states := state.get("tool_states"):
+                self._restore_tool_states(tool_states)
+        else:
+            self._history_offset = state.history_offset
+            self.llm.from_checkpoint_state(state.llm_state)
+            if state.tool_states:
+                self._restore_tool_states(state.tool_states)
+
+    def _restore_tool_states(self, tool_states: dict[str, dict]) -> None:
+        """Restore checkpoint states for agent's tools."""
+        tools_by_id = {tool.id: tool for tool in self.tools}
+        for tool_id, tool_state in tool_states.items():
+            tool = tools_by_id.get(tool_id)
+            if tool and isinstance(tool, CheckpointMixin):
+                tool.from_checkpoint_state(tool_state)
 
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""

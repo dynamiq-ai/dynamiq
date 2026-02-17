@@ -17,6 +17,7 @@ from litellm.utils import supports_pdf_input
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from dynamiq.callbacks.streaming import BaseStreamingCallbackHandler
+from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.connections import BaseConnection, HttpApiKey
 from dynamiq.nodes import ErrorHandling, NodeGroup
 from dynamiq.nodes.node import ConnectionNode, ensure_config
@@ -137,6 +138,12 @@ class BaseLLMInputSchema(BaseModel):
         raise ValueError("Error: Unable to run llm. Prompt was not provided.")
 
 
+class LLMCheckpointState(BaseCheckpointState):
+    """Checkpoint state for LLM nodes."""
+
+    is_fallback_run: bool = Field(default=False, description="Whether LLM is in fallback mode")
+
+
 class BaseLLM(ConnectionNode):
     """Base class for all LLM nodes.
 
@@ -161,6 +168,9 @@ class BaseLLM(ConnectionNode):
         response_format (dict[str, Any]): JSON schema that specifies the structure of the llm's output.
         tools (list[Tool]): List of tools that llm can call.
         fallback (FallbackConfig): Configuration for fallback behavior.
+
+    Checkpoint Support:
+        BaseLLM overrides checkpoint methods to save/restore the `_is_fallback_run` flag.
     """
 
     MODEL_PREFIX: ClassVar[str | None] = None
@@ -288,6 +298,19 @@ class BaseLLM(ConnectionNode):
     def reset_run_state(self):
         """Reset the run state of the LLM."""
         self._is_fallback_run = False
+        self._is_resumed = False
+
+    def to_checkpoint_state(self) -> LLMCheckpointState:
+        """Extract LLM-specific state for checkpointing."""
+        return LLMCheckpointState(is_fallback_run=self._is_fallback_run)
+
+    def from_checkpoint_state(self, state: LLMCheckpointState | dict[str, Any]) -> None:
+        """Restore LLM state from a checkpoint."""
+        super().from_checkpoint_state(state)
+        if isinstance(state, dict):
+            self._is_fallback_run = state.get("is_fallback_run", False)
+        else:
+            self._is_fallback_run = state.is_fallback_run
 
     def get_context_for_input_schema(self) -> dict:
         """Provides context for input schema that is required for proper validation."""

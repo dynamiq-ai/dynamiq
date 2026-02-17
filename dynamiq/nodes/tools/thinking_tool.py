@@ -3,6 +3,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.llms import BaseLLM
@@ -53,6 +54,13 @@ class ThinkingInputSchema(BaseModel):
     thought: str = Field(..., description="The thought, idea, or reasoning to process and analyze")
     context: str = Field(default="", description="Additional context or background information")
     focus: str = Field(default="general", description="Specific focus area (planning, analysis, problem-solving, etc.)")
+
+
+class ThinkingToolCheckpointState(BaseCheckpointState):
+    """Checkpoint state for ThinkingTool nodes."""
+
+    thought_history: list[dict] = Field(default_factory=list, description="History of processed thoughts")
+    llm_state: dict = Field(default_factory=dict, description="LLM component checkpoint state")
 
 
 class ThinkingTool(Node):
@@ -242,6 +250,27 @@ Examples:
             "focus_area": focus,
             "thinking_session_count": len(self._thought_history) if self.memory_enabled else None,
         }
+
+    def to_checkpoint_state(self) -> ThinkingToolCheckpointState:
+        """Extract thinking tool state for checkpointing, including LLM component state."""
+        return ThinkingToolCheckpointState(
+            thought_history=deepcopy(self._thought_history) if self.memory_enabled else [],
+            llm_state=self.llm.to_checkpoint_state().model_dump(),
+        )
+
+    def from_checkpoint_state(self, state: ThinkingToolCheckpointState | dict[str, Any]) -> None:
+        """Restore thinking tool state from checkpoint, including LLM component state."""
+        super().from_checkpoint_state(state)
+        if isinstance(state, dict):
+            if thought_history := state.get("thought_history"):
+                self._thought_history = deepcopy(thought_history)
+            if llm_state := state.get("llm_state"):
+                self.llm.from_checkpoint_state(llm_state)
+        else:
+            if state.thought_history:
+                self._thought_history = deepcopy(state.thought_history)
+            if state.llm_state:
+                self.llm.from_checkpoint_state(state.llm_state)
 
     def clear_memory(self) -> None:
         """Clear the thinking history memory."""

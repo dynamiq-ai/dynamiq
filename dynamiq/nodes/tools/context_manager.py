@@ -3,6 +3,7 @@ from typing import Any, ClassVar, Literal
 from litellm import token_counter
 from pydantic import BaseModel, ConfigDict, Field
 
+from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import ErrorHandling, Node, NodeGroup
 from dynamiq.nodes.agents.prompts.react.instructions import HISTORY_SUMMARIZATION_PROMPT_REPLACE
@@ -39,6 +40,12 @@ class ContextManagerInputSchema(BaseModel):
         description="List of messages to summarize (conversation history).",
         json_schema_extra={"is_accessible_to_agent": False},
     )
+
+
+class ContextManagerCheckpointState(BaseCheckpointState):
+    """Checkpoint state for ContextManagerTool nodes."""
+
+    llm_state: dict = Field(default_factory=dict, description="LLM component checkpoint state")
 
 
 class ContextManagerTool(Node):
@@ -339,3 +346,19 @@ class ContextManagerTool(Node):
             "messages compressed).",
             "summary": summary_result,
         }
+
+    def to_checkpoint_state(self) -> ContextManagerCheckpointState:
+        """Extract context manager state for checkpointing, including LLM component state."""
+        return ContextManagerCheckpointState(
+            llm_state=self.llm.to_checkpoint_state().model_dump(),
+        )
+
+    def from_checkpoint_state(self, state: ContextManagerCheckpointState | dict[str, Any]) -> None:
+        """Restore context manager state from checkpoint, including LLM component state."""
+        super().from_checkpoint_state(state)
+        if isinstance(state, dict):
+            if llm_state := state.get("llm_state"):
+                self.llm.from_checkpoint_state(llm_state)
+        else:
+            if state.llm_state:
+                self.llm.from_checkpoint_state(state.llm_state)
