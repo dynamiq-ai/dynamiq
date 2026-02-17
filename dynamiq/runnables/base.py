@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dynamiq.cache.config import CacheConfig
 from dynamiq.callbacks import BaseCallbackHandler
+from dynamiq.checkpoints.checkpoint import CheckpointConfig, CheckpointContext
 from dynamiq.types.dry_run import DryRunConfig
 from dynamiq.types.streaming import StreamingConfig
 from dynamiq.utils import format_value, generate_uuid, is_called_from_async_context
@@ -32,6 +33,8 @@ class RunnableConfig(BaseModel):
     max_node_workers: int | None = None
     nodes_override: dict[str, NodeRunnableConfig] = {}
     dry_run: DryRunConfig | None = None
+    checkpoint: CheckpointConfig | None = Field(default=None, description="Per-run checkpoint config overrides")
+    checkpoint_context: CheckpointContext | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

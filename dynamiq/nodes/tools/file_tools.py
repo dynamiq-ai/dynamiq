@@ -7,6 +7,7 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator
 
+from dynamiq.checkpoints.checkpoint import BaseCheckpointState
 from dynamiq.connections.managers import ConnectionManager
 from dynamiq.nodes import Node, NodeGroup
 from dynamiq.nodes.agents.exceptions import ToolExecutionException
@@ -191,6 +192,12 @@ class FileWriteInputSchema(BaseModel):
     def validate_path(cls, v: str) -> str:
         """Validate file_path to prevent path traversal attacks."""
         return validate_file_path(v)
+
+
+class FileReadToolCheckpointState(BaseCheckpointState):
+    """Checkpoint state for FileReadTool nodes."""
+
+    llm_state: dict = Field(default_factory=dict, description="LLM component checkpoint state")
 
 
 class FileReadTool(Node):
@@ -865,6 +872,22 @@ class FileReadTool(Node):
         logger.info(
             f"Tool {self.name} - {self.id}: {context} preview ({min(len(preview), limit)} chars) => {preview}{suffix}"
         )
+
+    def to_checkpoint_state(self) -> FileReadToolCheckpointState:
+        """Extract file read tool state for checkpointing, including LLM component state."""
+        return FileReadToolCheckpointState(
+            llm_state=self.llm.to_checkpoint_state().model_dump(),
+        )
+
+    def from_checkpoint_state(self, state: FileReadToolCheckpointState | dict[str, Any]) -> None:
+        """Restore file read tool state from checkpoint, including LLM component state."""
+        super().from_checkpoint_state(state)
+        if isinstance(state, dict):
+            if llm_state := state.get("llm_state"):
+                self.llm.from_checkpoint_state(llm_state)
+        else:
+            if state.llm_state:
+                self.llm.from_checkpoint_state(state.llm_state)
 
 
 class FileWriteTool(Node):

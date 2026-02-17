@@ -109,7 +109,7 @@ def merge(a: Any, b: Any) -> dict[str, Any]:
 
 def encode_bytes(value: bytes) -> str:
     """
-    Encode a bytes object to an encoded string.
+    Encode a bytes object to an encoded string (lossy - for display/tracing).
 
     Args:
         value (bytes): The bytes object to be encoded.
@@ -121,6 +121,78 @@ def encode_bytes(value: bytes) -> str:
         return value.decode()
     except UnicodeDecodeError:
         return base64.b64encode(value).decode()
+
+
+def encode_reversible(value: Any) -> Any:
+    """
+    Encode a value with reversible markers for round-trip serialization.
+
+    Unlike `encode()`, this function uses special markers (e.g., __bytes__, __bytesio__)
+    that allow the original type to be restored during deserialization.
+
+    Use this for checkpoints and other cases where data must be fully restored.
+
+    Args:
+        value: The value to be encoded.
+
+    Returns:
+        A JSON-serializable representation with type markers.
+    """
+    if isinstance(value, datetime):
+        return {"__datetime__": value.isoformat()}
+    if isinstance(value, date):
+        return {"__date__": value.isoformat()}
+    if isinstance(value, UUID):
+        return {"__uuid__": str(value)}
+    if isinstance(value, Enum):
+        return value.value
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if isinstance(value, set):
+        return {"__set__": list(value)}
+    if isinstance(value, BytesIO):
+        content = value.getvalue()
+        return {
+            "__bytesio__": base64.b64encode(content).decode("utf-8"),
+            "name": getattr(value, "name", None),
+        }
+    if isinstance(value, bytes):
+        return {"__bytes__": base64.b64encode(value).decode("utf-8")}
+    if hasattr(value, "__dict__"):
+        return value.__dict__
+    return value
+
+
+def decode_reversible(dct: dict) -> Any:
+    """
+    Decode a dictionary with reversible markers back to original types.
+
+    This is the counterpart to `encode_reversible()`. It restores special types
+    like bytes, BytesIO, datetime, UUID, etc. from their marker representations.
+
+    Args:
+        dct: Dictionary potentially containing type markers.
+
+    Returns:
+        The decoded object, or the original dict if no markers found.
+    """
+    if "__bytesio__" in dct:
+        content = base64.b64decode(dct["__bytesio__"])
+        bio = BytesIO(content)
+        if dct.get("name"):
+            bio.name = dct["name"]
+        return bio
+    if "__bytes__" in dct:
+        return base64.b64decode(dct["__bytes__"])
+    if "__datetime__" in dct:
+        return datetime.fromisoformat(dct["__datetime__"])
+    if "__date__" in dct:
+        return date.fromisoformat(dct["__date__"])
+    if "__uuid__" in dct:
+        return UUID(dct["__uuid__"])
+    if "__set__" in dct:
+        return set(dct["__set__"])
+    return dct
 
 
 def encode(value: Any) -> Any:
