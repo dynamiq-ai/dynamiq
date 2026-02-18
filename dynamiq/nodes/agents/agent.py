@@ -213,12 +213,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
             if self.summarization_config.enabled:
                 has_context_tool = any(isinstance(t, ContextManagerTool) for t in self.tools)
                 if not has_context_tool:
-                    self.tools.append(
-                        ContextManagerTool(
-                            llm=self.llm,
-                            name="context-manager",
-                        )
+                    context_tool = ContextManagerTool(
+                        llm=self.llm,
+                        name="context-manager",
                     )
+                    self.tools.append(context_tool)
+                    self._excluded_tool_ids.add(context_tool.id)
         except Exception as e:
             logger.error(f"Failed to ensure ContextManagerTool: {e}")
         return self
@@ -231,12 +231,12 @@ class Agent(HistoryManagerMixin, BaseAgent):
                 has_todo_write = any(isinstance(t, TodoWriteTool) for t in self.tools)
 
                 if not has_todo_write:
-                    self.tools.append(
-                        TodoWriteTool(
-                            name="todo-write",
-                            file_store=self.file_store.backend,
-                        )
+                    todo_tool = TodoWriteTool(
+                        name="todo-write",
+                        file_store=self.file_store.backend,
                     )
+                    self.tools.append(todo_tool)
+                    self._excluded_tool_ids.add(todo_tool.id)
                     logger.info("Agent: Added TodoWriteTool")
         except Exception as e:
             logger.error(f"Failed to ensure TodoWriteTool: {e}")
