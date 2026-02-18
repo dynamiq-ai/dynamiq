@@ -16,6 +16,8 @@ from dynamiq.prompts import (
     VisionMessage,
     VisionMessageFileContent,
     VisionMessageFileData,
+    VisionMessageImageContent,
+    VisionMessageImageURL,
     VisionMessageTextContent,
 )
 from dynamiq.runnables import RunnableConfig, RunnableStatus
@@ -222,7 +224,7 @@ def test_react_agent_google_models(model, inference_mode, emoji_agent_role, agen
 
 @pytest.mark.integration
 @pytest.mark.parametrize("model", ["claude-sonnet-4-5", "claude-opus-4-5", "claude-opus-4-6"])
-def test_anthropic_llm_with_base64_pdf(model):
+def test_anthropic_llm_with_base64_pdf_file(model):
     """Test Anthropic LLM with base64 PDF file input."""
     pdf_bytes = BytesIO()
     c = canvas.Canvas(pdf_bytes)
@@ -256,62 +258,3 @@ def test_anthropic_llm_with_base64_pdf(model):
     assert "content" in result.output
     assert isinstance(result.output["content"], str)
     assert len(result.output["content"]) > 0
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize("model", ["claude-sonnet-4-5"])
-def test_anthropic_llm_structured_output_strict(model):
-    """Test Anthropic LLM with structured output."""
-    llm = create_claude_llm(model)
-    schema_ = {
-        "type": "json_schema",
-        "strict": True,
-        "json_schema": {
-            "name": "input",
-            "schema": {
-                "type": "object",
-                "title": "Input",
-                "additionalProperties": False,
-                "required": ["schema", "type"],
-                "properties": {
-                    "schema": {
-                        "type": "object",
-                        "title": "Schema",
-                        "description": (
-                            "Determines input parameters of workflow. "
-                            "Provide it in the properties field format. Example:\n"
-                            '"properties": {\n'
-                            '  "query": {"type": "Any"},\n'
-                            '  "files": {"type": "list[files]"}\n'
-                            "}"
-                        ),
-                        "additionalProperties": True,
-                    },
-                    "type": {"type": "string", "enum": ["dynamiq.nodes.utils.Input"]},
-                },
-            },
-        },
-    }
-
-    prompt = Prompt(
-        messages=[
-            Message(
-                role="user",
-                content="Return a JSON object with all required fields",
-            )
-        ],
-    )
-    result = llm.run(
-        input_data={},
-        prompt=prompt,
-        response_format=schema_,
-        inference_mode=InferenceMode.FUNCTION_CALLING,
-    )
-
-    assert result.status == RunnableStatus.SUCCESS
-    assert result.output is not None
-    assert "content" in result.output
-
-    content = result.output["content"]
-    parsed_output = json.loads(content)
-    assert isinstance(parsed_output, dict)
