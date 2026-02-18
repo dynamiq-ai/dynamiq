@@ -26,20 +26,11 @@ from examples.llm_setup import setup_llm
 
 AGENT_ROLE = """
 You are a helpful assistant that can execute shell commands in a remote sandbox environment.
-
-You have access to a shell tool to execute commands in the sandbox.
-Use shell commands like 'echo', 'cat', 'python', etc. to accomplish tasks.
-
-Examples of what you can do:
-- Create files: echo 'content' > file.txt
-- Read files: cat file.txt
-- Run Python scripts: python script.py
-- List files: ls -la
+ Use write tool to write to the sandox
 """
 
 EXAMPLE_QUERY = """
 1. Create a file called 'hello.py' with a Python script that prints "Hello from E2B!"
-   (use: echo 'print("Hello from E2B!")' > hello.py)
 2. Run the script: python hello.py
 3. Show the output
 """

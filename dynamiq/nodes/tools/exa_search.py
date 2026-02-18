@@ -310,6 +310,10 @@ class ExaInputSchema(BaseModel):
             "Use this when include_full_content is insufficient."
         ),
     )
+    brief: str | None = Field(
+        default=None,
+        description="Very brief description of the action being performed. Example: 'Search for AI research papers'.",
+    )
 
 
 class ExaTool(ConnectionNode):
@@ -606,4 +610,4 @@ class ExaTool(ConnectionNode):
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
-        return {"content": result}
+        return {"content": result, "brief": input_data.brief}

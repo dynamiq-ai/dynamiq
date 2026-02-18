@@ -6,12 +6,14 @@ import logging
 import mimetypes
 from enum import Enum
 from functools import cached_property
-from typing import Any, ClassVar
+from pathlib import Path
+from typing import Any, BinaryIO, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from dynamiq.connections.connections import BaseConnection
 from dynamiq.nodes.node import Node
+from dynamiq.storages.file.base import FileInfo
 
 
 class SandboxTool(str, Enum):
@@ -283,6 +285,50 @@ class Sandbox(abc.ABC, BaseModel):
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support file retrieval. "
             "Use a sandbox backend that supports file operations (e.g., E2BSandbox)."
+        )
+
+    def store(
+        self,
+        file_path: str | Path,
+        content: str | bytes | BinaryIO,
+        content_type: str = None,
+        metadata: dict[str, Any] = None,
+        overwrite: bool = False,
+    ) -> FileInfo:
+        """Store a file in the sandbox filesystem.
+
+        Provides FileStore-compatible write interface so tools like
+        FileWriteTool work transparently with both backends.
+
+        Args:
+            file_path: Destination path (relative paths resolved against base_path).
+            content: File content as string, bytes, or file-like object.
+            content_type: MIME type of the file content.
+            metadata: Additional metadata to attach to the returned FileInfo.
+            overwrite: Ignored for sandbox (always overwrites).
+
+        Returns:
+            FileInfo with details about the stored file.
+        """
+        path_str = str(file_path)
+
+        if isinstance(content, str):
+            raw = content.encode("utf-8")
+        elif isinstance(content, (io.RawIOBase, io.BufferedIOBase, BinaryIO)):
+            raw = content.read()
+        else:
+            raw = content
+
+        file_name = path_str.rsplit("/", 1)[-1] if "/" in path_str else path_str
+        dest = self.upload_file(file_name, raw, destination_path=path_str)
+
+        return FileInfo(
+            name=file_name,
+            path=dest,
+            size=len(raw),
+            content_type=content_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream",
+            metadata=metadata or {},
+            content=raw,
         )
 
     def close(self) -> None:

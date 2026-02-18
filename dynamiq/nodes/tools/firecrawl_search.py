@@ -93,6 +93,10 @@ class FirecrawlSearchInput(BaseModel):
         alias="ignoreInvalidURLs",
         description="Exclude invalid URLs from search results when piping into other endpoints.",
     )
+    brief: str | None = Field(
+        default=None,
+        description="Very brief description of the action being performed. Example: 'Search for AI research papers'.",
+    )
 
 
 class FirecrawlSearchTool(ConnectionNode):
@@ -269,4 +273,4 @@ class FirecrawlSearchTool(ConnectionNode):
 
         logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(result)[:200]}...")
 
-        return {"content": result}
+        return {"content": result, "brief": input_data.brief}

@@ -279,18 +279,16 @@ class E2BSandbox(Sandbox):
         Returns:
             List of tool instances (Node objects).
         """
-        from dynamiq.nodes.tools.file_tools import FileReadTool
+        from dynamiq.nodes.tools.file_tools import FileReadTool, FileWriteTool
         from dynamiq.nodes.tools.todo_tools import TodoWriteTool
         from dynamiq.sandboxes.tools.shell import SandboxShellTool
 
-        if llm is not None:
-            return [
-                SandboxShellTool(sandbox=self),
-                FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
-                TodoWriteTool(file_store=self),
-            ]
-        else:
-            return [SandboxShellTool(sandbox=self)]
+        return [
+            SandboxShellTool(sandbox=self),
+            FileReadTool(name="sandbox_file_read", file_store=self, llm=llm, absolute_file_paths_allowed=True),
+            FileWriteTool(name="sandbox_file_write", file_store=self),
+            TodoWriteTool(file_store=self),
+        ]
 
     def close(self, kill: bool = False) -> None:
         """Close the E2B sandbox connection.

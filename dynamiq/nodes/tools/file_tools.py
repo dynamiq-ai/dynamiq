@@ -217,6 +217,11 @@ class FileWriteInputSchema(BaseModel):
             "and 'binary' writes raw bytes."
         ),
     )
+    brief: str | None = Field(
+        default=None,
+        description="Very brief description of the action being performed. "
+        "Example: 'Create a new file called report.txt', 'Update the data in report.txt.",
+    )
     encoding: str = Field(default="utf-8", description="Encoding to use when writing textual content.")
     append: bool = Field(
         default=False,
@@ -944,7 +949,7 @@ class FileWriteTool(Node):
         "Edit output includes the full updated file content with line numbers."
     )
 
-    file_store: FileStore = Field(..., description="File storage to write to.")
+    file_store: FileStore | Sandbox = Field(..., description="File storage to write to.")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
     input_schema: ClassVar[type[FileWriteInputSchema]] = FileWriteInputSchema
@@ -982,18 +987,14 @@ class FileWriteTool(Node):
                 overwrite=overwrite_flag,
             )
 
-            file_buffer = BytesIO(payload)
-            file_buffer.name = input_data.file_path
-            file_buffer.description = (input_data.metadata or {}).get("description", "FileWriteTool output")
-            file_buffer.content_type = content_type
-            file_buffer.seek(0)
-
             message = f"File '{input_data.file_path}' written successfully"
             logger.info(f"Tool {self.name} - {self.id}: finished with result:\n{str(file_info)[:200]}...")
+
+            print(f"File brief: {file_info}")
             return {
                 "content": message,
                 "file_info": file_info.model_dump(),
-                "files": [file_buffer],
+                "brief": input_data.brief,
             }
 
         except Exception as e:
@@ -1026,14 +1027,15 @@ class FileWriteTool(Node):
             total += count
 
         payload = content.encode(encoding)
-        self.file_store.store(path, payload, content_type="text/plain", overwrite=True)
-
+        file_info = self.file_store.store(path, payload, content_type="text/plain", overwrite=True)
+        print(f"File info: {file_info}")
         summary = f"Applied {len(edits)} edit(s) with {total} replacement(s) to {path}."
         logger.info(f"Tool {self.name} - {self.id}: {summary}")
 
         return {
             "content": f"{summary} Use FileReadTool to view the updated file.",
-            "path": path,
+            "file_info": file_info.model_dump(),
+            "brief": input_data.brief,
         }
 
     def _prepare_content_payload(self, input_data: FileWriteInputSchema) -> tuple[bytes, str]:

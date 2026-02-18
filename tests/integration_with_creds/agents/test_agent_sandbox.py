@@ -6,6 +6,7 @@ import pytest
 from pydantic import Field
 
 from dynamiq import Workflow
+from dynamiq.callbacks.tracing import TracingCallbackHandler
 from dynamiq.connections import OpenAI as OpenAIConnection
 from dynamiq.flows import Flow
 from dynamiq.nodes import Node
@@ -107,6 +108,9 @@ def test_agent_with_e2b_sandbox_executes_shell(openai_llm, e2b_connection):
 
     sandbox = E2BSandbox(connection=e2b_connection, timeout=300)
     try:
+
+        tracing_callback = TracingCallbackHandler()
+        config = RunnableConfig(callbacks=[tracing_callback])
         agent = Agent(
             name="E2B Sandbox Agent",
             llm=openai_llm,
@@ -120,11 +124,33 @@ def test_agent_with_e2b_sandbox_executes_shell(openai_llm, e2b_connection):
 
         result = wf.run(
             input_data={"input": "Run this command in the sandbox and tell me the output: echo hello"},
-            config=RunnableConfig(),
+            config=config,
         )
         assert result.status == RunnableStatus.SUCCESS
         content = result.output.get(agent.id, {}).get("output", {}).get("content", "")
         assert content is not None
         assert "hello" in str(content), f"Expected 'hello' in E2B output, got: {content[:500]}"
+
+        result = wf.run(
+            input_data={
+                "input": (
+                    "Use the file write tool to create a file called 'report.txt' "
+                    "with the content 'Hello from FileWriteTool'. "
+                    "Then read the file back with FileReadTool and tell me its content."
+                )
+            },
+            config=config,
+        )
+        assert result.status == RunnableStatus.SUCCESS
+        content = result.output.get(agent.id, {}).get("output", {}).get("content", "")
+        assert "Hello from FileWriteTool" in str(content), f"Expected written content in output, got: {content[:500]}"
+        stored = sandbox.retrieve("report.txt")
+        assert b"Hello from FileWriteTool" in stored, f"Expected file on sandbox, got: {stored[:200]}"
+
+        executed_tool_names = {run.name for run in tracing_callback.runs.values()}
+        assert (
+            "sandbox_file_write" in executed_tool_names
+        ), f"Expected 'sandbox_file_write' in traced runs, got: {executed_tool_names}"
+
     finally:
         sandbox.close(kill=True)

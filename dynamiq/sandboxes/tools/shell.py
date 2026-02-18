@@ -26,6 +26,11 @@ class SandboxShellInputSchema(BaseModel):
         default=False,
         description="If True, run the command in background without waiting for output.",
     )
+    brief: str | None = Field(
+        default=None,
+        description="Very brief description of the action being performed. "
+        "Example: 'List all files in the current directory'.",
+    )
 
 
 class SandboxShellTool(Node):
@@ -137,6 +142,7 @@ class SandboxShellTool(Node):
                 "stderr": result.stderr,
                 "exit_code": result.exit_code,
                 "success": is_success,
+                "brief": input_data.brief,
             }
 
             if not is_success:
