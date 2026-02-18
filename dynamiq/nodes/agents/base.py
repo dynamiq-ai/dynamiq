@@ -236,9 +236,7 @@ class Agent(Node):
     )
     description: str | None = Field(default=None, description="Short human-readable description of the agent.")
     _mcp_servers: list[MCPServer] = PrivateAttr(default_factory=list)
-    _mcp_server_tool_ids: list[str] = PrivateAttr(default_factory=list)
-    _skills_tool_ids: list[str] = PrivateAttr(default_factory=list)
-    _sandbox_tool_ids: list[str] = PrivateAttr(default_factory=list)
+    _excluded_tool_ids: set[str] = PrivateAttr(default_factory=set)
     _tool_cache: dict[ToolCacheEntry, Any] = {}
     _history_offset: int = PrivateAttr(
         default=2,  # Offset to the first message (default: 2 — system and initial user messages).
@@ -301,7 +299,7 @@ class Agent(Node):
                 self._mcp_servers.append(tool)
                 subtools = tool.get_mcp_tools()
                 expanded_tools.extend(subtools)
-                self._mcp_server_tool_ids.extend([subtool.id for subtool in subtools])
+                self._excluded_tool_ids.update(subtool.id for subtool in subtools)
             else:
                 expanded_tools.append(tool)
 
@@ -312,7 +310,7 @@ class Agent(Node):
         if self.sandbox_backend:
             # Add sandbox tools when sandbox is enabled (not serialized; recreated from sandbox config on load)
             sandbox_tools = self.sandbox_backend.get_tools(llm=self.llm)
-            self._sandbox_tool_ids = [t.id for t in sandbox_tools]
+            self._excluded_tool_ids.update(t.id for t in sandbox_tools)
             self.tools.extend(sandbox_tools)
 
         elif self.file_store_backend:
@@ -368,22 +366,12 @@ class Agent(Node):
             "system_prompt_manager": True,  # Runtime state container, not serializable
         }
 
-    def _is_tool_excluded_from_serialization(self, tool: Node) -> bool:
-        """Return True if this tool should not be serialized (recreated from config on load)."""
-        if tool.id in self._mcp_server_tool_ids:
-            return True
-        if tool.id in self._sandbox_tool_ids:
-            return True
-        if tool.id in self._skills_tool_ids:
-            return True
-        return False
-
     def to_dict(self, **kwargs) -> dict:
         """Converts the instance to a dictionary."""
         data = super().to_dict(**kwargs)
         data["llm"] = self.llm.to_dict(**kwargs)
 
-        tools_to_serialize = [t for t in self.tools if not self._is_tool_excluded_from_serialization(t)]
+        tools_to_serialize = [t for t in self.tools if t.id not in self._excluded_tool_ids]
         data["tools"] = [tool.to_dict(**kwargs) for tool in tools_to_serialize]
         data["tools"] = data["tools"] + [mcp_server.to_dict(**kwargs) for mcp_server in self._mcp_servers]
 
@@ -466,7 +454,7 @@ class Agent(Node):
             return
         skills_tool = SkillsTool(skill_registry=source)
         self.tools.append(skills_tool)
-        self._skills_tool_ids.append(skills_tool.id)
+        self._excluded_tool_ids.add(skills_tool.id)
 
     def _apply_skills_to_prompt(self) -> None:
         """Set skills block and tool_description on the prompt manager after _init_prompt_blocks()."""
