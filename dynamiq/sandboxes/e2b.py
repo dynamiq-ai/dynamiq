@@ -267,11 +267,15 @@ class E2BSandbox(Sandbox):
 
     def exists(self, file_path: str) -> bool:
         """Return True when file exists in sandbox filesystem."""
-        sandbox = self._ensure_sandbox()
-        resolved_path = self._resolve_path(file_path)
-        check_cmd = f"if [ -f {shlex.quote(resolved_path)} ]; then echo __EXISTS__; " "else echo __MISSING__; fi"
-        result = sandbox.commands.run(check_cmd)
-        return (result.stdout or "").strip() == "__EXISTS__"
+        try:
+            sandbox = self._ensure_sandbox()
+            resolved_path = self._resolve_path(file_path)
+            check_cmd = f"test -f {shlex.quote(resolved_path)}"
+            result = sandbox.commands.run(check_cmd)
+            return getattr(result, "exit_code", 1) == 0
+        except Exception as e:
+            logger.debug(f"E2BSandbox exists({file_path}) failed (treating as missing): {e}")
+            return False
 
     def retrieve(self, file_path: str) -> bytes:
         """Read file bytes from sandbox filesystem."""

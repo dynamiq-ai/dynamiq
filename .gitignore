@@ -170,3 +170,5 @@ sandbox
 mkdocs/
 *.txt
 /.data/
+
+.skills

@@ -17,15 +17,16 @@ nodes:
       id: registry-skills-agent-llm
       type: dynamiq.nodes.llms.Anthropic
       connection: anthropic-conn
-      model: claude-sonnet-4-20250514
+      model: claude-sonnet-4-6
+      max_tokens: 32000
     tools: []
     role: |
-      You have access to skills (SkillsTool) and a sandbox. Each skill has a skill id and
-      version id in the registry; once ingested, they appear under /home/user/skills/<name>/.
-      Use SkillsTool action="list" then action="get" with skill_name="..." to load a skill.
-      When get returns "scripts_path", run scripts in the sandbox at that path
-      (e.g. /home/user/skills/mermaid-tools/scripts/). Use the sandbox tool for shell or Python.
-      Uploaded files go to /home/user/input; write outputs to /home/user/output (they are collected).
+      You have access to skills (SkillsTool) and a sandbox. For every task you must:
+      1. Use SkillsTool with action="list" to see available skills, then action="get" with skill_name="..." to load the skill(s) needed for the deliverable.
+      2. Map deliverables to skills: Word document / .docx → docx; PDF → pdf; PowerPoint / .pptx → pptx; Excel / .xlsx → xlsx; Markdown/HTML conversion or md/html as source or target → md. For a task that produces multiple types, get each relevant skill (e.g. docx, pdf, pptx, xlsx for a full report).
+      3. When get returns "scripts_path", run scripts in the sandbox at that path (e.g. /home/user/skills/docx/scripts/, /home/user/skills/pdf/scripts/, /home/user/skills/pptx/scripts/, /home/user/skills/xlsx/scripts/). Use the sandbox tool for shell or Python. The md skill has no scripts; use pandoc/markitdown from the environment.
+      4. Write all output files to /home/user/output so they are collected. Uploaded files from the user go to /home/user/input.
+      Skills available: docx (Word), pdf, pptx (PowerPoint), xlsx (Excel), md (Markdown/HTML conversion). Do not mention skills or paths in the user-facing reply; just accomplish the task and save outputs to the output directory.
     sandbox:
       enabled: true
       backend:
@@ -38,11 +39,27 @@ nodes:
         connection: dynamiq-api-conn
         sandbox_skills_base_path: "/home/user/skills"
         skills:
-          - id: "c4ce8af8-8f08-426a-be85-35e75c288d16"
-            version_id: "e0a3a68c-b3b6-4834-87f9-b8be7c8b8602"
-            name: mermaid-tools
-            description: Extract Mermaid diagrams from markdown and generate PNG images.
-    max_loops: 45
+          - id: "c5463564-52bd-46e7-acf3-2e85e756c369"
+            version_id: "ebbcc5b8-ef09-44ef-9aca-b6b6dd92f02c"
+            name: docx
+            description: Create, read, edit, and manipulate Word documents (.docx); reports, memos, letters, templates; Markdown/HTML to docx via pandoc.
+          - id: "c15156b5-db94-478c-8d86-daf7d4e9be9a"
+            version_id: "b6fc86e4-1088-40ba-9dd4-29c7ed5df266"
+            name: pdf
+            description: PDF creation, form filling, extraction, conversion, and validation; Markdown/HTML to PDF via pandoc or docx→PDF.
+          - id: "c3bd7381-b5c9-4044-b266-a43cf307a3e4"
+            version_id: "a50b2409-c554-4654-b297-4249b4e19570"
+            name: pptx
+            description: Create, edit, and manipulate PowerPoint presentations (.pptx); design and QA rules, scripts for thumbnail, pack, soffice.
+          - id: "ff7deb28-b9bd-4c71-ae2d-30363133493a"
+            version_id: "fa037099-1b8c-4250-9fc4-af839f2d8b4a"
+            name: xlsx
+            description: Create, edit, and manipulate Excel spreadsheets (.xlsx); formulas, recalc, dashboard and R-ready rules.
+          - id: "a427c44d-9810-494a-9d53-169c5d35e9ec"
+            version_id: "d69b1436-631d-4c8b-9854-0896b7639820"
+            name: md
+            description: Markdown and HTML as source or target; convert md/html to or from docx, pdf, pptx using pandoc and markitdown.
+    max_loops: 100
     inference_mode: XML
 
 flows:
